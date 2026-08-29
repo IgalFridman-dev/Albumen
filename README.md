@@ -4,12 +4,13 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Planning is complete and validated. Implementation has not started.
+Planning is complete and validated. E1-S1 has implemented the native offline application boundary and is in review.
 
 - Current implementation entry point: **E1-S1 — Bootstrap the native offline application boundary**
 - Current tracking: [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)
 - Story contracts: [`_bmad-output/specs/`](_bmad-output/specs/)
 - Documentation map: [`docs/README.md`](docs/README.md)
+- E1-S1 verification: [`docs/evidence/e1-s1/verification.md`](docs/evidence/e1-s1/verification.md)
 
 The mandatory first-epic sequence is:
 
@@ -34,13 +35,17 @@ The project deliberately excludes cloud inference, accounts, telemetry, automati
 5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
 6. Stop at E1-S6 until the safety gate is explicitly recorded as `PASS`.
 
-The application solution and source tree are intentionally absent before E1-S1; bootstrapping them is part of that story.
+The repository now contains the E1-S1 .NET 10/C# 14/WPF `win-x64` structural seed, its five test projects, and a network-disabled Windows Sandbox verification gate. Later-story behavior remains intentionally absent.
 
 ## Repository layout
 
 ```text
 PhotoSift/
 |-- README.md
+|-- PhotoSift.slnx               # Six production projects and five test projects
+|-- src/                          # Native offline structural seed
+|-- tests/                        # Unit, architecture, scenario, and tooling tests
+|-- eng/                          # Runtime/offline verification harnesses
 |-- docs/                         # Human-facing documentation index
 `-- _bmad-output/
     |-- planning-artifacts/       # Product, UX, architecture, and backlog
@@ -49,3 +54,13 @@ PhotoSift/
 ```
 
 Local `.uv-cache-bmad-*` directories are disposable workflow caches and are not project artifacts.
+
+## Build and verification
+
+The repository pins .NET SDK `10.0.400` and requires the .NET/Desktop `10.0.11` runtime family. The complete executable gate is:
+
+```powershell
+pwsh -NoProfile -File eng/sandbox/Invoke-PhotoSiftSandbox.ps1 -Stage Full
+```
+
+Windows Sandbox is used because this development host's Application Control policy blocks unsigned locally built executables. The harness keeps networking disabled and does not weaken that host policy.
