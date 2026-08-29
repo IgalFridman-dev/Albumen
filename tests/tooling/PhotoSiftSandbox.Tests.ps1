@@ -184,4 +184,33 @@ if ($guestVerificationScript -notmatch [regex]::Escape("@('restore', 'PhotoSift.
 }
 $script:passed++
 
+Assert-Throws {
+    Assert-PhotoSiftSmokeResult `
+        -ExitCode 1 `
+        -StandardOutput 'PHOTOSIFT_SMOKE_OK phases=5 current=ChooseScope offline=true' `
+        -TimedOut $false
+} 'nonzero WPF smoke exits must be rejected'
+Assert-Throws {
+    Assert-PhotoSiftSmokeResult `
+        -ExitCode 0 `
+        -StandardOutput 'wrong marker' `
+        -TimedOut $false
+} 'missing WPF smoke marker must be rejected'
+Assert-PhotoSiftSmokeResult `
+    -ExitCode 0 `
+    -StandardOutput 'PHOTOSIFT_SMOKE_OK phases=5 current=ChooseScope offline=true' `
+    -TimedOut $false
+$script:passed++
+
+[xml]$sharedBuildConfiguration = Get-Content -Raw -LiteralPath (
+    Join-Path $repositoryRoot 'Directory.Build.props')
+Assert-Equal `
+    'win-x64' `
+    ([string]$sharedBuildConfiguration.Project.PropertyGroup.RuntimeIdentifier) `
+    'the shared project boundary must select win-x64'
+if ($guestVerificationScript -match [regex]::Escape("@('build', 'PhotoSift.slnx', '-c', 'Release', '-r'")) {
+    throw 'Solution build must not use the unsupported solution-level RuntimeIdentifier switch.'
+}
+$script:passed++
+
 Write-Output "Passed: $script:passed Failed: 0"

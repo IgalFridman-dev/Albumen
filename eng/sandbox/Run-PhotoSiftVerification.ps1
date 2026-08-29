@@ -189,7 +189,9 @@ try {
 
         $coreTestProjects = @(
             'tests\PhotoSift.Domain.Tests\PhotoSift.Domain.Tests.csproj',
-            'tests\PhotoSift.Application.Tests\PhotoSift.Application.Tests.csproj')
+            'tests\PhotoSift.Application.Tests\PhotoSift.Application.Tests.csproj',
+            'tests\PhotoSift.Analysis.Tests\PhotoSift.Analysis.Tests.csproj',
+            'tests\PhotoSift.Scenarios.Tests\PhotoSift.Scenarios.Tests.csproj')
         foreach ($testProject in $coreTestProjects) {
             $testName = [System.IO.Path]::GetFileNameWithoutExtension($testProject)
             Invoke-LoggedCommand `
@@ -217,7 +219,7 @@ try {
         Invoke-LoggedCommand `
             -Name 'build-solution' `
             -FilePath $dotnetPath `
-            -Arguments @('build', 'PhotoSift.slnx', '-c', 'Release', '-r', 'win-x64', '--no-restore') | Out-Null
+            -Arguments @('build', 'PhotoSift.slnx', '-c', 'Release', '--no-restore') | Out-Null
 
         $testProjects = @(
             'tests\PhotoSift.Domain.Tests\PhotoSift.Domain.Tests.csproj',
@@ -251,8 +253,13 @@ try {
                 '-RuntimeIdentifier', 'win-x64') | Out-Null
         Invoke-LoggedCommand `
             -Name 'wpf-smoke' `
-            -FilePath 'src\PhotoSift.App\bin\Release\net10.0-windows\win-x64\PhotoSift.App.exe' `
-            -Arguments @('--smoke-test') | Out-Null
+            -FilePath 'powershell.exe' `
+            -Arguments @(
+                '-NoProfile',
+                '-ExecutionPolicy', 'Bypass',
+                '-File', 'eng\Invoke-OfflineLaunchSmoke.ps1',
+                '-Configuration', 'Release',
+                '-RuntimeIdentifier', 'win-x64') | Out-Null
     }
 }
 catch {

@@ -46,7 +46,11 @@ function Invoke-PhotoSiftProcess {
         [string[]]$Arguments = @(),
 
         [Parameter()]
-        [string]$WorkingDirectory = [System.Environment]::CurrentDirectory
+        [string]$WorkingDirectory = [System.Environment]::CurrentDirectory,
+
+        [Parameter()]
+        [ValidateRange(0, 3600)]
+        [int]$TimeoutSeconds = 0
     )
 
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -69,16 +73,55 @@ function Invoke-PhotoSiftProcess {
 
         $standardOutputTask = $process.StandardOutput.ReadToEndAsync()
         $standardErrorTask = $process.StandardError.ReadToEndAsync()
-        $process.WaitForExit()
+        $timedOut = $false
+        if ($TimeoutSeconds -gt 0) {
+            $timedOut = -not $process.WaitForExit($TimeoutSeconds * 1000)
+            if ($timedOut) {
+                $process.Kill()
+                $process.WaitForExit()
+            }
+        }
+        else {
+            $process.WaitForExit()
+        }
 
         return [pscustomobject]@{
             ExitCode = $process.ExitCode
             StandardOutput = $standardOutputTask.GetAwaiter().GetResult()
             StandardError = $standardErrorTask.GetAwaiter().GetResult()
+            TimedOut = $timedOut
         }
     }
     finally {
         $process.Dispose()
+    }
+}
+
+function Assert-PhotoSiftSmokeResult {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [int]$ExitCode,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$StandardOutput,
+
+        [Parameter(Mandatory)]
+        [bool]$TimedOut
+    )
+
+    if ($TimedOut) {
+        throw 'PhotoSift WPF smoke process timed out.'
+    }
+    if ($ExitCode -ne 0) {
+        throw "PhotoSift WPF smoke process exited $ExitCode."
+    }
+
+    $expectedMarker = 'PHOTOSIFT_SMOKE_OK phases=5 current=ChooseScope offline=true'
+    $outputLines = @($StandardOutput -split "`r?`n")
+    if ($outputLines -notcontains $expectedMarker) {
+        throw "PhotoSift WPF smoke output did not contain: $expectedMarker"
     }
 }
 
@@ -205,4 +248,4 @@ function Assert-PhotoSiftSandboxResult {
 }
 
 Export-ModuleMember `
-    -Function New-PhotoSiftSandboxConfiguration, Assert-PhotoSiftSandboxResult, Invoke-PhotoSiftProcess
+    -Function New-PhotoSiftSandboxConfiguration, Assert-PhotoSiftSandboxResult, Invoke-PhotoSiftProcess, Assert-PhotoSiftSmokeResult
