@@ -131,6 +131,10 @@ public static class AllowedFixture
     [System.IO.Directory]::CreateDirectory($generatedSourceRoot) | Out-Null
     'global using System.Net.Http;' |
         Set-Content -LiteralPath (Join-Path $generatedSourceRoot 'GlobalUsings.g.cs') -Encoding utf8
+    $binarySourceRoot = Join-Path $allowedSourceRoot 'bin\Release'
+    [System.IO.Directory]::CreateDirectory($binarySourceRoot) | Out-Null
+    'global using System.Net.Sockets;' |
+        Set-Content -LiteralPath (Join-Path $binarySourceRoot 'BinaryGenerated.cs') -Encoding utf8
 
     $windowsPowerShellResult = Invoke-BoundaryChecker `
         -Arguments @(
