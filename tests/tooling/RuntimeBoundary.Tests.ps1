@@ -14,14 +14,21 @@ try {
             [string[]]$Arguments,
 
             [Parameter(Mandatory)]
-            [string]$OutputPrefix
+            [string]$OutputPrefix,
+
+            [Parameter()]
+            [string]$FilePath = 'pwsh.exe'
         )
 
         $standardOutputPath = Join-Path $testRoot ($OutputPrefix + '-stdout.txt')
         $standardErrorPath = Join-Path $testRoot ($OutputPrefix + '-stderr.txt')
+        $engineArguments = @('-NoProfile')
+        if ([System.IO.Path]::GetFileName($FilePath) -eq 'powershell.exe') {
+            $engineArguments += @('-ExecutionPolicy', 'Bypass')
+        }
         $process = Start-Process `
-            -FilePath 'pwsh.exe' `
-            -ArgumentList (@('-NoProfile', '-File', $checkerPath) + $Arguments) `
+            -FilePath $FilePath `
+            -ArgumentList ($engineArguments + @('-File', $checkerPath) + $Arguments) `
             -Wait `
             -PassThru `
             -RedirectStandardOutput $standardOutputPath `
@@ -62,28 +69,32 @@ try {
         throw 'Failure output did not identify System.Net.Http.'
     }
 
-    $networkAssemblyPath = Join-Path $testRoot 'ForbiddenNetworkFixture.dll'
-    Add-Type -TypeDefinition @'
+    $networkSourceRoot = Join-Path $testRoot 'network-source'
+    [System.IO.Directory]::CreateDirectory($networkSourceRoot) | Out-Null
+    @'
+using System.Net.Http;
+
 public static class ForbiddenNetworkFixture
 {
     public static System.Net.Http.HttpClient CreateClient() => new();
 }
-'@ -OutputAssembly $networkAssemblyPath
+'@ | Set-Content -LiteralPath (Join-Path $networkSourceRoot 'NetworkFixture.cs') -Encoding utf8
 
     $networkResult = Invoke-BoundaryChecker `
         -Arguments @(
             '-DependencyManifestPath', $cleanManifestPath,
-            '-AssemblyPath', $networkAssemblyPath) `
+            '-SourceRootPath', $networkSourceRoot) `
         -OutputPrefix 'network-api'
     if ($networkResult.ExitCode -eq 0) {
         throw 'Direct System.Net.Http.HttpClient fixture was incorrectly accepted.'
     }
-    if ($networkResult.Output -notmatch [regex]::Escape('System.Net.Http.HttpClient::.ctor')) {
-        throw 'Failure output did not identify the direct HttpClient constructor call.'
+    if ($networkResult.Output -notmatch [regex]::Escape('System.Net.*')) {
+        throw 'Failure output did not identify the direct System.Net usage.'
     }
 
-    $mutationAssemblyPath = Join-Path $testRoot 'ForbiddenMutationFixture.dll'
-    Add-Type -TypeDefinition @'
+    $mutationSourceRoot = Join-Path $testRoot 'mutation-source'
+    [System.IO.Directory]::CreateDirectory($mutationSourceRoot) | Out-Null
+    @'
 public static class ForbiddenMutationFixture
 {
     public static void DeleteFile(string path) => System.IO.File.Delete(path);
@@ -91,12 +102,12 @@ public static class ForbiddenMutationFixture
     public static void MoveDirectory(string source, string destination) =>
         System.IO.Directory.Move(source, destination);
 }
-'@ -OutputAssembly $mutationAssemblyPath
+'@ | Set-Content -LiteralPath (Join-Path $mutationSourceRoot 'MutationFixture.cs') -Encoding utf8
 
     $mutationResult = Invoke-BoundaryChecker `
         -Arguments @(
             '-DependencyManifestPath', $cleanManifestPath,
-            '-AssemblyPath', $mutationAssemblyPath) `
+            '-SourceRootPath', $mutationSourceRoot) `
         -OutputPrefix 'mutation-api'
     if ($mutationResult.ExitCode -eq 0) {
         throw 'Direct source-mutation API fixture was incorrectly accepted.'
@@ -108,7 +119,42 @@ public static class ForbiddenMutationFixture
         throw 'Failure output did not identify the direct Directory.Move call.'
     }
 
-    Write-Output 'Passed: 7 Failed: 0'
+    $allowedSourceRoot = Join-Path $testRoot 'allowed-source'
+    [System.IO.Directory]::CreateDirectory($allowedSourceRoot) | Out-Null
+    @'
+public static class AllowedFixture
+{
+    public static string GetMarker() => "local-only";
+}
+'@ | Set-Content -LiteralPath (Join-Path $allowedSourceRoot 'AllowedFixture.cs') -Encoding utf8
+
+    $windowsPowerShellResult = Invoke-BoundaryChecker `
+        -Arguments @(
+            '-DependencyManifestPath', $cleanManifestPath,
+            '-SourceRootPath', $allowedSourceRoot) `
+        -OutputPrefix 'windows-powershell' `
+        -FilePath 'powershell.exe'
+    if ($windowsPowerShellResult.ExitCode -ne 0) {
+        throw "Windows PowerShell compatibility fixture failed: $($windowsPowerShellResult.Output)"
+    }
+    if ($windowsPowerShellResult.Output -notmatch [regex]::Escape('ForbiddenApiCalls=0')) {
+        throw 'Windows PowerShell compatibility output omitted ForbiddenApiCalls=0.'
+    }
+
+    $windowsPowerShellNegativeResult = Invoke-BoundaryChecker `
+        -Arguments @(
+            '-DependencyManifestPath', $cleanManifestPath,
+            '-SourceRootPath', $networkSourceRoot) `
+        -OutputPrefix 'windows-powershell-negative' `
+        -FilePath 'powershell.exe'
+    if ($windowsPowerShellNegativeResult.ExitCode -eq 0) {
+        throw 'Windows PowerShell incorrectly accepted the direct System.Net fixture.'
+    }
+    if ($windowsPowerShellNegativeResult.Output -notmatch [regex]::Escape('System.Net.*')) {
+        throw 'Windows PowerShell failure output did not identify direct System.Net usage.'
+    }
+
+    Write-Output 'Passed: 11 Failed: 0'
 }
 finally {
     Remove-Item -Recurse -Force -LiteralPath $testRoot -ErrorAction SilentlyContinue
