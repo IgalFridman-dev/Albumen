@@ -9,7 +9,7 @@ namespace PhotoSift.Scenarios.Tests.Shell;
 public sealed class ShellViewModelBoundaryTests
 {
     [Fact]
-    public async Task ChooseScopeActionUsesApplicationPortAndConsumesItsSnapshot()
+    public async Task ChooseScopeCommandUsesApplicationPortAndConsumesItsSnapshot()
     {
         var returnedPhases = ImmutableArray.Create(
             new WorkflowPhaseState(
@@ -36,7 +36,7 @@ public sealed class ShellViewModelBoundaryTests
             new ShellSnapshot(returnedPhases, "Instruction returned by Application."));
         var viewModel = new ShellViewModel(workflow);
 
-        await viewModel.OpenChooseScopeAsync(CancellationToken.None);
+        await viewModel.ChooseScopeCommand.ExecuteAsync();
 
         Assert.Equal(1, workflow.CallCount);
         Assert.IsType<OpenChooseScopeCommand>(workflow.ReceivedCommand);
