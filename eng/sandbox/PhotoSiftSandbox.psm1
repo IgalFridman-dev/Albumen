@@ -98,7 +98,7 @@ function New-PhotoSiftSandboxConfiguration {
         [string]$OutputPath,
 
         [Parameter(Mandatory)]
-        [ValidateSet('Architecture', 'Full')]
+        [ValidateSet('Architecture', 'Core', 'Full')]
         [string]$Stage
     )
 
@@ -166,7 +166,7 @@ function Assert-PhotoSiftSandboxResult {
         [string]$SummaryPath,
 
         [Parameter(Mandatory)]
-        [ValidateSet('Architecture', 'Full')]
+        [ValidateSet('Architecture', 'Core', 'Full')]
         [string]$ExpectedStage
     )
 

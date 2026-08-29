@@ -85,6 +85,17 @@ if ($xml.Configuration.LogonCommand.Command -notmatch '-Stage Architecture') {
 }
 $script:passed++
 
+$coreConfiguration = New-PhotoSiftSandboxConfiguration `
+    -SourcePath $sourcePath `
+    -SdkPath $sdkPath `
+    -PackagesPath $packagesPath `
+    -OutputPath $outputPath `
+    -Stage Core
+if ($coreConfiguration -notmatch '-Stage Core') {
+    throw 'Guest logon command did not contain the Core stage.'
+}
+$script:passed++
+
 $missingSummary = Join-Path $outputPath 'missing-summary.json'
 Assert-Throws {
     Assert-PhotoSiftSandboxResult -SummaryPath $missingSummary -ExpectedStage Architecture

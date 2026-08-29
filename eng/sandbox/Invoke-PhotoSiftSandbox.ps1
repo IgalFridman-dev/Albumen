@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [ValidateSet('Architecture', 'Full')]
+    [ValidateSet('Architecture', 'Core', 'Full')]
     [string]$Stage = 'Full',
 
     [Parameter()]

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Architecture', 'Full')]
+    [ValidateSet('Architecture', 'Core', 'Full')]
     [string]$Stage
 )
 
@@ -180,6 +180,34 @@ try {
                 '--no-restore',
                 '--logger', 'trx;LogFileName=architecture.trx',
                 '--results-directory', 'C:\PhotoSift\output\TestResults') | Out-Null
+    }
+    elseif ($Stage -eq 'Core') {
+        Invoke-LoggedCommand `
+            -Name 'restore-core' `
+            -FilePath $dotnetPath `
+            -Arguments @('restore', 'PhotoSift.slnx', '-r', 'win-x64', '--locked-mode', '--configfile', 'NuGet.Config', '-p:NuGetAudit=false') | Out-Null
+
+        $coreTestProjects = @(
+            'tests\PhotoSift.Domain.Tests\PhotoSift.Domain.Tests.csproj',
+            'tests\PhotoSift.Application.Tests\PhotoSift.Application.Tests.csproj')
+        foreach ($testProject in $coreTestProjects) {
+            $testName = [System.IO.Path]::GetFileNameWithoutExtension($testProject)
+            Invoke-LoggedCommand `
+                -Name ('build-' + $testName) `
+                -FilePath $dotnetPath `
+                -Arguments @('build', $testProject, '-c', 'Release', '-r', 'win-x64', '--no-restore') | Out-Null
+            Invoke-LoggedCommand `
+                -Name ('test-' + $testName) `
+                -FilePath $dotnetPath `
+                -Arguments @(
+                    'test', $testProject,
+                    '-c', 'Release',
+                    '-r', 'win-x64',
+                    '--no-build',
+                    '--no-restore',
+                    '--logger', "trx;LogFileName=$testName.trx",
+                    '--results-directory', 'C:\PhotoSift\output\TestResults') | Out-Null
+        }
     }
     else {
         Invoke-LoggedCommand `
