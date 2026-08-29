@@ -127,6 +127,10 @@ public static class AllowedFixture
     public static string GetMarker() => "local-only";
 }
 '@ | Set-Content -LiteralPath (Join-Path $allowedSourceRoot 'AllowedFixture.cs') -Encoding utf8
+    $generatedSourceRoot = Join-Path $allowedSourceRoot 'obj\Release'
+    [System.IO.Directory]::CreateDirectory($generatedSourceRoot) | Out-Null
+    'global using System.Net.Http;' |
+        Set-Content -LiteralPath (Join-Path $generatedSourceRoot 'GlobalUsings.g.cs') -Encoding utf8
 
     $windowsPowerShellResult = Invoke-BoundaryChecker `
         -Arguments @(
