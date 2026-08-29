@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PhotoSift.Domain/PhotoSift.Domain.csproj" />
+    <Project Path="src/PhotoSift.Application/PhotoSift.Application.csproj" />
+    <Project Path="src/PhotoSift.Analysis/PhotoSift.Analysis.csproj" />
+    <Project Path="src/PhotoSift.Infrastructure.Sqlite/PhotoSift.Infrastructure.Sqlite.csproj" />
+    <Project Path="src/PhotoSift.Infrastructure.Windows/PhotoSift.Infrastructure.Windows.csproj" />
+    <Project Path="src/PhotoSift.App/PhotoSift.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PhotoSift.Domain.Tests/PhotoSift.Domain.Tests.csproj" />
+    <Project Path="tests/PhotoSift.Application.Tests/PhotoSift.Application.Tests.csproj" />
+    <Project Path="tests/PhotoSift.Analysis.Tests/PhotoSift.Analysis.Tests.csproj" />
+    <Project Path="tests/PhotoSift.Infrastructure.Tests/PhotoSift.Infrastructure.Tests.csproj" />
+    <Project Path="tests/PhotoSift.Scenarios.Tests/PhotoSift.Scenarios.Tests.csproj" />
+  </Folder>
+</Solution>
