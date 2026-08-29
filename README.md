@@ -4,9 +4,9 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Planning is complete and validated. E1-S1 has implemented and verified the native offline application boundary and is done. E1-S2 remains intentionally locked in backlog; `next_eligible_story` remains E1-S1 until the implementation policy is deliberately advanced.
+Planning is complete and validated. E1-S1 has implemented and verified the native offline application boundary and is done. The mandatory sequential policy now unlocks E1-S2 as the sole next eligible story; E1-S3 and all later work remain locked.
 
-- Current implementation entry point: **E1-S1 — Bootstrap the native offline application boundary**
+- Current implementation entry point: **E1-S2 — Select and preflight an exact local Scope**
 - Current tracking: [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)
 - Story contracts: [`_bmad-output/specs/`](_bmad-output/specs/)
 - Documentation map: [`docs/README.md`](docs/README.md)
