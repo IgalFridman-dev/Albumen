@@ -118,6 +118,30 @@ public sealed class ScopePreflightPolicyTests
     }
 
     [Fact]
+    public void EvaluateFailsClosedForAnUnrecognizedCloudEnumValue()
+    {
+        var result = ScopePreflightPolicy.Evaluate(
+            Evidence(ScopeVolumeKind.Fixed, (ScopeCloudState)999, ScopeTraversalState.Complete));
+
+        Assert.Equal(ScopePreflightDecision.Blocked, result.Decision);
+        Assert.Equal(
+            new[] { ScopeBlockingReason.UnknownSafety },
+            result.BlockingReasons);
+    }
+
+    [Fact]
+    public void EvaluateFailsClosedForAnUnrecognizedTraversalEnumValue()
+    {
+        var result = ScopePreflightPolicy.Evaluate(
+            Evidence(ScopeVolumeKind.Fixed, ScopeCloudState.Local, (ScopeTraversalState)999));
+
+        Assert.Equal(ScopePreflightDecision.Blocked, result.Decision);
+        Assert.Equal(
+            new[] { ScopeBlockingReason.UnknownSafety },
+            result.BlockingReasons);
+    }
+
+    [Fact]
     public void EvaluateRequiresAResolvedScopeForReady()
     {
         var result = ScopePreflightPolicy.Evaluate(
