@@ -164,6 +164,47 @@ public sealed class ChooseScopeWorkflowTests
     }
 
     [Fact]
+    public async Task ThrowingSubscriberCannotStrandReentrantSnapshotChanges()
+    {
+        var picker = new SequenceFolderPicker(@"C:\First", @"C:\Second");
+        var workflow = new ChooseScopeWorkflow(picker, new SelectionPreflight());
+        var callbackFailure = new InvalidOperationException("subscriber failed");
+        var observed = new List<(long Revision, ScopeSessionState State)>();
+        Task? reentrantSelection = null;
+
+        workflow.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.Revision == 1 &&
+                snapshot.ScopeState is ScopeSessionState.Checking)
+            {
+                reentrantSelection = workflow.HandleAsync(
+                    new ChooseScopeCommand(),
+                    CancellationToken.None);
+                throw callbackFailure;
+            }
+        };
+        workflow.SnapshotChanged += (_, snapshot) =>
+            observed.Add((snapshot.Revision, snapshot.ScopeState));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => workflow.HandleAsync(
+                new ChooseScopeCommand(),
+                CancellationToken.None));
+        Assert.NotNull(reentrantSelection);
+        await reentrantSelection;
+
+        Assert.Same(callbackFailure, exception);
+        Assert.Equal(
+            [
+                (2, ScopeSessionState.Checking),
+                (2, ScopeSessionState.Ready),
+            ],
+            observed);
+        Assert.Equal(2, workflow.Current.Revision);
+        Assert.Equal(ScopeSessionState.Ready, workflow.Current.ScopeState);
+    }
+
+    [Fact]
     public async Task ChangingRecursionInvalidatesReadyBeforePreflightCompletes()
     {
         var initialCompletion = NewCompletion();

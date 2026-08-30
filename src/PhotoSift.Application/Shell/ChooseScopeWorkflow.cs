@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using PhotoSift.Application.Scope;
 using PhotoSift.Domain.Scope;
 using PhotoSift.Domain.Workflow;
@@ -196,34 +197,32 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
             return;
         }
 
-        try
+        ExceptionDispatchInfo? deliveryFailure = null;
+        while (true)
         {
-            while (true)
-            {
-                ShellSnapshot snapshot;
-                lock (gate)
-                {
-                    if (pendingSnapshotChanges.Count == 0)
-                    {
-                        isDeliveringSnapshotChanges = false;
-                        return;
-                    }
-
-                    snapshot = pendingSnapshotChanges.Dequeue();
-                }
-
-                SnapshotChanged?.Invoke(this, snapshot);
-            }
-        }
-        catch
-        {
+            ShellSnapshot snapshot;
             lock (gate)
             {
-                isDeliveringSnapshotChanges = false;
+                if (pendingSnapshotChanges.Count == 0)
+                {
+                    isDeliveringSnapshotChanges = false;
+                    break;
+                }
+
+                snapshot = pendingSnapshotChanges.Dequeue();
             }
 
-            throw;
+            try
+            {
+                SnapshotChanged?.Invoke(this, snapshot);
+            }
+            catch (Exception exception)
+            {
+                deliveryFailure ??= ExceptionDispatchInfo.Capture(exception);
+            }
         }
+
+        deliveryFailure?.Throw();
     }
 
     private static ShellSnapshot CreateChecking(
