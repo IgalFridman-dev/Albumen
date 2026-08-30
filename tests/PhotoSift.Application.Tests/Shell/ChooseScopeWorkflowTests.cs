@@ -100,6 +100,70 @@ public sealed class ChooseScopeWorkflowTests
     }
 
     [Fact]
+    public async Task ReentrantSelectionCannotDeliverAnOlderSnapshotAfterANewerRevision()
+    {
+        var picker = new SequenceFolderPicker(@"C:\First", @"C:\Second");
+        var workflow = new ChooseScopeWorkflow(picker, new SelectionPreflight());
+        var observedRevisions = new List<long>();
+        Task? reentrantSelection = null;
+
+        workflow.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.Revision == 1 &&
+                snapshot.ScopeState is ScopeSessionState.Checking)
+            {
+                reentrantSelection = workflow.HandleAsync(
+                    new ChooseScopeCommand(),
+                    CancellationToken.None);
+            }
+        };
+        workflow.SnapshotChanged += (_, snapshot) =>
+            observedRevisions.Add(snapshot.Revision);
+
+        await workflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None);
+        Assert.NotNull(reentrantSelection);
+        await reentrantSelection;
+
+        Assert.Equal([1, 2, 2], observedRevisions);
+        Assert.Equal(@"C:\Second", workflow.Current.Selection?.SelectedPath);
+        Assert.Equal(2, workflow.Current.Revision);
+    }
+
+    [Fact]
+    public async Task FolderSelectionStartedFromRetryPublicationSupersedesTheRetry()
+    {
+        var picker = new SequenceFolderPicker(@"C:\First", @"C:\Second");
+        var workflow = new ChooseScopeWorkflow(picker, new SelectionPreflight());
+        await workflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None);
+        var observedRevisions = new List<long>();
+        Task? newerSelection = null;
+
+        workflow.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.Revision == 2 &&
+                snapshot.ScopeState is ScopeSessionState.Checking)
+            {
+                newerSelection = workflow.HandleAsync(
+                    new ChooseScopeCommand(),
+                    CancellationToken.None);
+            }
+        };
+        workflow.SnapshotChanged += (_, snapshot) =>
+            observedRevisions.Add(snapshot.Revision);
+
+        await workflow.HandleAsync(
+            new RetryScopePreflightCommand(),
+            CancellationToken.None);
+        Assert.NotNull(newerSelection);
+        await newerSelection;
+
+        Assert.Equal([2, 3, 3], observedRevisions);
+        Assert.Equal(@"C:\Second", workflow.Current.Selection?.SelectedPath);
+        Assert.Equal(3, workflow.Current.Revision);
+        Assert.Equal(ScopeSessionState.Ready, workflow.Current.ScopeState);
+    }
+
+    [Fact]
     public async Task ChangingRecursionInvalidatesReadyBeforePreflightCompletes()
     {
         var initialCompletion = NewCompletion();
@@ -292,6 +356,17 @@ public sealed class ChooseScopeWorkflowTests
         }
     }
 
+    private sealed class SequenceFolderPicker(params string?[] paths) : ILocalFolderPicker
+    {
+        private readonly Queue<string?> pending = new(paths);
+
+        public Task<string?> PickSingleAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(pending.Dequeue());
+        }
+    }
+
     private sealed class StubPreflight(ScopePreflightEvidence evidence) : ILocalScopePreflight
     {
         public Task<ScopePreflightEvidence> InspectAsync(
@@ -300,6 +375,19 @@ public sealed class ChooseScopeWorkflowTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(evidence);
+        }
+    }
+
+    private sealed class SelectionPreflight : ILocalScopePreflight
+    {
+        public Task<ScopePreflightEvidence> InspectAsync(
+            ScopeSelection selection,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(ReadyEvidence(
+                selection.SelectedPath,
+                selection.Recursion));
         }
     }
 

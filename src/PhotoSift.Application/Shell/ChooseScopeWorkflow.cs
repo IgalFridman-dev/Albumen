@@ -8,9 +8,11 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
 {
     private const string RuleSetNotConfigured = "Not configured";
     private readonly object gate = new();
+    private readonly Queue<ShellSnapshot> pendingSnapshotChanges = new();
     private readonly ILocalFolderPicker folderPicker;
     private readonly ILocalScopePreflight preflight;
     private ShellSnapshot current;
+    private bool isDeliveringSnapshotChanges;
 
     public ChooseScopeWorkflow(
         ILocalFolderPicker folderPicker,
@@ -57,9 +59,13 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
             return;
         }
 
-        await RunPreflightAsync(
-                new ScopeSelection(selectedPath, ScopeRecursion.TopLevelOnly),
-                cancellationToken)
+        var selection = new ScopeSelection(
+            selectedPath,
+            ScopeRecursion.TopLevelOnly);
+        var start = BeginPreflight(selection);
+        DeliverSnapshotChangesIfNeeded(start.ShouldDeliver);
+
+        await RunPreflightAsync(selection, start.Revision, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -69,28 +75,30 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        ScopeSelection? selection;
+        ScopeSelection selection;
+        (long Revision, bool ShouldDeliver) start;
         lock (gate)
         {
-            selection = current.Selection;
+            var currentSelection = current.Selection;
+            if (currentSelection is null)
+            {
+                return;
+            }
+
+            var recursion = command.IncludeSubfolders
+                ? ScopeRecursion.IncludeSubfolders
+                : ScopeRecursion.TopLevelOnly;
+            if (currentSelection.Recursion == recursion)
+            {
+                return;
+            }
+
+            selection = new ScopeSelection(currentSelection.SelectedPath, recursion);
+            start = BeginPreflightUnderLock(selection);
         }
 
-        if (selection is null)
-        {
-            return;
-        }
-
-        var recursion = command.IncludeSubfolders
-            ? ScopeRecursion.IncludeSubfolders
-            : ScopeRecursion.TopLevelOnly;
-        if (selection.Recursion == recursion)
-        {
-            return;
-        }
-
-        await RunPreflightAsync(
-                new ScopeSelection(selection.SelectedPath, recursion),
-                cancellationToken)
+        DeliverSnapshotChangesIfNeeded(start.ShouldDeliver);
+        await RunPreflightAsync(selection, start.Revision, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -101,22 +109,25 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
         ArgumentNullException.ThrowIfNull(command);
 
         ScopeSelection selection;
+        (long Revision, bool ShouldDeliver) start;
         lock (gate)
         {
             selection = current.Selection
                 ?? throw new InvalidOperationException(
                     "Scope preflight cannot be retried before a Scope is selected.");
+            start = BeginPreflightUnderLock(selection);
         }
 
-        await RunPreflightAsync(selection, cancellationToken).ConfigureAwait(false);
+        DeliverSnapshotChangesIfNeeded(start.ShouldDeliver);
+        await RunPreflightAsync(selection, start.Revision, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task RunPreflightAsync(
         ScopeSelection selection,
+        long revision,
         CancellationToken cancellationToken)
     {
-        var revision = BeginPreflight(selection);
-
         try
         {
             var evidence = await preflight
@@ -131,22 +142,27 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
         }
     }
 
-    private long BeginPreflight(ScopeSelection selection)
+    private (long Revision, bool ShouldDeliver) BeginPreflight(
+        ScopeSelection selection)
     {
-        ShellSnapshot checking;
         lock (gate)
         {
-            var revision = current.Revision + 1;
-            checking = CreateChecking(selection, revision);
-            current = checking;
+            return BeginPreflightUnderLock(selection);
         }
+    }
 
-        SnapshotChanged?.Invoke(this, checking);
-        return checking.Revision;
+    private (long Revision, bool ShouldDeliver) BeginPreflightUnderLock(
+        ScopeSelection selection)
+    {
+        var revision = current.Revision + 1;
+        var checking = CreateChecking(selection, revision);
+        current = checking;
+        return (revision, EnqueueSnapshotChangeUnderLock(checking));
     }
 
     private void PublishIfCurrent(long revision, ShellSnapshot completed)
     {
+        bool shouldDeliver;
         lock (gate)
         {
             if (current.Revision != revision)
@@ -155,9 +171,59 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
             }
 
             current = completed;
+            shouldDeliver = EnqueueSnapshotChangeUnderLock(completed);
         }
 
-        SnapshotChanged?.Invoke(this, completed);
+        DeliverSnapshotChangesIfNeeded(shouldDeliver);
+    }
+
+    private bool EnqueueSnapshotChangeUnderLock(ShellSnapshot snapshot)
+    {
+        pendingSnapshotChanges.Enqueue(snapshot);
+        if (isDeliveringSnapshotChanges)
+        {
+            return false;
+        }
+
+        isDeliveringSnapshotChanges = true;
+        return true;
+    }
+
+    private void DeliverSnapshotChangesIfNeeded(bool shouldDeliver)
+    {
+        if (!shouldDeliver)
+        {
+            return;
+        }
+
+        try
+        {
+            while (true)
+            {
+                ShellSnapshot snapshot;
+                lock (gate)
+                {
+                    if (pendingSnapshotChanges.Count == 0)
+                    {
+                        isDeliveringSnapshotChanges = false;
+                        return;
+                    }
+
+                    snapshot = pendingSnapshotChanges.Dequeue();
+                }
+
+                SnapshotChanged?.Invoke(this, snapshot);
+            }
+        }
+        catch
+        {
+            lock (gate)
+            {
+                isDeliveringSnapshotChanges = false;
+            }
+
+            throw;
+        }
     }
 
     private static ShellSnapshot CreateChecking(
