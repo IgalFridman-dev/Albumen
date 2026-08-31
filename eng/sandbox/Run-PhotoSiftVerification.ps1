@@ -14,8 +14,14 @@ $outputPath = 'C:\PhotoSift\output'
 $dotnetPath = 'C:\PhotoSift\sdk\dotnet.exe'
 $summaryPath = Join-Path $outputPath 'summary.json'
 $summaryTemporaryPath = Join-Path $outputPath 'summary.json.tmp'
+$adapterSignatureLogPath = Join-Path $outputPath 'adapter-signatures.json'
 $commands = New-Object 'System.Collections.Generic.List[object]'
+$testResults = New-Object 'System.Collections.Generic.List[object]'
+$adapterSignatureEvidence = New-Object 'System.Collections.Generic.List[object]'
 $failure = $null
+$signingCertificate = $null
+$signingCleanupError = $null
+$signingEvidenceError = $null
 $networkingDisabled = $false
 $sdkVersion = $null
 $desktopRuntimeVersion = $null
@@ -78,6 +84,41 @@ function Invoke-LoggedCommand {
     }
 
     return $result
+}
+
+function Add-TestProjectEvidence {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ProjectName,
+
+        [Parameter(Mandatory)]
+        [string]$ResultFileName
+    )
+
+    $testResultsPath = Join-Path $outputPath 'TestResults'
+    $trxPath = Join-Path $testResultsPath $ResultFileName
+    $testEvidence = Read-PhotoSiftTrxResult `
+        -ProjectName $ProjectName `
+        -TrxPath $trxPath `
+        -OutputRoot $outputPath
+    $testResults.Add($testEvidence)
+}
+
+function Invoke-GuestAdapterSigning {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Checkpoint
+    )
+
+    if ($null -eq $script:signingCertificate) {
+        $script:signingCertificate = New-PhotoSiftSandboxTestCertificate
+    }
+
+    Invoke-PhotoSiftTestAdapterSigning `
+        -SearchRoots @($env:TEMP, $workingSource) `
+        -Certificate $script:signingCertificate `
+        -Checkpoint $Checkpoint `
+        -EvidenceList $script:adapterSignatureEvidence | Out-Null
 }
 
 try {
@@ -169,6 +210,7 @@ try {
             -Name 'build-architecture' `
             -FilePath $dotnetPath `
             -Arguments @('build', $projectPath, '-c', 'Release', '-r', 'win-x64', '--no-restore') | Out-Null
+        Invoke-GuestAdapterSigning -Checkpoint 'Architecture'
         Invoke-LoggedCommand `
             -Name 'test-architecture' `
             -FilePath $dotnetPath `
@@ -180,6 +222,9 @@ try {
                 '--no-restore',
                 '--logger', 'trx;LogFileName=architecture.trx',
                 '--results-directory', 'C:\PhotoSift\output\TestResults') | Out-Null
+        Add-TestProjectEvidence `
+            -ProjectName 'PhotoSift.Infrastructure.Tests' `
+            -ResultFileName 'architecture.trx'
     }
     elseif ($Stage -eq 'Core') {
         Invoke-LoggedCommand `
@@ -198,6 +243,7 @@ try {
                 -Name ('build-' + $testName) `
                 -FilePath $dotnetPath `
                 -Arguments @('build', $testProject, '-c', 'Release', '-r', 'win-x64', '--no-restore') | Out-Null
+            Invoke-GuestAdapterSigning -Checkpoint ('Core-' + $testName)
             Invoke-LoggedCommand `
                 -Name ('test-' + $testName) `
                 -FilePath $dotnetPath `
@@ -209,6 +255,9 @@ try {
                     '--no-restore',
                     '--logger', "trx;LogFileName=$testName.trx",
                     '--results-directory', 'C:\PhotoSift\output\TestResults') | Out-Null
+            Add-TestProjectEvidence `
+                -ProjectName $testName `
+                -ResultFileName ($testName + '.trx')
         }
     }
     else {
@@ -220,6 +269,7 @@ try {
             -Name 'build-solution' `
             -FilePath $dotnetPath `
             -Arguments @('build', 'PhotoSift.slnx', '-c', 'Release', '--no-restore') | Out-Null
+        Invoke-GuestAdapterSigning -Checkpoint 'Full'
 
         $testProjects = @(
             'tests\PhotoSift.Domain.Tests\PhotoSift.Domain.Tests.csproj',
@@ -240,6 +290,9 @@ try {
                     '--no-restore',
                     '--logger', "trx;LogFileName=$testName.trx",
                     '--results-directory', 'C:\PhotoSift\output\TestResults') | Out-Null
+            Add-TestProjectEvidence `
+                -ProjectName $testName `
+                -ResultFileName ($testName + '.trx')
         }
 
         Invoke-LoggedCommand `
@@ -266,6 +319,31 @@ catch {
     $failure = $_.Exception.ToString()
 }
 finally {
+    if ($null -ne $signingCertificate) {
+        try {
+            Remove-PhotoSiftSandboxTestCertificate -Certificate $signingCertificate
+        }
+        catch {
+            $signingCleanupError = $_.Exception.ToString()
+            if ($null -eq $failure) {
+                $failure = $signingCleanupError
+            }
+        }
+    }
+
+    try {
+        ConvertTo-Json `
+            -InputObject $adapterSignatureEvidence.ToArray() `
+            -Depth 5 |
+            Set-Content -LiteralPath $adapterSignatureLogPath -Encoding utf8
+    }
+    catch {
+        $signingEvidenceError = $_.Exception.ToString()
+        if ($null -eq $failure) {
+            $failure = $signingEvidenceError
+        }
+    }
+
     $summary = [ordered]@{
         success = $null -eq $failure
         stage = $Stage
@@ -274,6 +352,11 @@ finally {
         desktopRuntimeVersion = $desktopRuntimeVersion
         error = $failure
         commands = $commands
+        tests = $testResults
+        adapterSignatureLog = [System.IO.Path]::GetFileName($adapterSignatureLogPath)
+        adapterSignatures = $adapterSignatureEvidence
+        signingCleanupError = $signingCleanupError
+        signingEvidenceError = $signingEvidenceError
         completedAtUtc = [System.DateTimeOffset]::UtcNow.ToString('O')
     }
     $summary | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $summaryTemporaryPath -Encoding utf8
