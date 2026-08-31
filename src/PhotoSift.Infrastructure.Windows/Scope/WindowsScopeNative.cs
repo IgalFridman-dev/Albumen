@@ -3,10 +3,24 @@ using PhotoSift.Domain.Scope;
 
 namespace PhotoSift.Infrastructure.Windows.Scope;
 
-internal sealed class WindowsScopeNative(WicCodecCapability codecs) : IWindowsScopeNative
+internal sealed class WindowsScopeNative : IWindowsScopeNative
 {
-    private readonly WicCodecCapability codecs =
-        codecs ?? throw new ArgumentNullException(nameof(codecs));
+    private readonly WicCodecCapability codecs;
+    private readonly IWindowsFileReadProbe fileReadProbe;
+
+    internal WindowsScopeNative(WicCodecCapability codecs)
+        : this(codecs, new WindowsFileReadProbe())
+    {
+    }
+
+    internal WindowsScopeNative(
+        WicCodecCapability codecs,
+        IWindowsFileReadProbe fileReadProbe)
+    {
+        this.codecs = codecs ?? throw new ArgumentNullException(nameof(codecs));
+        this.fileReadProbe = fileReadProbe ??
+            throw new ArgumentNullException(nameof(fileReadProbe));
+    }
 
     public WindowsDirectoryFacts InspectDirectory(string path)
     {
@@ -104,37 +118,13 @@ internal sealed class WindowsScopeNative(WicCodecCapability codecs) : IWindowsSc
     public bool CanOpenForRead(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        using var findHandle = NativeMethods.FindFirstFileEx(
-            path,
-            FindExInfoLevel.Basic,
-            out var findData,
-            FindExSearchOperation.NameMatch,
-            searchFilter: 0,
-            additionalFlags: 0);
-        if (findHandle.IsInvalid)
-        {
-            return false;
-        }
-
-        var cloudState = MapCloudState(
-            findData.FileAttributes,
-            NativeMethods.CfGetPlaceholderStateFromAttributeTag(
-                findData.FileAttributes,
-                findData.Reserved0));
+        var cloudState = fileReadProbe.GetCloudState(path);
         if (cloudState is ScopeCloudState.Placeholder or ScopeCloudState.Unknown)
         {
             return false;
         }
 
-        using var readHandle = NativeMethods.CreateFile(
-            path,
-            NativeMethods.GenericRead,
-            FileShare.ReadWrite | FileShare.Delete,
-            securityAttributes: 0,
-            NativeMethods.OpenExisting,
-            NativeMethods.FileAttributeNormal,
-            templateFile: 0);
-        return !readHandle.IsInvalid;
+        return fileReadProbe.TryOpenForRead(path);
     }
 
     public bool IsCodecAvailable(SupportedImageFormat format) => codecs.IsAvailable(format);

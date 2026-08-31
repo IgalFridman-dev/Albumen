@@ -19,3 +19,10 @@ internal interface IComClassAvailability
 {
     bool IsAvailable(Guid classId);
 }
+
+internal interface IWindowsFileReadProbe
+{
+    ScopeCloudState GetCloudState(string path);
+
+    bool TryOpenForRead(string path);
+}

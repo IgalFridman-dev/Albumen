@@ -70,16 +70,26 @@ public sealed class WindowsScopeNativeTests
     {
         var directory = Directory.CreateTempSubdirectory("PhotoSiftEnumerate-");
         var childPath = Path.Combine(directory.FullName, "ordinary.jpg");
+        var childDirectoryPath = Path.Combine(directory.FullName, "child");
+        var nestedPath = Path.Combine(childDirectoryPath, "nested.jpg");
         File.WriteAllText(childPath, "not image pixels");
+        Directory.CreateDirectory(childDirectoryPath);
+        File.WriteAllText(nestedPath, "not image pixels");
 
         try
         {
-            var entry = Assert.Single(CreateNative().EnumerateDirectory(directory.FullName));
+            var entries = CreateNative().EnumerateDirectory(directory.FullName).ToArray();
 
-            Assert.Equal(childPath, entry.Path);
-            Assert.False(entry.IsDirectory);
-            Assert.False(entry.IsReparsePoint);
-            Assert.Equal(ScopeCloudState.Local, entry.CloudState);
+            Assert.Equal(2, entries.Length);
+            Assert.Contains(entries, entry =>
+                entry.Path == childPath &&
+                !entry.IsDirectory &&
+                !entry.IsReparsePoint &&
+                entry.CloudState == ScopeCloudState.Local);
+            Assert.Contains(entries, entry =>
+                entry.Path == childDirectoryPath &&
+                entry.IsDirectory);
+            Assert.DoesNotContain(entries, entry => entry.Path == nestedPath);
         }
         finally
         {
@@ -108,6 +118,22 @@ public sealed class WindowsScopeNativeTests
         }
     }
 
+    [Theory]
+    [InlineData(ScopeCloudState.Placeholder)]
+    [InlineData(ScopeCloudState.Unknown)]
+    public void ReadProbeClassifiesBeforeOpeningUnsafeCloudEntry(ScopeCloudState cloudState)
+    {
+        const string path = @"C:\photos\unsafe.jpg";
+        var readProbe = new RecordingFileReadProbe(cloudState);
+        var native = new WindowsScopeNative(
+            new WicCodecCapability(new ComClassAvailability()),
+            readProbe);
+
+        Assert.False(native.CanOpenForRead(path));
+        Assert.Equal(path, readProbe.ClassifiedPath);
+        Assert.Equal(0, readProbe.ReadOpenAttempts);
+    }
+
     [Fact]
     public void MissingDirectoryProducesTypedUnavailableFailure()
     {
@@ -123,4 +149,23 @@ public sealed class WindowsScopeNativeTests
 
     private static WindowsScopeNative CreateNative() =>
         new(new WicCodecCapability(new ComClassAvailability()));
+
+    private sealed class RecordingFileReadProbe(ScopeCloudState cloudState) : IWindowsFileReadProbe
+    {
+        public string? ClassifiedPath { get; private set; }
+
+        public int ReadOpenAttempts { get; private set; }
+
+        public ScopeCloudState GetCloudState(string path)
+        {
+            ClassifiedPath = path;
+            return cloudState;
+        }
+
+        public bool TryOpenForRead(string path)
+        {
+            ReadOpenAttempts++;
+            return true;
+        }
+    }
 }
