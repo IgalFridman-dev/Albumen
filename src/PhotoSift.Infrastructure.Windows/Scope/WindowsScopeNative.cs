@@ -55,7 +55,7 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
     public ScopeVolumeKind GetVolumeKind(string resolvedPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(resolvedPath);
-        var root = Path.GetPathRoot(resolvedPath);
+        var root = NormalizeDriveRoot(resolvedPath);
         return string.IsNullOrEmpty(root)
             ? ScopeVolumeKind.Unknown
             : MapDriveType(NativeMethods.GetDriveType(root));
@@ -139,6 +139,14 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
         NativeMethods.DriveCdRom or NativeMethods.DriveRamDisk => ScopeVolumeKind.Unsupported,
         _ => ScopeVolumeKind.Unknown,
     };
+
+    internal static string? NormalizeDriveRoot(string resolvedPath)
+    {
+        var root = Path.GetPathRoot(resolvedPath);
+        return string.IsNullOrEmpty(root) || Path.EndsInDirectorySeparator(root)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+    }
 
     internal static ScopeCloudState MapCloudState(uint attributes, uint placeholderState)
     {

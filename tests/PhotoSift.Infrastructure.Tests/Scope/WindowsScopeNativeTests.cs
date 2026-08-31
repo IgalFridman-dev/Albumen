@@ -47,6 +47,14 @@ public sealed class WindowsScopeNativeTests
         Assert.Equal(expected, WindowsScopeNative.MapDriveType(driveType));
     }
 
+    [Fact]
+    public void NormalizesUncRootForGetDriveTypeContract()
+    {
+        Assert.Equal(
+            @"\\server\share\",
+            WindowsScopeNative.NormalizeDriveRoot(@"\\server\share\photos"));
+    }
+
     [Theory]
     [InlineData(0x00000080u, 0u, ScopeCloudState.Local)]
     [InlineData(0u, 1u, ScopeCloudState.Placeholder)]
