@@ -23,6 +23,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private string supportedCount = string.Empty;
     private string ruleSetStatus = string.Empty;
     private bool includeSubfolders;
+    private bool canChangeRecursion;
     private bool isChecking;
     private bool isReady;
     private bool isBlocked;
@@ -111,6 +112,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         private set => SetField(ref includeSubfolders, value);
     }
 
+    public bool CanChangeRecursion
+    {
+        get => canChangeRecursion;
+        private set => SetField(ref canChangeRecursion, value);
+    }
+
     public bool IsChecking
     {
         get => isChecking;
@@ -175,6 +182,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         SelectedPath = snapshot.Selection?.SelectedPath ?? string.Empty;
         ResolvedPath = snapshot.Preflight?.Scope?.ResolvedPath ?? string.Empty;
         IncludeSubfolders = ProjectRecursion(snapshot.Selection);
+        CanChangeRecursion = snapshot.Selection is not null;
         SupportedCount = FormatCount(snapshot.Preflight?.CompleteCounts?.Supported);
         RuleSetStatus = snapshot.RuleSetStatus;
         ScopeSummary = ProjectSummary(snapshot.Preflight);

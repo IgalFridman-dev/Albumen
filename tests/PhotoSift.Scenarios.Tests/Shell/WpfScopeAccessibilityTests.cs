@@ -1,9 +1,11 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PhotoSift.App;
@@ -65,6 +67,115 @@ public sealed class WpfScopeAccessibilityTests
 
                 AssertSystemBrushesRemainDynamic(window);
                 AssertLaterPhaseButtonsStayUnavailable(window);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void RecursionControlStaysDisabledUntilASelectionIsPublished()
+    {
+        RunOnSta(() =>
+        {
+            var workflow = new PublishingChooseScopeWorkflow(ColdSnapshot());
+            var viewModel = new ShellViewModel(workflow);
+            var window = new MainWindow { DataContext = viewModel };
+            try
+            {
+                ShowAndDrain(window);
+
+                var recursion = Assert.IsType<CheckBox>(
+                    window.FindName("IncludeSubfoldersCheckBox"));
+                Assert.Equal(string.Empty, viewModel.SelectedPath);
+                Assert.False(recursion.IsChecked);
+                Assert.False(recursion.IsEnabled);
+
+                workflow.Publish(CheckingSnapshot(ScopeRecursion.IncludeSubfolders));
+                DrainDispatcher();
+
+                Assert.Equal(@"C:\Photos", viewModel.SelectedPath);
+                Assert.True(recursion.IsEnabled);
+                Assert.True(recursion.IsChecked);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void ChooseButtonNameMatchesItsVisibleActionAsSelectionStateChanges()
+    {
+        RunOnSta(() =>
+        {
+            var workflow = new PublishingChooseScopeWorkflow(ColdSnapshot());
+            var viewModel = new ShellViewModel(workflow);
+            var window = new MainWindow { DataContext = viewModel };
+            try
+            {
+                ShowAndDrain(window);
+
+                var choose = Assert.IsType<Button>(
+                    window.FindName("ChooseAnotherScopeButton"));
+                Assert.Equal("Choose folder", choose.Content);
+                Assert.Equal("Choose folder", AutomationProperties.GetName(choose));
+
+                workflow.Publish(CheckingSnapshot(ScopeRecursion.TopLevelOnly));
+                DrainDispatcher();
+
+                Assert.Equal("Choose another folder", choose.Content);
+                Assert.Equal(
+                    "Choose another folder",
+                    AutomationProperties.GetName(choose));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void StatusTransitionsRaiseOneLiveRegionEventForCheckingAndCompletion()
+    {
+        RunOnSta(() =>
+        {
+            var workflow = new PublishingChooseScopeWorkflow(ColdSnapshot());
+            var viewModel = new ShellViewModel(workflow);
+            var window = new MainWindow { DataContext = viewModel };
+            try
+            {
+                ShowAndDrain(window);
+
+                var status = Assert.IsType<TextBlock>(
+                    window.FindName("ScopeStatusText"));
+                var statusElement = FindStatusAutomationElement(window, status);
+                using var liveEvents = new LiveRegionEventRecorder(statusElement);
+
+                workflow.Publish(CheckingSnapshot(ScopeRecursion.TopLevelOnly));
+                AssertLiveRegionCount(liveEvents, expectedCount: 1);
+
+                Assert.Equal("Checking location and access", status.Text);
+                Assert.Collection(
+                    liveEvents.ItemStatuses,
+                    itemStatus => Assert.Equal(
+                        "Checking location and access",
+                        itemStatus));
+
+                workflow.Publish(ReadySnapshot());
+                AssertLiveRegionCount(liveEvents, expectedCount: 2);
+
+                Assert.Equal("Ready", status.Text);
+                Assert.Collection(
+                    liveEvents.ItemStatuses,
+                    itemStatus => Assert.Equal(
+                        "Checking location and access",
+                        itemStatus),
+                    itemStatus => Assert.Equal("Ready", itemStatus));
             }
             finally
             {
@@ -207,6 +318,48 @@ public sealed class WpfScopeAccessibilityTests
         Assert.All(phaseButtons.Skip(1), button => Assert.False(button.IsEnabled));
     }
 
+    private static AutomationElement FindStatusAutomationElement(
+        Window window,
+        TextBlock status)
+    {
+        var root = AutomationElement.FromHandle(new WindowInteropHelper(window).Handle);
+        var statusElement = root.FindFirst(
+            TreeScope.Descendants,
+            new AndCondition(
+                new PropertyCondition(
+                    AutomationElement.NameProperty,
+                    AutomationProperties.GetName(status)),
+                new PropertyCondition(
+                    AutomationElement.ControlTypeProperty,
+                    ControlType.Text)));
+        return statusElement ?? throw new InvalidOperationException(
+            "ScopeStatusText was not exposed in the UI Automation tree.");
+    }
+
+    private static void AssertLiveRegionCount(
+        LiveRegionEventRecorder recorder,
+        int expectedCount)
+    {
+        var timeout = Stopwatch.StartNew();
+        while (recorder.Count < expectedCount &&
+               timeout.Elapsed < TimeSpan.FromSeconds(2))
+        {
+            DrainDispatcher();
+            recorder.WaitForSignal(TimeSpan.FromMilliseconds(10));
+        }
+
+        Assert.Equal(expectedCount, recorder.Count);
+
+        var settling = Stopwatch.StartNew();
+        while (settling.Elapsed < TimeSpan.FromMilliseconds(100))
+        {
+            DrainDispatcher();
+            recorder.WaitForSignal(TimeSpan.FromMilliseconds(10));
+        }
+
+        Assert.Equal(expectedCount, recorder.Count);
+    }
+
     private static IEnumerable<T> VisualDescendants<T>(DependencyObject root)
         where T : DependencyObject
     {
@@ -275,6 +428,20 @@ public sealed class WpfScopeAccessibilityTests
 
         failure?.Throw();
     }
+
+    private static ShellSnapshot ColdSnapshot() =>
+        new(
+            InitialWorkflow.Create(),
+            "Choose one local folder to scan.",
+            ScopeSessionState.Cold);
+
+    private static ShellSnapshot CheckingSnapshot(ScopeRecursion recursion) =>
+        new(
+            InitialWorkflow.Create(),
+            "Checking location and access.",
+            ScopeSessionState.Checking,
+            new ScopeSelection(@"C:\Photos", recursion),
+            Revision: 1);
 
     private static ShellSnapshot ReadySnapshot()
     {
@@ -350,6 +517,70 @@ public sealed class WpfScopeAccessibilityTests
         {
             Current = snapshot;
             SnapshotChanged?.Invoke(this, snapshot);
+        }
+    }
+
+    private sealed class LiveRegionEventRecorder : IDisposable
+    {
+        private readonly AutomationElement element;
+        private readonly AutomationEventHandler handler;
+        private readonly AutoResetEvent signal = new(initialState: false);
+        private readonly Lock itemStatusesLock = new();
+        private readonly List<string> itemStatuses = [];
+        private int count;
+
+        public LiveRegionEventRecorder(AutomationElement element)
+        {
+            this.element = element;
+            handler = OnAutomationEvent;
+            Automation.AddAutomationEventHandler(
+                AutomationElementIdentifiers.LiveRegionChangedEvent,
+                element,
+                TreeScope.Element,
+                handler);
+        }
+
+        public int Count => Volatile.Read(ref count);
+
+        public string[] ItemStatuses
+        {
+            get
+            {
+                lock (itemStatusesLock)
+                {
+                    return [.. itemStatuses];
+                }
+            }
+        }
+
+        public void WaitForSignal(TimeSpan timeout) => signal.WaitOne(timeout);
+
+        public void Dispose()
+        {
+            Automation.RemoveAutomationEventHandler(
+                AutomationElementIdentifiers.LiveRegionChangedEvent,
+                element,
+                handler);
+            signal.Dispose();
+            GC.SuppressFinalize(this);
+        }
+
+        private void OnAutomationEvent(object sender, AutomationEventArgs eventArgs)
+        {
+            if (sender is not AutomationElement source ||
+                eventArgs.EventId !=
+                    AutomationElementIdentifiers.LiveRegionChangedEvent)
+            {
+                return;
+            }
+
+            lock (itemStatusesLock)
+            {
+                itemStatuses.Add(source.Current.ItemStatus);
+            }
+
+            Interlocked.Increment(ref count);
+            signal.Set();
         }
     }
 }

@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Input;
 using System.Windows.Threading;
 using PhotoSift.App.Shell;
@@ -9,6 +11,8 @@ namespace PhotoSift.App;
 public partial class MainWindow : Window
 {
     private ShellViewModel? shellViewModel;
+    private int dataContextGeneration;
+    private bool isClosed;
 
     public MainWindow()
     {
@@ -22,6 +26,7 @@ public partial class MainWindow : Window
         object sender,
         DependencyPropertyChangedEventArgs eventArgs)
     {
+        dataContextGeneration++;
         if (shellViewModel is not null)
         {
             shellViewModel.PropertyChanged -= OnViewModelPropertyChanged;
@@ -46,6 +51,11 @@ public partial class MainWindow : Window
         object? sender,
         PropertyChangedEventArgs eventArgs)
     {
+        if (eventArgs.PropertyName == nameof(ShellViewModel.ScopeStatus))
+        {
+            QueueScopeStatusAnnouncement();
+        }
+
         if (eventArgs.PropertyName == nameof(ShellViewModel.IsBlocked) &&
             shellViewModel?.IsBlocked is true)
         {
@@ -63,8 +73,42 @@ public partial class MainWindow : Window
             },
             DispatcherPriority.Input);
 
+    private void QueueScopeStatusAnnouncement()
+    {
+        var expectedViewModel = shellViewModel;
+        var expectedStatus = expectedViewModel?.ScopeStatus;
+        if (expectedStatus is not "Checking location and access" and
+            not "Ready" and
+            not "Blocked")
+        {
+            return;
+        }
+
+        var expectedGeneration = dataContextGeneration;
+        Dispatcher.InvokeAsync(
+            () =>
+            {
+                if (isClosed ||
+                    expectedGeneration != dataContextGeneration ||
+                    !ReferenceEquals(expectedViewModel, shellViewModel) ||
+                    ScopeStatusText.Text != expectedStatus ||
+                    AutomationProperties.GetItemStatus(ScopeStatusText) !=
+                        expectedStatus)
+                {
+                    return;
+                }
+
+                var peer = UIElementAutomationPeer.FromElement(ScopeStatusText) ??
+                    UIElementAutomationPeer.CreatePeerForElement(ScopeStatusText);
+                peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+            },
+            DispatcherPriority.Background);
+    }
+
     private void OnClosed(object? sender, EventArgs eventArgs)
     {
+        isClosed = true;
+        dataContextGeneration++;
         if (shellViewModel is not null)
         {
             shellViewModel.PropertyChanged -= OnViewModelPropertyChanged;

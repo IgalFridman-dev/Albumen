@@ -186,6 +186,7 @@
                                   Command="{Binding ChangeRecursionCommand}"
                                   CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
                                   Content="Include subfolders"
+                                  IsEnabled="{Binding CanChangeRecursion}"
                                   IsChecked="{Binding IncludeSubfolders, Mode=OneWay}" />
                     </StackPanel>
 
@@ -225,7 +226,7 @@
                                 MinHeight="36"
                                 Margin="0,0,10,10"
                                 Padding="14,7"
-                                AutomationProperties.Name="Choose another folder"
+                                AutomationProperties.Name="{Binding Content, RelativeSource={RelativeSource Self}}"
                                 Command="{Binding ChooseScopeCommand}">
                             <Button.Style>
                                 <Style TargetType="Button">
