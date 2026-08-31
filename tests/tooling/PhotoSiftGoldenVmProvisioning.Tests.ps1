@@ -105,15 +105,17 @@ try {
         'PhotoSiftRunner',
         (ConvertTo-SecureString 'test-only-password' -AsPlainText -Force))
     $vm = [pscustomobject]@{ Name = 'PhotoSift-Verification'; State = 'Off' }
-    $sourceCheckpoint = [pscustomobject]@{ Name = 'Clean-Evaluation-Base' }
+    $recoveryCheckpoint = [pscustomobject]@{ Name = 'Clean-Evaluation-Base' }
+    $sourceCheckpoint = [pscustomobject]@{ Name = 'Credential-Evaluation-Base' }
     $targetCheckpoint = [pscustomobject]@{ Name = 'Toolchain-Evaluation-Base' }
 
     Assert-PhotoSiftGoldenVmProvisioningContract `
         -ExpectedVMName 'PhotoSift-Verification' `
-        -SourceCheckpointName 'Clean-Evaluation-Base' `
+        -RecoveryCheckpointName 'Clean-Evaluation-Base' `
+        -SourceCheckpointName 'Credential-Evaluation-Base' `
         -TargetCheckpointName 'Toolchain-Evaluation-Base' `
         -VM $vm `
-        -Checkpoints @($sourceCheckpoint) `
+        -Checkpoints @($recoveryCheckpoint, $sourceCheckpoint) `
         -NetworkAdapters @() `
         -Credential $credential `
         -IsElevated $true | Out-Null
@@ -122,14 +124,41 @@ try {
     Assert-Throws {
         Assert-PhotoSiftGoldenVmProvisioningContract `
             -ExpectedVMName 'PhotoSift-Verification' `
-            -SourceCheckpointName 'Clean-Evaluation-Base' `
+            -RecoveryCheckpointName 'Clean-Evaluation-Base' `
+            -SourceCheckpointName 'Credential-Evaluation-Base' `
             -TargetCheckpointName 'Toolchain-Evaluation-Base' `
             -VM $vm `
-            -Checkpoints @($sourceCheckpoint, $targetCheckpoint) `
+            -Checkpoints @($recoveryCheckpoint, $sourceCheckpoint, $targetCheckpoint) `
             -NetworkAdapters @() `
             -Credential $credential `
             -IsElevated $true
     } 'an existing target checkpoint must be rejected before mutation'
+
+    Assert-Throws {
+        Assert-PhotoSiftGoldenVmProvisioningContract `
+            -ExpectedVMName 'PhotoSift-Verification' `
+            -RecoveryCheckpointName 'Clean-Evaluation-Base' `
+            -SourceCheckpointName 'Credential-Evaluation-Base' `
+            -TargetCheckpointName 'Toolchain-Evaluation-Base' `
+            -VM $vm `
+            -Checkpoints @($sourceCheckpoint) `
+            -NetworkAdapters @() `
+            -Credential $credential `
+            -IsElevated $true
+    } 'the immutable recovery checkpoint must be present before provisioning'
+
+    Assert-Throws {
+        Assert-PhotoSiftGoldenVmProvisioningContract `
+            -ExpectedVMName 'PhotoSift-Verification' `
+            -RecoveryCheckpointName 'Clean-Evaluation-Base' `
+            -SourceCheckpointName 'Credential-Evaluation-Base' `
+            -TargetCheckpointName 'Toolchain-Evaluation-Base' `
+            -VM $vm `
+            -Checkpoints @($recoveryCheckpoint, $recoveryCheckpoint, $sourceCheckpoint) `
+            -NetworkAdapters @() `
+            -Credential $credential `
+            -IsElevated $true
+    } 'the immutable recovery checkpoint must not be duplicated'
 
     $hostSdkInventory = [pscustomobject]@{ fileCount = 3; totalBytes = [long]30 }
     $hostPackagesInventory = [pscustomobject]@{ fileCount = 1; totalBytes = [long]12 }
@@ -141,9 +170,11 @@ try {
     }
     $successOperations = @{
         RestoreSourceCheckpoint = { param($VMName, $CheckpointName) $successState.Events.Add('restore-source'); $successState.VMState = 'Off' }.GetNewClosure()
+        RestoreTargetCheckpoint = { param($VMName, $CheckpointName) $successState.Events.Add('restore-target'); $successState.VMState = 'Off' }.GetNewClosure()
+        InspectVmContract = { param($VMName) [pscustomobject]@{ vmState = $successState.VMState; networkAdapterCount = 0 } }.GetNewClosure()
         StartVM = { param($VMName) $successState.Events.Add('start'); $successState.VMState = 'Running' }.GetNewClosure()
         WaitForVM = { param($VMName, $TimeoutSeconds) $successState.Events.Add('wait-ready') }.GetNewClosure()
-        OpenSession = { param($VMName, $Credential) $successState.Events.Add('open-session'); [pscustomobject]@{ Name = 'session' } }.GetNewClosure()
+        OpenSession = { param($VMName, $CheckpointContext, $Credential) $successState.Events.Add("open-session:$CheckpointContext"); [pscustomobject]@{ Name = 'session' } }.GetNewClosure()
         PrepareGuest = { param($Session, $GuestToolchainRoot) $successState.Events.Add('prepare-guest') }.GetNewClosure()
         CopySdk = { param($Session, $SdkPath, $GuestSdkPath) $successState.Events.Add('copy-sdk') }.GetNewClosure()
         CopyPackages = { param($Session, $PackagesPath, $GuestPackagesPath) $successState.Events.Add('copy-packages') }.GetNewClosure()
@@ -164,7 +195,10 @@ try {
         ReadCheckpoints = {
             param($VMName)
             $successState.Events.Add('read-checkpoints')
-            @($sourceCheckpoint, $targetCheckpoint)
+            if ($successState.TargetCreated) {
+                return @($recoveryCheckpoint, $sourceCheckpoint, $targetCheckpoint)
+            }
+            @($recoveryCheckpoint, $sourceCheckpoint)
         }.GetNewClosure()
         RemoveTargetCheckpoint = { param($VMName, $CheckpointName) $successState.Events.Add('remove-target'); $successState.TargetCreated = $false }.GetNewClosure()
         StopVM = { param($VMName) $successState.Events.Add('stop'); $successState.VMState = 'Off' }.GetNewClosure()
@@ -172,22 +206,97 @@ try {
 
     $result = Invoke-PhotoSiftGoldenVmProvisioning `
         -VMName 'PhotoSift-Verification' `
-        -SourceCheckpointName 'Clean-Evaluation-Base' `
+        -RecoveryCheckpointName 'Clean-Evaluation-Base' `
+        -SourceCheckpointName 'Credential-Evaluation-Base' `
         -TargetCheckpointName 'Toolchain-Evaluation-Base' `
         -Credential $credential `
         -SdkPath $sdkPath `
         -PackagesPath $packagesPath `
         -HostSdkInventory $hostSdkInventory `
         -HostPackagesInventory $hostPackagesInventory `
+        -Deadline ([System.DateTimeOffset]::Now.AddMinutes(1)) `
         -Operations $successOperations
     Assert-Equal 'Toolchain-Evaluation-Base' $result.targetCheckpointName 'success must report the additive checkpoint'
     Assert-Equal $true $successState.SessionClosed 'success must close the PowerShell Direct session'
     Assert-Equal 'Off' $successState.VMState 'checkpoint creation must occur with the VM Off'
     Assert-Equal $true $successState.TargetCreated 'success must preserve the new target checkpoint'
     Assert-Equal `
-        'restore-source,start,wait-ready,open-session,prepare-guest,copy-sdk,copy-packages,inspect-guest,shutdown-guest,close-session,wait-off,create-target,read-checkpoints' `
+        'restore-source,start,wait-ready,open-session:Credential-Evaluation-Base,prepare-guest,copy-sdk,copy-packages,inspect-guest,shutdown-guest,close-session,wait-off,read-checkpoints,create-target,read-checkpoints,restore-target,start,wait-ready,open-session:Toolchain-Evaluation-Base,inspect-guest,shutdown-guest,close-session,wait-off,restore-target,read-checkpoints' `
         ($successState.Events -join ',') `
-        'the target checkpoint must be created only after verification and clean shutdown'
+        'provisioning success must restore, authenticate, inspect, and reseal the target checkpoint'
+
+    $restoredNicState = [pscustomobject]@{
+        StartCalled = $false
+        RestoreCount = 0
+    }
+    $restoredNicOperations = @{
+        RestoreSourceCheckpoint = {
+            param($VMName, $CheckpointName)
+            $restoredNicState.RestoreCount++
+        }.GetNewClosure()
+        RestoreTargetCheckpoint = { param($VMName, $CheckpointName) }
+        InspectVmContract = {
+            param($VMName)
+            throw 'restored source checkpoint reintroduced a virtual NIC'
+        }
+        StartVM = {
+            param($VMName)
+            $restoredNicState.StartCalled = $true
+        }.GetNewClosure()
+        WaitForVM = { param($VMName, $TimeoutSeconds) }
+        OpenSession = { param($VMName, $CheckpointContext, $Credential) [pscustomobject]@{ Name = 'session' } }
+        PrepareGuest = { param($Session, $GuestToolchainRoot) }
+        CopySdk = { param($Session, $SdkPath, $GuestSdkPath) }
+        CopyPackages = { param($Session, $PackagesPath, $GuestPackagesPath) }
+        InspectGuestPayload = { param($Session, $GuestSdkPath, $GuestPackagesPath) }
+        ShutdownGuest = { param($Session) }
+        CloseSession = { param($Session) }
+        WaitForPowerOff = { param($VMName, $TimeoutSeconds) }
+        CreateTargetCheckpoint = { param($VMName, $CheckpointName) }
+        ReadCheckpoints = { param($VMName) @($recoveryCheckpoint, $sourceCheckpoint) }
+        RemoveTargetCheckpoint = { param($VMName, $CheckpointName) }
+        StopVM = { param($VMName) }
+    }
+    Assert-Throws {
+        Invoke-PhotoSiftGoldenVmProvisioning `
+            -VMName 'PhotoSift-Verification' `
+            -RecoveryCheckpointName 'Clean-Evaluation-Base' `
+            -SourceCheckpointName 'Credential-Evaluation-Base' `
+            -TargetCheckpointName 'Toolchain-Evaluation-Base' `
+            -Credential $credential `
+            -SdkPath $sdkPath `
+            -PackagesPath $packagesPath `
+            -HostSdkInventory $hostSdkInventory `
+            -HostPackagesInventory $hostPackagesInventory `
+            -Deadline ([System.DateTimeOffset]::Now.AddMinutes(1)) `
+            -Operations $restoredNicOperations
+    } 'a source checkpoint that restores a NIC must fail before provisioning startup'
+    Assert-Equal $false $restoredNicState.StartCalled 'provisioning post-restore NIC validation must precede StartVM'
+    Assert-Equal 2 $restoredNicState.RestoreCount 'provisioning post-restore validation failure must still restore during cleanup'
+
+    $restoredNicState.StartCalled = $false
+    $restoredNicState.RestoreCount = 0
+    $expiredProvisioningOperations = $restoredNicOperations.Clone()
+    $expiredProvisioningOperations.InspectVmContract = {
+        param($VMName)
+        [pscustomobject]@{ vmState = 'Off'; networkAdapterCount = 0 }
+    }
+    Assert-Throws {
+        Invoke-PhotoSiftGoldenVmProvisioning `
+            -VMName 'PhotoSift-Verification' `
+            -RecoveryCheckpointName 'Clean-Evaluation-Base' `
+            -SourceCheckpointName 'Credential-Evaluation-Base' `
+            -TargetCheckpointName 'Toolchain-Evaluation-Base' `
+            -Credential $credential `
+            -SdkPath $sdkPath `
+            -PackagesPath $packagesPath `
+            -HostSdkInventory $hostSdkInventory `
+            -HostPackagesInventory $hostPackagesInventory `
+            -Deadline ([System.DateTimeOffset]::Now.AddSeconds(-1)) `
+            -Operations $expiredProvisioningOperations
+    } 'an expired provisioning deadline must fail before VM startup and still clean up'
+    Assert-Equal $false $restoredNicState.StartCalled 'expired provisioning must not start the VM'
+    Assert-Equal 1 $restoredNicState.RestoreCount 'expired provisioning must restore the source checkpoint during cleanup'
 
     $failureState = [pscustomobject]@{
         RestoreCount = 0
@@ -197,9 +306,11 @@ try {
     }
     $failureOperations = @{
         RestoreSourceCheckpoint = { param($VMName, $CheckpointName) $failureState.RestoreCount++; $failureState.VMState = 'Off' }.GetNewClosure()
+        RestoreTargetCheckpoint = { param($VMName, $CheckpointName) $failureState.VMState = 'Off' }.GetNewClosure()
+        InspectVmContract = { param($VMName) [pscustomobject]@{ vmState = $failureState.VMState; networkAdapterCount = 0 } }.GetNewClosure()
         StartVM = { param($VMName) $failureState.VMState = 'Running' }.GetNewClosure()
         WaitForVM = { param($VMName, $TimeoutSeconds) }.GetNewClosure()
-        OpenSession = { param($VMName, $Credential) [pscustomobject]@{ Name = 'session' } }.GetNewClosure()
+        OpenSession = { param($VMName, $CheckpointContext, $Credential) [pscustomobject]@{ Name = 'session' } }.GetNewClosure()
         PrepareGuest = { param($Session, $GuestToolchainRoot) }.GetNewClosure()
         CopySdk = { param($Session, $SdkPath, $GuestSdkPath) throw 'synthetic transfer failure' }.GetNewClosure()
         CopyPackages = { param($Session, $PackagesPath, $GuestPackagesPath) }.GetNewClosure()
@@ -208,26 +319,113 @@ try {
         CloseSession = { param($Session) $failureState.SessionClosed = $true }.GetNewClosure()
         WaitForPowerOff = { param($VMName, $TimeoutSeconds) }.GetNewClosure()
         CreateTargetCheckpoint = { param($VMName, $CheckpointName) $failureState.TargetCreated = $true }.GetNewClosure()
-        ReadCheckpoints = { param($VMName) @($sourceCheckpoint) }.GetNewClosure()
+        ReadCheckpoints = { param($VMName) @($recoveryCheckpoint, $sourceCheckpoint) }.GetNewClosure()
         RemoveTargetCheckpoint = { param($VMName, $CheckpointName) $failureState.TargetCreated = $false }.GetNewClosure()
         StopVM = { param($VMName) $failureState.VMState = 'Off' }.GetNewClosure()
     }
     Assert-Throws {
         Invoke-PhotoSiftGoldenVmProvisioning `
             -VMName 'PhotoSift-Verification' `
-            -SourceCheckpointName 'Clean-Evaluation-Base' `
+            -RecoveryCheckpointName 'Clean-Evaluation-Base' `
+            -SourceCheckpointName 'Credential-Evaluation-Base' `
             -TargetCheckpointName 'Toolchain-Evaluation-Base' `
             -Credential $credential `
             -SdkPath $sdkPath `
             -PackagesPath $packagesPath `
             -HostSdkInventory $hostSdkInventory `
             -HostPackagesInventory $hostPackagesInventory `
+            -Deadline ([System.DateTimeOffset]::Now.AddMinutes(1)) `
             -Operations $failureOperations
     } 'a transfer failure must abort provisioning'
     Assert-Equal 2 $failureState.RestoreCount 'failure must restore the source checkpoint before and after mutation'
     Assert-Equal $true $failureState.SessionClosed 'failure must close the PowerShell Direct session'
     Assert-Equal 'Off' $failureState.VMState 'failure must leave the VM Off'
     Assert-Equal $false $failureState.TargetCreated 'failure must not leave a target checkpoint'
+
+    $foreignTargetRemovalCalls = 0
+    $preCreateFailureOperations = $failureOperations.Clone()
+    $preCreateFailureOperations.ReadCheckpoints = {
+        param($VMName)
+        @($recoveryCheckpoint, $sourceCheckpoint, $targetCheckpoint)
+    }.GetNewClosure()
+    $preCreateFailureOperations.RemoveTargetCheckpoint = {
+        param($VMName, $CheckpointName)
+        $script:foreignTargetRemovalCalls++
+    }
+    Assert-Throws {
+        Invoke-PhotoSiftGoldenVmProvisioning `
+            -VMName 'PhotoSift-Verification' `
+            -RecoveryCheckpointName 'Clean-Evaluation-Base' `
+            -SourceCheckpointName 'Credential-Evaluation-Base' `
+            -TargetCheckpointName 'Toolchain-Evaluation-Base' `
+            -Credential $credential `
+            -SdkPath $sdkPath `
+            -PackagesPath $packagesPath `
+            -HostSdkInventory $hostSdkInventory `
+            -HostPackagesInventory $hostPackagesInventory `
+            -Deadline ([System.DateTimeOffset]::Now.AddMinutes(1)) `
+            -Operations $preCreateFailureOperations
+    } 'a pre-create failure must not remove a same-named target owned by another invocation'
+    Assert-Equal 0 $foreignTargetRemovalCalls 'cleanup must not remove a target before this invocation attempts checkpoint creation'
+
+    $createThenThrowState = [pscustomobject]@{
+        RestoreCount = 0
+        VMState = 'Off'
+        TargetCreated = $false
+    }
+    $createThenThrowOperations = @{
+        RestoreSourceCheckpoint = { param($VMName, $CheckpointName) $createThenThrowState.RestoreCount++; $createThenThrowState.VMState = 'Off' }.GetNewClosure()
+        RestoreTargetCheckpoint = { param($VMName, $CheckpointName) $createThenThrowState.VMState = 'Off' }.GetNewClosure()
+        InspectVmContract = { param($VMName) [pscustomobject]@{ vmState = $createThenThrowState.VMState; networkAdapterCount = 0 } }.GetNewClosure()
+        StartVM = { param($VMName) $createThenThrowState.VMState = 'Running' }.GetNewClosure()
+        WaitForVM = { param($VMName, $TimeoutSeconds) }.GetNewClosure()
+        OpenSession = { param($VMName, $CheckpointContext, $Credential) [pscustomobject]@{ Name = 'session' } }.GetNewClosure()
+        PrepareGuest = { param($Session, $GuestToolchainRoot) }.GetNewClosure()
+        CopySdk = { param($Session, $SdkPath, $GuestSdkPath) }.GetNewClosure()
+        CopyPackages = { param($Session, $PackagesPath, $GuestPackagesPath) }.GetNewClosure()
+        InspectGuestPayload = {
+            param($Session, $GuestSdkPath, $GuestPackagesPath)
+            [pscustomobject]@{
+                sdkVersion = '10.0.400'
+                desktopRuntimeVersion = '10.0.11'
+                sdkInventory = [pscustomobject]@{ fileCount = 3; totalBytes = [long]30 }
+                packagesInventory = [pscustomobject]@{ fileCount = 1; totalBytes = [long]12 }
+            }
+        }.GetNewClosure()
+        ShutdownGuest = { param($Session) }.GetNewClosure()
+        CloseSession = { param($Session) }.GetNewClosure()
+        WaitForPowerOff = { param($VMName, $TimeoutSeconds) $createThenThrowState.VMState = 'Off' }.GetNewClosure()
+        CreateTargetCheckpoint = {
+            param($VMName, $CheckpointName)
+            $createThenThrowState.TargetCreated = $true
+            throw 'synthetic post-create failure'
+        }.GetNewClosure()
+        ReadCheckpoints = {
+            param($VMName)
+            if ($createThenThrowState.TargetCreated) {
+                return @($recoveryCheckpoint, $sourceCheckpoint, $targetCheckpoint)
+            }
+            return @($recoveryCheckpoint, $sourceCheckpoint)
+        }.GetNewClosure()
+        RemoveTargetCheckpoint = { param($VMName, $CheckpointName) $createThenThrowState.TargetCreated = $false }.GetNewClosure()
+        StopVM = { param($VMName) $createThenThrowState.VMState = 'Off' }.GetNewClosure()
+    }
+    Assert-Throws {
+        Invoke-PhotoSiftGoldenVmProvisioning `
+            -VMName 'PhotoSift-Verification' `
+            -RecoveryCheckpointName 'Clean-Evaluation-Base' `
+            -SourceCheckpointName 'Credential-Evaluation-Base' `
+            -TargetCheckpointName 'Toolchain-Evaluation-Base' `
+            -Credential $credential `
+            -SdkPath $sdkPath `
+            -PackagesPath $packagesPath `
+            -HostSdkInventory $hostSdkInventory `
+            -HostPackagesInventory $hostPackagesInventory `
+            -Deadline ([System.DateTimeOffset]::Now.AddMinutes(1)) `
+            -Operations $createThenThrowOperations
+    } 'a checkpoint cmdlet that creates then throws must still remove the target'
+    Assert-Equal $false $createThenThrowState.TargetCreated 'failure cleanup must discover and remove a side-effected target checkpoint'
+    Assert-Equal 2 $createThenThrowState.RestoreCount 'create-then-throw cleanup must restore the source checkpoint'
 }
 finally {
     if ([System.IO.Directory]::Exists($testRoot)) {

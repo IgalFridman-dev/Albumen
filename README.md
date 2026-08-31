@@ -59,7 +59,13 @@ Local `.uv-cache-bmad-*` directories are disposable workflow caches and are not 
 
 The repository pins .NET SDK `10.0.400` and requires the .NET/Desktop `10.0.11` runtime family. The complete executable gate is:
 
-Provision the toolchain checkpoint once from an elevated PowerShell 7 window. This preserves `Clean-Evaluation-Base` and creates `Toolchain-Evaluation-Base`:
+Capture and validate the clean credential baseline once from an elevated PowerShell window. This authenticates the current VM state before any restore, preserves `Clean-Evaluation-Base`, and creates `Credential-Evaluation-Base` without saving or changing the password:
+
+```powershell
+pwsh -NoProfile -File eng/verification/Repair-PhotoSiftGoldenVmCredential.ps1
+```
+
+Then provision the toolchain checkpoint once. This restores `Credential-Evaluation-Base` and creates a re-authenticated `Toolchain-Evaluation-Base`:
 
 ```powershell
 pwsh -NoProfile -File eng/verification/Initialize-PhotoSiftGoldenVm.ps1
@@ -77,4 +83,4 @@ From an elevated PowerShell window, run all three local gates with one guest cre
 pwsh -NoProfile -File eng/verification/Invoke-PhotoSiftHyperVStages.ps1
 ```
 
-The Golden Hyper-V VM is used because this development host's Application Control policy blocks unsigned locally built executables and Windows Sandbox also blocks the xUnit adapter. The VM has zero virtual NICs. `Clean-Evaluation-Base` remains the immutable recovery checkpoint; normal runs restore the additive toolchain checkpoint and do not weaken host or guest policy.
+The Golden Hyper-V VM is used because this development host's Application Control policy blocks unsigned locally built executables and Windows Sandbox also blocks the xUnit adapter. The VM has zero virtual NICs. `Clean-Evaluation-Base` remains the immutable emergency checkpoint; `Credential-Evaluation-Base` seals the verified local account; normal runs restore the additive toolchain checkpoint and do not weaken host or guest policy.

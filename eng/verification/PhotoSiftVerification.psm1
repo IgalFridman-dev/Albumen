@@ -1,5 +1,100 @@
 Set-StrictMode -Version Latest
 
+if (-not [string]::IsNullOrWhiteSpace($env:SystemRoot) -and
+    $null -eq ('PhotoSift.Verification.NativeProcessTree' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+namespace PhotoSift.Verification
+{
+    public static class NativeProcessTree
+    {
+        private const uint SnapshotProcesses = 0x00000002;
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        private struct ProcessEntry
+        {
+            public uint Size;
+            public uint Usage;
+            public uint ProcessId;
+            public IntPtr DefaultHeapId;
+            public uint ModuleId;
+            public uint ThreadCount;
+            public uint ParentProcessId;
+            public int BasePriority;
+            public uint Flags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string ExecutableFile;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern bool Process32First(IntPtr snapshot, ref ProcessEntry entry);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry entry);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        public static int[] GetDescendants(int rootProcessId)
+        {
+            var parentByProcess = new Dictionary<uint, uint>();
+            IntPtr snapshot = CreateToolhelp32Snapshot(SnapshotProcesses, 0);
+            if (snapshot == new IntPtr(-1))
+            {
+                return new int[0];
+            }
+
+            try
+            {
+                var entry = new ProcessEntry();
+                entry.Size = (uint)Marshal.SizeOf(typeof(ProcessEntry));
+                if (Process32First(snapshot, ref entry))
+                {
+                    do
+                    {
+                        parentByProcess[entry.ProcessId] = entry.ParentProcessId;
+                        entry.Size = (uint)Marshal.SizeOf(typeof(ProcessEntry));
+                    }
+                    while (Process32Next(snapshot, ref entry));
+                }
+            }
+            finally
+            {
+                CloseHandle(snapshot);
+            }
+
+            var descendants = new List<int>();
+            var parents = new HashSet<uint>();
+            parents.Add((uint)rootProcessId);
+            bool added;
+            do
+            {
+                added = false;
+                foreach (var pair in parentByProcess)
+                {
+                    if (parents.Contains(pair.Value) && !parents.Contains(pair.Key))
+                    {
+                        parents.Add(pair.Key);
+                        descendants.Add((int)pair.Key);
+                        added = true;
+                    }
+                }
+            }
+            while (added);
+
+            return descendants.ToArray();
+        }
+    }
+}
+'@
+}
+
 function ConvertTo-PhotoSiftProcessArgument {
     param(
         [Parameter(Mandatory)]
@@ -36,6 +131,94 @@ function ConvertTo-PhotoSiftProcessArgument {
     return $quoted.ToString()
 }
 
+function Stop-PhotoSiftProcessTree {
+    param(
+        [Parameter(Mandatory)]
+        [System.Diagnostics.Process]$Process
+    )
+
+    if ($Process.HasExited) {
+        return
+    }
+
+    $descendantProcessIds = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+        try {
+            $descendantProcessIds = @(
+                [PhotoSift.Verification.NativeProcessTree]::GetDescendants($Process.Id))
+        }
+        catch {
+            # taskkill still provides the normal Windows process-tree path.
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+        try {
+        $taskKillPath = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+        $taskKillStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $taskKillStartInfo.FileName = $taskKillPath
+        $taskKillStartInfo.Arguments = "/PID $($Process.Id) /T /F"
+        $taskKillStartInfo.UseShellExecute = $false
+        $taskKillStartInfo.CreateNoWindow = $true
+        $taskKillStartInfo.RedirectStandardOutput = $true
+        $taskKillStartInfo.RedirectStandardError = $true
+        $taskKillProcess = New-Object System.Diagnostics.Process
+        $taskKillProcess.StartInfo = $taskKillStartInfo
+        try {
+            if ($taskKillProcess.Start()) {
+                [void]$taskKillProcess.StandardOutput.ReadToEndAsync()
+                [void]$taskKillProcess.StandardError.ReadToEndAsync()
+                if (-not $taskKillProcess.WaitForExit(5000)) {
+                    $taskKillProcess.Kill()
+                    $taskKillProcess.WaitForExit()
+                }
+            }
+        }
+        finally {
+            $taskKillProcess.Dispose()
+        }
+        }
+        catch {
+            # Runtime process-tree termination below is the cross-platform fallback.
+        }
+    }
+
+    if (-not $Process.HasExited) {
+        try {
+            $Process.Kill($true)
+        }
+        catch [System.Management.Automation.MethodException] {
+            # Windows PowerShell's .NET Framework Process type has no Kill(Boolean) overload.
+        }
+        catch [System.Management.Automation.RuntimeException] {
+            # The root-process fallback below still prevents an indefinite wait.
+        }
+    }
+
+    if (-not $Process.HasExited) {
+        $Process.Kill()
+    }
+
+    for ($index = $descendantProcessIds.Count - 1; $index -ge 0; $index--) {
+        try {
+            $descendant = [System.Diagnostics.Process]::GetProcessById(
+                $descendantProcessIds[$index])
+            try {
+                if (-not $descendant.HasExited) {
+                    $descendant.Kill()
+                    $descendant.WaitForExit()
+                }
+            }
+            finally {
+                $descendant.Dispose()
+            }
+        }
+        catch {
+            # The descendant was already terminated by taskkill or exited naturally.
+        }
+    }
+}
+
 function Invoke-PhotoSiftProcess {
     [CmdletBinding()]
     param(
@@ -49,7 +232,7 @@ function Invoke-PhotoSiftProcess {
         [string]$WorkingDirectory = [System.Environment]::CurrentDirectory,
 
         [Parameter()]
-        [ValidateRange(0, 3600)]
+        [ValidateRange(0, 7200)]
         [int]$TimeoutSeconds = 0
     )
 
@@ -77,7 +260,7 @@ function Invoke-PhotoSiftProcess {
         if ($TimeoutSeconds -gt 0) {
             $timedOut = -not $process.WaitForExit($TimeoutSeconds * 1000)
             if ($timedOut) {
-                $process.Kill()
+                Stop-PhotoSiftProcessTree -Process $process
                 $process.WaitForExit()
             }
         }
@@ -95,6 +278,249 @@ function Invoke-PhotoSiftProcess {
     finally {
         $process.Dispose()
     }
+}
+
+function Get-PhotoSiftRemainingSeconds {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [System.DateTimeOffset]$Deadline,
+
+        [Parameter(Mandatory)]
+        [string]$OperationName
+    )
+
+    $remaining = [int][System.Math]::Ceiling(
+        ($Deadline - [System.DateTimeOffset]::Now).TotalSeconds)
+    if ($remaining -le 0) {
+        throw "Golden VM verification timed out before '$OperationName'."
+    }
+
+    return $remaining
+}
+
+function Invoke-PhotoSiftPowerShellWithDeadline {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [scriptblock]$ScriptBlock,
+
+        [Parameter()]
+        [object[]]$ArgumentList = @(),
+
+        [Parameter(Mandatory)]
+        [System.DateTimeOffset]$Deadline,
+
+        [Parameter(Mandatory)]
+        [string]$OperationName,
+
+        [Parameter()]
+        [switch]$AllowErrorStream
+    )
+
+    $remainingSeconds = Get-PhotoSiftRemainingSeconds `
+        -Deadline $Deadline `
+        -OperationName $OperationName
+    $powerShell = [System.Management.Automation.PowerShell]::Create()
+    try {
+        [void]$powerShell.AddScript($ScriptBlock.ToString())
+        foreach ($argument in $ArgumentList) {
+            [void]$powerShell.AddArgument($argument)
+        }
+
+        $asyncResult = $powerShell.BeginInvoke()
+        if (-not $asyncResult.AsyncWaitHandle.WaitOne($remainingSeconds * 1000)) {
+            $powerShell.Stop()
+            throw "Golden VM verification timed out during '$OperationName'."
+        }
+
+        try {
+            $output = $powerShell.EndInvoke($asyncResult)
+        }
+        catch {
+            if ($powerShell.Streams.Error.Count -gt 0) {
+                $PSCmdlet.ThrowTerminatingError($powerShell.Streams.Error[0])
+            }
+            throw
+        }
+        if ($powerShell.HadErrors -and -not $AllowErrorStream) {
+            if ($powerShell.Streams.Error.Count -eq 1) {
+                $PSCmdlet.ThrowTerminatingError($powerShell.Streams.Error[0])
+            }
+            $messages = @($powerShell.Streams.Error | ForEach-Object { $_.ToString() })
+            throw "Golden VM operation '$OperationName' failed: $($messages -join [System.Environment]::NewLine)"
+        }
+        return $output
+    }
+    finally {
+        $powerShell.Dispose()
+    }
+}
+
+function Assert-PhotoSiftSnapshotHasNoReparsePoints {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$SnapshotRoot
+    )
+
+    $resolvedSnapshotRoot = [System.IO.Path]::GetFullPath($SnapshotRoot)
+    $reparsePoints = @(Get-ChildItem -LiteralPath $resolvedSnapshotRoot -Force -Recurse |
+        Where-Object {
+            ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+        })
+    if ($reparsePoints.Count -gt 0) {
+        throw "Golden VM source snapshot contained a reparse point: $($reparsePoints[0].FullName)"
+    }
+
+    return $resolvedSnapshotRoot
+}
+
+function New-PhotoSiftSourceSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepositoryRoot,
+
+        [Parameter(Mandatory)]
+        [string]$HostInputPath,
+
+        [Parameter(Mandatory)]
+        [System.DateTimeOffset]$Deadline
+    )
+
+    $resolvedRepositoryRoot = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $resolvedHostInputPath = [System.IO.Path]::GetFullPath($HostInputPath)
+    [System.IO.Directory]::CreateDirectory($resolvedHostInputPath) | Out-Null
+    $remainingSeconds = Get-PhotoSiftRemainingSeconds `
+        -Deadline $Deadline `
+        -OperationName 'source snapshot copy'
+    $copyResult = Invoke-PhotoSiftProcess `
+        -FilePath (Join-Path $env:SystemRoot 'System32\robocopy.exe') `
+        -Arguments @(
+            $resolvedRepositoryRoot,
+            $resolvedHostInputPath,
+            '/E',
+            '/XJ',
+            '/SL',
+            '/XD', '.git', 'bin', 'obj',
+            '/XF', '.git',
+            '/R:1',
+            '/W:1',
+            '/NFL',
+            '/NDL',
+            '/NJH',
+            '/NJS') `
+        -WorkingDirectory $resolvedRepositoryRoot `
+        -TimeoutSeconds $remainingSeconds
+    if ($copyResult.TimedOut) {
+        throw 'Golden VM source snapshot copy timed out.'
+    }
+    if ($copyResult.ExitCode -notin 0..7) {
+        throw "Could not prepare the Golden VM source snapshot; robocopy exited $($copyResult.ExitCode)."
+    }
+
+    Assert-PhotoSiftSnapshotHasNoReparsePoints `
+        -SnapshotRoot $resolvedHostInputPath | Out-Null
+    return $resolvedHostInputPath
+}
+
+function Remove-PhotoSiftHostInputSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$HostInputPath,
+
+        [Parameter(Mandatory)]
+        [string]$RunsRoot
+    )
+
+    $resolvedHostInputPath = [System.IO.Path]::GetFullPath($HostInputPath).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar)
+    $resolvedRunsRoot = [System.IO.Path]::GetFullPath($RunsRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar)
+    $runPath = [System.IO.Path]::GetDirectoryName($resolvedHostInputPath)
+    $parentOfRun = [System.IO.Path]::GetDirectoryName($runPath)
+    if ([System.IO.Path]::GetFileName($resolvedHostInputPath) -cne 'input' -or
+        -not $parentOfRun.Equals(
+            $resolvedRunsRoot,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove a source snapshot outside the expected runs layout: $resolvedHostInputPath"
+    }
+
+    if ([System.IO.Directory]::Exists($resolvedHostInputPath)) {
+        Remove-Item -LiteralPath $resolvedHostInputPath -Recurse -Force
+    }
+}
+
+function Resolve-PhotoSiftGoldenVmCredential {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.PSCredential]$Credential,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedComputerName,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedUserName
+    )
+
+    $acceptedUserNames = @(
+        $ExpectedUserName,
+        ".\$ExpectedUserName",
+        "$ExpectedComputerName\$ExpectedUserName")
+    $matchesExpectedUser = @($acceptedUserNames | Where-Object {
+        $_.Equals(
+            $Credential.UserName,
+            [System.StringComparison]::OrdinalIgnoreCase)
+    }).Count -gt 0
+    if (-not $matchesExpectedUser) {
+        throw "Golden VM credentials must identify the local account '$ExpectedComputerName\$ExpectedUserName'; got '$($Credential.UserName)'."
+    }
+
+    return New-Object System.Management.Automation.PSCredential(
+        "$ExpectedComputerName\$ExpectedUserName",
+        $Credential.Password)
+}
+
+function Get-PhotoSiftGoldenVmCredential {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [System.Management.Automation.PSCredential]$Credential,
+
+        [Parameter()]
+        [string]$ExpectedComputerName = 'PHOTOSIFTVM',
+
+        [Parameter()]
+        [string]$ExpectedUserName = 'PhotoSiftRunner',
+
+        [Parameter()]
+        [scriptblock]$PromptCredential = {
+            param($UserName, $Message)
+            Get-Credential -UserName $UserName -Message $Message
+        }
+    )
+
+    $resolvedCredential = $Credential
+    if ($null -eq $resolvedCredential) {
+        $canonicalUserName = "$ExpectedComputerName\$ExpectedUserName"
+        $resolvedCredential = & $PromptCredential `
+            $canonicalUserName `
+            "Enter the password for the Golden VM account $canonicalUserName. Capturing this credential does not authenticate it."
+        if ($null -eq $resolvedCredential) {
+            throw 'Golden VM credential prompt was cancelled.'
+        }
+    }
+
+    return Resolve-PhotoSiftGoldenVmCredential `
+        -Credential $resolvedCredential `
+        -ExpectedComputerName $ExpectedComputerName `
+        -ExpectedUserName $ExpectedUserName
 }
 
 function Assert-PhotoSiftGoldenVmContract {
@@ -178,6 +604,20 @@ function Assert-PhotoSiftGoldenVmVerificationCheckpoint {
     return $CheckpointName
 }
 
+function Test-PhotoSiftPowerShellDirectTransientFailure {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    return (
+        $ErrorRecord.CategoryInfo.Category -ceq
+            [System.Management.Automation.ErrorCategory]::ResourceUnavailable -and
+        $ErrorRecord.FullyQualifiedErrorId -match
+            '^(PhotoSift\.PowerShellDirectNotReady|PhotoSift\.HyperVSocketNotReady)(,|$)')
+}
+
 function Connect-PhotoSiftPowerShellDirect {
     [CmdletBinding()]
     param(
@@ -185,38 +625,188 @@ function Connect-PhotoSiftPowerShellDirect {
         [string]$VMName,
 
         [Parameter(Mandatory)]
+        [string]$CheckpointName,
+
+        [Parameter(Mandatory)]
         [System.Management.Automation.PSCredential]$Credential,
+
+        [Parameter()]
+        [string]$ExpectedComputerName = 'PHOTOSIFTVM',
+
+        [Parameter()]
+        [string]$ExpectedUserName = 'PhotoSiftRunner',
 
         [Parameter(Mandatory)]
         [System.DateTimeOffset]$Deadline,
 
         [Parameter()]
         [scriptblock]$OpenSession = {
-            param($RequestedVMName, $RequestedCredential)
-            New-PSSession `
-                -VMName $RequestedVMName `
-                -Credential $RequestedCredential `
-                -ErrorAction Stop
+            param($RequestedVMName, $RequestedCredential, $OpenTimeoutMilliseconds)
+            $hadSessionOption = Test-Path -LiteralPath 'variable:PSSessionOption'
+            $previousSessionOption = $null
+            if ($hadSessionOption) {
+                $previousSessionOption = $PSSessionOption
+            }
+            try {
+                $PSSessionOption = New-PSSessionOption `
+                    -OpenTimeout $OpenTimeoutMilliseconds `
+                    -OperationTimeout $OpenTimeoutMilliseconds
+                New-PSSession `
+                    -VMName $RequestedVMName `
+                    -Credential $RequestedCredential `
+                    -ErrorAction Stop
+            }
+            finally {
+                if ($hadSessionOption) {
+                    $PSSessionOption = $previousSessionOption
+                }
+                else {
+                    Remove-Variable -Name PSSessionOption -ErrorAction SilentlyContinue
+                }
+            }
         },
 
         [Parameter()]
-        [scriptblock]$WaitBeforeRetry = { Start-Sleep -Seconds 2 }
+        [scriptblock]$InspectIdentity = {
+            param($Session)
+            Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {
+                [pscustomobject][ordered]@{
+                    identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+                    computerName = $env:COMPUTERNAME
+                    userProfile = $env:USERPROFILE
+                }
+            }
+        },
+
+        [Parameter()]
+        [scriptblock]$CloseSession = {
+            param($Session)
+            Remove-PSSession -Session $Session -ErrorAction Stop
+        },
+
+        [Parameter()]
+        [scriptblock]$InvokeWithDeadline = {
+            param($Operation, $Arguments, $RequestedDeadline, $OperationName)
+            $wrapperArguments = New-Object 'object[]' 2
+            $wrapperArguments[0] = $Operation
+            $wrapperArguments[1] = [object[]]$Arguments
+            $envelopes = @(Invoke-PhotoSiftPowerShellWithDeadline `
+                -ScriptBlock {
+                    param($RequestedOperation, $RequestedArguments)
+                    try {
+                        [pscustomobject]@{
+                            succeeded = $true
+                            output = @(& $RequestedOperation @RequestedArguments)
+                            errorRecord = $null
+                        }
+                    }
+                    catch {
+                        [pscustomobject]@{
+                            succeeded = $false
+                            output = @()
+                            errorRecord = $_
+                        }
+                    }
+                } `
+                -ArgumentList $wrapperArguments `
+                -Deadline $RequestedDeadline `
+                -OperationName $OperationName `
+                -AllowErrorStream)
+            if ($envelopes.Count -ne 1) {
+                throw "Bounded Golden VM operation '$OperationName' returned $($envelopes.Count) envelopes."
+            }
+            $envelope = $envelopes[0]
+            if (-not [bool]$envelope.succeeded) {
+                throw ([System.Management.Automation.ErrorRecord]$envelope.errorRecord)
+            }
+            return @($envelope.output)
+        },
+
+        [Parameter()]
+        [scriptblock]$WaitBeforeRetry = {
+            param($Seconds)
+            Start-Sleep -Seconds $Seconds
+        }
     )
 
+    $session = $null
     do {
+        $remainingOpenSeconds = Get-PhotoSiftRemainingSeconds `
+            -Deadline $Deadline `
+            -OperationName 'PowerShell Direct session creation'
+        $openTimeoutMilliseconds = [int][System.Math]::Max(
+            1,
+            [System.Math]::Min(
+                [int]::MaxValue,
+                [long]$remainingOpenSeconds * 1000L))
         try {
-            return & $OpenSession $VMName $Credential
+            $sessionResults = @(& $OpenSession `
+                    $VMName `
+                    $Credential `
+                    $openTimeoutMilliseconds)
+            if ($sessionResults.Count -ne 1) {
+                throw "PowerShell Direct returned $($sessionResults.Count) sessions."
+            }
+            $session = $sessionResults[0]
+            break
         }
         catch {
-            if ($_.Exception.Message -match '(?i)credential is invalid') {
-                throw
+            if (-not (Test-PhotoSiftPowerShellDirectTransientFailure -ErrorRecord $_)) {
+                throw "PowerShell Direct session authentication/connection failed for VM '$VMName' after restoring checkpoint '$CheckpointName' with account '$($Credential.UserName)'. The secure credential was captured but not authenticated. The session was attempted once to protect the account from lockout. No PhotoSift script saved or changed the guest password. $($_.Exception.Message)"
             }
-            if ([System.DateTimeOffset]::Now -ge $Deadline) {
-                throw
-            }
-            & $WaitBeforeRetry
+            $remainingSeconds = Get-PhotoSiftRemainingSeconds `
+                -Deadline $Deadline `
+                -OperationName 'PowerShell Direct readiness retry'
+            $retryDelaySeconds = [System.Math]::Min(2, $remainingSeconds)
+            & $WaitBeforeRetry $retryDelaySeconds
         }
     } while ($true)
+
+    if ($null -eq $session) {
+        throw "PowerShell Direct returned no session for VM '$VMName' after restoring checkpoint '$CheckpointName'."
+    }
+
+    try {
+        [void](Get-PhotoSiftRemainingSeconds `
+                -Deadline $Deadline `
+                -OperationName 'PowerShell Direct identity attestation')
+        $identityArguments = [object[]]@($session)
+        $identityResults = @(& $InvokeWithDeadline `
+                $InspectIdentity `
+                $identityArguments `
+                $Deadline `
+                'PowerShell Direct identity attestation')
+        if ($identityResults.Count -ne 1) {
+            throw "identity probe returned $($identityResults.Count) results"
+        }
+        $identity = $identityResults[0]
+        $expectedIdentity = "$ExpectedComputerName\$ExpectedUserName"
+        $expectedProfile = "C:\Users\$ExpectedUserName"
+        if (-not [string]::Equals(
+                [string]$identity.identity,
+                $expectedIdentity,
+                [System.StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals(
+                [string]$identity.computerName,
+                $ExpectedComputerName,
+                [System.StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals(
+                [string]$identity.userProfile,
+                $expectedProfile,
+                [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "expected identity '$expectedIdentity' and profile '$expectedProfile', got '$($identity.identity)' and '$($identity.userProfile)'"
+        }
+    }
+    catch {
+        try {
+            & $CloseSession $session
+        }
+        catch {
+        }
+        throw "PowerShell Direct identity attestation failed for VM '$VMName' checkpoint '$CheckpointName'. $($_.Exception.Message)"
+    }
+
+    return $session
 }
 
 function Get-PhotoSiftGuestRunnerInvocation {
@@ -236,7 +826,11 @@ function Get-PhotoSiftGuestRunnerInvocation {
         [string]$SdkRoot,
 
         [Parameter(Mandatory)]
-        [string]$PackagesRoot
+        [string]$PackagesRoot,
+
+        [Parameter(Mandatory)]
+        [ValidateRange(1, 7200)]
+        [int]$TimeoutSeconds
     )
 
     return [pscustomobject][ordered]@{
@@ -245,6 +839,7 @@ function Get-PhotoSiftGuestRunnerInvocation {
         runRoot = $RunRoot
         sdkRoot = $SdkRoot
         packagesRoot = $PackagesRoot
+        timeoutSeconds = $TimeoutSeconds
         arguments = @(
             '-NoProfile',
             '-NonInteractive',
@@ -253,7 +848,9 @@ function Get-PhotoSiftGuestRunnerInvocation {
             '-Stage', $Stage,
             '-RunRoot', $RunRoot,
             '-SdkRoot', $SdkRoot,
-            '-PackagesRoot', $PackagesRoot)
+            '-PackagesRoot', $PackagesRoot,
+            '-TimeoutSeconds', $TimeoutSeconds.ToString(
+                [System.Globalization.CultureInfo]::InvariantCulture))
     }
 }
 
@@ -310,11 +907,15 @@ function Invoke-PhotoSiftGoldenVmRun {
         [string]$PackagesRoot,
 
         [Parameter(Mandatory)]
+        [System.DateTimeOffset]$Deadline,
+
+        [Parameter(Mandatory)]
         [hashtable]$Operations
     )
 
     $requiredOperations = @(
         'RestoreCheckpoint',
+        'InspectVmContract',
         'StartVM',
         'WaitForVM',
         'OpenSession',
@@ -339,30 +940,45 @@ function Invoke-PhotoSiftGoldenVmRun {
     [System.IO.Directory]::CreateDirectory($resolvedHostOutput) | Out-Null
 
     $session = $null
+    $postRestoreContract = $null
+    $postCleanupContract = $null
     $failures = New-Object 'System.Collections.Generic.List[string]'
     try {
-        & $Operations.RestoreCheckpoint $VMName $CheckpointName
-        & $Operations.StartVM $VMName
-        & $Operations.WaitForVM $VMName 120
-        $session = & $Operations.OpenSession $VMName $Credential
+        [void](Get-PhotoSiftRemainingSeconds -Deadline $Deadline -OperationName 'checkpoint restore')
+        & $Operations.RestoreCheckpoint $VMName $CheckpointName $Deadline
+        [void](Get-PhotoSiftRemainingSeconds -Deadline $Deadline -OperationName 'post-restore VM contract inspection')
+        $postRestoreContract = & $Operations.InspectVmContract $VMName $Deadline
+        [void](Get-PhotoSiftRemainingSeconds -Deadline $Deadline -OperationName 'VM startup')
+        & $Operations.StartVM $VMName $Deadline
+        $waitSeconds = [System.Math]::Min(
+            120,
+            (Get-PhotoSiftRemainingSeconds -Deadline $Deadline -OperationName 'VM heartbeat'))
+        & $Operations.WaitForVM $VMName $waitSeconds $Deadline
+        [void](Get-PhotoSiftRemainingSeconds -Deadline $Deadline -OperationName 'PowerShell Direct connection')
+        $session = & $Operations.OpenSession $VMName $Credential $Deadline
         if ($null -eq $session) {
             throw "PowerShell Direct returned no session for '$VMName'."
         }
 
-        & $Operations.PrepareGuest $session $GuestRunRoot
-        & $Operations.CopySource $session $resolvedHostInput (Join-Path $GuestRunRoot 'input')
+        [void](Get-PhotoSiftRemainingSeconds -Deadline $Deadline -OperationName 'guest preparation')
+        & $Operations.PrepareGuest $session $GuestRunRoot $Deadline
+        [void](Get-PhotoSiftRemainingSeconds -Deadline $Deadline -OperationName 'guest source copy')
+        & $Operations.CopySource $session $resolvedHostInput (Join-Path $GuestRunRoot 'input') $Deadline
         try {
-            & $Operations.InvokeGuest $session $Stage $GuestRunRoot $SdkRoot $PackagesRoot
+            [void](Get-PhotoSiftRemainingSeconds -Deadline $Deadline -OperationName 'guest verification')
+            & $Operations.InvokeGuest $session $Stage $GuestRunRoot $SdkRoot $PackagesRoot $Deadline
         }
         catch {
             $failures.Add($_.Exception.ToString())
         }
 
         try {
+            [void](Get-PhotoSiftRemainingSeconds -Deadline $Deadline -OperationName 'guest evidence copy')
             & $Operations.CopyEvidence `
                 $session `
                 (Join-Path $GuestRunRoot 'output') `
-                $resolvedHostOutput
+                $resolvedHostOutput `
+                $Deadline
         }
         catch {
             $failures.Add("Could not retrieve Golden VM evidence: $($_.Exception)")
@@ -394,6 +1010,13 @@ function Invoke-PhotoSiftGoldenVmRun {
         catch {
             $failures.Add("Could not restore Golden checkpoint '$CheckpointName': $($_.Exception)")
         }
+
+        try {
+            $postCleanupContract = & $Operations.InspectVmContract $VMName
+        }
+        catch {
+            $failures.Add("Golden VM post-cleanup contract failed: $($_.Exception)")
+        }
     }
 
     if ($failures.Count -gt 0) {
@@ -406,6 +1029,10 @@ function Invoke-PhotoSiftGoldenVmRun {
         stage = $Stage
         runId = $RunId
         outputPath = $resolvedHostOutput
+        postRestoreVmState = [string]$postRestoreContract.vmState
+        postRestoreNetworkAdapterCount = [int]$postRestoreContract.networkAdapterCount
+        postCleanupVmState = [string]$postCleanupContract.vmState
+        postCleanupNetworkAdapterCount = [int]$postCleanupContract.networkAdapterCount
     }
 }
 
@@ -436,11 +1063,38 @@ function Get-PhotoSiftVerificationStage {
         }
     }
 
+    $restoreTarget = if ($Stage -ceq 'Architecture') {
+        'tests\PhotoSift.Infrastructure.Tests\PhotoSift.Infrastructure.Tests.csproj'
+    }
+    else {
+        'PhotoSift.slnx'
+    }
+    $restoreName = switch ($Stage) {
+        'Architecture' { 'restore-architecture' }
+        'Core' { 'restore-core' }
+        'Full' { 'restore-solution' }
+    }
+
     return [pscustomobject][ordered]@{
         stage = $Stage
         testProjects = @($testProjects)
+        restoreName = $restoreName
+        restoreArguments = @(
+            'restore',
+            $restoreTarget,
+            '-r', 'win-x64',
+            '--locked-mode',
+            '--configfile', 'NuGet.Config',
+            '-p:NuGetAudit=false')
         runRuntimeBoundary = $Stage -ceq 'Full'
         runWpfSmoke = $Stage -ceq 'Full'
+        runtimeBoundaryScript = if ($Stage -ceq 'Full') {
+            'eng\Verify-RuntimeBoundary.ps1'
+        } else { $null }
+        wpfSmokeScript = if ($Stage -ceq 'Full') {
+            'eng\Invoke-OfflineLaunchSmoke.ps1'
+        } else { $null }
+        signingEnabled = $false
     }
 }
 
@@ -458,6 +1112,16 @@ function Read-PhotoSiftTrxResult {
     )
 
     $resolvedTrxPath = [System.IO.Path]::GetFullPath($TrxPath)
+    $resolvedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+    $outputRootPrefix = $resolvedOutputRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) +
+        [System.IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedTrxPath.StartsWith(
+            $outputRootPrefix,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Test project '$ProjectName' TRX evidence was outside output: $resolvedTrxPath."
+    }
     if (-not [System.IO.File]::Exists($resolvedTrxPath)) {
         throw "Test project '$ProjectName' did not produce TRX evidence at $resolvedTrxPath."
     }
@@ -512,17 +1176,6 @@ function Read-PhotoSiftTrxResult {
         throw "Test project '$ProjectName' TRX evidence recorded failed or error results."
     }
 
-    $resolvedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
-    $outputRootPrefix = $resolvedOutputRoot.TrimEnd(
-        [System.IO.Path]::DirectorySeparatorChar,
-        [System.IO.Path]::AltDirectorySeparatorChar) +
-        [System.IO.Path]::DirectorySeparatorChar
-    if (-not $resolvedTrxPath.StartsWith(
-            $outputRootPrefix,
-            [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Test project '$ProjectName' TRX evidence was outside output: $resolvedTrxPath."
-    }
-
     return [pscustomobject]@{
         project = $ProjectName
         resultFile = $resolvedTrxPath.Substring($outputRootPrefix.Length)
@@ -534,6 +1187,73 @@ function Read-PhotoSiftTrxResult {
         timeout = $counts.timeout
         aborted = $counts.aborted
         notExecuted = $counts.notExecuted
+    }
+}
+
+function Test-PhotoSiftJsonInteger {
+    param(
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        [object]$Value
+    )
+
+    return $Value -is [sbyte] -or
+        $Value -is [byte] -or
+        $Value -is [int16] -or
+        $Value -is [uint16] -or
+        $Value -is [int32] -or
+        $Value -is [uint32] -or
+        $Value -is [int64] -or
+        $Value -is [uint64]
+}
+
+function Get-PhotoSiftExpectedCommandNames {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Architecture', 'Core', 'Full')]
+        [string]$Stage
+    )
+
+    switch ($Stage) {
+        'Architecture' {
+            return @(
+                'copy-source',
+                'dotnet-version',
+                'dotnet-runtimes',
+                'restore-architecture',
+                'build-architecture',
+                'test-architecture')
+        }
+        'Core' {
+            return @(
+                'copy-source',
+                'dotnet-version',
+                'dotnet-runtimes',
+                'restore-core',
+                'build-PhotoSift.Domain.Tests',
+                'test-PhotoSift.Domain.Tests',
+                'build-PhotoSift.Application.Tests',
+                'test-PhotoSift.Application.Tests',
+                'build-PhotoSift.Analysis.Tests',
+                'test-PhotoSift.Analysis.Tests',
+                'build-PhotoSift.Scenarios.Tests',
+                'test-PhotoSift.Scenarios.Tests')
+        }
+        'Full' {
+            return @(
+                'copy-source',
+                'dotnet-version',
+                'dotnet-runtimes',
+                'restore-solution',
+                'build-solution',
+                'test-PhotoSift.Domain.Tests',
+                'test-PhotoSift.Application.Tests',
+                'test-PhotoSift.Analysis.Tests',
+                'test-PhotoSift.Infrastructure.Tests',
+                'test-PhotoSift.Scenarios.Tests',
+                'runtime-boundary',
+                'wpf-smoke')
+        }
     }
 }
 
@@ -587,31 +1307,100 @@ function Assert-PhotoSiftVerificationResult {
         throw "Golden VM produced malformed summary evidence: $($_.Exception.Message)"
     }
 
-    if (-not [bool]$summary.success) {
+    $successProperty = $summary.PSObject.Properties['success']
+    if ($null -eq $successProperty -or
+        $successProperty.Value -isnot [bool] -or
+        -not $successProperty.Value) {
         throw 'Golden VM verification reported success=false.'
     }
-    if ([string]$summary.stage -cne $ExpectedStage) {
+    $stageProperty = $summary.PSObject.Properties['stage']
+    if ($null -eq $stageProperty -or
+        $stageProperty.Value -isnot [string] -or
+        $stageProperty.Value -cne $ExpectedStage) {
         throw "Golden VM stage '$($summary.stage)' did not match '$ExpectedStage'."
     }
-    if (-not [bool]$summary.networkingDisabled) {
+    $networkingProperty = $summary.PSObject.Properties['networkingDisabled']
+    if ($null -eq $networkingProperty -or
+        $networkingProperty.Value -isnot [bool] -or
+        -not $networkingProperty.Value) {
         throw 'Golden VM evidence did not record networking as disabled.'
     }
-    if ([string]$summary.sdkVersion -cne '10.0.400') {
+    $sdkVersionProperty = $summary.PSObject.Properties['sdkVersion']
+    if ($null -eq $sdkVersionProperty -or
+        $sdkVersionProperty.Value -isnot [string] -or
+        $sdkVersionProperty.Value -cne '10.0.400') {
         throw "Golden VM evidence reported unexpected SDK '$($summary.sdkVersion)'."
     }
-    if ([string]$summary.desktopRuntimeVersion -cne '10.0.11') {
+    $desktopRuntimeProperty = $summary.PSObject.Properties['desktopRuntimeVersion']
+    if ($null -eq $desktopRuntimeProperty -or
+        $desktopRuntimeProperty.Value -isnot [string] -or
+        $desktopRuntimeProperty.Value -cne '10.0.11') {
         throw "Golden VM evidence reported unexpected Desktop Runtime '$($summary.desktopRuntimeVersion)'."
     }
 
-    $failedCommands = @($summary.commands | Where-Object {
-        $succeededProperty = $_.PSObject.Properties['succeeded']
-        if ($null -ne $succeededProperty) {
-            return -not [bool]$succeededProperty.Value
+    $outputRoot = [System.IO.Path]::GetFullPath(
+        [System.IO.Path]::GetDirectoryName($resolvedSummaryPath))
+    $outputRootPrefix = $outputRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) +
+        [System.IO.Path]::DirectorySeparatorChar
+    $commandsProperty = $summary.PSObject.Properties['commands']
+    if ($null -eq $commandsProperty) {
+        throw 'Golden VM evidence did not contain command results.'
+    }
+    $commandResults = @($commandsProperty.Value)
+    $expectedCommandNames = @(Get-PhotoSiftExpectedCommandNames -Stage $ExpectedStage)
+    if ($commandResults.Count -ne $expectedCommandNames.Count) {
+        throw "Golden VM evidence contained an unexpected command count for '$ExpectedStage'."
+    }
+    foreach ($expectedCommandName in $expectedCommandNames) {
+        $matchingCommands = @($commandResults | Where-Object {
+            $nameProperty = $_.PSObject.Properties['name']
+            $null -ne $nameProperty -and
+                $nameProperty.Value -is [string] -and
+                $nameProperty.Value -ceq $expectedCommandName
+        })
+        if ($matchingCommands.Count -ne 1) {
+            throw "Golden VM evidence did not contain exactly one '$expectedCommandName' command."
         }
-        return [int]$_.exitCode -ne 0
-    })
-    if ($failedCommands.Count -gt 0) {
-        throw "Golden VM commands failed: $($failedCommands.name -join ', ')"
+
+        $command = $matchingCommands[0]
+        $succeededProperty = $command.PSObject.Properties['succeeded']
+        if ($null -eq $succeededProperty -or
+            $succeededProperty.Value -isnot [bool] -or
+            -not $succeededProperty.Value) {
+            throw "Golden VM command '$expectedCommandName' did not report succeeded=true."
+        }
+        $exitCodeProperty = $command.PSObject.Properties['exitCode']
+        if ($null -eq $exitCodeProperty -or
+            -not (Test-PhotoSiftJsonInteger -Value $exitCodeProperty.Value)) {
+            throw "Golden VM command '$expectedCommandName' had an invalid exitCode."
+        }
+        $exitCode = [long]$exitCodeProperty.Value
+        if (($expectedCommandName -ceq 'copy-source' -and $exitCode -notin 0..7) -or
+            ($expectedCommandName -cne 'copy-source' -and $exitCode -ne 0)) {
+            throw "Golden VM command '$expectedCommandName' reported an unaccepted exitCode '$exitCode'."
+        }
+        $timedOutProperty = $command.PSObject.Properties['timedOut']
+        if ($null -eq $timedOutProperty -or
+            $timedOutProperty.Value -isnot [bool] -or
+            $timedOutProperty.Value) {
+            throw "Golden VM command '$expectedCommandName' did not report timedOut=false."
+        }
+        $logPathProperty = $command.PSObject.Properties['logPath']
+        if ($null -eq $logPathProperty -or
+            $logPathProperty.Value -isnot [string] -or
+            [string]::IsNullOrWhiteSpace($logPathProperty.Value)) {
+            throw "Golden VM command '$expectedCommandName' did not name a command log."
+        }
+        $resolvedLogPath = [System.IO.Path]::GetFullPath(
+            (Join-Path $outputRoot $logPathProperty.Value))
+        if (-not $resolvedLogPath.StartsWith(
+                $outputRootPrefix,
+                [System.StringComparison]::OrdinalIgnoreCase) -or
+            -not [System.IO.File]::Exists($resolvedLogPath)) {
+            throw "Golden VM command '$expectedCommandName' log was missing or outside output."
+        }
     }
 
     $testsProperty = $summary.PSObject.Properties['tests']
@@ -647,20 +1436,22 @@ function Assert-PhotoSiftVerificationResult {
             throw "Golden VM evidence did not contain exactly one test result for '$expectedProject'."
         }
 
+        $resultFileProperty = $projectResults[0].PSObject.Properties['resultFile']
+        if ($null -eq $resultFileProperty -or
+            $resultFileProperty.Value -isnot [string] -or
+            [string]::IsNullOrWhiteSpace($resultFileProperty.Value)) {
+            throw "Golden VM evidence for '$expectedProject' did not name a TRX file."
+        }
+
         $counts = @{}
         foreach ($name in 'total', 'executed', 'passed', 'failed', 'error', 'timeout', 'aborted', 'notExecuted') {
             $property = $projectResults[0].PSObject.Properties[$name]
-            $value = 0
             if ($null -eq $property -or
-                -not [int]::TryParse(
-                    [string]$property.Value,
-                    [System.Globalization.NumberStyles]::Integer,
-                    [System.Globalization.CultureInfo]::InvariantCulture,
-                    [ref]$value) -or
-                $value -lt 0) {
+                -not (Test-PhotoSiftJsonInteger -Value $property.Value) -or
+                [long]$property.Value -lt 0) {
                 throw "Golden VM evidence for '$expectedProject' had an invalid '$name' count."
             }
-            $counts[$name] = $value
+            $counts[$name] = [int]$property.Value
         }
 
         if ($counts.executed -eq 0) {
@@ -677,6 +1468,16 @@ function Assert-PhotoSiftVerificationResult {
             $counts.aborted -gt 0) {
             throw "Golden VM evidence recorded failed or error results for '$expectedProject'."
         }
+
+        $reparsedResult = Read-PhotoSiftTrxResult `
+            -ProjectName $expectedProject `
+            -TrxPath (Join-Path $outputRoot $resultFileProperty.Value) `
+            -OutputRoot $outputRoot
+        foreach ($name in 'total', 'executed', 'passed', 'failed', 'error', 'timeout', 'aborted', 'notExecuted') {
+            if ([int]$reparsedResult.$name -ne $counts[$name]) {
+                throw "Golden VM summary/TRX '$name' count mismatch for '$expectedProject'."
+            }
+        }
     }
 
     if ($testResults.Count -ne $expectedProjects.Count) {
@@ -689,12 +1490,19 @@ function Assert-PhotoSiftVerificationResult {
 Export-ModuleMember -Function `
     Assert-PhotoSiftGoldenVmContract, `
     Assert-PhotoSiftGoldenVmVerificationCheckpoint, `
+    Assert-PhotoSiftSnapshotHasNoReparsePoints, `
+    Resolve-PhotoSiftGoldenVmCredential, `
+    Get-PhotoSiftGoldenVmCredential, `
     Connect-PhotoSiftPowerShellDirect, `
+    Get-PhotoSiftRemainingSeconds, `
     Get-PhotoSiftGuestRunnerInvocation, `
     Get-PhotoSiftGuestEvidencePaths, `
     Invoke-PhotoSiftGoldenVmRun, `
+    Invoke-PhotoSiftPowerShellWithDeadline, `
     Get-PhotoSiftVerificationStage, `
     Invoke-PhotoSiftProcess, `
+    New-PhotoSiftSourceSnapshot, `
+    Remove-PhotoSiftHostInputSnapshot, `
     Read-PhotoSiftTrxResult, `
     Assert-PhotoSiftSmokeResult, `
     Assert-PhotoSiftVerificationResult

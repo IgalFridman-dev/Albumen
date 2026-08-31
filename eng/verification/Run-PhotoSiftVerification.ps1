@@ -11,11 +11,16 @@ param(
     [string]$SdkRoot,
 
     [Parameter(Mandatory)]
-    [string]$PackagesRoot
+    [string]$PackagesRoot,
+
+    [Parameter(Mandatory)]
+    [ValidateRange(1, 7200)]
+    [int]$TimeoutSeconds
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$deadline = [System.DateTimeOffset]::Now.AddSeconds($TimeoutSeconds)
 
 $inputPath = Join-Path $RunRoot 'input'
 $workingSource = Join-Path $RunRoot 'source'
@@ -53,10 +58,14 @@ function Invoke-LoggedCommand {
 
     $logPath = Join-Path $outputPath ($Name + '.log')
     $startedAt = [System.DateTimeOffset]::UtcNow
+    $remainingSeconds = Get-PhotoSiftRemainingSeconds `
+        -Deadline $deadline `
+        -OperationName "guest command '$Name'"
     $processResult = Invoke-PhotoSiftProcess `
         -FilePath $FilePath `
         -Arguments $Arguments `
-        -WorkingDirectory $WorkingDirectory
+        -WorkingDirectory $WorkingDirectory `
+        -TimeoutSeconds $remainingSeconds
     $commandOutput = @(
         $processResult.StandardOutput.TrimEnd()
         $processResult.StandardError.TrimEnd()
@@ -68,7 +77,9 @@ function Invoke-LoggedCommand {
         filePath = $FilePath
         arguments = $Arguments
         exitCode = $processResult.ExitCode
-        succeeded = $AcceptedExitCodes -contains $processResult.ExitCode
+        succeeded = -not $processResult.TimedOut -and
+            $AcceptedExitCodes -contains $processResult.ExitCode
+        timedOut = $processResult.TimedOut
         startedAtUtc = $startedAt.ToString('O')
         durationMilliseconds = [long]([System.DateTimeOffset]::UtcNow - $startedAt).TotalMilliseconds
         logPath = [System.IO.Path]::GetFileName($logPath)
@@ -76,6 +87,9 @@ function Invoke-LoggedCommand {
     }
     $commands.Add($result)
 
+    if ($processResult.TimedOut) {
+        throw "Command '$Name' timed out. See $logPath."
+    }
     if ($AcceptedExitCodes -notcontains $processResult.ExitCode) {
         throw "Command '$Name' exited $($processResult.ExitCode). See $logPath."
     }
@@ -126,6 +140,8 @@ try {
             $inputPath,
             $workingSource,
             '/E',
+            '/XJ',
+            '/SL',
             '/XD', '.git', 'bin', 'obj',
             '/XF', '.git',
             '/R:1',
@@ -178,9 +194,9 @@ try {
     if ($Stage -ceq 'Architecture') {
         $projectPath = 'tests\PhotoSift.Infrastructure.Tests\PhotoSift.Infrastructure.Tests.csproj'
         Invoke-LoggedCommand `
-            -Name 'restore-architecture' `
+            -Name $stageDefinition.restoreName `
             -FilePath $dotnetPath `
-            -Arguments @('restore', $projectPath, '-r', 'win-x64', '--locked-mode', '--configfile', 'NuGet.Config', '-p:NuGetAudit=false') | Out-Null
+            -Arguments $stageDefinition.restoreArguments | Out-Null
         Invoke-LoggedCommand `
             -Name 'build-architecture' `
             -FilePath $dotnetPath `
@@ -201,11 +217,10 @@ try {
             -ResultFileName 'architecture.trx'
     }
     else {
-        $restoreName = if ($Stage -ceq 'Core') { 'restore-core' } else { 'restore-solution' }
         Invoke-LoggedCommand `
-            -Name $restoreName `
+            -Name $stageDefinition.restoreName `
             -FilePath $dotnetPath `
-            -Arguments @('restore', 'PhotoSift.slnx', '-r', 'win-x64', '--locked-mode', '--configfile', 'NuGet.Config', '-p:NuGetAudit=false') | Out-Null
+            -Arguments $stageDefinition.restoreArguments | Out-Null
 
         if ($Stage -ceq 'Full') {
             Invoke-LoggedCommand `
@@ -246,7 +261,7 @@ try {
             -Arguments @(
                 '-NoProfile',
                 '-ExecutionPolicy', 'Bypass',
-                '-File', 'eng\Verify-RuntimeBoundary.ps1',
+                '-File', $stageDefinition.runtimeBoundaryScript,
                 '-Configuration', 'Release',
                 '-RuntimeIdentifier', 'win-x64') | Out-Null
     }
@@ -257,7 +272,7 @@ try {
             -Arguments @(
                 '-NoProfile',
                 '-ExecutionPolicy', 'Bypass',
-                '-File', 'eng\Invoke-OfflineLaunchSmoke.ps1',
+                '-File', $stageDefinition.wpfSmokeScript,
                 '-Configuration', 'Release',
                 '-RuntimeIdentifier', 'win-x64') | Out-Null
     }

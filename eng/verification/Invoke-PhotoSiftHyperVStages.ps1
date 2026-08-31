@@ -28,11 +28,12 @@ if ([string]::IsNullOrWhiteSpace($TranscriptPath)) {
 }
 
 $credential = Get-Credential `
-    -UserName 'PhotoSiftRunner' `
-    -Message 'Enter the password for the PhotoSift Golden VM verification account.'
+    -UserName 'PHOTOSIFTVM\PhotoSiftRunner' `
+    -Message 'Capture the password for PHOTOSIFTVM\PhotoSiftRunner. Authentication occurs after each checkpoint restore.'
 if ($null -eq $credential) {
     throw 'Golden VM credential prompt was cancelled.'
 }
+Write-Output 'Credential captured in memory; the Golden VM has not been authenticated yet.'
 
 Start-Transcript -LiteralPath $TranscriptPath -Force | Out-Null
 try {

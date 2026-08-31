@@ -16,12 +16,6 @@ param(
     [System.Management.Automation.PSCredential]$Credential,
 
     [Parameter()]
-    [ValidateNotNullOrEmpty()]
-    [string]$CredentialPath = (Join-Path `
-        ([System.Environment]::GetFolderPath('LocalApplicationData')) `
-        'PhotoSift\verification\golden-vm.credential.xml'),
-
-    [Parameter()]
     [ValidateRange(1, 120)]
     [int]$TimeoutMinutes = 30
 )
@@ -32,6 +26,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $modulePath = Join-Path $PSScriptRoot 'PhotoSiftVerification.psm1'
 Import-Module $modulePath -Force
+$deadline = [System.DateTimeOffset]::Now.AddMinutes($TimeoutMinutes)
 
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
@@ -44,14 +39,7 @@ if (-not $isElevated) {
 Assert-PhotoSiftGoldenVmVerificationCheckpoint `
     -CheckpointName $CheckpointName | Out-Null
 
-$resolvedCredential = $Credential
-if ($null -eq $resolvedCredential) {
-    $resolvedCredentialPath = [System.IO.Path]::GetFullPath($CredentialPath)
-    if (-not [System.IO.File]::Exists($resolvedCredentialPath)) {
-        throw "Golden VM credential file does not exist: $resolvedCredentialPath"
-    }
-    $resolvedCredential = Import-Clixml -LiteralPath $resolvedCredentialPath
-}
+$resolvedCredential = Get-PhotoSiftGoldenVmCredential -Credential $Credential
 
 $vm = Get-VM -Name $VMName -ErrorAction Stop
 $checkpoints = @(Get-VMSnapshot -VMName $VMName -ErrorAction Stop)
@@ -77,44 +65,49 @@ $hostOutputPath = Join-Path $runPath 'output'
 [System.IO.Directory]::CreateDirectory($hostInputPath) | Out-Null
 [System.IO.Directory]::CreateDirectory($hostOutputPath) | Out-Null
 
-$copyResult = Invoke-PhotoSiftProcess `
-    -FilePath (Join-Path $env:SystemRoot 'System32\robocopy.exe') `
-    -Arguments @(
-        $repositoryRoot,
-        $hostInputPath,
-        '/E',
-        '/XD', '.git', 'bin', 'obj',
-        '/XF', '.git',
-        '/R:1',
-        '/W:1',
-        '/NFL',
-        '/NDL',
-        '/NJH',
-        '/NJS') `
-    -WorkingDirectory $repositoryRoot
-if ($copyResult.ExitCode -notin 0..7) {
-    throw "Could not prepare the Golden VM source snapshot; robocopy exited $($copyResult.ExitCode)."
-}
+try {
+    New-PhotoSiftSourceSnapshot `
+        -RepositoryRoot $repositoryRoot `
+        -HostInputPath $hostInputPath `
+        -Deadline $deadline | Out-Null
 
 $guestRunRoot = "C:\PhotoSift\runs\$runId"
 $guestSdkRoot = 'C:\PhotoSift\golden\sdk'
 $guestPackagesRoot = 'C:\PhotoSift\golden\packages'
-$deadline = [System.DateTimeOffset]::Now.AddMinutes($TimeoutMinutes)
 
 $restoreCheckpoint = {
-    param($RequestedVMName, $RequestedCheckpointName)
+    param($RequestedVMName, $RequestedCheckpointName, $RequestedDeadline)
     Restore-VMSnapshot `
         -VMName $RequestedVMName `
         -Name $RequestedCheckpointName `
         -Confirm:$false `
         -ErrorAction Stop | Out-Null
 }.GetNewClosure()
+$inspectVmContract = {
+    param($RequestedVMName, $RequestedDeadline)
+    $currentVM = Get-VM -Name $RequestedVMName -ErrorAction Stop
+    $currentNetworkAdapters = @(
+        Get-VMNetworkAdapter -VMName $RequestedVMName -ErrorAction Stop)
+    if ([string]$currentVM.Name -cne $RequestedVMName) {
+        throw "Hyper-V returned a VM that did not match '$RequestedVMName'."
+    }
+    if ([string]$currentVM.State -cne 'Off') {
+        throw "Golden VM '$RequestedVMName' must be Off after checkpoint restore."
+    }
+    if ($currentNetworkAdapters.Count -ne 0) {
+        throw "Golden VM '$RequestedVMName' must have zero virtual network adapters after checkpoint restore."
+    }
+    [pscustomobject]@{
+        vmState = 'Off'
+        networkAdapterCount = 0
+    }
+}.GetNewClosure()
 $startVM = {
-    param($RequestedVMName)
+    param($RequestedVMName, $RequestedDeadline)
     Start-VM -Name $RequestedVMName -ErrorAction Stop | Out-Null
 }.GetNewClosure()
 $waitForVM = {
-    param($RequestedVMName, $TimeoutSeconds)
+    param($RequestedVMName, $TimeoutSeconds, $RequestedDeadline)
     Wait-VM `
         -Name $RequestedVMName `
         -For Heartbeat `
@@ -122,85 +115,152 @@ $waitForVM = {
         -ErrorAction Stop | Out-Null
 }.GetNewClosure()
 $openSession = {
-    param($RequestedVMName, $RequestedCredential)
+    param($RequestedVMName, $RequestedCredential, $RequestedDeadline)
     Connect-PhotoSiftPowerShellDirect `
         -VMName $RequestedVMName `
+        -CheckpointName $CheckpointName `
         -Credential $RequestedCredential `
-        -Deadline $deadline
+        -Deadline $RequestedDeadline | ForEach-Object {
+            Write-Information `
+                "PowerShell Direct authenticated PHOTOSIFTVM\PhotoSiftRunner for VM '$RequestedVMName' checkpoint '$CheckpointName'." `
+                -InformationAction Continue
+            $_
+        }
 }.GetNewClosure()
 $prepareGuest = {
-    param($Session, $RequestedGuestRunRoot)
-    Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {
-        param($RunRoot)
-        if ([System.IO.Directory]::Exists($RunRoot)) {
-            Remove-Item -LiteralPath $RunRoot -Recurse -Force
-        }
-        [System.IO.Directory]::CreateDirectory((Join-Path $RunRoot 'input')) | Out-Null
-        [System.IO.Directory]::CreateDirectory((Join-Path $RunRoot 'output')) | Out-Null
-    } -ArgumentList $RequestedGuestRunRoot
+    param($Session, $RequestedGuestRunRoot, $RequestedDeadline)
+    Invoke-PhotoSiftPowerShellWithDeadline `
+        -ScriptBlock {
+            param($RemoteSession, $RunRoot)
+            Invoke-Command -Session $RemoteSession -ErrorAction Stop -ScriptBlock {
+                param($RemoteRunRoot)
+                if ([System.IO.Directory]::Exists($RemoteRunRoot)) {
+                    Remove-Item -LiteralPath $RemoteRunRoot -Recurse -Force
+                }
+                [System.IO.Directory]::CreateDirectory((Join-Path $RemoteRunRoot 'input')) | Out-Null
+                [System.IO.Directory]::CreateDirectory((Join-Path $RemoteRunRoot 'output')) | Out-Null
+            } -ArgumentList $RunRoot
+        } `
+        -ArgumentList @($Session, $RequestedGuestRunRoot) `
+        -Deadline $RequestedDeadline `
+        -OperationName 'guest preparation' | Out-Null
 }.GetNewClosure()
 $copySource = {
-    param($Session, $RequestedHostInputPath, $GuestInputPath)
+    param($Session, $RequestedHostInputPath, $GuestInputPath, $RequestedDeadline)
     foreach ($item in @(Get-ChildItem -LiteralPath $RequestedHostInputPath -Force)) {
-        Copy-Item `
-            -LiteralPath $item.FullName `
-            -Destination $GuestInputPath `
-            -Recurse `
-            -Force `
-            -ToSession $Session `
-            -ErrorAction Stop
+        Invoke-PhotoSiftPowerShellWithDeadline `
+            -ScriptBlock {
+                param($RemoteSession, $SourcePath, $DestinationPath)
+                Copy-Item `
+                    -LiteralPath $SourcePath `
+                    -Destination $DestinationPath `
+                    -Recurse `
+                    -Force `
+                    -ToSession $RemoteSession `
+                    -ErrorAction Stop
+            } `
+            -ArgumentList @($Session, $item.FullName, $GuestInputPath) `
+            -Deadline $RequestedDeadline `
+            -OperationName "guest source copy '$($item.Name)'" | Out-Null
     }
 }.GetNewClosure()
 $invokeGuest = {
-    param($Session, $RequestedStage, $RequestedGuestRunRoot, $SdkRoot, $PackagesRoot)
+    param($Session, $RequestedStage, $RequestedGuestRunRoot, $SdkRoot, $PackagesRoot, $RequestedDeadline)
     $guestScript = Join-Path `
         $RequestedGuestRunRoot `
         'input\eng\verification\Run-PhotoSiftVerification.ps1'
+    $remainingSeconds = Get-PhotoSiftRemainingSeconds `
+        -Deadline $RequestedDeadline `
+        -OperationName 'guest verification'
     $guestInvocation = Get-PhotoSiftGuestRunnerInvocation `
         -ScriptPath $guestScript `
         -Stage $RequestedStage `
         -RunRoot $RequestedGuestRunRoot `
         -SdkRoot $SdkRoot `
-        -PackagesRoot $PackagesRoot
-    Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {
-        param($ScriptPath, $StageName, $RunRoot, $GuestSdkRoot, $GuestPackagesRoot)
-        $windowsPowerShell = Join-Path `
-            $env:SystemRoot `
-            'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $runnerArguments = @(
-            '-NoProfile',
-            '-NonInteractive',
-            '-ExecutionPolicy', 'Bypass',
-            '-File', $ScriptPath,
-            '-Stage', $StageName,
-            '-RunRoot', $RunRoot,
-            '-SdkRoot', $GuestSdkRoot,
-            '-PackagesRoot', $GuestPackagesRoot)
-        & $windowsPowerShell @runnerArguments
-        if ($LASTEXITCODE -ne 0) {
-            throw "Golden VM guest runner exited $LASTEXITCODE."
-        }
-    } -ArgumentList `
-        $guestInvocation.scriptPath,
-        $guestInvocation.stage,
-        $guestInvocation.runRoot,
-        $guestInvocation.sdkRoot,
-        $guestInvocation.packagesRoot
+        -PackagesRoot $PackagesRoot `
+        -TimeoutSeconds $remainingSeconds
+    Invoke-PhotoSiftPowerShellWithDeadline `
+        -ScriptBlock {
+            param(
+                $RemoteSession,
+                $ScriptPath,
+                $StageName,
+                $RunRoot,
+                $GuestSdkRoot,
+                $GuestPackagesRoot,
+                $GuestTimeoutSeconds)
+            Invoke-Command -Session $RemoteSession -ErrorAction Stop -ScriptBlock {
+                param(
+                    $RemoteScriptPath,
+                    $RemoteStageName,
+                    $RemoteRunRoot,
+                    $RemoteSdkRoot,
+                    $RemotePackagesRoot,
+                    $RemoteTimeoutSeconds)
+                $windowsPowerShell = Join-Path `
+                    $env:SystemRoot `
+                    'System32\WindowsPowerShell\v1.0\powershell.exe'
+                $runnerArguments = @(
+                    '-NoProfile',
+                    '-NonInteractive',
+                    '-ExecutionPolicy', 'Bypass',
+                    '-File', $RemoteScriptPath,
+                    '-Stage', $RemoteStageName,
+                    '-RunRoot', $RemoteRunRoot,
+                    '-SdkRoot', $RemoteSdkRoot,
+                    '-PackagesRoot', $RemotePackagesRoot,
+                    '-TimeoutSeconds', $RemoteTimeoutSeconds)
+                & $windowsPowerShell @runnerArguments
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Golden VM guest runner exited $LASTEXITCODE."
+                }
+            } -ArgumentList `
+                $ScriptPath,
+                $StageName,
+                $RunRoot,
+                $GuestSdkRoot,
+                $GuestPackagesRoot,
+                $GuestTimeoutSeconds
+        } `
+        -ArgumentList @(
+            $Session,
+            $guestInvocation.scriptPath,
+            $guestInvocation.stage,
+            $guestInvocation.runRoot,
+            $guestInvocation.sdkRoot,
+            $guestInvocation.packagesRoot,
+            $guestInvocation.timeoutSeconds) `
+        -Deadline $RequestedDeadline `
+        -OperationName 'guest verification' | Out-Null
 }.GetNewClosure()
 $copyEvidence = {
-    param($Session, $GuestOutputPath, $RequestedHostOutputPath)
-    $remoteItems = @(Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {
-            param($OutputPath)
-            Get-ChildItem -LiteralPath $OutputPath -Force
-        } -ArgumentList $GuestOutputPath)
+    param($Session, $GuestOutputPath, $RequestedHostOutputPath, $RequestedDeadline)
+    $remoteItems = @(Invoke-PhotoSiftPowerShellWithDeadline `
+        -ScriptBlock {
+            param($RemoteSession, $OutputPath)
+            Invoke-Command -Session $RemoteSession -ErrorAction Stop -ScriptBlock {
+                param($RemoteOutputPath)
+                Get-ChildItem -LiteralPath $RemoteOutputPath -Force
+            } -ArgumentList $OutputPath
+        } `
+        -ArgumentList @($Session, $GuestOutputPath) `
+        -Deadline $RequestedDeadline `
+        -OperationName 'guest evidence enumeration')
     foreach ($guestItemPath in @(Get-PhotoSiftGuestEvidencePaths -Items $remoteItems)) {
-        Copy-Item `
-            -FromSession $Session `
-            -LiteralPath $guestItemPath `
-            -Destination $RequestedHostOutputPath `
-            -Recurse `
-            -Force `
-            -ErrorAction Stop
+        Invoke-PhotoSiftPowerShellWithDeadline `
+            -ScriptBlock {
+                param($RemoteSession, $SourcePath, $DestinationPath)
+                Copy-Item `
+                    -FromSession $RemoteSession `
+                    -LiteralPath $SourcePath `
+                    -Destination $DestinationPath `
+                    -Recurse `
+                    -Force `
+                    -ErrorAction Stop
+            } `
+            -ArgumentList @($Session, $guestItemPath, $RequestedHostOutputPath) `
+            -Deadline $RequestedDeadline `
+            -OperationName "guest evidence copy '$guestItemPath'" | Out-Null
     }
 }.GetNewClosure()
 $closeSession = {
@@ -217,6 +277,7 @@ $stopVM = {
 
 $operations = @{
     RestoreCheckpoint = $restoreCheckpoint
+    InspectVmContract = $inspectVmContract
     StartVM = $startVM
     WaitForVM = $waitForVM
     OpenSession = $openSession
@@ -232,7 +293,7 @@ Write-Output "Starting Golden VM verification for stage $Stage."
 Write-Output "VM: $($contract.vmName); checkpoint: $($contract.checkpointName); virtual NICs: $($contract.networkAdapterCount)"
 Write-Output "Run output: $runPath"
 
-Invoke-PhotoSiftGoldenVmRun `
+$runResult = Invoke-PhotoSiftGoldenVmRun `
     -VMName $VMName `
     -CheckpointName $CheckpointName `
     -Credential $resolvedCredential `
@@ -243,7 +304,8 @@ Invoke-PhotoSiftGoldenVmRun `
     -GuestRunRoot $guestRunRoot `
     -SdkRoot $guestSdkRoot `
     -PackagesRoot $guestPackagesRoot `
-    -Operations $operations | Out-Null
+    -Deadline $deadline `
+    -Operations $operations
 
 $summary = Assert-PhotoSiftVerificationResult `
     -SummaryPath (Join-Path $hostOutputPath 'summary.json') `
@@ -254,6 +316,10 @@ $controllerEvidence = [ordered]@{
     checkpointName = $contract.checkpointName
     initialVmState = $contract.vmState
     networkAdapterCount = $contract.networkAdapterCount
+    postRestoreVmState = $runResult.postRestoreVmState
+    postRestoreNetworkAdapterCount = $runResult.postRestoreNetworkAdapterCount
+    postCleanupVmState = $runResult.postCleanupVmState
+    postCleanupNetworkAdapterCount = $runResult.postCleanupNetworkAdapterCount
     stage = $Stage
     runId = $runId
     completedAtUtc = [System.DateTimeOffset]::UtcNow.ToString('O')
@@ -264,3 +330,9 @@ $controllerEvidence | ConvertTo-Json -Depth 5 |
 Write-Output "Golden VM verification passed for stage $Stage."
 Write-Output "Commands: $(@($summary.commands).Count)"
 Write-Output "Output: $runPath"
+}
+finally {
+    Remove-PhotoSiftHostInputSnapshot `
+        -HostInputPath $hostInputPath `
+        -RunsRoot $runsRoot
+}
