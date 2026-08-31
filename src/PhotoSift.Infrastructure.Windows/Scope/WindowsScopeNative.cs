@@ -28,7 +28,7 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
         var displayPath = Path.GetFullPath(path);
 
         using var handle = NativeMethods.CreateFile(
-            displayPath,
+            ToExtendedLengthPath(displayPath),
             desiredAccess: 0,
             FileShare.ReadWrite | FileShare.Delete,
             securityAttributes: 0,
@@ -64,7 +64,7 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
     public IEnumerable<WindowsScopeEntry> EnumerateDirectory(string resolvedPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(resolvedPath);
-        var searchPath = Path.Combine(resolvedPath, "*");
+        var searchPath = Path.Combine(ToExtendedLengthPath(resolvedPath), "*");
         using var findHandle = NativeMethods.FindFirstFileEx(
             searchPath,
             FindExInfoLevel.Basic,
@@ -146,6 +146,21 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
         return string.IsNullOrEmpty(root) || Path.EndsInDirectorySeparator(root)
             ? root
             : root + Path.DirectorySeparatorChar;
+    }
+
+    internal static string ToExtendedLengthPath(string path)
+    {
+        const string extendedUncPrefix = @"\\?\UNC\";
+        const string extendedPrefix = @"\\?\";
+
+        if (path.StartsWith(extendedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+
+        return path.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase)
+            ? extendedUncPrefix + path[2..]
+            : extendedPrefix + path;
     }
 
     internal static ScopeCloudState MapCloudState(uint attributes, uint placeholderState)

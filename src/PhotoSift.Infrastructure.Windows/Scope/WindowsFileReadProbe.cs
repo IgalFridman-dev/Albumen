@@ -7,7 +7,7 @@ internal sealed class WindowsFileReadProbe : IWindowsFileReadProbe
     public ScopeCloudState GetCloudState(string path)
     {
         using var findHandle = NativeMethods.FindFirstFileEx(
-            path,
+            WindowsScopeNative.ToExtendedLengthPath(path),
             FindExInfoLevel.Basic,
             out var findData,
             FindExSearchOperation.NameMatch,
@@ -28,7 +28,7 @@ internal sealed class WindowsFileReadProbe : IWindowsFileReadProbe
     public bool TryOpenForRead(string path)
     {
         using var readHandle = NativeMethods.CreateFile(
-            path,
+            WindowsScopeNative.ToExtendedLengthPath(path),
             NativeMethods.GenericRead,
             FileShare.ReadWrite | FileShare.Delete,
             securityAttributes: 0,
