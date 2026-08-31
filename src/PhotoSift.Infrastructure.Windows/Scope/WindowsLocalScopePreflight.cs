@@ -167,7 +167,19 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
 
                     if (!entry.IsDirectory)
                     {
-                        counts = CountFile(entry.Path, counts, codecAvailability);
+                        var fileResult = CountFile(
+                            entry.Path,
+                            counts,
+                            codecAvailability);
+                        if (fileResult.CloudState is not ScopeCloudState.Local)
+                        {
+                            return IncompleteEvidence(
+                                resolvedScope,
+                                volume,
+                                fileResult.CloudState);
+                        }
+
+                        counts = fileResult.Counts;
                         continue;
                     }
 
@@ -328,7 +340,7 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
             EmptyCounts,
             EmptyRestrictions);
 
-    private ScopeOutcomeCounts CountFile(
+    private FileCountResult CountFile(
         string path,
         ScopeOutcomeCounts counts,
         Dictionary<SupportedImageFormat, bool> codecAvailability)
@@ -336,11 +348,13 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
         var format = Recognize(path);
         if (format is null)
         {
-            return new ScopeOutcomeCounts(
-                counts.Supported,
-                counts.UnsupportedExtension + 1,
-                counts.Unreadable,
-                counts.CodecUnavailable);
+            return new FileCountResult(
+                new ScopeOutcomeCounts(
+                    counts.Supported,
+                    counts.UnsupportedExtension + 1,
+                    counts.Unreadable,
+                    counts.CodecUnavailable),
+                ScopeCloudState.Local);
         }
 
         if (!codecAvailability.TryGetValue(format.Value, out var codecAvailable))
@@ -351,24 +365,34 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
 
         if (!codecAvailable)
         {
-            return new ScopeOutcomeCounts(
-                counts.Supported,
-                counts.UnsupportedExtension,
-                counts.Unreadable,
-                counts.CodecUnavailable + 1);
+            return new FileCountResult(
+                new ScopeOutcomeCounts(
+                    counts.Supported,
+                    counts.UnsupportedExtension,
+                    counts.Unreadable,
+                    counts.CodecUnavailable + 1),
+                ScopeCloudState.Local);
         }
 
-        return native.CanOpenForRead(path)
-            ? new ScopeOutcomeCounts(
-                counts.Supported + 1,
-                counts.UnsupportedExtension,
-                counts.Unreadable,
-                counts.CodecUnavailable)
-            : new ScopeOutcomeCounts(
-                counts.Supported,
-                counts.UnsupportedExtension,
-                counts.Unreadable + 1,
-                counts.CodecUnavailable);
+        var readResult = native.ProbeFileForRead(path);
+        if (readResult.CloudState is not ScopeCloudState.Local)
+        {
+            return new FileCountResult(counts, readResult.CloudState);
+        }
+
+        return new FileCountResult(
+            readResult.CanOpenForRead
+                ? new ScopeOutcomeCounts(
+                    counts.Supported + 1,
+                    counts.UnsupportedExtension,
+                    counts.Unreadable,
+                    counts.CodecUnavailable)
+                : new ScopeOutcomeCounts(
+                    counts.Supported,
+                    counts.UnsupportedExtension,
+                    counts.Unreadable + 1,
+                    counts.CodecUnavailable),
+            ScopeCloudState.Local);
     }
 
     private static SupportedImageFormat? Recognize(string path) =>
@@ -379,5 +403,9 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
             ".HEIC" => SupportedImageFormat.Heic,
             _ => null,
         };
+
+    private readonly record struct FileCountResult(
+        ScopeOutcomeCounts Counts,
+        ScopeCloudState CloudState);
 
 }

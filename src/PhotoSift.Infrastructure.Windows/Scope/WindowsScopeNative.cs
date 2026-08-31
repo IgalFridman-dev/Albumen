@@ -115,16 +115,20 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
         }
     }
 
-    public bool CanOpenForRead(string path)
+    public WindowsFileReadProbeResult ProbeFileForRead(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var cloudState = fileReadProbe.GetCloudState(path);
-        if (cloudState is ScopeCloudState.Placeholder or ScopeCloudState.Unknown)
+        if (cloudState is not ScopeCloudState.Local)
         {
-            return false;
+            return new WindowsFileReadProbeResult(
+                cloudState,
+                CanOpenForRead: false);
         }
 
-        return fileReadProbe.TryOpenForRead(path);
+        return new WindowsFileReadProbeResult(
+            cloudState,
+            fileReadProbe.TryOpenForRead(path));
     }
 
     public bool IsCodecAvailable(SupportedImageFormat format) => codecs.IsAvailable(format);

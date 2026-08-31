@@ -10,7 +10,7 @@ internal interface IWindowsScopeNative
 
     IEnumerable<WindowsScopeEntry> EnumerateDirectory(string resolvedPath);
 
-    bool CanOpenForRead(string path);
+    WindowsFileReadProbeResult ProbeFileForRead(string path);
 
     bool IsCodecAvailable(SupportedImageFormat format);
 }

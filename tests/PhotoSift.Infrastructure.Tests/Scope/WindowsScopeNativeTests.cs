@@ -118,7 +118,10 @@ public sealed class WindowsScopeNativeTests
                 FileAccess.ReadWrite,
                 FileShare.None);
 
-            Assert.False(CreateNative().CanOpenForRead(path));
+            var result = CreateNative().ProbeFileForRead(path);
+
+            Assert.Equal(ScopeCloudState.Local, result.CloudState);
+            Assert.False(result.CanOpenForRead);
         }
         finally
         {
@@ -127,9 +130,14 @@ public sealed class WindowsScopeNativeTests
     }
 
     [Theory]
-    [InlineData(ScopeCloudState.Placeholder)]
-    [InlineData(ScopeCloudState.Unknown)]
-    public void ReadProbeClassifiesBeforeOpeningUnsafeCloudEntry(ScopeCloudState cloudState)
+    [InlineData(ScopeCloudState.Local, true, 1)]
+    [InlineData(ScopeCloudState.Synchronized, false, 0)]
+    [InlineData(ScopeCloudState.Placeholder, false, 0)]
+    [InlineData(ScopeCloudState.Unknown, false, 0)]
+    public void ReadProbeReturnsRecheckedCloudStateAndOpensOnlyLocalFiles(
+        ScopeCloudState cloudState,
+        bool expectedCanOpen,
+        int expectedReadOpenAttempts)
     {
         const string path = @"C:\photos\unsafe.jpg";
         var readProbe = new RecordingFileReadProbe(cloudState);
@@ -137,9 +145,12 @@ public sealed class WindowsScopeNativeTests
             new WicCodecCapability(new ComClassAvailability()),
             readProbe);
 
-        Assert.False(native.CanOpenForRead(path));
+        var result = native.ProbeFileForRead(path);
+
+        Assert.Equal(cloudState, result.CloudState);
+        Assert.Equal(expectedCanOpen, result.CanOpenForRead);
         Assert.Equal(path, readProbe.ClassifiedPath);
-        Assert.Equal(0, readProbe.ReadOpenAttempts);
+        Assert.Equal(expectedReadOpenAttempts, readProbe.ReadOpenAttempts);
     }
 
     [Fact]

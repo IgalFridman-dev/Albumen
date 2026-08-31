@@ -13,7 +13,7 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Exception> inspectionFailures =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, bool> readable =
+    private readonly Dictionary<string, WindowsFileReadProbeResult> readResults =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<SupportedImageFormat, bool> codecs = [];
     private readonly ScopeVolumeKind volume;
@@ -45,7 +45,9 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
 
     public List<string> EnumeratedPaths { get; } = [];
 
-    public List<string> ReadPaths { get; } = [];
+    public List<string> ReadProbePaths { get; } = [];
+
+    public List<string> ReadOpenPaths { get; } = [];
 
     public List<SupportedImageFormat> CodecQueries { get; } = [];
 
@@ -62,14 +64,17 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         string directory,
         string path,
         ScopeCloudState cloud = ScopeCloudState.Local,
-        bool canRead = true)
+        bool canRead = true,
+        ScopeCloudState? readCloud = null)
     {
         EntriesFor(directory).Add(new WindowsScopeEntry(
             path,
             IsDirectory: false,
             IsReparsePoint: false,
             cloud));
-        readable[path] = canRead;
+        readResults[path] = new WindowsFileReadProbeResult(
+            readCloud ?? cloud,
+            canRead);
         return this;
     }
 
@@ -148,10 +153,18 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
             : [];
     }
 
-    public bool CanOpenForRead(string path)
+    public WindowsFileReadProbeResult ProbeFileForRead(string path)
     {
-        ReadPaths.Add(path);
-        return !readable.TryGetValue(path, out var canRead) || canRead;
+        ReadProbePaths.Add(path);
+        var result = readResults.TryGetValue(path, out var configured)
+            ? configured
+            : new WindowsFileReadProbeResult(ScopeCloudState.Local, CanOpenForRead: true);
+        if (result.CloudState is ScopeCloudState.Local)
+        {
+            ReadOpenPaths.Add(path);
+        }
+
+        return result;
     }
 
     public bool IsCodecAvailable(SupportedImageFormat format)

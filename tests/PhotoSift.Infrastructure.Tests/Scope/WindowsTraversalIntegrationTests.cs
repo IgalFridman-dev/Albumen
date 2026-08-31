@@ -43,7 +43,7 @@ public sealed class WindowsTraversalIntegrationTests
         }
         finally
         {
-            root.Delete(recursive: true);
+            CleanupAll(() => root.Delete(recursive: true));
         }
     }
 
@@ -51,11 +51,10 @@ public sealed class WindowsTraversalIntegrationTests
     public async Task RealReadLockedJpegIsCountedUnreadable()
     {
         var root = Directory.CreateTempSubdirectory("PhotoSiftLocked-");
-        var path = Path.Combine(root.FullName, "locked.jpg");
-        File.WriteAllText(path, "fixture");
-
         try
         {
+            var path = Path.Combine(root.FullName, "locked.jpg");
+            File.WriteAllText(path, "fixture");
             using var exclusive = new FileStream(
                 path,
                 FileMode.Open,
@@ -70,32 +69,39 @@ public sealed class WindowsTraversalIntegrationTests
         }
         finally
         {
-            root.Delete(recursive: true);
+            CleanupAll(() => root.Delete(recursive: true));
         }
     }
 
     [Fact]
     public async Task RealAccessDeniedDescendantBlocksCompleteCountsAndRestoresAcl()
     {
+        DirectoryInfo? denied = null;
+        DirectorySecurity? restricted = null;
+        FileSystemAccessRule? denial = null;
+        var restrictionApplied = false;
         var root = Directory.CreateTempSubdirectory("PhotoSiftDenied-");
-        var denied = Directory.CreateDirectory(Path.Combine(root.FullName, "denied"));
-        File.WriteAllText(Path.Combine(denied.FullName, "hidden.jpg"), "fixture");
-        var security = denied.GetAccessControl(AccessControlSections.Access);
-        var user = WindowsIdentity.GetCurrent().User ??
-            throw new InvalidOperationException("The fixture requires a Windows user SID.");
-        var denial = new FileSystemAccessRule(
-            user,
-            FileSystemRights.ListDirectory,
-            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-            PropagationFlags.None,
-            AccessControlType.Deny);
-        var restricted = new DirectorySecurity();
-        restricted.SetSecurityDescriptorBinaryForm(security.GetSecurityDescriptorBinaryForm());
-        restricted.AddAccessRule(denial);
-        denied.SetAccessControl(restricted);
 
         try
         {
+            denied = Directory.CreateDirectory(Path.Combine(root.FullName, "denied"));
+            File.WriteAllText(Path.Combine(denied.FullName, "hidden.jpg"), "fixture");
+            var security = denied.GetAccessControl(AccessControlSections.Access);
+            var user = WindowsIdentity.GetCurrent().User ??
+                throw new InvalidOperationException("The fixture requires a Windows user SID.");
+            denial = new FileSystemAccessRule(
+                user,
+                FileSystemRights.ListDirectory,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Deny);
+            restricted = new DirectorySecurity();
+            restricted.SetSecurityDescriptorBinaryForm(
+                security.GetSecurityDescriptorBinaryForm());
+            restricted.AddAccessRule(denial);
+            denied.SetAccessControl(restricted);
+            restrictionApplied = true;
+
             var evidence = await new WindowsLocalScopePreflight().InspectAsync(
                 new ScopeSelection(root.FullName, ScopeRecursion.IncludeSubfolders),
                 CancellationToken.None);
@@ -109,29 +115,47 @@ public sealed class WindowsTraversalIntegrationTests
         }
         finally
         {
-            restricted.RemoveAccessRuleSpecific(denial);
-            denied.SetAccessControl(restricted);
-            root.Delete(recursive: true);
+            CleanupAll(
+                () =>
+                {
+                    if (restrictionApplied)
+                    {
+                        restricted!.RemoveAccessRuleSpecific(denial!);
+                        denied!.SetAccessControl(restricted);
+                    }
+                },
+                () => root.Delete(recursive: true));
         }
     }
 
     [Fact]
     public async Task RealContainedEscapingAndCyclicLinksStayWithinResolvedScope()
     {
+        DirectoryInfo? outside = null;
+        string? alias = null;
+        string? escape = null;
+        string? cycle = null;
+        var aliasCreated = false;
+        var escapeCreated = false;
+        var cycleCreated = false;
         var root = Directory.CreateTempSubdirectory("PhotoSiftLinks-");
-        var outside = Directory.CreateTempSubdirectory("PhotoSiftOutside-");
-        var actual = Directory.CreateDirectory(Path.Combine(root.FullName, "actual"));
-        File.WriteAllText(Path.Combine(actual.FullName, "inside.jpg"), "fixture");
-        File.WriteAllText(Path.Combine(outside.FullName, "outside.jpg"), "fixture");
-        var alias = Path.Combine(root.FullName, "alias");
-        var escape = Path.Combine(root.FullName, "escape");
-        var cycle = Path.Combine(actual.FullName, "cycle");
 
         try
         {
+            outside = Directory.CreateTempSubdirectory("PhotoSiftOutside-");
+            var actual = Directory.CreateDirectory(Path.Combine(root.FullName, "actual"));
+            File.WriteAllText(Path.Combine(actual.FullName, "inside.jpg"), "fixture");
+            File.WriteAllText(Path.Combine(outside.FullName, "outside.jpg"), "fixture");
+            alias = Path.Combine(root.FullName, "alias");
+            escape = Path.Combine(root.FullName, "escape");
+            cycle = Path.Combine(actual.FullName, "cycle");
+
             Directory.CreateSymbolicLink(alias, actual.FullName);
+            aliasCreated = true;
             Directory.CreateSymbolicLink(escape, outside.FullName);
+            escapeCreated = true;
             Directory.CreateSymbolicLink(cycle, root.FullName);
+            cycleCreated = true;
 
             var evidence = await new WindowsLocalScopePreflight().InspectAsync(
                 new ScopeSelection(root.FullName, ScopeRecursion.IncludeSubfolders),
@@ -144,19 +168,56 @@ public sealed class WindowsTraversalIntegrationTests
         }
         finally
         {
-            DeleteDirectoryLink(cycle);
-            DeleteDirectoryLink(alias);
-            DeleteDirectoryLink(escape);
-            root.Delete(recursive: true);
-            outside.Delete(recursive: true);
+            CleanupAll(
+                () =>
+                {
+                    if (cycleCreated)
+                    {
+                        DeleteDirectoryLink(cycle!);
+                    }
+                },
+                () =>
+                {
+                    if (aliasCreated)
+                    {
+                        DeleteDirectoryLink(alias!);
+                    }
+                },
+                () =>
+                {
+                    if (escapeCreated)
+                    {
+                        DeleteDirectoryLink(escape!);
+                    }
+                },
+                () => root.Delete(recursive: true),
+                () =>
+                {
+                    if (outside is not null)
+                    {
+                        outside.Delete(recursive: true);
+                    }
+                });
         }
     }
 
-    private static void DeleteDirectoryLink(string path)
+    private static void DeleteDirectoryLink(string path) => Directory.Delete(path);
+
+    private static void CleanupAll(params Action[] cleanupActions)
     {
-        if (Directory.Exists(path))
+        var failures = new List<Exception>();
+        foreach (var cleanupAction in cleanupActions)
         {
-            Directory.Delete(path);
+            var failure = Record.Exception(cleanupAction);
+            if (failure is not null)
+            {
+                failures.Add(failure);
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException("Fixture cleanup failed.", failures);
         }
     }
 }

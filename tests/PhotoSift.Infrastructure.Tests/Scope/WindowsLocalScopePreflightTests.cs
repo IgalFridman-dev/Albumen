@@ -270,7 +270,8 @@ public sealed class WindowsLocalScopePreflightTests
 
         Assert.Equal(new ScopeOutcomeCounts(0, 0, 0, 2), evidence.Counts);
         Assert.Equal(new[] { SupportedImageFormat.Heic }, native.CodecQueries);
-        Assert.Empty(native.ReadPaths);
+        Assert.Empty(native.ReadProbePaths);
+        Assert.Empty(native.ReadOpenPaths);
         Assert.Equal(2, Total(evidence.Counts));
     }
 
@@ -287,7 +288,8 @@ public sealed class WindowsLocalScopePreflightTests
 
         Assert.Equal(new ScopeOutcomeCounts(0, 1, 0, 0), evidence.Counts);
         Assert.Empty(native.CodecQueries);
-        Assert.Empty(native.ReadPaths);
+        Assert.Empty(native.ReadProbePaths);
+        Assert.Empty(native.ReadOpenPaths);
     }
 
     [Fact]
@@ -306,6 +308,30 @@ public sealed class WindowsLocalScopePreflightTests
 
         Assert.Equal(new ScopeOutcomeCounts(0, 0, 1, 0), evidence.Counts);
         Assert.Equal(1, Total(evidence.Counts));
+    }
+
+    [Fact]
+    public async Task FileReclassifiedAsSynchronizedBlocksWithoutReadOpenOrCompleteCounts()
+    {
+        const string path = @"C:\Resolved\Photos\changed.jpg";
+        var native = LocalRoot().AddFile(
+            @"C:\Resolved\Photos",
+            path,
+            cloud: ScopeCloudState.Local,
+            canRead: true,
+            readCloud: ScopeCloudState.Synchronized);
+        var adapter = new WindowsLocalScopePreflight(native);
+
+        var evidence = await adapter.InspectAsync(
+            Selection(ScopeRecursion.IncludeSubfolders),
+            CancellationToken.None);
+        var result = ScopePreflightPolicy.Evaluate(evidence);
+
+        Assert.Equal(ScopeCloudState.Synchronized, evidence.Cloud);
+        Assert.Equal(ScopeTraversalState.NotRun, evidence.Traversal);
+        Assert.Null(result.CompleteCounts);
+        Assert.Equal(path, Assert.Single(native.ReadProbePaths));
+        Assert.Empty(native.ReadOpenPaths);
     }
 
     [Theory]

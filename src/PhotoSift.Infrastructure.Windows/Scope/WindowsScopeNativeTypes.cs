@@ -18,6 +18,10 @@ internal sealed record WindowsScopeEntry(
     bool IsReparsePoint,
     ScopeCloudState CloudState);
 
+internal sealed record WindowsFileReadProbeResult(
+    ScopeCloudState CloudState,
+    bool CanOpenForRead);
+
 internal sealed class WindowsScopeNativeException(
     WindowsScopeFailureKind kind,
     string path,
