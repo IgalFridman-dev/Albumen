@@ -79,6 +79,37 @@ public sealed class WindowsLocalScopePreflightTests
         Assert.Equal(ResolvedRootOnly, native.EnumeratedPaths);
     }
 
+    [Theory]
+    [InlineData(ScopeCloudState.Synchronized)]
+    [InlineData(ScopeCloudState.Placeholder)]
+    [InlineData(ScopeCloudState.Unknown)]
+    public async Task TopLevelOnlyIgnoresOutOfScopeDescendantCloudState(
+        ScopeCloudState descendantCloud)
+    {
+        var child = @"C:\Resolved\Photos\CloudChild";
+        var native = LocalRoot()
+            .AddFile(@"C:\Resolved\Photos", @"C:\Resolved\Photos\direct.jpg")
+            .AddDirectory(
+                @"C:\Resolved\Photos",
+                child,
+                child,
+                FakeWindowsScopeNative.Identity(2),
+                entryCloud: descendantCloud,
+                directoryCloud: descendantCloud);
+        var adapter = new WindowsLocalScopePreflight(native);
+
+        var evidence = await adapter.InspectAsync(
+            Selection(ScopeRecursion.TopLevelOnly),
+            CancellationToken.None);
+
+        Assert.Equal(ScopeTraversalState.Complete, evidence.Traversal);
+        Assert.Equal(new ScopeOutcomeCounts(1, 0, 0, 0), evidence.Counts);
+        Assert.Equal(SelectedPathOnly, native.InspectedPaths);
+        Assert.Equal(ResolvedRootOnly, native.EnumeratedPaths);
+        Assert.DoesNotContain(child, native.InspectedPaths);
+        Assert.DoesNotContain(child, native.EnumeratedPaths);
+    }
+
     [Fact]
     public async Task DescendantAccessDeniedSuppressesOtherwiseCompleteCounts()
     {

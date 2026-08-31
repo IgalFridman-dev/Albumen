@@ -154,6 +154,12 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
                 foreach (var entry in native.EnumerateDirectory(directory.ResolvedPath))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (entry.IsDirectory &&
+                        selection.Recursion is ScopeRecursion.TopLevelOnly)
+                    {
+                        continue;
+                    }
+
                     if (entry.CloudState is not ScopeCloudState.Local)
                     {
                         return IncompleteEvidence(resolvedScope, volume, entry.CloudState);
@@ -162,11 +168,6 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
                     if (!entry.IsDirectory)
                     {
                         counts = CountFile(entry.Path, counts, codecAvailability);
-                        continue;
-                    }
-
-                    if (selection.Recursion is ScopeRecursion.TopLevelOnly)
-                    {
                         continue;
                     }
 
