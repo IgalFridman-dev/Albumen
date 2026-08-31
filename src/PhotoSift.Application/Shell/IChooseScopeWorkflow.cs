@@ -2,38 +2,17 @@ namespace PhotoSift.Application.Shell;
 
 public interface IChooseScopeWorkflow
 {
-    event EventHandler<ShellSnapshot>? SnapshotChanged
-    {
-        add { }
-        remove { }
-    }
+    event EventHandler<ShellSnapshot>? SnapshotChanged;
 
-    ShellSnapshot Current => throw new NotSupportedException(
-        "This temporary legacy workflow does not expose revisioned Scope state.");
+    ShellSnapshot Current { get; }
 
-    Task HandleAsync(ChooseScopeCommand command, CancellationToken cancellationToken) =>
-        Task.FromException(new NotSupportedException(
-            "This temporary legacy workflow does not handle revisioned Scope commands."));
+    Task HandleAsync(ChooseScopeCommand command, CancellationToken cancellationToken);
 
     Task HandleAsync(
         ChangeScopeRecursionCommand command,
-        CancellationToken cancellationToken) =>
-        Task.FromException(new NotSupportedException(
-            "This temporary legacy workflow does not handle revisioned Scope commands."));
+        CancellationToken cancellationToken);
 
     Task HandleAsync(
         RetryScopePreflightCommand command,
-        CancellationToken cancellationToken) =>
-        Task.FromException(new NotSupportedException(
-            "This temporary legacy workflow does not handle revisioned Scope commands."));
-
-    // Temporary compatibility for the pre-E1-S2 WPF consumer. Removed with its migration.
-    Task<ShellSnapshot> OpenAsync(
-        OpenChooseScopeCommand command,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(command);
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(Current);
-    }
+        CancellationToken cancellationToken);
 }
