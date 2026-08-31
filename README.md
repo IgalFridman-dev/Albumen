@@ -35,7 +35,7 @@ The project deliberately excludes cloud inference, accounts, telemetry, automati
 5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
 6. Stop at E1-S6 until the safety gate is explicitly recorded as `PASS`.
 
-The repository now contains the E1-S1 .NET 10/C# 14/WPF `win-x64` structural seed, its five test projects, and a network-disabled Windows Sandbox verification gate. Later-story behavior remains intentionally absent.
+The repository now contains the E1-S1 .NET 10/C# 14/WPF `win-x64` structural seed, its five test projects, and a NIC-free Golden Hyper-V VM verification gate. Later-story behavior remains intentionally absent.
 
 ## Repository layout
 
@@ -59,8 +59,22 @@ Local `.uv-cache-bmad-*` directories are disposable workflow caches and are not 
 
 The repository pins .NET SDK `10.0.400` and requires the .NET/Desktop `10.0.11` runtime family. The complete executable gate is:
 
+Provision the toolchain checkpoint once from an elevated PowerShell 7 window. This preserves `Clean-Evaluation-Base` and creates `Toolchain-Evaluation-Base`:
+
 ```powershell
-pwsh -NoProfile -File eng/sandbox/Invoke-PhotoSiftSandbox.ps1 -Stage Full
+pwsh -NoProfile -File eng/verification/Initialize-PhotoSiftGoldenVm.ps1
 ```
 
-Windows Sandbox is used because this development host's Application Control policy blocks unsigned locally built executables. The harness keeps networking disabled and does not weaken that host policy.
+Normal gates restore `Toolchain-Evaluation-Base` and copy only the project source:
+
+```powershell
+pwsh -NoProfile -File eng/verification/Invoke-PhotoSiftHyperV.ps1 -Stage Full
+```
+
+From an elevated PowerShell window, run all three local gates with one guest credential prompt:
+
+```powershell
+pwsh -NoProfile -File eng/verification/Invoke-PhotoSiftHyperVStages.ps1
+```
+
+The Golden Hyper-V VM is used because this development host's Application Control policy blocks unsigned locally built executables and Windows Sandbox also blocks the xUnit adapter. The VM has zero virtual NICs. `Clean-Evaluation-Base` remains the immutable recovery checkpoint; normal runs restore the additive toolchain checkpoint and do not weaken host or guest policy.

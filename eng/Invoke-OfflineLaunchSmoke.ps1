@@ -17,7 +17,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$modulePath = Join-Path $PSScriptRoot 'sandbox\PhotoSiftSandbox.psm1'
+$modulePath = Join-Path $PSScriptRoot 'verification\PhotoSiftVerification.psm1'
 Import-Module $modulePath -Force
 
 $activeNetworkAdapters = @(
