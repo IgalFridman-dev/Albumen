@@ -162,7 +162,120 @@ public static class AllowedFixture
         throw 'Windows PowerShell failure output did not identify direct System.Net usage.'
     }
 
-    Write-Output 'Passed: 11 Failed: 0'
+    $nativeInteropSourceRoot = Join-Path $testRoot 'native-interop-source'
+    $nativeInteropProjectPath = Join-Path $nativeInteropSourceRoot 'PhotoSift.Application'
+    [System.IO.Directory]::CreateDirectory($nativeInteropProjectPath) | Out-Null
+    @'
+using System.Runtime.InteropServices;
+
+public static partial class ForbiddenNativeInteropFixture
+{
+    [LibraryImport("kernel32.dll")]
+    internal static partial uint GetCurrentProcessId();
+}
+'@ | Set-Content -LiteralPath (Join-Path $nativeInteropProjectPath 'NativeInteropFixture.cs') -Encoding utf8
+
+    $nativeInteropResult = Invoke-BoundaryChecker `
+        -Arguments @(
+            '-DependencyManifestPath', $cleanManifestPath,
+            '-SourceRootPath', $nativeInteropSourceRoot) `
+        -OutputPrefix 'native-interop'
+    if ($nativeInteropResult.ExitCode -eq 0) {
+        throw 'Native interop outside Windows infrastructure fixture was incorrectly accepted.'
+    }
+    if ($nativeInteropResult.Output -notmatch [regex]::Escape(
+            'PhotoSift.Application\NativeInteropFixture.cs -> native interop outside Windows infrastructure')) {
+        throw 'Failure output did not identify the native interop path-policy violation.'
+    }
+
+    $filesystemInspectionSourceRoot = Join-Path $testRoot 'filesystem-inspection-source'
+    $filesystemInspectionProjectPath = Join-Path $filesystemInspectionSourceRoot 'PhotoSift.Application'
+    [System.IO.Directory]::CreateDirectory($filesystemInspectionProjectPath) | Out-Null
+    @'
+using Microsoft.Win32.SafeHandles;
+
+public static class ForbiddenFilesystemInspectionFixture
+{
+    public static void Inspect(SafeFileHandle handle) => _ = File.OpenHandle("fixture");
+}
+'@ | Set-Content -LiteralPath (Join-Path $filesystemInspectionProjectPath 'FilesystemInspectionFixture.cs') -Encoding utf8
+
+    $filesystemInspectionResult = Invoke-BoundaryChecker `
+        -Arguments @(
+            '-DependencyManifestPath', $cleanManifestPath,
+            '-SourceRootPath', $filesystemInspectionSourceRoot) `
+        -OutputPrefix 'filesystem-inspection'
+    if ($filesystemInspectionResult.ExitCode -eq 0) {
+        throw 'Direct filesystem inspection outside Windows infrastructure fixture was incorrectly accepted.'
+    }
+    if ($filesystemInspectionResult.Output -notmatch [regex]::Escape(
+            'PhotoSift.Application\FilesystemInspectionFixture.cs -> direct filesystem inspection outside Windows infrastructure')) {
+        throw 'Failure output did not identify the direct filesystem inspection path-policy violation.'
+    }
+
+    $folderPickerSourceRoot = Join-Path $testRoot 'folder-picker-source'
+    $folderPickerProjectPath = Join-Path $folderPickerSourceRoot 'PhotoSift.Application'
+    [System.IO.Directory]::CreateDirectory($folderPickerProjectPath) | Out-Null
+    @'
+public static class ForbiddenFolderPickerFixture
+{
+    public static object Create() => new OpenFolderDialog();
+}
+'@ | Set-Content -LiteralPath (Join-Path $folderPickerProjectPath 'FolderPickerFixture.cs') -Encoding utf8
+
+    $folderPickerResult = Invoke-BoundaryChecker `
+        -Arguments @(
+            '-DependencyManifestPath', $cleanManifestPath,
+            '-SourceRootPath', $folderPickerSourceRoot) `
+        -OutputPrefix 'folder-picker'
+    if ($folderPickerResult.ExitCode -eq 0) {
+        throw 'Folder picker outside App fixture was incorrectly accepted.'
+    }
+    if ($folderPickerResult.Output -notmatch [regex]::Escape(
+            'PhotoSift.Application\FolderPickerFixture.cs -> folder picker outside App')) {
+        throw 'Failure output did not identify the folder picker path-policy violation.'
+    }
+
+    $allowedPathPolicySourceRoot = Join-Path $testRoot 'allowed-path-policy-source'
+    $allowedWindowsInfrastructurePath = Join-Path `
+        $allowedPathPolicySourceRoot `
+        'PhotoSift.Infrastructure.Windows'
+    [System.IO.Directory]::CreateDirectory($allowedWindowsInfrastructurePath) | Out-Null
+    @'
+using Microsoft.Win32.SafeHandles;
+using System.Runtime.InteropServices;
+
+public static partial class AllowedWindowsInfrastructureFixture
+{
+    [LibraryImport("kernel32.dll")]
+    internal static partial uint GetCurrentProcessId();
+
+    public static IEnumerable<string> Enumerate(string path) =>
+        Directory.EnumerateFileSystemEntries(path);
+
+    public static void Inspect(SafeFileHandle handle) => _ = File.OpenHandle("fixture");
+}
+'@ | Set-Content -LiteralPath (
+        Join-Path $allowedWindowsInfrastructurePath 'AllowedWindowsInfrastructureFixture.cs') -Encoding utf8
+    $allowedAppPath = Join-Path $allowedPathPolicySourceRoot 'PhotoSift.App'
+    [System.IO.Directory]::CreateDirectory($allowedAppPath) | Out-Null
+    @'
+public static class AllowedAppFixture
+{
+    public static object Create() => new OpenFolderDialog();
+}
+'@ | Set-Content -LiteralPath (Join-Path $allowedAppPath 'AllowedAppFixture.cs') -Encoding utf8
+
+    $allowedPathPolicyResult = Invoke-BoundaryChecker `
+        -Arguments @(
+            '-DependencyManifestPath', $cleanManifestPath,
+            '-SourceRootPath', $allowedPathPolicySourceRoot) `
+        -OutputPrefix 'allowed-path-policy'
+    if ($allowedPathPolicyResult.ExitCode -ne 0) {
+        throw "Allowed path-policy fixture failed: $($allowedPathPolicyResult.Output)"
+    }
+
+    Write-Output 'Passed: 15 Failed: 0'
 }
 finally {
     Remove-Item -Recurse -Force -LiteralPath $testRoot -ErrorAction SilentlyContinue
