@@ -53,7 +53,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged
             parameter => ReplaceScopeOperationAsync(
                 cancellationToken => this.chooseScopeWorkflow.HandleAsync(
                     new ChangeScopeRecursionCommand(RequireBoolean(parameter)),
-                    cancellationToken)),
+                    cancellationToken),
+                isNeutral: () => IsSameValueRecursion(parameter)),
             allowConcurrentExecutions: true);
         this.chooseScopeWorkflow.SnapshotChanged += OnSnapshotChanged;
         Apply(this.chooseScopeWorkflow.Current);
@@ -300,8 +301,21 @@ public sealed class ShellViewModel : INotifyPropertyChanged
                 "Recursion command requires a Boolean parameter.",
                 nameof(parameter));
 
+    private bool IsSameValueRecursion(object? parameter)
+    {
+        if (parameter is not bool includeSubfolders)
+        {
+            return false;
+        }
+
+        var selection = chooseScopeWorkflow.Current.Selection;
+        return selection is not null &&
+            ProjectRecursion(selection) == includeSubfolders;
+    }
+
     private async Task ReplaceScopeOperationAsync(
-        Func<CancellationToken, Task> operation)
+        Func<CancellationToken, Task> operation,
+        Func<bool>? isNeutral = null)
     {
         ArgumentNullException.ThrowIfNull(operation);
 
@@ -311,12 +325,29 @@ public sealed class ShellViewModel : INotifyPropertyChanged
             ScopeOperationCancellation? preceding;
             lock (scopeOperationGate)
             {
+                if (isNeutral?.Invoke() is true)
+                {
+                    return;
+                }
+
                 preceding = currentScopeOperation;
                 currentScopeOperation = owner;
             }
 
             preceding?.Cancel();
-            await operation(owner.Token);
+
+            Task execution;
+            lock (scopeOperationGate)
+            {
+                if (!ReferenceEquals(currentScopeOperation, owner))
+                {
+                    return;
+                }
+
+                execution = operation(owner.Token);
+            }
+
+            await execution;
         }
         finally
         {

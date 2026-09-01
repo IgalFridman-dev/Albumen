@@ -335,6 +335,75 @@ public sealed class ScopeProjectionTests
         Assert.All(viewModel.Phases.Skip(1), phase => Assert.False(phase.IsAvailable));
     }
 
+    [Fact]
+    public async Task ReentrantCancellationReplacementKeepsTheNewestResultCurrent()
+    {
+        const string path = @"C:\Photos";
+        ShellViewModel? viewModel = null;
+        var preflight = new ReentrantReplacementPreflight(
+            () => viewModel!.ChangeRecursionCommand.ExecuteAsync(true));
+        var workflow = new ChooseScopeWorkflow(
+            new SequenceFolderPicker(path),
+            preflight);
+        viewModel = new ShellViewModel(workflow);
+
+        var firstOperation = viewModel.ChooseScopeCommand.ExecuteAsync();
+        await preflight.FirstStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+
+        var supersededOperation = viewModel.RetryScopeCommand.ExecuteAsync();
+        await preflight.ReplacementStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        preflight.ReplacementCompletion.SetResult(
+            ReadyEvidence(path, ScopeRecursion.IncludeSubfolders));
+
+        var newestOperation = Assert.IsAssignableFrom<Task>(
+            preflight.ReplacementOperation);
+        await Task.WhenAll(
+            firstOperation,
+            supersededOperation,
+            newestOperation);
+
+        Assert.True(viewModel.IsReady);
+        Assert.Equal(path, viewModel.ResolvedPath);
+        Assert.Equal(ScopeSessionState.Ready, workflow.Current.ScopeState);
+        Assert.Equal(
+            ScopeRecursion.IncludeSubfolders,
+            workflow.Current.Selection?.Recursion);
+        Assert.Equal(2, workflow.Current.Revision);
+    }
+
+    [Fact]
+    public async Task SameValueRecursionDuringCheckingLeavesActivePreflightRunning()
+    {
+        const string path = @"C:\Photos";
+        var preflight = new CompletablePreflight();
+        var workflow = new ChooseScopeWorkflow(
+            new SequenceFolderPicker(path),
+            preflight);
+        var viewModel = new ShellViewModel(workflow);
+
+        var activeOperation = viewModel.ChooseScopeCommand.ExecuteAsync();
+        await preflight.Started.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+
+        await viewModel.ChangeRecursionCommand.ExecuteAsync(false);
+        preflight.Completion.SetResult(
+            ReadyEvidence(path, ScopeRecursion.TopLevelOnly));
+        await activeOperation;
+
+        Assert.True(viewModel.IsReady);
+        Assert.Equal(path, viewModel.ResolvedPath);
+        Assert.Equal(ScopeSessionState.Ready, workflow.Current.ScopeState);
+        Assert.Equal(
+            ScopeRecursion.TopLevelOnly,
+            workflow.Current.Selection?.Recursion);
+        Assert.Equal(1, workflow.Current.Revision);
+    }
+
     private static ShellSnapshot ColdSnapshot() =>
         new(
             InitialWorkflow.Create(),
@@ -525,6 +594,77 @@ public sealed class ScopeProjectionTests
         {
             cleanupCancellation.Cancel();
             cleanupCancellation.Dispose();
+        }
+    }
+
+    private sealed class ReentrantReplacementPreflight(
+        Func<Task> launchReplacement)
+        : ILocalScopePreflight
+    {
+        private readonly TaskCompletionSource<bool> firstCancellation =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int invocationCount;
+
+        public TaskCompletionSource<bool> FirstStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ReplacementStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<ScopePreflightEvidence> ReplacementCompletion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task? ReplacementOperation { get; private set; }
+
+        public async Task<ScopePreflightEvidence> InspectAsync(
+            ScopeSelection selection,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var invocation = Interlocked.Increment(ref invocationCount);
+            if (invocation == 1)
+            {
+                FirstStarted.TrySetResult(true);
+                using var registration = cancellationToken.Register(() =>
+                {
+                    try
+                    {
+                        ReplacementOperation = launchReplacement();
+                    }
+                    finally
+                    {
+                        firstCancellation.TrySetResult(true);
+                    }
+                });
+                await firstCancellation.Task;
+                throw new OperationCanceledException(cancellationToken);
+            }
+
+            if (invocation == 2)
+            {
+                ReplacementStarted.TrySetResult(true);
+                return await ReplacementCompletion.Task.WaitAsync(cancellationToken);
+            }
+
+            throw new InvalidOperationException(
+                $"Unexpected preflight invocation: {invocation}.");
+        }
+    }
+
+    private sealed class CompletablePreflight : ILocalScopePreflight
+    {
+        public TaskCompletionSource<bool> Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<ScopePreflightEvidence> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<ScopePreflightEvidence> InspectAsync(
+            ScopeSelection selection,
+            CancellationToken cancellationToken)
+        {
+            Started.TrySetResult(true);
+            return await Completion.Task.WaitAsync(cancellationToken);
         }
     }
 
