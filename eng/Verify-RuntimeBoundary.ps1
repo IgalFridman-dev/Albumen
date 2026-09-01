@@ -122,7 +122,8 @@ function Assert-NoForbiddenProductionApis {
 
         $isWindowsInfrastructure = $relativePath -like 'PhotoSift.Infrastructure.Windows\*'
         $isApp = $relativePath -like 'PhotoSift.App\*'
-        if ($source -match '\[(?:LibraryImport|DllImport)\b' -and -not $isWindowsInfrastructure) {
+        if ($source -match '\[\s*(?:(?:global\s*::\s*)?System\s*\.\s*Runtime\s*\.\s*InteropServices\s*\.\s*)?(?:LibraryImport|DllImport)(?:Attribute)?\b' -and
+            -not $isWindowsInfrastructure) {
             $violations.Add("$relativePath -> native interop outside Windows infrastructure")
         }
         if ($source -match '\b(?:Directory\.EnumerateFileSystemEntries|File\.OpenHandle|SafeFileHandle)\b' -and
