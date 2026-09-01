@@ -25,6 +25,23 @@ public sealed class ScopePreflightPolicyTests
     }
 
     [Theory]
+    [InlineData(ScopeVolumeKind.Fixed, ScopeCloudState.Local, ScopePreflightDecision.Ready)]
+    [InlineData(ScopeVolumeKind.Removable, ScopeCloudState.Local, ScopePreflightDecision.Ready)]
+    [InlineData(ScopeVolumeKind.Fixed, ScopeCloudState.Placeholder, ScopePreflightDecision.Blocked)]
+    [InlineData(ScopeVolumeKind.Removable, ScopeCloudState.Placeholder, ScopePreflightDecision.Blocked)]
+    public void EvaluateRetainsVerifiedVolumeForReadyAndBlockedResults(
+        ScopeVolumeKind volume,
+        ScopeCloudState cloud,
+        ScopePreflightDecision expectedDecision)
+    {
+        var result = ScopePreflightPolicy.Evaluate(
+            Evidence(volume, cloud, ScopeTraversalState.Complete));
+
+        Assert.Equal(expectedDecision, result.Decision);
+        Assert.Equal(volume, result.Volume);
+    }
+
+    [Theory]
     [InlineData(ScopeVolumeKind.Unavailable, ScopeBlockingReason.UnavailableRoot)]
     [InlineData(ScopeVolumeKind.Remote, ScopeBlockingReason.NonLocalRoot)]
     [InlineData(ScopeVolumeKind.Unsupported, ScopeBlockingReason.UnsupportedRoot)]
@@ -98,7 +115,11 @@ public sealed class ScopePreflightPolicyTests
     public void EvaluateDeduplicatesUnknownSafetyBlockers()
     {
         var result = ScopePreflightPolicy.Evaluate(
-            Evidence(ScopeVolumeKind.Unknown, ScopeCloudState.Unknown, ScopeTraversalState.Unknown));
+            Evidence(
+                ScopeVolumeKind.Unknown,
+                ScopeCloudState.Unknown,
+                ScopeTraversalState.Unknown,
+                includeScope: false));
 
         Assert.Equal(
             new[] { ScopeBlockingReason.UnknownSafety },
@@ -142,7 +163,7 @@ public sealed class ScopePreflightPolicyTests
     }
 
     [Fact]
-    public void EvaluateRequiresAResolvedScopeForReady()
+    public void EvaluateRequiresAResolvedScopeAndExplainsUnknownSafety()
     {
         var result = ScopePreflightPolicy.Evaluate(
             Evidence(
@@ -153,7 +174,9 @@ public sealed class ScopePreflightPolicyTests
 
         Assert.Equal(ScopePreflightDecision.Blocked, result.Decision);
         Assert.Null(result.CompleteCounts);
-        Assert.Empty(result.BlockingReasons);
+        Assert.Equal(
+            new[] { ScopeBlockingReason.UnknownSafety },
+            result.BlockingReasons);
     }
 
     [Fact]

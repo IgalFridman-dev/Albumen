@@ -38,6 +38,15 @@ public sealed class ScopeValueTests
     }
 
     [Fact]
+    public void ScopeSelectionRejectsUndefinedRecursion()
+    {
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ScopeSelection(@"C:\Photos", (ScopeRecursion)999));
+
+        Assert.Equal("recursion", exception.ParamName);
+    }
+
+    [Fact]
     public void DirectoryIdentityRetainsTheNativeDirectoryIdentityValues()
     {
         var identity = new DirectoryIdentity(1, 2, 3);

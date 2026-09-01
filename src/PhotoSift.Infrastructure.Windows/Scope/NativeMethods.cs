@@ -13,6 +13,8 @@ internal static partial class NativeMethods
     internal const uint FileAttributeReparsePoint = 0x00000400;
     internal const uint FileAttributeRecallOnOpen = 0x00040000;
     internal const uint FileAttributeRecallOnDataAccess = 0x00400000;
+    internal const uint FileFlagOpenNoRecall = 0x00100000;
+    internal const uint FileFlagOpenReparsePoint = 0x00200000;
     internal const uint FileFlagBackupSemantics = 0x02000000;
 
     internal const uint DriveUnknown = 0;

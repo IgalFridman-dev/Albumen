@@ -89,7 +89,7 @@ function Assert-NoForbiddenProductionApis {
     }
 
     $sourceFiles = @(
-        Get-ChildItem -Recurse -File -Filter '*.cs' -LiteralPath $resolvedRootPath |
+        Get-ChildItem -Recurse -Force -File -Filter '*.cs' -LiteralPath $resolvedRootPath |
             Where-Object { $_.FullName -notmatch '[\\/](?:bin|obj)[\\/]' } |
             Sort-Object FullName)
     if ($sourceFiles.Count -eq 0) {

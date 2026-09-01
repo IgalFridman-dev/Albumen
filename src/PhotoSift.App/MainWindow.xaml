@@ -143,7 +143,7 @@
                             Margin="0,14,0,0"
                             Padding="14"
                             Focusable="True"
-                            AutomationProperties.Name="Scope blocked"
+                            AutomationProperties.Name="{Binding BlockingNoticeAutomationName}"
                             Background="{DynamicResource {x:Static SystemColors.InfoBrushKey}}"
                             BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                             BorderThickness="1"

@@ -129,6 +129,39 @@ public sealed class WindowsScopeNativeTests
         }
     }
 
+    [Fact]
+    public void FileReadProbeOpensOrdinaryFilesButRejectsEscapingSymbolicLinks()
+    {
+        var root = Directory.CreateTempSubdirectory("PhotoSiftReadProbe-");
+        var outside = Directory.CreateTempSubdirectory("PhotoSiftReadProbeOutside-");
+        var ordinaryPath = Path.Combine(root.FullName, "ordinary.jpg");
+        var targetPath = Path.Combine(outside.FullName, "target.jpg");
+        var linkPath = Path.Combine(root.FullName, "escape.jpg");
+        var linkCreated = false;
+
+        try
+        {
+            File.WriteAllText(ordinaryPath, "fixture");
+            File.WriteAllText(targetPath, "fixture");
+            File.CreateSymbolicLink(linkPath, targetPath);
+            linkCreated = true;
+            var probe = new WindowsFileReadProbe();
+
+            Assert.True(probe.TryOpenForRead(ordinaryPath));
+            Assert.False(probe.TryOpenForRead(linkPath));
+        }
+        finally
+        {
+            if (linkCreated)
+            {
+                File.Delete(linkPath);
+            }
+
+            root.Delete(recursive: true);
+            outside.Delete(recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData(ScopeCloudState.Local, true, 1)]
     [InlineData(ScopeCloudState.Synchronized, false, 0)]

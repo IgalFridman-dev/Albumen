@@ -20,12 +20,16 @@ namespace PhotoSift.Scenarios.Tests.Shell;
 
 public sealed class WpfScopeAccessibilityTests
 {
-    [Fact]
-    public void ReadySurfaceUsesAccessibleBuiltInControlsAndSystemPresentation()
+    [Theory]
+    [InlineData(ScopeVolumeKind.Fixed, "Fixed")]
+    [InlineData(ScopeVolumeKind.Removable, "Removable")]
+    public void ReadySurfaceUsesAccessibleBuiltInControlsAndSystemPresentation(
+        ScopeVolumeKind volume,
+        string expectedVolumeValue)
     {
         RunOnSta(() =>
         {
-            var workflow = new PublishingChooseScopeWorkflow(ReadySnapshot());
+            var workflow = new PublishingChooseScopeWorkflow(ReadySnapshot(volume));
             var viewModel = new ShellViewModel(workflow);
             var window = new MainWindow { DataContext = viewModel };
             try
@@ -62,7 +66,11 @@ public sealed class WpfScopeAccessibilityTests
                 Assert.Equal("Rule Set: Not configured", ruleSet.Text);
                 Assert.Equal("Include subfolders", AutomationProperties.GetName(recursion));
                 Assert.True(recursion.IsChecked);
-                Assert.Equal(6, summary.Items.Count);
+                Assert.Equal(7, summary.Items.Count);
+                var volumeSummary = Assert.IsType<ScopeSummaryItemViewModel>(
+                    summary.Items[0]);
+                Assert.Equal("Local drive type", volumeSummary.Label);
+                Assert.Equal(expectedVolumeValue, volumeSummary.Value);
                 Assert.Equal(Visibility.Collapsed, blocking.Visibility);
 
                 AssertSystemBrushesRemainDynamic(window);
@@ -131,6 +139,7 @@ public sealed class WpfScopeAccessibilityTests
                 Assert.Equal(
                     "Choose another folder",
                     AutomationProperties.GetName(choose));
+                Assert.True(choose.IsEnabled);
             }
             finally
             {
@@ -252,7 +261,9 @@ public sealed class WpfScopeAccessibilityTests
 
                 Assert.Equal("Blocked", status.Text);
                 Assert.Equal(Visibility.Visible, blocking.Visibility);
-                Assert.Equal("Scope blocked", AutomationProperties.GetName(blocking));
+                Assert.Equal(
+                    "Choose a folder on a local drive.",
+                    AutomationProperties.GetName(blocking));
                 Assert.True(blocking.IsKeyboardFocusWithin);
                 Assert.True(retry.IsEnabled);
                 Assert.True(retry.Focusable);
@@ -443,20 +454,22 @@ public sealed class WpfScopeAccessibilityTests
             new ScopeSelection(@"C:\Photos", recursion),
             Revision: 1);
 
-    private static ShellSnapshot ReadySnapshot()
+    private static ShellSnapshot ReadySnapshot(
+        ScopeVolumeKind volume = ScopeVolumeKind.Fixed)
     {
         var selection = new ScopeSelection(
             @"C:\Photos",
             ScopeRecursion.IncludeSubfolders);
         var result = new ScopePreflightResult(
-            ScopePreflightDecision.Ready,
-            new ResolvedScope(
+            Decision: ScopePreflightDecision.Ready,
+            Scope: new ResolvedScope(
                 selection,
                 @"\\?\C:\Photos",
                 new DirectoryIdentity(1, 2, 3)),
-            new ScopeOutcomeCounts(12, 3, 4, 5),
-            new ScopeRestrictionCounts(6, 7),
-            ImmutableArray<ScopeBlockingReason>.Empty);
+            Volume: volume,
+            CompleteCounts: new ScopeOutcomeCounts(12, 3, 4, 5),
+            Restrictions: new ScopeRestrictionCounts(6, 7),
+            BlockingReasons: ImmutableArray<ScopeBlockingReason>.Empty);
         return new ShellSnapshot(
             InitialWorkflow.Create(),
             "Scope is ready.",
@@ -473,14 +486,15 @@ public sealed class WpfScopeAccessibilityTests
             @"C:\Photos",
             ScopeRecursion.IncludeSubfolders);
         var result = new ScopePreflightResult(
-            ScopePreflightDecision.Blocked,
-            new ResolvedScope(
+            Decision: ScopePreflightDecision.Blocked,
+            Scope: new ResolvedScope(
                 selection,
                 @"\\?\C:\Photos",
                 new DirectoryIdentity(1, 2, 3)),
-            null,
-            new ScopeRestrictionCounts(0, 0),
-            ImmutableArray.Create(ScopeBlockingReason.NonLocalRoot));
+            Volume: ScopeVolumeKind.Remote,
+            CompleteCounts: null,
+            Restrictions: new ScopeRestrictionCounts(0, 0),
+            BlockingReasons: ImmutableArray.Create(ScopeBlockingReason.NonLocalRoot));
         return new ShellSnapshot(
             InitialWorkflow.Create(),
             "Scope is blocked.",

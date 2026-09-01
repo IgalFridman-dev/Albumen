@@ -160,15 +160,19 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
                         continue;
                     }
 
-                    if (entry.CloudState is not ScopeCloudState.Local)
-                    {
-                        return IncompleteEvidence(resolvedScope, volume, entry.CloudState);
-                    }
-
                     if (!entry.IsDirectory)
                     {
+                        if (entry.CloudState is not ScopeCloudState.Local)
+                        {
+                            return IncompleteEvidence(
+                                resolvedScope,
+                                volume,
+                                entry.CloudState);
+                        }
+
                         var fileResult = CountFile(
                             entry.Path,
+                            entry.IsReparsePoint,
                             counts,
                             codecAvailability);
                         if (fileResult.CloudState is not ScopeCloudState.Local)
@@ -226,17 +230,22 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
                             restrictions);
                     }
 
-                    if (child.CloudState is not ScopeCloudState.Local)
-                    {
-                        return IncompleteEvidence(resolvedScope, volume, child.CloudState);
-                    }
-
                     if (!ScopePathContainment.Contains(root.ResolvedPath, child.ResolvedPath))
                     {
                         restrictions = new ScopeRestrictionCounts(
                             restrictions.EscapingReparseTargets + 1,
                             restrictions.DuplicateDirectoryIdentities);
                         continue;
+                    }
+
+                    if (entry.CloudState is not ScopeCloudState.Local)
+                    {
+                        return IncompleteEvidence(resolvedScope, volume, entry.CloudState);
+                    }
+
+                    if (child.CloudState is not ScopeCloudState.Local)
+                    {
+                        return IncompleteEvidence(resolvedScope, volume, child.CloudState);
                     }
 
                     if (!visited.Add(child.Identity))
@@ -342,6 +351,7 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
 
     private FileCountResult CountFile(
         string path,
+        bool isReparsePoint,
         ScopeOutcomeCounts counts,
         Dictionary<SupportedImageFormat, bool> codecAvailability)
     {
@@ -353,6 +363,17 @@ public sealed class WindowsLocalScopePreflight : ILocalScopePreflight
                     counts.Supported,
                     counts.UnsupportedExtension + 1,
                     counts.Unreadable,
+                    counts.CodecUnavailable),
+                ScopeCloudState.Local);
+        }
+
+        if (isReparsePoint)
+        {
+            return new FileCountResult(
+                new ScopeOutcomeCounts(
+                    counts.Supported,
+                    counts.UnsupportedExtension,
+                    counts.Unreadable + 1,
                     counts.CodecUnavailable),
                 ScopeCloudState.Local);
         }

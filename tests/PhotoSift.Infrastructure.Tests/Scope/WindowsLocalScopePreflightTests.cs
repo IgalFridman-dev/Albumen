@@ -178,6 +178,46 @@ public sealed class WindowsLocalScopePreflightTests
         Assert.DoesNotContain(escapeResolved, native.EnumeratedPaths);
     }
 
+    [Theory]
+    [InlineData(ScopeCloudState.Synchronized, ScopeCloudState.Local)]
+    [InlineData(ScopeCloudState.Placeholder, ScopeCloudState.Local)]
+    [InlineData(ScopeCloudState.Unknown, ScopeCloudState.Local)]
+    [InlineData(ScopeCloudState.Local, ScopeCloudState.Synchronized)]
+    [InlineData(ScopeCloudState.Local, ScopeCloudState.Placeholder)]
+    [InlineData(ScopeCloudState.Local, ScopeCloudState.Unknown)]
+    public async Task EscapingDirectoryCloudEvidenceIsIgnoredAfterContainmentFails(
+        ScopeCloudState entryCloud,
+        ScopeCloudState directoryCloud)
+    {
+        const string escapeDisplay = @"C:\Resolved\Photos\Escape";
+        const string escapeResolved = @"C:\Outside";
+        var native = LocalRoot()
+            .AddFile(@"C:\Resolved\Photos", @"C:\Resolved\Photos\inside.jpg")
+            .AddDirectory(
+                @"C:\Resolved\Photos",
+                escapeDisplay,
+                escapeResolved,
+                FakeWindowsScopeNative.Identity(2),
+                entryCloud,
+                directoryCloud,
+                isReparsePoint: true)
+            .AddFile(escapeResolved, @"C:\Outside\outside.jpg");
+        var adapter = new WindowsLocalScopePreflight(native);
+
+        var evidence = await adapter.InspectAsync(
+            Selection(ScopeRecursion.IncludeSubfolders),
+            CancellationToken.None);
+        var result = ScopePreflightPolicy.Evaluate(evidence);
+
+        Assert.Equal(ScopeCloudState.Local, evidence.Cloud);
+        Assert.Equal(ScopeTraversalState.Complete, evidence.Traversal);
+        Assert.Equal(new ScopeOutcomeCounts(1, 0, 0, 0), evidence.Counts);
+        Assert.Equal(1, evidence.Restrictions.EscapingReparseTargets);
+        Assert.Equal(ScopePreflightDecision.Ready, result.Decision);
+        Assert.Contains(escapeDisplay, native.InspectedPaths);
+        Assert.DoesNotContain(escapeResolved, native.EnumeratedPaths);
+    }
+
     [Fact]
     public async Task ContainedAliasesEnumerateOneNativeDirectoryIdentity()
     {
@@ -280,6 +320,46 @@ public sealed class WindowsLocalScopePreflightTests
     {
         var path = @"C:\Resolved\Photos\notes.txt";
         var native = LocalRoot().AddFile(@"C:\Resolved\Photos", path);
+        var adapter = new WindowsLocalScopePreflight(native);
+
+        var evidence = await adapter.InspectAsync(
+            Selection(ScopeRecursion.IncludeSubfolders),
+            CancellationToken.None);
+
+        Assert.Equal(new ScopeOutcomeCounts(0, 1, 0, 0), evidence.Counts);
+        Assert.Empty(native.CodecQueries);
+        Assert.Empty(native.ReadProbePaths);
+        Assert.Empty(native.ReadOpenPaths);
+    }
+
+    [Fact]
+    public async Task RecognizedFileReparsePointIsUnreadableWithoutCodecOrReadProbe()
+    {
+        const string path = @"C:\Resolved\Photos\escape.jpg";
+        var native = LocalRoot().AddFile(
+            @"C:\Resolved\Photos",
+            path,
+            isReparsePoint: true);
+        var adapter = new WindowsLocalScopePreflight(native);
+
+        var evidence = await adapter.InspectAsync(
+            Selection(ScopeRecursion.IncludeSubfolders),
+            CancellationToken.None);
+
+        Assert.Equal(new ScopeOutcomeCounts(0, 0, 1, 0), evidence.Counts);
+        Assert.Empty(native.CodecQueries);
+        Assert.Empty(native.ReadProbePaths);
+        Assert.Empty(native.ReadOpenPaths);
+    }
+
+    [Fact]
+    public async Task UnrecognizedFileReparsePointRemainsUnsupportedWithoutReadProbe()
+    {
+        const string path = @"C:\Resolved\Photos\escape.txt";
+        var native = LocalRoot().AddFile(
+            @"C:\Resolved\Photos",
+            path,
+            isReparsePoint: true);
         var adapter = new WindowsLocalScopePreflight(native);
 
         var evidence = await adapter.InspectAsync(

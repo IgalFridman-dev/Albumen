@@ -16,6 +16,14 @@ public sealed record ScopeSelection
             throw new ArgumentException("Scope path must be fully qualified.", nameof(selectedPath));
         }
 
+        if (!Enum.IsDefined(recursion))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(recursion),
+                recursion,
+                "Scope recursion must be a defined value.");
+        }
+
         SelectedPath = selectedPath;
         Recursion = recursion;
     }

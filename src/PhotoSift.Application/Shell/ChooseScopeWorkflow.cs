@@ -129,18 +129,21 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
         long revision,
         CancellationToken cancellationToken)
     {
+        ScopePreflightEvidence evidence;
         try
         {
-            var evidence = await preflight
+            evidence = await preflight
                 .InspectAsync(selection, cancellationToken)
                 .ConfigureAwait(false);
-            var result = ScopePreflightPolicy.Evaluate(evidence);
-            PublishIfCurrent(revision, CreateCompleted(selection, result, revision));
         }
         catch (OperationCanceledException)
         {
             PublishIfCurrent(revision, CreateCanceled(selection, revision));
+            return;
         }
+
+        var result = ScopePreflightPolicy.Evaluate(evidence);
+        PublishIfCurrent(revision, CreateCompleted(selection, result, revision));
     }
 
     private (long Revision, bool ShouldDeliver) BeginPreflight(

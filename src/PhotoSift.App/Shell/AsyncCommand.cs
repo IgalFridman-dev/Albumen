@@ -5,22 +5,29 @@ namespace PhotoSift.App.Shell;
 public sealed class AsyncCommand : ICommand
 {
     private readonly Func<object?, Task> execute;
-    private bool isExecuting;
+    private readonly bool allowConcurrentExecutions;
+    private int executionCount;
 
-    public AsyncCommand(Func<Task> execute)
-        : this(_ => execute())
+    public AsyncCommand(
+        Func<Task> execute,
+        bool allowConcurrentExecutions = false)
+        : this(_ => execute(), allowConcurrentExecutions)
     {
         ArgumentNullException.ThrowIfNull(execute);
     }
 
-    public AsyncCommand(Func<object?, Task> execute)
+    public AsyncCommand(
+        Func<object?, Task> execute,
+        bool allowConcurrentExecutions = false)
     {
         this.execute = execute ?? throw new ArgumentNullException(nameof(execute));
+        this.allowConcurrentExecutions = allowConcurrentExecutions;
     }
 
     public event EventHandler? CanExecuteChanged;
 
-    public bool CanExecute(object? parameter) => !isExecuting;
+    public bool CanExecute(object? parameter) =>
+        allowConcurrentExecutions || Volatile.Read(ref executionCount) == 0;
 
     public async void Execute(object? parameter) => await ExecuteAsync(parameter);
 
@@ -28,12 +35,11 @@ public sealed class AsyncCommand : ICommand
 
     public async Task ExecuteAsync(object? parameter)
     {
-        if (!CanExecute(parameter))
+        if (!TryBeginExecution())
         {
             return;
         }
 
-        isExecuting = true;
         CanExecuteChanged?.Invoke(this, EventArgs.Empty);
         try
         {
@@ -41,8 +47,19 @@ public sealed class AsyncCommand : ICommand
         }
         finally
         {
-            isExecuting = false;
+            Interlocked.Decrement(ref executionCount);
             CanExecuteChanged?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    private bool TryBeginExecution()
+    {
+        if (allowConcurrentExecutions)
+        {
+            Interlocked.Increment(ref executionCount);
+            return true;
+        }
+
+        return Interlocked.CompareExchange(ref executionCount, 1, 0) == 0;
     }
 }

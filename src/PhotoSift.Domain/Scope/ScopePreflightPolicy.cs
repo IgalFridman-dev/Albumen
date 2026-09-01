@@ -17,12 +17,18 @@ public static class ScopePreflightPolicy
             blockers.Add(ScopeBlockingReason.UnknownSafety);
         }
 
+        if (evidence.Scope is null)
+        {
+            blockers.Add(ScopeBlockingReason.UnknownSafety);
+        }
+
         var ordered = blockers.Distinct().OrderBy(reason => (int)reason).ToImmutableArray();
         var ready = ordered.IsEmpty && evidence.Scope is not null &&
             evidence.Traversal is ScopeTraversalState.Complete;
         return new ScopePreflightResult(
             ready ? ScopePreflightDecision.Ready : ScopePreflightDecision.Blocked,
             evidence.Scope,
+            evidence.Volume,
             ready ? evidence.Counts : null,
             evidence.Restrictions,
             ordered);

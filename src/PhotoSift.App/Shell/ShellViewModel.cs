@@ -12,10 +12,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged
 {
     private readonly IChooseScopeWorkflow chooseScopeWorkflow;
     private readonly SynchronizationContext? synchronizationContext;
+    private readonly object scopeOperationGate = new();
+    private ScopeOperationCancellation? currentScopeOperation;
     private ShellSnapshot? currentSnapshot;
     private ImmutableArray<PhaseItemViewModel> phases = [];
     private ImmutableArray<ScopeSummaryItemViewModel> scopeSummary = [];
     private ImmutableArray<string> blockingReasons = [];
+    private string blockingNoticeAutomationName = "Scope blocked";
     private string instruction = string.Empty;
     private string scopeStatus = string.Empty;
     private string selectedPath = string.Empty;
@@ -35,17 +38,23 @@ public sealed class ShellViewModel : INotifyPropertyChanged
             ?? throw new ArgumentNullException(nameof(chooseScopeWorkflow));
         synchronizationContext = SynchronizationContext.Current;
         ChooseScopeCommand = new AsyncCommand(
-            () => this.chooseScopeWorkflow.HandleAsync(
-                new ChooseScopeCommand(),
-                CancellationToken.None));
+            () => ReplaceScopeOperationAsync(
+                cancellationToken => this.chooseScopeWorkflow.HandleAsync(
+                    new ChooseScopeCommand(),
+                    cancellationToken)),
+            allowConcurrentExecutions: true);
         RetryScopeCommand = new AsyncCommand(
-            () => this.chooseScopeWorkflow.HandleAsync(
-                new RetryScopePreflightCommand(),
-                CancellationToken.None));
+            () => ReplaceScopeOperationAsync(
+                cancellationToken => this.chooseScopeWorkflow.HandleAsync(
+                    new RetryScopePreflightCommand(),
+                    cancellationToken)),
+            allowConcurrentExecutions: true);
         ChangeRecursionCommand = new AsyncCommand(
-            parameter => this.chooseScopeWorkflow.HandleAsync(
-                new ChangeScopeRecursionCommand(RequireBoolean(parameter)),
-                CancellationToken.None));
+            parameter => ReplaceScopeOperationAsync(
+                cancellationToken => this.chooseScopeWorkflow.HandleAsync(
+                    new ChangeScopeRecursionCommand(RequireBoolean(parameter)),
+                    cancellationToken)),
+            allowConcurrentExecutions: true);
         this.chooseScopeWorkflow.SnapshotChanged += OnSnapshotChanged;
         Apply(this.chooseScopeWorkflow.Current);
     }
@@ -104,6 +113,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     {
         get => blockingReasons;
         private set => SetField(ref blockingReasons, value);
+    }
+
+    public string BlockingNoticeAutomationName
+    {
+        get => blockingNoticeAutomationName;
+        private set => SetField(ref blockingNoticeAutomationName, value);
     }
 
     public bool IncludeSubfolders
@@ -187,6 +202,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         RuleSetStatus = snapshot.RuleSetStatus;
         ScopeSummary = ProjectSummary(snapshot.Preflight);
         BlockingReasons = ProjectBlockingReasons(snapshot.Preflight);
+        BlockingNoticeAutomationName = BlockingReasons.IsDefaultOrEmpty
+            ? "Scope blocked"
+            : BlockingReasons[0];
         IsChecking = snapshot.ScopeState is ScopeSessionState.Checking;
         IsReady = snapshot.ScopeState is ScopeSessionState.Ready;
         IsBlocked = snapshot.ScopeState is ScopeSessionState.Blocked;
@@ -221,6 +239,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
 
         return
         [
+            new("Local drive type", ProjectVolume(preflight.Volume)),
             new("Supported images", FormatCount(counts.Supported)),
             new("Unsupported extensions", FormatCount(counts.UnsupportedExtension)),
             new("Unreadable images", FormatCount(counts.Unreadable)),
@@ -233,6 +252,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged
                 FormatCount(preflight.Restrictions.DuplicateDirectoryIdentities)),
         ];
     }
+
+    private static string ProjectVolume(ScopeVolumeKind volume) =>
+        volume switch
+        {
+            ScopeVolumeKind.Fixed => "Fixed",
+            ScopeVolumeKind.Removable => "Removable",
+            _ => throw new InvalidOperationException(
+                $"Unknown Scope volume: {volume}"),
+        };
 
     private static ImmutableArray<string> ProjectBlockingReasons(
         ScopePreflightResult? preflight) =>
@@ -271,6 +299,106 @@ public sealed class ShellViewModel : INotifyPropertyChanged
             : throw new ArgumentException(
                 "Recursion command requires a Boolean parameter.",
                 nameof(parameter));
+
+    private async Task ReplaceScopeOperationAsync(
+        Func<CancellationToken, Task> operation)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        using var owner = new ScopeOperationCancellation();
+        try
+        {
+            ScopeOperationCancellation? preceding;
+            lock (scopeOperationGate)
+            {
+                preceding = currentScopeOperation;
+                currentScopeOperation = owner;
+            }
+
+            preceding?.Cancel();
+            await operation(owner.Token);
+        }
+        finally
+        {
+            lock (scopeOperationGate)
+            {
+                if (ReferenceEquals(currentScopeOperation, owner))
+                {
+                    currentScopeOperation = null;
+                }
+            }
+        }
+    }
+
+    private sealed class ScopeOperationCancellation : IDisposable
+    {
+        private readonly object gate = new();
+        private readonly CancellationTokenSource source = new();
+        private bool cancellationInProgress;
+        private bool cancellationRequested;
+        private bool disposeRequested;
+        private bool disposed;
+
+        public CancellationToken Token => source.Token;
+
+        public void Cancel()
+        {
+            lock (gate)
+            {
+                if (disposed || cancellationRequested)
+                {
+                    return;
+                }
+
+                cancellationRequested = true;
+                cancellationInProgress = true;
+            }
+
+            try
+            {
+                source.Cancel();
+            }
+            finally
+            {
+                var dispose = false;
+                lock (gate)
+                {
+                    cancellationInProgress = false;
+                    if (disposeRequested && !disposed)
+                    {
+                        disposed = true;
+                        dispose = true;
+                    }
+                }
+
+                if (dispose)
+                {
+                    source.Dispose();
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (gate)
+            {
+                if (disposed)
+                {
+                    return;
+                }
+
+                if (cancellationInProgress)
+                {
+                    disposeRequested = true;
+                    return;
+                }
+
+                disposed = true;
+            }
+
+            source.Dispose();
+        }
+    }
 
     private static ImmutableArray<PhaseItemViewModel> Project(
         ImmutableArray<WorkflowPhaseState> phases) =>

@@ -204,6 +204,47 @@ public sealed class ChooseScopeWorkflowTests
         Assert.Equal(ScopeSessionState.Ready, workflow.Current.ScopeState);
     }
 
+    [Theory]
+    [InlineData(
+        ScopeVolumeKind.Fixed,
+        ScopeSessionState.Ready,
+        ScopePreflightDecision.Ready)]
+    [InlineData(
+        ScopeVolumeKind.Remote,
+        ScopeSessionState.Blocked,
+        ScopePreflightDecision.Blocked)]
+    public async Task CompletionSubscriberCancellationCannotReplaceTerminalSnapshot(
+        ScopeVolumeKind volume,
+        ScopeSessionState expectedState,
+        ScopePreflightDecision expectedDecision)
+    {
+        var evidence = ReadyEvidence(@"C:\Photos") with { Volume = volume };
+        var workflow = new ChooseScopeWorkflow(
+            new StubFolderPicker(@"C:\Photos"),
+            new StubPreflight(evidence));
+        var subscriberFailure = new OperationCanceledException(
+            "completion subscriber canceled");
+        workflow.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.ScopeState == expectedState)
+            {
+                throw subscriberFailure;
+            }
+        };
+
+        var exception = await Assert.ThrowsAsync<OperationCanceledException>(
+            () => workflow.HandleAsync(
+                new ChooseScopeCommand(),
+                CancellationToken.None));
+
+        Assert.Same(subscriberFailure, exception);
+        Assert.Equal(expectedState, workflow.Current.ScopeState);
+        Assert.Equal(expectedDecision, workflow.Current.Preflight?.Decision);
+        Assert.All(
+            workflow.Current.Phases.Skip(1),
+            phase => Assert.Equal(PhaseAvailability.Unavailable, phase.Availability));
+    }
+
     [Fact]
     public async Task ChangingRecursionInvalidatesReadyBeforePreflightCompletes()
     {

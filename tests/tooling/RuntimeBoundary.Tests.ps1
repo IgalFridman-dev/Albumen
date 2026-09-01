@@ -182,6 +182,22 @@ public static class ForbiddenQualifiedNativeInteropFixture
 }
 '@ | Set-Content -LiteralPath (
         Join-Path $nativeInteropProjectPath 'QualifiedNativeInteropFixture.cs') -Encoding utf8
+    $hiddenNativeInteropPath = Join-Path `
+        $nativeInteropProjectPath `
+        'HiddenNativeInteropFixture.cs'
+    @'
+using System.Runtime.InteropServices;
+
+public static partial class HiddenNativeInteropFixture
+{
+    [LibraryImport("kernel32.dll")]
+    internal static partial uint GetCurrentThreadId();
+}
+'@ | Set-Content -LiteralPath $hiddenNativeInteropPath -Encoding utf8
+    [System.IO.File]::SetAttributes(
+        $hiddenNativeInteropPath,
+        [System.IO.File]::GetAttributes($hiddenNativeInteropPath) -bor
+            [System.IO.FileAttributes]::Hidden)
 
     $nativeInteropResult = Invoke-BoundaryChecker `
         -Arguments @(
@@ -198,6 +214,10 @@ public static class ForbiddenQualifiedNativeInteropFixture
     if ($nativeInteropResult.Output -notmatch [regex]::Escape(
             'PhotoSift.Application\QualifiedNativeInteropFixture.cs -> native interop outside Windows infrastructure')) {
         throw 'Failure output did not identify the qualified native interop path-policy violation.'
+    }
+    if ($nativeInteropResult.Output -notmatch [regex]::Escape(
+            'PhotoSift.Application\HiddenNativeInteropFixture.cs -> native interop outside Windows infrastructure')) {
+        throw 'Failure output did not identify the hidden native interop path-policy violation.'
     }
 
     $filesystemInspectionSourceRoot = Join-Path $testRoot 'filesystem-inspection-source'

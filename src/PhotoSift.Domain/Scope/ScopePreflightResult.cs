@@ -23,6 +23,7 @@ public enum ScopeBlockingReason
 public sealed record ScopePreflightResult(
     ScopePreflightDecision Decision,
     ResolvedScope? Scope,
+    ScopeVolumeKind Volume,
     ScopeOutcomeCounts? CompleteCounts,
     ScopeRestrictionCounts Restrictions,
     ImmutableArray<ScopeBlockingReason> BlockingReasons);

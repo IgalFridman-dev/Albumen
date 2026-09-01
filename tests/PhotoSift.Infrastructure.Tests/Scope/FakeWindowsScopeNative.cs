@@ -65,12 +65,13 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         string path,
         ScopeCloudState cloud = ScopeCloudState.Local,
         bool canRead = true,
-        ScopeCloudState? readCloud = null)
+        ScopeCloudState? readCloud = null,
+        bool isReparsePoint = false)
     {
         EntriesFor(directory).Add(new WindowsScopeEntry(
             path,
             IsDirectory: false,
-            IsReparsePoint: false,
+            isReparsePoint,
             cloud));
         readResults[path] = new WindowsFileReadProbeResult(
             readCloud ?? cloud,

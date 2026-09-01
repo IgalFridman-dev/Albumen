@@ -25,7 +25,7 @@ internal sealed class WindowsFileReadProbe : IWindowsFileReadProbe
                 findData.Reserved0));
     }
 
-    public bool TryOpenForRead(string path)
+    public unsafe bool TryOpenForRead(string path)
     {
         using var readHandle = NativeMethods.CreateFile(
             WindowsScopeNative.ToExtendedLengthPath(path),
@@ -33,8 +33,24 @@ internal sealed class WindowsFileReadProbe : IWindowsFileReadProbe
             FileShare.ReadWrite | FileShare.Delete,
             securityAttributes: 0,
             NativeMethods.OpenExisting,
-            NativeMethods.FileAttributeNormal,
+            NativeMethods.FileAttributeNormal |
+                NativeMethods.FileFlagOpenNoRecall |
+                NativeMethods.FileFlagOpenReparsePoint,
             templateFile: 0);
-        return !readHandle.IsInvalid;
+        if (readHandle.IsInvalid)
+        {
+            return false;
+        }
+
+        if (!NativeMethods.GetFileInformationByHandleEx(
+                readHandle,
+                FileInfoByHandleClass.FileAttributeTagInfo,
+                out FILE_ATTRIBUTE_TAG_INFO information,
+                checked((uint)sizeof(FILE_ATTRIBUTE_TAG_INFO))))
+        {
+            return false;
+        }
+
+        return (information.FileAttributes & NativeMethods.FileAttributeReparsePoint) == 0;
     }
 }

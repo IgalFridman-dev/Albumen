@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using PhotoSift.App.Shell;
+using PhotoSift.Application.Scope;
 using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Scope;
 using PhotoSift.Domain.Workflow;
@@ -23,6 +24,7 @@ public sealed class ScopeProjectionTests
         Assert.False(viewModel.IsReady);
         Assert.False(viewModel.IsBlocked);
         Assert.False(viewModel.IsCanceled);
+        Assert.Equal("Scope blocked", viewModel.BlockingNoticeAutomationName);
     }
 
     [Fact]
@@ -60,6 +62,32 @@ public sealed class ScopeProjectionTests
         Assert.All(viewModel.Phases.Skip(1), phase => Assert.False(phase.IsAvailable));
     }
 
+    [Theory]
+    [InlineData(ScopeVolumeKind.Fixed, "Fixed")]
+    [InlineData(ScopeVolumeKind.Removable, "Removable")]
+    public void ReadySnapshotDistinguishesVerifiedLocalVolume(
+        ScopeVolumeKind volume,
+        string expectedValue)
+    {
+        var viewModel = new ShellViewModel(
+            new RecordingChooseScopeWorkflow(ReadySnapshot(volume)));
+
+        var volumeSummary = Assert.Single(
+            viewModel.ScopeSummary,
+            item => item.Label == "Local drive type");
+        Assert.Equal(expectedValue, volumeSummary.Value);
+        Assert.True(viewModel.IsReady);
+    }
+
+    [Fact]
+    public void UnknownReadyVolumeIsRejectedInsteadOfPresentedAsReady()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            new ShellViewModel(
+                new RecordingChooseScopeWorkflow(
+                    ReadySnapshot((ScopeVolumeKind)999))));
+    }
+
     [Fact]
     public void ReadySnapshotLabelsEveryOutcomeAndRestrictionCount()
     {
@@ -69,6 +97,7 @@ public sealed class ScopeProjectionTests
         Assert.Equal(
             new[]
             {
+                ("Local drive type", "Fixed"),
                 ("Supported images", "12"),
                 ("Unsupported extensions", "3"),
                 ("Unreadable images", "4"),
@@ -97,11 +126,30 @@ public sealed class ScopeProjectionTests
 
         Assert.Equal("Blocked", viewModel.ScopeStatus);
         Assert.Equal(new[] { expectedReason }, viewModel.BlockingReasons);
+        Assert.Equal(expectedReason, viewModel.BlockingNoticeAutomationName);
         Assert.Equal("Unavailable", viewModel.SupportedCount);
         Assert.True(viewModel.IsBlocked);
         Assert.False(viewModel.IsChecking);
         Assert.False(viewModel.IsReady);
         Assert.False(viewModel.IsCanceled);
+    }
+
+    [Fact]
+    public void BlockedSnapshotWithoutReasonsUsesGenericAutomationFallback()
+    {
+        var blocked = BlockedSnapshot(ScopeBlockingReason.NonLocalRoot);
+        var snapshot = blocked with
+        {
+            Preflight = blocked.Preflight! with
+            {
+                BlockingReasons = ImmutableArray<ScopeBlockingReason>.Empty,
+            },
+        };
+
+        var viewModel = new ShellViewModel(
+            new RecordingChooseScopeWorkflow(snapshot));
+
+        Assert.Equal("Scope blocked", viewModel.BlockingNoticeAutomationName);
     }
 
     [Fact]
@@ -179,11 +227,146 @@ public sealed class ScopeProjectionTests
         Assert.True(viewModel.IsChecking);
     }
 
+    [Fact]
+    public async Task AsyncCommandConstructorsDefaultToRejectingOverlappingInvocation()
+    {
+        await AssertRejectsOverlappingInvocationByDefault(
+            execute => new AsyncCommand(execute));
+        await AssertRejectsOverlappingInvocationByDefault(
+            execute => new AsyncCommand(_ => execute()));
+    }
+
+    [Fact]
+    public async Task ChooseDuringCheckingCancelsSupersededOperationAndPublishesOnlyReplacement()
+    {
+        const string firstPath = @"C:\First";
+        const string replacementPath = @"C:\Replacement";
+        var picker = new SequenceFolderPicker(firstPath, replacementPath);
+        using var preflight = new CancellationAwarePreflight();
+        var workflow = new ChooseScopeWorkflow(picker, preflight);
+        var terminalSnapshots = new List<ShellSnapshot>();
+        var terminalSnapshotsGate = new object();
+        workflow.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.ScopeState is
+                ScopeSessionState.Ready or
+                ScopeSessionState.Blocked or
+                ScopeSessionState.Canceled)
+            {
+                lock (terminalSnapshotsGate)
+                {
+                    terminalSnapshots.Add(snapshot);
+                }
+            }
+        };
+        var viewModel = new ShellViewModel(workflow);
+
+        var firstOperation = viewModel.ChooseScopeCommand.ExecuteAsync();
+        await preflight.FirstStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(viewModel.IsChecking);
+        Assert.Equal(firstPath, viewModel.SelectedPath);
+        Assert.True(viewModel.ChooseScopeCommand.CanExecute(parameter: null));
+
+        var replacementOperation = viewModel.ChooseScopeCommand.ExecuteAsync();
+        await preflight.ReplacementStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        await preflight.FirstCanceled.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        preflight.ReplacementCompletion.SetResult(ReadyEvidence(replacementPath));
+
+        await Task.WhenAll(firstOperation, replacementOperation);
+
+        Assert.True(viewModel.IsReady);
+        Assert.Equal(replacementPath, viewModel.SelectedPath);
+        Assert.Equal(replacementPath, viewModel.ResolvedPath);
+        Assert.All(viewModel.Phases.Skip(1), phase => Assert.False(phase.IsAvailable));
+        ShellSnapshot[] observedTerminals;
+        lock (terminalSnapshotsGate)
+        {
+            observedTerminals = [.. terminalSnapshots];
+        }
+
+        var replacement = Assert.Single(observedTerminals);
+        Assert.Equal(ScopeSessionState.Ready, replacement.ScopeState);
+        Assert.Equal(replacementPath, replacement.Selection?.SelectedPath);
+        Assert.Equal(2, replacement.Revision);
+    }
+
+    [Theory]
+    [InlineData(false, ScopeRecursion.TopLevelOnly)]
+    [InlineData(true, ScopeRecursion.IncludeSubfolders)]
+    public async Task RetryAndRecursionChangeDuringCheckingCancelSupersededOperation(
+        bool changeRecursion,
+        ScopeRecursion expectedRecursion)
+    {
+        const string path = @"C:\Photos";
+        var picker = new SequenceFolderPicker(path);
+        using var preflight = new CancellationAwarePreflight();
+        var workflow = new ChooseScopeWorkflow(picker, preflight);
+        var viewModel = new ShellViewModel(workflow);
+
+        var firstOperation = viewModel.ChooseScopeCommand.ExecuteAsync();
+        await preflight.FirstStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+
+        var replacementOperation = changeRecursion
+            ? viewModel.ChangeRecursionCommand.ExecuteAsync(true)
+            : viewModel.RetryScopeCommand.ExecuteAsync();
+        await preflight.ReplacementStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        await preflight.FirstCanceled.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        preflight.ReplacementCompletion.SetResult(
+            ReadyEvidence(path, expectedRecursion));
+
+        await Task.WhenAll(firstOperation, replacementOperation);
+
+        Assert.True(viewModel.IsReady);
+        Assert.Equal(expectedRecursion, workflow.Current.Selection?.Recursion);
+        Assert.Equal(2, workflow.Current.Revision);
+        Assert.All(viewModel.Phases.Skip(1), phase => Assert.False(phase.IsAvailable));
+    }
+
     private static ShellSnapshot ColdSnapshot() =>
         new(
             InitialWorkflow.Create(),
             "Choose one local folder to scan.",
             ScopeSessionState.Cold);
+
+    private static async Task AssertRejectsOverlappingInvocationByDefault(
+        Func<Func<Task>, AsyncCommand> commandFactory)
+    {
+        var started = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var invocationCount = 0;
+        var command = commandFactory(async () =>
+        {
+            invocationCount++;
+            started.TrySetResult(true);
+            await completion.Task;
+        });
+
+        var firstInvocation = command.ExecuteAsync();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.False(command.CanExecute(parameter: null));
+        await command.ExecuteAsync();
+        Assert.Equal(1, invocationCount);
+
+        completion.SetResult(true);
+        await firstInvocation;
+        Assert.True(command.CanExecute(parameter: null));
+    }
 
     private static ShellSnapshot CheckingSnapshot(
         ScopeRecursion recursion = ScopeRecursion.IncludeSubfolders) =>
@@ -194,26 +377,28 @@ public sealed class ScopeProjectionTests
             new ScopeSelection(@"C:\Photos", recursion),
             Revision: 1);
 
-    private static ShellSnapshot ReadySnapshot()
+    private static ShellSnapshot ReadySnapshot(
+        ScopeVolumeKind volume = ScopeVolumeKind.Fixed)
     {
         var selection = new ScopeSelection(
             @"C:\Photos",
             ScopeRecursion.IncludeSubfolders);
         var result = new ScopePreflightResult(
-            ScopePreflightDecision.Ready,
-            new ResolvedScope(
+            Decision: ScopePreflightDecision.Ready,
+            Scope: new ResolvedScope(
                 selection,
                 @"\\?\C:\Photos",
                 new DirectoryIdentity(1, 2, 3)),
-            new ScopeOutcomeCounts(
+            Volume: volume,
+            CompleteCounts: new ScopeOutcomeCounts(
                 supported: 12,
                 unsupportedExtension: 3,
                 unreadable: 4,
                 codecUnavailable: 5),
-            new ScopeRestrictionCounts(
+            Restrictions: new ScopeRestrictionCounts(
                 escapingReparseTargets: 6,
                 duplicateDirectoryIdentities: 7),
-            ImmutableArray<ScopeBlockingReason>.Empty);
+            BlockingReasons: ImmutableArray<ScopeBlockingReason>.Empty);
         return new ShellSnapshot(
             InitialWorkflow.Create(),
             "Scope is ready.",
@@ -230,14 +415,17 @@ public sealed class ScopeProjectionTests
             @"C:\Photos",
             ScopeRecursion.IncludeSubfolders);
         var result = new ScopePreflightResult(
-            ScopePreflightDecision.Blocked,
-            new ResolvedScope(
+            Decision: ScopePreflightDecision.Blocked,
+            Scope: new ResolvedScope(
                 selection,
                 @"\\?\C:\Photos",
                 new DirectoryIdentity(1, 2, 3)),
-            null,
-            new ScopeRestrictionCounts(0, 0),
-            ImmutableArray.Create(reason));
+            Volume: reason is ScopeBlockingReason.NonLocalRoot
+                ? ScopeVolumeKind.Remote
+                : ScopeVolumeKind.Fixed,
+            CompleteCounts: null,
+            Restrictions: new ScopeRestrictionCounts(0, 0),
+            BlockingReasons: ImmutableArray.Create(reason));
         return new ShellSnapshot(
             InitialWorkflow.Create(),
             "Scope is blocked.",
@@ -257,6 +445,88 @@ public sealed class ScopeProjectionTests
                 @"C:\Photos",
                 ScopeRecursion.IncludeSubfolders),
             Revision: 1);
+
+    private static ScopePreflightEvidence ReadyEvidence(
+        string path,
+        ScopeRecursion recursion = ScopeRecursion.TopLevelOnly) =>
+        new(
+            new ResolvedScope(
+                new ScopeSelection(path, recursion),
+                path,
+                new DirectoryIdentity(1, 0, 1)),
+            ScopeVolumeKind.Fixed,
+            ScopeCloudState.Local,
+            ScopeTraversalState.Complete,
+            new ScopeOutcomeCounts(1, 0, 0, 0),
+            new ScopeRestrictionCounts(0, 0));
+
+    private sealed class SequenceFolderPicker(params string[] paths)
+        : ILocalFolderPicker
+    {
+        private readonly Queue<string> pending = new(paths);
+        private readonly object gate = new();
+
+        public Task<string?> PickSingleAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (gate)
+            {
+                return Task.FromResult<string?>(pending.Dequeue());
+            }
+        }
+    }
+
+    private sealed class CancellationAwarePreflight : ILocalScopePreflight, IDisposable
+    {
+        private readonly CancellationTokenSource cleanupCancellation = new();
+        private int invocationCount;
+
+        public TaskCompletionSource<bool> FirstStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> FirstCanceled { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ReplacementStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<ScopePreflightEvidence> ReplacementCompletion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<ScopePreflightEvidence> InspectAsync(
+            ScopeSelection selection,
+            CancellationToken cancellationToken)
+        {
+            var invocation = Interlocked.Increment(ref invocationCount);
+            if (invocation == 1)
+            {
+                FirstStarted.TrySetResult(true);
+                using var registration = cancellationToken.Register(
+                    () => FirstCanceled.TrySetResult(true));
+                using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    cleanupCancellation.Token);
+                await Task.Delay(Timeout.InfiniteTimeSpan, linkedCancellation.Token);
+                throw new InvalidOperationException(
+                    "The canceled first preflight completed unexpectedly.");
+            }
+
+            if (invocation == 2)
+            {
+                ReplacementStarted.TrySetResult(true);
+                return await ReplacementCompletion.Task.WaitAsync(cancellationToken);
+            }
+
+            throw new InvalidOperationException(
+                $"Unexpected preflight invocation: {invocation}.");
+        }
+
+        public void Dispose()
+        {
+            cleanupCancellation.Cancel();
+            cleanupCancellation.Dispose();
+        }
+    }
 
     private sealed class RecordingChooseScopeWorkflow(ShellSnapshot current)
         : IChooseScopeWorkflow
