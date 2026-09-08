@@ -4,14 +4,14 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Planning is complete and validated. E1-S1 implemented and verified the native offline application boundary and is done. E1-S2 implementation is in review; it remains the sole next eligible story, while E1-S3 and all later work remain locked.
+Planning is complete and validated. E1-S1 implemented and verified the native offline application boundary and is done. E1-S2 is implemented, reviewed, verified by the complete offline Full gate, and done. The policy still names E1-S2 as the sole eligible story; E1-S3 and all later work remain deliberately locked until a separate policy transition.
 
-- Current implementation entry point: **E1-S2 — Select and preflight an exact local Scope (in review)**
+- Latest completed story: **E1-S2 — Select and preflight an exact local Scope (done)**
 - Current tracking: [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)
 - Story contracts: [`_bmad-output/specs/`](_bmad-output/specs/)
 - Documentation map: [`docs/README.md`](docs/README.md)
 - E1-S1 verification: [`docs/evidence/e1-s1/verification.md`](docs/evidence/e1-s1/verification.md)
-- E1-S2 review checklist: [`docs/evidence/e1-s2/verification.md`](docs/evidence/e1-s2/verification.md)
+- E1-S2 final verification: [`docs/evidence/e1-s2/verification.md`](docs/evidence/e1-s2/verification.md)
 
 The mandatory first-epic sequence is:
 
@@ -36,7 +36,7 @@ The project deliberately excludes cloud inference, accounts, telemetry, automati
 5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
 6. Stop at E1-S6 until the safety gate is explicitly recorded as `PASS`.
 
-The repository now contains the E1-S1 .NET 10/C# 14/WPF `win-x64` structural seed, its five test projects, and a NIC-free Golden Hyper-V VM verification gate. Later-story behavior remains intentionally absent.
+The repository contains the .NET 10/C# 14/WPF `win-x64` application with exact local Scope selection and preflight, five test projects, and a NIC-free Golden Hyper-V VM verification gate. Later-story behavior remains intentionally absent.
 
 ## Repository layout
 
