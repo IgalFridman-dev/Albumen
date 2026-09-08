@@ -4,10 +4,10 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Planning is complete and validated. E1-S1 implemented and verified the native offline application boundary and is done. E1-S2 is implemented, reviewed, verified by the complete offline Full gate, and done. Following the approved continuation from its merge into develop, E1-S3 is the sole eligible story and is in design preparation. E1-S4 through E1-S6 and Epics 2–5 remain locked.
+Planning is complete and validated. E1-S1 implemented and verified the native offline application boundary and is done. E1-S2 is implemented, reviewed, verified by the complete offline Full gate, and done. E1-S3 is the sole eligible story and its approved design is in implementation. E1-S4 through E1-S6 and Epics 2–5 remain locked.
 
 - Latest completed story: **E1-S2 — Select and preflight an exact local Scope (done)**
-- Next eligible story: **E1-S3 — Detect byte-identical distinct files and hard-link aliases (ready for development; design preparation)**
+- Current implementation: **E1-S3 — Detect byte-identical distinct files and hard-link aliases (in progress)**
 - Current tracking: [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)
 - Story contracts: [`_bmad-output/specs/`](_bmad-output/specs/)
 - Documentation map: [`docs/README.md`](docs/README.md)
