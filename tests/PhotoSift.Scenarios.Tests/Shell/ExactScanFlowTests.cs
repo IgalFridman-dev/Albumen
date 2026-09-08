@@ -73,7 +73,7 @@ internal sealed class ExactShellFixture
         var failed = new ScanFileOccurrence(new(pin, 4, 1, 1), @"C:\Photos\denied.jpg", @"C:\Photos\denied.jpg", new PhysicalFileKey(1, new(0, 3)), new(ScanStageState.Succeeded, ScanReason.None), new(ScanStageState.FailedRetryable, ScanReason.AccessDenied), null, new(null, null, false));
         var members = memberCount == 3 ? ImmutableArray.Create(a, alias, b)
             : Enumerable.Range(1, memberCount).Select(i => Row(pin, i, (ulong)i, $@"C:\Photos\copy-{i}.jpg")).ToImmutableArray();
-        var groups = Enumerable.Range(0, groupCount).Select(_ => new CandidateGroup(Guid.NewGuid(), pin, CandidateCategory.Exact,
+        var groups = Enumerable.Range(0, groupCount).Select(_ => new CandidateGroup(Guid.NewGuid(), 1, pin, CandidateCategory.Exact,
             members, [], false, null, new(null, RecoveryUnavailableReason.UnknownAllocation))).ToImmutableArray();
         var scan = new ScanSnapshot(pin, status, new(ScanStageState.Succeeded, ScanReason.None), [a, alias, b, failed], groups, new(4, 3, 0, 1, 0, 0));
         Workflow.Publish(new(Scope.Current, new(1, 1), scan, WorkflowPhase.Review, InitialWorkflow.Create()));

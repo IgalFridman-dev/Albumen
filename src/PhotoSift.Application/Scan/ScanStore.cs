@@ -18,6 +18,8 @@ internal sealed class ScanStore(ScanRunContext context)
     public bool Faulted { get; private set; }
     public int PendingComparisons => groups.PendingCount;
 
+    public bool MatchesGroup(Guid groupId, long groupRevision) => groups.IsCurrent(groupId, groupRevision);
+
     public OccurrenceWork? Register(EnumeratedFile file)
     {
         var token = new OccurrenceToken(context.Pin, ++nextId, 1, 1);

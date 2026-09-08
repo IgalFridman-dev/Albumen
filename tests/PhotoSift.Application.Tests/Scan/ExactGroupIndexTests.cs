@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using PhotoSift.Application.Scan;
 using PhotoSift.Domain.Scan;
 using Xunit;
@@ -6,6 +7,139 @@ namespace PhotoSift.Application.Tests.Scan;
 
 public sealed class ExactGroupIndexTests
 {
+    [Fact]
+    public void IdenticalProjectionRetainsIdentityWithoutRevisionDrift()
+    {
+        var index = new ExactGroupIndex();
+        var initial = TestGroups.Publish(index, TestGroups.Component(1, 2));
+        var unchanged = TestGroups.Publish(index, TestGroups.Component(2, 1));
+
+        Assert.Equal(initial.GroupId, unchanged.GroupId);
+        Assert.Equal(1, initial.GroupRevision);
+        Assert.Equal(1, unchanged.GroupRevision);
+    }
+
+    [Theory]
+    [InlineData("members")]
+    [InlineData("equality")]
+    [InlineData("uncertainty")]
+    [InlineData("keeper")]
+    [InlineData("recovery")]
+    public void EachMaterialProjectionChangeAdvancesRevisionExactlyOnce(string change)
+    {
+        var index = new ExactGroupIndex();
+        var projection = TestGroups.Component(1, 2, 3);
+        var initial = TestGroups.Publish(index, projection);
+        var changedProjection = change switch
+        {
+            "members" => projection with
+            {
+                Members = projection.Members.Add(TestGroups.Row(4, 1, @"C:\Photos\alias.jpg")),
+            },
+            "equality" => projection with
+            {
+                Equality = projection.Equality.Add(TestGroups.Edge(projection.Members[0], projection.Members[2])),
+            },
+            "uncertainty" => projection with { Uncertain = true },
+            "keeper" => projection with { KeeperOccurrenceId = 2 },
+            _ => projection with { PotentialRecovery = new PotentialRecovery(4096, RecoveryUnavailableReason.None) },
+        };
+
+        var changed = TestGroups.Publish(index, changedProjection);
+        var neutral = TestGroups.Publish(index, changedProjection);
+
+        Assert.Equal(initial.GroupId, changed.GroupId);
+        Assert.Equal(2, changed.GroupRevision);
+        Assert.Equal(changed.GroupId, neutral.GroupId);
+        Assert.Equal(2, neutral.GroupRevision);
+    }
+
+    [Fact]
+    public void CaseEquivalentPresentationPathsDoNotAdvanceRevision()
+    {
+        var index = new ExactGroupIndex();
+        var projection = TestGroups.Component(1, 2);
+        var initial = TestGroups.Publish(index, projection);
+        var changedPaths = projection with
+        {
+            Members = projection.Members.Select(row => new ScanFileOccurrence(
+                row.Token,
+                row.DiscoveredPath.ToUpperInvariant(),
+                row.ResolvedPath.ToUpperInvariant(),
+                row.PhysicalFileKey,
+                row.Enumerate,
+                row.Exact,
+                row.Content,
+                row.Allocation)).ToImmutableArray(),
+        };
+
+        var unchanged = TestGroups.Publish(index, changedPaths);
+
+        Assert.Equal(initial.GroupId, unchanged.GroupId);
+        Assert.Equal(initial.GroupRevision, unchanged.GroupRevision);
+    }
+
+    [Fact]
+    public void MergeRetiresBothInputsAndStartsNewIdentity()
+    {
+        var index = new ExactGroupIndex();
+        var initial = TestGroups.PublishMany(index, TestGroups.Component(1, 2), TestGroups.Component(3, 4));
+
+        var merged = TestGroups.Publish(index, TestGroups.Component(1, 2, 3, 4));
+
+        Assert.DoesNotContain(merged.GroupId, initial.Select(group => group.GroupId));
+        Assert.Equal(1, merged.GroupRevision);
+        Assert.All(initial, group => Assert.False(index.IsCurrent(group.GroupId, group.GroupRevision)));
+    }
+
+    [Fact]
+    public void SplitRetiresInputAndStartsNewIdentities()
+    {
+        var index = new ExactGroupIndex();
+        var initial = TestGroups.Publish(index, TestGroups.Component(1, 2, 3, 4));
+
+        var split = TestGroups.PublishMany(index, TestGroups.Component(1, 2), TestGroups.Component(3, 4));
+
+        Assert.All(split, group =>
+        {
+            Assert.NotEqual(initial.GroupId, group.GroupId);
+            Assert.Equal(1, group.GroupRevision);
+        });
+        Assert.False(index.IsCurrent(initial.GroupId, initial.GroupRevision));
+    }
+
+    [Fact]
+    public void DisappearanceRetiresIdentityBeforeEquivalentComponentReturns()
+    {
+        var index = new ExactGroupIndex();
+        var initial = TestGroups.Publish(index, TestGroups.Component(1, 2));
+        Assert.Empty(index.Publish(TestGroups.Pin, []));
+
+        var returned = TestGroups.Publish(index, TestGroups.Component(1, 2));
+
+        Assert.NotEqual(initial.GroupId, returned.GroupId);
+        Assert.Equal(1, returned.GroupRevision);
+        Assert.False(index.IsCurrent(initial.GroupId, initial.GroupRevision));
+    }
+
+    [Fact]
+    public void AmbiguousReplacementRetiresSourceRatherThanRedirectingIt()
+    {
+        var index = new ExactGroupIndex();
+        var initial = TestGroups.Publish(index, TestGroups.Component(1, 2));
+
+        var replacements = TestGroups.PublishMany(index, TestGroups.Component(1, 3), TestGroups.Component(2, 4));
+
+        Assert.All(replacements, group => Assert.NotEqual(initial.GroupId, group.GroupId));
+        Assert.False(index.IsCurrent(initial.GroupId, initial.GroupRevision));
+    }
+
+    [Fact]
+    public void RevisionOverflowIsVisibleProgrammingFault()
+    {
+        Assert.Throws<OverflowException>(() => ExactGroupIndex.AdvanceRevision(long.MaxValue));
+    }
+
     [Fact]
     public void CollisionBucketFindsSecondAndThirdEqualityWhenFirstDiffers()
     {
@@ -117,6 +251,25 @@ public sealed class ExactGroupIndexTests
     }
 
     [Fact]
+    public void SnapshotsWhileComparisonsSettleOnlyAdvanceForMaterialChange()
+    {
+        var (store, _, _) = VerifiedPair();
+        var initial = Assert.Single(StoreFixture.Snapshot(store).Groups);
+        var third = StoreFixture.Register(store, 3);
+        var comparison = Assert.Single(store.CommitSignature(StoreFixture.Signature(third)).Comparisons);
+
+        var pending = Assert.Single(StoreFixture.Snapshot(store).Groups);
+        Assert.Equal(initial.GroupRevision, pending.GroupRevision);
+        var stillPending = Assert.Single(StoreFixture.Snapshot(store).Groups);
+        Assert.Equal(initial.GroupRevision, stillPending.GroupRevision);
+        Assert.True(store.CommitComparison(StoreFixture.Equality(comparison)));
+
+        var changed = Assert.Single(StoreFixture.Snapshot(store).Groups);
+        Assert.Equal(initial.GroupId, changed.GroupId);
+        Assert.Equal(initial.GroupRevision + 1, changed.GroupRevision);
+    }
+
+    [Fact]
     public void ForgedOrDuplicateComparisonCannotCreateEquality()
     {
         var store = new ScanStore(ScanTestData.Context());
@@ -157,4 +310,47 @@ public sealed class ExactGroupIndexTests
         Assert.True(store.CommitComparison(StoreFixture.Equality(pair)));
         return (store, first, second);
     }
+}
+
+internal static class TestGroups
+{
+    public static readonly ScanPin Pin = new(Guid.Parse("11111111-1111-1111-1111-111111111111"), 1, 1, 1);
+
+    public static CandidateGroup Publish(ExactGroupIndex index, CandidateGroupProjection projection) =>
+        Assert.Single(index.Publish(Pin, [projection]));
+
+    public static ImmutableArray<CandidateGroup> PublishMany(
+        ExactGroupIndex index,
+        params CandidateGroupProjection[] projections) => index.Publish(Pin, [.. projections]);
+
+    public static CandidateGroupProjection Component(params long[] ids)
+    {
+        var members = ids.Select(id => Row(id, (ulong)id, $@"C:\Photos\{id}.jpg")).ToImmutableArray();
+        var equality = members.Zip(members.Skip(1), Edge).ToImmutableArray();
+        return new CandidateGroupProjection(
+            members.Select(row => row.PhysicalFileKey!.Value).ToImmutableArray(),
+            CandidateCategory.Exact,
+            members,
+            equality,
+            false,
+            null,
+            new PotentialRecovery(0, RecoveryUnavailableReason.None));
+    }
+
+    public static ScanFileOccurrence Row(long occurrenceId, ulong physicalId, string path)
+    {
+        var key = new PhysicalFileKey(1, new FileId128(0, physicalId));
+        return new ScanFileOccurrence(
+            new OccurrenceToken(Pin, occurrenceId, 1, 1),
+            path,
+            path,
+            key,
+            ScanTestData.Success,
+            ScanTestData.Success,
+            new ContentRevision(key, 1, ScanTestData.Digest),
+            new AllocationEvidence(4096, 1, true));
+    }
+
+    public static EqualityEvidence Edge(ScanFileOccurrence left, ScanFileOccurrence right) =>
+        new(left.Token, right.Token, left.Content!, right.Content!);
 }

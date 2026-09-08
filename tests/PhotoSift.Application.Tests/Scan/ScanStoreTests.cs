@@ -91,6 +91,32 @@ public sealed class ScanStoreTests
         Assert.Equal(0, before.Counts.Analyzed);
         Assert.Equal(1, StoreFixture.Snapshot(store).Counts.Analyzed);
     }
+
+    [Fact]
+    public void CandidateRevisionChangesWithoutRevisingExistingOccurrencesAndRejectsStalePin()
+    {
+        var store = new ScanStore(ScanTestData.Context());
+        var first = StoreFixture.Register(store, 1);
+        store.CommitSignature(StoreFixture.Signature(first));
+        var second = StoreFixture.Register(store, 2);
+        var comparison = Assert.Single(store.CommitSignature(StoreFixture.Signature(second)).Comparisons);
+        Assert.True(store.CommitComparison(StoreFixture.Equality(comparison)));
+        var initialSnapshot = StoreFixture.Snapshot(store);
+        var initialGroup = Assert.Single(initialSnapshot.Groups);
+        var initialTokens = initialSnapshot.Occurrences.Select(row => row.Token).ToArray();
+
+        var alias = StoreFixture.Register(store, 3, 1);
+        Assert.True(store.CommitSignature(StoreFixture.Signature(alias)).Accepted);
+        var changedSnapshot = StoreFixture.Snapshot(store);
+        var changedGroup = Assert.Single(changedSnapshot.Groups);
+
+        Assert.Equal(initialGroup.GroupId, changedGroup.GroupId);
+        Assert.Equal(initialGroup.GroupRevision + 1, changedGroup.GroupRevision);
+        Assert.Equal(initialTokens, changedSnapshot.Occurrences.Take(2).Select(row => row.Token));
+        Assert.All(changedSnapshot.Occurrences.Take(2), row => Assert.Equal(1, row.Token.OccurrenceRevision));
+        Assert.False(store.MatchesGroup(initialGroup.GroupId, initialGroup.GroupRevision));
+        Assert.True(store.MatchesGroup(changedGroup.GroupId, changedGroup.GroupRevision));
+    }
 }
 
 internal static class StoreFixture

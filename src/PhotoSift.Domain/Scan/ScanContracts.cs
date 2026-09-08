@@ -186,12 +186,29 @@ public sealed record EqualityEvidence(
 
 public sealed record CandidateGroup(
     Guid GroupId,
+    long GroupRevision,
     ScanPin Pin,
     CandidateCategory Category,
     ImmutableArray<ScanFileOccurrence> Members,
     ImmutableArray<EqualityEvidence> Equality,
     bool Uncertain,
     long? KeeperOccurrenceId,
-    PotentialRecovery PotentialRecovery);
+    PotentialRecovery PotentialRecovery)
+{
+    private long groupRevision = ValidateRevision(GroupRevision);
+
+    public long GroupRevision
+    {
+        get => groupRevision;
+        init => groupRevision = ValidateRevision(value);
+    }
+
+    private static long ValidateRevision(long revision) => revision > 0
+        ? revision
+        : throw new ArgumentOutOfRangeException(
+            nameof(revision),
+            revision,
+            "Candidate group revision must be positive.");
+}
 
 public sealed record ExactRuleConfirmation(long ScopeRevision, long RuleSetRevision);

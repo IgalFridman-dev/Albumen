@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using PhotoSift.Domain.Scan;
 using Xunit;
 
@@ -61,5 +62,32 @@ public sealed class ExactIdentityTests
     {
         Assert.Throws<ArgumentNullException>(
             () => new ContentRevision(default, 0, null!));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void CandidateGroupRejectsNonPositiveRevision(long revision)
+    {
+        var pin = new ScanPin(Guid.NewGuid(), 1, 1, 1);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new CandidateGroup(
+            Guid.NewGuid(), revision, pin, CandidateCategory.Exact,
+            ImmutableArray<ScanFileOccurrence>.Empty,
+            ImmutableArray<EqualityEvidence>.Empty,
+            false, null, new PotentialRecovery(0, RecoveryUnavailableReason.None)));
+    }
+
+    [Fact]
+    public void CandidateGroupCannotBeCopiedWithNonPositiveRevision()
+    {
+        var pin = new ScanPin(Guid.NewGuid(), 1, 1, 1);
+        var group = new CandidateGroup(
+            Guid.NewGuid(), 1, pin, CandidateCategory.Exact,
+            ImmutableArray<ScanFileOccurrence>.Empty,
+            ImmutableArray<EqualityEvidence>.Empty,
+            false, null, new PotentialRecovery(0, RecoveryUnavailableReason.None));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => group with { GroupRevision = 0 });
     }
 }
