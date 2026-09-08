@@ -92,7 +92,7 @@ public sealed class WindowsScanEnumerator : IScanEnumerator
                     yield return new ScanFileFound(file.File);
                     break;
                 case WindowsTraversalFinished finished:
-                    yield return new ScanEnumerationEnded(MapFinished(finished.Evidence));
+                    yield return new ScanEnumerationEnded(finished.ProtectionOutcome ?? MapFinished(finished.Evidence));
                     yield break;
                 default:
                     yield return new ScanEnumerationEnded(

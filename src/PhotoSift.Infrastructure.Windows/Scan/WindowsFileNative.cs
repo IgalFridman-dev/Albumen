@@ -39,10 +39,18 @@ internal sealed partial class WindowsFileNative : IWindowsFileFactsSource
     internal static SafeFileHandle OpenContent(string path) =>
         Open(path, GenericRead, OpenReparsePoint | OpenNoRecall | SequentialScan);
 
-    // Metadata handles pin each inspected name while the adapter call validates the chain.
-    // They do not outlive the call and do not claim that attributes are frozen.
+    // Metadata-only inspection does not participate in share denial. Content
+    // reads revalidate these observations; traversal uses retained guards below.
     internal static SafeFileHandle OpenMetadata(string path, bool followDirectoryLink = false) =>
         Open(path, 0, BackupSemantics | OpenNoRecall | (followDirectoryLink ? 0 : OpenReparsePoint));
+
+    internal static SafeFileHandle OpenDirectoryForEnumeration(string path) =>
+        Open(path, 0x00000001 /* FILE_LIST_DIRECTORY */, BackupSemantics | OpenNoRecall | OpenReparsePoint);
+
+    // FILE_TRAVERSE shares the FILE_EXECUTE bit: unlike access=0 metadata
+    // requests, this participates in share-access checks and pins the name.
+    internal static SafeFileHandle OpenDirectoryGuard(string path, bool followDirectoryLink) =>
+        Open(path, 0x00000020 /* FILE_TRAVERSE */, BackupSemantics | OpenNoRecall | (followDirectoryLink ? 0 : OpenReparsePoint));
 
     private static SafeFileHandle Open(string path, uint access, uint flags)
     {

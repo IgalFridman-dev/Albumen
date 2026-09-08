@@ -13,7 +13,7 @@ internal sealed record WindowsTraversalRoot(ScopePreflightEvidence Evidence)
 internal sealed record WindowsTraversalFile(EnumeratedFile File)
     : WindowsTraversalEvent;
 
-internal sealed record WindowsTraversalFinished(ScopePreflightEvidence Evidence)
+internal sealed record WindowsTraversalFinished(ScopePreflightEvidence Evidence, StageOutcome? ProtectionOutcome = null)
     : WindowsTraversalEvent;
 
 internal sealed class WindowsScopeTraversal
@@ -72,14 +72,23 @@ internal sealed class WindowsScopeTraversal
             ScopeTraversalState.NotRun,
             EmptyCounts,
             EmptyRestrictions);
-        yield return new WindowsTraversalRoot(rootEvidence);
-
         if (volume is not ScopeVolumeKind.Fixed and not ScopeVolumeKind.Removable ||
             root.CloudState is not ScopeCloudState.Local)
         {
+            yield return new WindowsTraversalRoot(rootEvidence);
             yield return new WindowsTraversalFinished(rootEvidence);
             yield break;
         }
+
+        var rootProtectionAttempt = Capture(() => native.ProtectDirectory(
+            resolvedScope, root, selection.SelectedPath, cancellationToken));
+        if (rootProtectionAttempt.Failure is { } rootProtectionFailure)
+        {
+            yield return ProtectionFailure(rootProtectionFailure, true, resolvedScope, volume, EmptyRestrictions);
+            yield break;
+        }
+        using var rootProtection = rootProtectionAttempt.Value;
+        yield return new WindowsTraversalRoot(rootEvidence);
 
         var counts = EmptyCounts;
         var restrictions = EmptyRestrictions;
@@ -91,8 +100,31 @@ internal sealed class WindowsScopeTraversal
         while (pending.TryPop(out var frame))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var rootValidation = Capture(() => { rootProtection.Validate(cancellationToken); return true; });
+            if (rootValidation.Failure is { } rootFailure)
+            {
+                yield return ProtectionFailure(rootFailure, true, resolvedScope, volume, restrictions);
+                yield break;
+            }
+
+            // Queued directories own facts only. Acquire their chain at entry,
+            // compare the cached identity, and retain it through this listing.
+            IWindowsDirectoryProtection? childProtection = null;
+            if (frame.Facts.Identity != root.Identity)
+            {
+                var protectionAttempt = Capture(() => native.ProtectDirectory(
+                    resolvedScope, frame.Facts, frame.DiscoveredPath, cancellationToken));
+                if (protectionAttempt.Failure is { } protectionFailure)
+                {
+                    yield return ProtectionFailure(protectionFailure, false, resolvedScope, volume, restrictions);
+                    yield break;
+                }
+                childProtection = protectionAttempt.Value;
+            }
+            using var currentProtection = childProtection;
+            var protection = childProtection ?? rootProtection;
             var entriesAttempt = Capture(() =>
-                native.EnumerateDirectory(frame.Facts.ResolvedPath).GetEnumerator());
+                protection.Enumerate(cancellationToken).GetEnumerator());
             if (entriesAttempt.Failure is not null)
             {
                 yield return new WindowsTraversalFinished(
@@ -112,13 +144,8 @@ internal sealed class WindowsScopeTraversal
                 var moveAttempt = Capture(entries.MoveNext);
                 if (moveAttempt.Failure is not null)
                 {
-                    yield return new WindowsTraversalFinished(
-                        MapEnumerationFailure(
-                            moveAttempt.Failure,
-                            frame.Facts.Identity == root.Identity,
-                            resolvedScope,
-                            volume,
-                            restrictions));
+                    yield return ProtectionFailure(moveAttempt.Failure,
+                        frame.Facts.Identity == root.Identity, resolvedScope, volume, restrictions);
                     yield break;
                 }
 
@@ -223,6 +250,12 @@ internal sealed class WindowsScopeTraversal
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        var finalValidation = Capture(() => { rootProtection.Validate(cancellationToken); return true; });
+        if (finalValidation.Failure is { } finalFailure)
+        {
+            yield return ProtectionFailure(finalFailure, true, resolvedScope, volume, restrictions);
+            yield break;
+        }
         yield return new WindowsTraversalFinished(
             new ScopePreflightEvidence(
                 resolvedScope,
@@ -244,6 +277,11 @@ internal sealed class WindowsScopeTraversal
             return new NativeAttempt<T>(default!, exception);
         }
     }
+
+    private static WindowsTraversalFinished ProtectionFailure(Exception exception, bool isRoot,
+        ResolvedScope scope, ScopeVolumeKind volume, ScopeRestrictionCounts restrictions) =>
+        new(MapEnumerationFailure(exception, isRoot, scope, volume, restrictions),
+            (exception as ScanReadException)?.Outcome);
 
     private static ScopeOutcomeCounts AddFileOutcome(
         ScopeOutcomeCounts counts,
@@ -363,6 +401,8 @@ internal sealed class WindowsScopeTraversal
             : ScopeTraversalState.DescendantAccessDenied;
         return exception switch
         {
+            ScanReadException { Outcome.Reason: ScanReason.AccessDenied or ScanReason.SharingViolation } =>
+                FailureEvidence(scope, volume, ScopeCloudState.Local, accessTraversal, restrictions),
             UnauthorizedAccessException => FailureEvidence(
                 scope,
                 volume,

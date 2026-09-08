@@ -27,6 +27,22 @@ internal sealed class WindowsFileFactsReader(IWindowsFileFactsSource source)
                 && SamePath(Path.GetDirectoryName(resolved), resolvedRoot), ScanReason.UnsafeLocation);
         }
 
+        Require(SamePath(Path.GetFileName(discovered), Path.GetFileName(resolved)), ScanReason.Changed);
+        return ValidateDirectory(scope, Path.GetDirectoryName(discovered)!, Path.GetDirectoryName(resolved)!,
+            expectedIdentity: null, openedChain, cancellationToken);
+    }
+
+    internal WindowsScopeReadGuard ValidateDirectory(ResolvedScope scope, string discoveredDirectory,
+        string resolvedDirectory, DirectoryIdentity? expectedIdentity,
+        ImmutableDictionary<string, WindowsDirectoryProof>? openedChain, CancellationToken cancellationToken)
+    {
+        var selectedRoot = NormalizePath(scope.Selection.SelectedPath);
+        var resolvedRoot = NormalizePath(scope.ResolvedPath);
+        discoveredDirectory = NormalizePath(discoveredDirectory);
+        resolvedDirectory = NormalizePath(resolvedDirectory);
+        Require(ScopePathContainment.Contains(selectedRoot, discoveredDirectory)
+            && ScopePathContainment.Contains(resolvedRoot, resolvedDirectory), ScanReason.UnsafeLocation);
+
         var guard = new WindowsScopeReadGuard();
         try
         {
@@ -40,10 +56,17 @@ internal sealed class WindowsFileFactsReader(IWindowsFileFactsSource source)
             var root = InspectChain(resolvedRoot);
             Require(root.PhysicalFileKey == expectedRoot && SamePath(root.ResolvedPath, resolvedRoot),
                 ScanReason.Changed);
-            var discoveredParent = InspectChain(Path.GetDirectoryName(discovered)!);
-            var resolvedParent = InspectChain(Path.GetDirectoryName(resolved)!);
-            Require(SamePath(Path.Combine(discoveredParent.ResolvedPath!, Path.GetFileName(discovered)), resolved)
-                && SamePath(resolvedParent.ResolvedPath, Path.GetDirectoryName(resolved)), ScanReason.Changed);
+            var discoveredParent = InspectChain(discoveredDirectory);
+            var resolvedParent = InspectChain(resolvedDirectory);
+            Require(SamePath(discoveredParent.ResolvedPath, resolvedDirectory)
+                && SamePath(resolvedParent.ResolvedPath, resolvedDirectory), ScanReason.Changed);
+            if (expectedIdentity is { } identity)
+            {
+                var expectedKey = new PhysicalFileKey(identity.VolumeSerialNumber,
+                    new FileId128(identity.FileIdHigh, identity.FileIdLow));
+                Require(discoveredParent.PhysicalFileKey == expectedKey && resolvedParent.PhysicalFileKey == expectedKey,
+                    ScanReason.Changed);
+            }
             if (openedChain is not null)
             {
                 Require(guard.Proofs.Count == openedChain.Count && guard.Proofs.All(pair =>
@@ -98,7 +121,9 @@ internal sealed class WindowsFileFactsReader(IWindowsFileFactsSource source)
 
             WindowsFileObservation ReadDirectory(string path, bool follow)
             {
-                var handle = WindowsFileNative.OpenMetadata(path, follow);
+                var handle = expectedIdentity is not null
+                    ? WindowsFileNative.OpenDirectoryGuard(path, follow)
+                    : WindowsFileNative.OpenMetadata(path, follow);
                 guard.Handles.Add(handle);
                 var facts = source.Read(handle, path);
                 ValidateSafety(facts, directory: true);
@@ -143,6 +168,17 @@ internal sealed class WindowsFileFactsReader(IWindowsFileFactsSource source)
 
         return new ProtectedFileFacts(facts.PhysicalFileKey!.Value, facts.ByteLength!.Value,
             resolved, facts.LastWriteUtc, allocation with { Stable = stable });
+    }
+
+    internal void ValidateDirectoryHandle(SafeFileHandle handle,
+        PhotoSift.Infrastructure.Windows.Scope.WindowsDirectoryFacts expected)
+    {
+        var facts = source.Read(handle, NormalizePath(expected.ResolvedPath));
+        ValidateSafety(facts, directory: true);
+        var key = new PhysicalFileKey(expected.Identity.VolumeSerialNumber,
+            new FileId128(expected.Identity.FileIdHigh, expected.Identity.FileIdLow));
+        Require(facts.PhysicalFileKey == key && SamePath(facts.ResolvedPath, NormalizePath(expected.ResolvedPath)), ScanReason.Changed);
+        Require((facts.Attributes!.Value & ReparsePoint) == 0, ScanReason.UnsafeLocation);
     }
 
     private static void ValidateSafety(WindowsFileObservation facts, bool directory)
