@@ -3,6 +3,8 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using PhotoSift.Application.Shell;
+using ScanSessionStatus = PhotoSift.Application.Scan.ScanStatus;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
 using PhotoSift.Domain.Workflow;
 
@@ -11,6 +13,8 @@ namespace PhotoSift.App.Shell;
 public sealed class ShellViewModel : INotifyPropertyChanged
 {
     private readonly IChooseScopeWorkflow chooseScopeWorkflow;
+    private readonly IPhotoSiftWorkflow? photoWorkflow;
+    private PhotoSiftSnapshot? photoSnapshot;
     private ShellSnapshot? currentSnapshot;
     private ImmutableArray<PhaseItemViewModel> phases = [];
     private ImmutableArray<ScopeSummaryItemViewModel> scopeSummary = [];
@@ -45,9 +49,53 @@ public sealed class ShellViewModel : INotifyPropertyChanged
             parameter => this.chooseScopeWorkflow.HandleAsync(
                 new ChangeScopeRecursionCommand(RequireBoolean(parameter)), CancellationToken.None),
             allowConcurrentExecutions: true);
+        ContinueCommand = new AsyncCommand(() => photoWorkflow?.ContinueAsync() ?? Task.CompletedTask);
+        ConfirmExactRulesCommand = new AsyncCommand(() => photoWorkflow?.ConfirmExactRulesAsync() ?? Task.CompletedTask);
+        StartScanCommand = new AsyncCommand(() => photoWorkflow?.StartScanAsync() ?? Task.CompletedTask);
+        CancelScanCommand = new AsyncCommand(() => photoWorkflow?.CancelScanAsync() ?? Task.CompletedTask);
+        OpenReviewCommand = new AsyncCommand(() => photoWorkflow?.NavigateAsync(WorkflowPhase.Review) ?? Task.CompletedTask);
+        NavigateCommand = new AsyncCommand(parameter => photoWorkflow is not null && parameter is WorkflowPhase phase
+            ? photoWorkflow.NavigateAsync(phase) : parameter is WorkflowPhase.ChooseScope
+                ? this.chooseScopeWorkflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None) : Task.CompletedTask);
         this.chooseScopeWorkflow.SnapshotChanged += OnSnapshotChanged;
         Apply(this.chooseScopeWorkflow.Current);
     }
+
+    public ShellViewModel(IChooseScopeWorkflow scope, IPhotoSiftWorkflow workflow) : this(scope)
+    {
+        photoWorkflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
+        workflow.SnapshotChanged += (_, snapshot) => ApplyCombined(snapshot);
+        ApplyCombined(workflow.Current);
+    }
+
+    public AsyncCommand ContinueCommand { get; }
+    public AsyncCommand ConfirmExactRulesCommand { get; }
+    public AsyncCommand StartScanCommand { get; }
+    public AsyncCommand CancelScanCommand { get; }
+    public AsyncCommand OpenReviewCommand { get; }
+    public AsyncCommand NavigateCommand { get; }
+    public WorkflowPhase CurrentPhase => photoSnapshot?.CurrentPhase ?? WorkflowPhase.ChooseScope;
+    public bool IsChooseScopePhase => CurrentPhase == WorkflowPhase.ChooseScope;
+    public bool IsConfirmRulesPhase => CurrentPhase == WorkflowPhase.ConfirmRules;
+    public bool IsScanPhase => CurrentPhase == WorkflowPhase.Scan;
+    public bool IsReviewPhase => CurrentPhase == WorkflowPhase.Review;
+    public bool CanContinue => photoSnapshot?.Scope.ScopeState == ScopeSessionState.Ready;
+    public bool CanConfirmExactRules => CanContinue && IsConfirmRulesPhase && photoSnapshot?.Rules is null;
+    public bool CanStartScan => photoSnapshot is { } snapshot && ShellPhasePolicy.CanStart(snapshot.Scope, snapshot.Rules) && !IsScanBusy;
+    public bool IsScanBusy => photoSnapshot?.Scan.Status is ScanSessionStatus.Checking or ScanSessionStatus.Running;
+    public bool CanOpenReview => photoSnapshot?.Scan.Pin is not null;
+    public string ExactPreset { get; } = "Exact duplicates only. Files must contain identical bytes. Rules are fixed for this scan.";
+    public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";
+    public string ScanStatus => photoSnapshot is { } snapshot
+        ? $"{snapshot.Scan.Status}; Enumeration: {snapshot.Scan.Enumeration.State}; Exact: {(snapshot.Scan.Counts.Outstanding > 0 ? "Running" : snapshot.Scan.Status is ScanSessionStatus.Complete or ScanSessionStatus.Incomplete ? "Finished" : "Pending")}" : "Idle";
+    public string ScanCountsText => photoSnapshot is { Scan.Counts: var count }
+        ? $"Discovered: {count.Discovered}; Analyzed: {count.Analyzed}; Excluded: {count.Excluded}; Failed: {count.Failed}; Canceled: {count.Canceled}; Outstanding: {count.Outstanding}" : string.Empty;
+    public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
+        ? "Complete scope coverage. Read failures and exclusions are reported separately."
+        : "Partial results — incomplete scope coverage. Results do not represent every file in the Scope.";
+    public string ReviewDisclaimer { get; } = "Analyzed revisions; scan again after files change. Results are memory-only and are not restored after restart.";
+    public ImmutableArray<ExactGroupViewModel> ExactGroups { get; private set; } = [];
+    public ImmutableArray<ScanOccurrenceViewModel> CouldNotAnalyze { get; private set; } = [];
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -158,7 +206,34 @@ public sealed class ShellViewModel : INotifyPropertyChanged
 
     // The composition root schedules the workflow's ordered publications on the
     // UI Dispatcher. Workers never call the ViewModel or synchronously Send here.
-    private void OnSnapshotChanged(object? sender, ShellSnapshot snapshot) => Apply(snapshot);
+    private void OnSnapshotChanged(object? sender, ShellSnapshot snapshot)
+    {
+        if (photoWorkflow is null) Apply(snapshot);
+    }
+
+    private void ApplyCombined(PhotoSiftSnapshot snapshot)
+    {
+        var previousPhase = CurrentPhase;
+        var previousStatus = ScanStatus;
+        var previousBusy = IsScanBusy;
+        var previousCanConfirm = CanConfirmExactRules;
+        Apply(snapshot.Scope);
+        photoSnapshot = snapshot;
+        Phases = Project(snapshot.Phases);
+        RuleSetStatus = snapshot.Rules is null ? "Not configured" : "Exact duplicates only — confirmed";
+        ExactGroups = snapshot.Scan.Groups.Select(group => new ExactGroupViewModel(group)).ToImmutableArray();
+        CouldNotAnalyze = snapshot.Scan.Occurrences
+            .Where(row => row.Exact.State is ScanStageState.FailedRetryable or ScanStageState.FailedTerminal or ScanStageState.Canceled)
+            .Select(row => new ScanOccurrenceViewModel(row)).ToImmutableArray();
+        foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsScanPhase), nameof(IsReviewPhase),
+            nameof(CanContinue), nameof(CanStartScan), nameof(CanOpenReview),
+            nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(ExactGroups), nameof(CouldNotAnalyze) })
+            OnPropertyChanged(name);
+        if (previousBusy != IsScanBusy) OnPropertyChanged(nameof(IsScanBusy));
+        if (previousCanConfirm != CanConfirmExactRules) OnPropertyChanged(nameof(CanConfirmExactRules));
+        if (previousStatus != ScanStatus) OnPropertyChanged(nameof(ScanStatus));
+        if (previousPhase != CurrentPhase) OnPropertyChanged(nameof(CurrentPhase));
+    }
 
     private void Apply(ShellSnapshot snapshot)
     {
@@ -308,3 +383,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
+
+
+
+
+

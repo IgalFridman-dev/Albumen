@@ -1,3 +1,5 @@
+using PhotoSift.Domain.Scan;
+using PhotoSift.Application.Scan;
 using PhotoSift.Domain.Scope;
 using PhotoSift.Infrastructure.Windows.Scope;
 
@@ -15,8 +17,15 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WindowsFileReadProbeResult> readResults =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Exception> readProbeFailures =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PhysicalFileKey> fileIdentities =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Exception> fileIdentityFailures =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<SupportedImageFormat, bool> codecs = [];
     private readonly ScopeVolumeKind volume;
+    private ulong nextFileIdentity = 100;
 
     private FakeWindowsScopeNative(
         ScopeVolumeKind volume,
@@ -49,7 +58,27 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
 
     public List<string> ReadOpenPaths { get; } = [];
 
+    public List<string> InspectedFileIdentityPaths { get; } = [];
+
     public List<SupportedImageFormat> CodecQueries { get; } = [];
+
+    public Action<string>? AfterDirectoryInspection { get; set; }
+
+    public int LiveDirectoryProtections { get; private set; }
+
+    public int MaximumDirectoryProtections { get; private set; }
+
+    public void ReplaceDirectory(string path, DirectoryIdentity identity, string? resolvedPath = null,
+        ScopeCloudState cloud = ScopeCloudState.Local)
+    {
+        var previous = directories[path];
+        directories[path] = previous with
+        {
+            Identity = identity,
+            ResolvedPath = resolvedPath ?? previous.ResolvedPath,
+            CloudState = cloud,
+        };
+    }
 
     public static FakeWindowsScopeNative ForRoot(
         ScopeVolumeKind volume,
@@ -66,7 +95,8 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         ScopeCloudState cloud = ScopeCloudState.Local,
         bool canRead = true,
         ScopeCloudState? readCloud = null,
-        bool isReparsePoint = false)
+        bool isReparsePoint = false,
+        PhysicalFileKey? physicalFileKey = null)
     {
         EntriesFor(directory).Add(new WindowsScopeEntry(
             path,
@@ -76,6 +106,7 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         readResults[path] = new WindowsFileReadProbeResult(
             readCloud ?? cloud,
             canRead);
+        fileIdentities[path] = physicalFileKey ?? FileIdentity(nextFileIdentity++);
         return this;
     }
 
@@ -122,6 +153,18 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         return this;
     }
 
+    public FakeWindowsScopeNative FailFileIdentity(string path, Exception exception)
+    {
+        fileIdentityFailures[path] = exception;
+        return this;
+    }
+
+    public FakeWindowsScopeNative FailReadProbe(string path, Exception exception)
+    {
+        readProbeFailures[path] = exception;
+        return this;
+    }
+
     public WindowsDirectoryFacts InspectDirectory(string path)
     {
         InspectedPaths.Add(path);
@@ -130,15 +173,27 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
             throw failure;
         }
 
-        return directories.TryGetValue(path, out var facts)
+        var result = directories.TryGetValue(path, out var facts)
             ? facts
             : throw new InvalidOperationException($"No directory facts for '{path}'.");
+        AfterDirectoryInspection?.Invoke(path);
+        return result;
     }
 
     public ScopeVolumeKind GetVolumeKind(string resolvedPath)
     {
         VolumePaths.Add(resolvedPath);
         return volume;
+    }
+
+    public IWindowsDirectoryProtection ProtectDirectory(ResolvedScope scope, WindowsDirectoryFacts expected,
+        string discoveredPath, CancellationToken cancellationToken)
+    {
+        var protection = new DirectoryProtection(this, scope, expected);
+        protection.Validate(cancellationToken);
+        LiveDirectoryProtections++;
+        MaximumDirectoryProtections = Math.Max(MaximumDirectoryProtections, LiveDirectoryProtections);
+        return protection;
     }
 
     public IEnumerable<WindowsScopeEntry> EnumerateDirectory(string resolvedPath)
@@ -157,6 +212,11 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
     public WindowsFileReadProbeResult ProbeFileForRead(string path)
     {
         ReadProbePaths.Add(path);
+        if (readProbeFailures.TryGetValue(path, out var failure))
+        {
+            throw failure;
+        }
+
         var result = readResults.TryGetValue(path, out var configured)
             ? configured
             : new WindowsFileReadProbeResult(ScopeCloudState.Local, CanOpenForRead: true);
@@ -166,6 +226,19 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         }
 
         return result;
+    }
+
+    public PhysicalFileKey InspectFileIdentity(string path)
+    {
+        InspectedFileIdentityPaths.Add(path);
+        if (fileIdentityFailures.TryGetValue(path, out var failure))
+        {
+            throw failure;
+        }
+
+        return fileIdentities.TryGetValue(path, out var identity)
+            ? identity
+            : throw new InvalidOperationException($"No file identity for '{path}'.");
     }
 
     public bool IsCodecAvailable(SupportedImageFormat format)
@@ -183,5 +256,41 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         }
 
         return directoryEntries;
+    }
+
+    private static PhysicalFileKey FileIdentity(ulong value) =>
+        new(7, new FileId128(0, value));
+
+    private sealed class DirectoryProtection(FakeWindowsScopeNative owner, ResolvedScope scope,
+        WindowsDirectoryFacts expected) : IWindowsDirectoryProtection
+    {
+        private bool disposed;
+        public void Validate(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var root = owner.directories[scope.Selection.SelectedPath];
+            var current = owner.directories[expected.DisplayPath];
+            if (root.Identity != scope.RootIdentity || root.ResolvedPath != scope.ResolvedPath
+                || current.Identity != expected.Identity || current.ResolvedPath != expected.ResolvedPath)
+                throw new ScanReadException(new StageOutcome(ScanStageState.FailedRetryable, ScanReason.Changed), "Directory changed.");
+            if (root.CloudState != ScopeCloudState.Local || current.CloudState != ScopeCloudState.Local)
+                throw new ScanReadException(new StageOutcome(ScanStageState.FailedTerminal, ScanReason.UnknownSafety), "Unsafe directory.");
+        }
+        public IEnumerable<WindowsScopeEntry> Enumerate(CancellationToken cancellationToken)
+        {
+            Validate(cancellationToken);
+            foreach (var entry in owner.EnumerateDirectory(expected.ResolvedPath))
+            {
+                Validate(cancellationToken);
+                yield return entry;
+            }
+            Validate(cancellationToken);
+        }
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            owner.LiveDirectoryProtections--;
+        }
     }
 }

@@ -5,6 +5,7 @@ using System.Windows.Automation.Peers;
 using System.Windows.Input;
 using System.Windows.Threading;
 using PhotoSift.App.Shell;
+using PhotoSift.Domain.Workflow;
 
 namespace PhotoSift.App;
 
@@ -51,6 +52,21 @@ public partial class MainWindow : Window
         object? sender,
         PropertyChangedEventArgs eventArgs)
     {
+        if ((eventArgs.PropertyName == nameof(ShellViewModel.CanConfirmExactRules)
+                && shellViewModel is { IsConfirmRulesPhase: true, CanConfirmExactRules: false, CanStartScan: true })
+            || (eventArgs.PropertyName == nameof(ShellViewModel.IsScanBusy)
+                && shellViewModel is { IsScanPhase: true, IsScanBusy: true }))
+        {
+            QueuePhaseFocus();
+        }
+        if (eventArgs.PropertyName == nameof(ShellViewModel.CurrentPhase))
+        {
+            QueuePhaseFocus();
+        }
+        if (eventArgs.PropertyName == nameof(ShellViewModel.ScanStatus))
+        {
+            QueueScanStatusAnnouncement();
+        }
         if (eventArgs.PropertyName == nameof(ShellViewModel.ScopeStatus))
         {
             QueueScopeStatusAnnouncement();
@@ -105,6 +121,49 @@ public partial class MainWindow : Window
             DispatcherPriority.Background);
     }
 
+    private void QueuePhaseFocus()
+    {
+        var generation = dataContextGeneration;
+        var expected = shellViewModel;
+        if (expected is null) return;
+        var phase = expected.CurrentPhase;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || generation != dataContextGeneration || !ReferenceEquals(expected, shellViewModel)
+                || phase != shellViewModel?.CurrentPhase) return;
+            UIElement? target = phase switch
+            {
+                WorkflowPhase.ChooseScope => expected.IsBlocked ? BlockingNotice : ChooseAnotherScopeButton,
+                WorkflowPhase.ConfirmRules => expected.CanConfirmExactRules ? ConfirmExactRulesButton : StartScanButton,
+                WorkflowPhase.Scan => expected.IsScanBusy ? CancelScanButton : null,
+                WorkflowPhase.Review => ReviewHeading,
+                _ => null,
+            };
+            if (target is not null && target.IsVisible && target.IsEnabled)
+            {
+                Activate();
+                target.Focus();
+                Keyboard.Focus(target);
+            }
+        }, DispatcherPriority.Input);
+    }
+
+    private void QueueScanStatusAnnouncement()
+    {
+        var expected = shellViewModel;
+        var status = expected?.ScanStatus;
+        var generation = dataContextGeneration;
+        Dispatcher.InvokeAsync(() =>
+        {
+            var statusElement = expected?.IsReviewPhase is true ? ReviewStatusText : ScanStatusText;
+            if (isClosed || generation != dataContextGeneration || !ReferenceEquals(expected, shellViewModel)
+                || !statusElement.IsVisible || statusElement.Text != status || AutomationProperties.GetItemStatus(statusElement) != status) return;
+            var peer = UIElementAutomationPeer.FromElement(statusElement)
+                ?? UIElementAutomationPeer.CreatePeerForElement(statusElement);
+            peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        }, DispatcherPriority.Background);
+    }
+
     private void OnClosed(object? sender, EventArgs eventArgs)
     {
         isClosed = true;
@@ -115,3 +174,6 @@ public partial class MainWindow : Window
         }
     }
 }
+
+
+

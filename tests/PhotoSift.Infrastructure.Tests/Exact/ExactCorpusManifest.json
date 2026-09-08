@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "scopeRoot": "scope",
+  "files": [
+    { "path": "scope/large/a-original.jpg", "recipe": "sequence-131073", "equivalence": "large", "expectation": "supported" },
+    { "path": "scope/large/b-renamed-copy.jpeg", "copyOf": "scope/large/a-original.jpg", "equivalence": "large", "expectation": "supported" },
+    { "path": "scope/large/c-in-scope-alias.png", "hardLinkTo": "scope/large/a-original.jpg", "equivalence": "large", "expectation": "supported" },
+    { "path": "scope/large/d-equal-length-different.png", "recipe": "sequence-131073-flip-last", "equivalence": "different-large", "expectation": "supported" },
+
+    { "path": "scope/empty/a-empty.png", "recipe": "empty", "equivalence": "empty", "expectation": "supported" },
+    { "path": "scope/empty/b-empty-copy.jpg", "copyOf": "scope/empty/a-empty.png", "equivalence": "empty", "expectation": "supported" },
+    { "path": "scope/empty/c-empty-alias.jpeg", "hardLinkTo": "scope/empty/a-empty.png", "equivalence": "empty", "expectation": "supported" },
+
+    { "path": "outside/external-origin.jpg", "recipe": "sequence-4097", "equivalence": "external", "expectation": "outside" },
+    { "path": "scope/external/a-external-link.jpg", "hardLinkTo": "outside/external-origin.jpg", "equivalence": "external", "expectation": "supported" },
+    { "path": "scope/external/b-external-copy.png", "copyOf": "outside/external-origin.jpg", "equivalence": "external", "expectation": "supported" },
+
+    { "path": "scope/race/a-source.jpg", "recipe": "sequence-8193", "equivalence": "race", "expectation": "supported" },
+    { "path": "scope/race/b-copy.png", "copyOf": "scope/race/a-source.jpg", "equivalence": "race", "expectation": "supported" },
+
+    { "path": "outside/alias-only-origin.png", "recipe": "sequence-333", "equivalence": "alias-only", "expectation": "outside" },
+    { "path": "scope/alias-only/a-first-link.png", "hardLinkTo": "outside/alias-only-origin.png", "equivalence": "alias-only", "expectation": "supported" },
+    { "path": "scope/alias-only/b-second-link.jpg", "hardLinkTo": "outside/alias-only-origin.png", "equivalence": "alias-only", "expectation": "supported" },
+
+    { "path": "scope/unique/abc.jpg", "recipe": "abc", "equivalence": "abc", "expectation": "supported" },
+    { "path": "scope/unsupported/abc.gif", "copyOf": "scope/unique/abc.jpg", "equivalence": "abc", "expectation": "unsupported-extension" },
+    { "path": "scope/codec/conditional.heic", "recipe": "sequence-19", "equivalence": "heic-conditional", "expectation": "codec-dependent" },
+    { "path": "scope/תמונות-日本語/רחוב-唯一.png", "recipe": "sequence-257", "equivalence": "unicode-unique", "expectation": "supported" },
+    { "path": "scope/deep/segment-0-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/segment-1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/segment-2-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/segment-3-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/deep-unique.jpeg", "recipe": "sequence-521", "equivalence": "deep-unique", "expectation": "supported" }
+  ]
+}

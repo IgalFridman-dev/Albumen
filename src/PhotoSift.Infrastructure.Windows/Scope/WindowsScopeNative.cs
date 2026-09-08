@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
+using PhotoSift.Infrastructure.Windows.Scan;
 
 namespace PhotoSift.Infrastructure.Windows.Scope;
 
@@ -7,6 +9,7 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
 {
     private readonly WicCodecCapability codecs;
     private readonly IWindowsFileReadProbe fileReadProbe;
+    private readonly IWindowsFileFactsSource fileFacts;
 
     internal WindowsScopeNative(WicCodecCapability codecs)
         : this(codecs, new WindowsFileReadProbe())
@@ -16,10 +19,17 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
     internal WindowsScopeNative(
         WicCodecCapability codecs,
         IWindowsFileReadProbe fileReadProbe)
+        : this(codecs, fileReadProbe, new WindowsFileNative())
+    {
+    }
+
+    internal WindowsScopeNative(WicCodecCapability codecs, IWindowsFileReadProbe fileReadProbe,
+        IWindowsFileFactsSource fileFacts)
     {
         this.codecs = codecs ?? throw new ArgumentNullException(nameof(codecs));
         this.fileReadProbe = fileReadProbe ??
             throw new ArgumentNullException(nameof(fileReadProbe));
+        this.fileFacts = fileFacts ?? throw new ArgumentNullException(nameof(fileFacts));
     }
 
     public WindowsDirectoryFacts InspectDirectory(string path)
@@ -33,7 +43,7 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
             FileShare.ReadWrite | FileShare.Delete,
             securityAttributes: 0,
             NativeMethods.OpenExisting,
-            NativeMethods.FileFlagBackupSemantics,
+            NativeMethods.FileFlagBackupSemantics | NativeMethods.FileFlagOpenNoRecall,
             templateFile: 0);
         ThrowIfInvalid(handle.IsInvalid, displayPath);
 
@@ -64,56 +74,15 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
     public IEnumerable<WindowsScopeEntry> EnumerateDirectory(string resolvedPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(resolvedPath);
-        var searchPath = Path.Combine(ToExtendedLengthPath(resolvedPath), "*");
-        using var findHandle = NativeMethods.FindFirstFileEx(
-            searchPath,
-            FindExInfoLevel.Basic,
-            out var findData,
-            FindExSearchOperation.NameMatch,
-            searchFilter: 0,
-            additionalFlags: 0);
-
-        if (findHandle.IsInvalid)
-        {
-            var nativeError = Marshal.GetLastPInvokeError();
-            if (nativeError == NativeMethods.ErrorFileNotFound)
-            {
-                yield break;
-            }
-
-            throw CreateException(resolvedPath, nativeError);
-        }
-
-        while (true)
-        {
-            var name = findData.GetFileName();
-            if (name is not "." and not "..")
-            {
-                var attributes = findData.FileAttributes;
-                var placeholderState = NativeMethods.CfGetPlaceholderStateFromAttributeTag(
-                    attributes,
-                    findData.Reserved0);
-                yield return new WindowsScopeEntry(
-                    Path.Combine(resolvedPath, name),
-                    (attributes & NativeMethods.FileAttributeDirectory) != 0,
-                    (attributes & NativeMethods.FileAttributeReparsePoint) != 0,
-                    MapCloudState(attributes, placeholderState));
-            }
-
-            if (NativeMethods.FindNextFile(findHandle, out findData))
-            {
-                continue;
-            }
-
-            var nativeError = Marshal.GetLastPInvokeError();
-            if (nativeError == NativeMethods.ErrorNoMoreFiles)
-            {
-                yield break;
-            }
-
-            throw CreateException(resolvedPath, nativeError);
-        }
+        var root = InspectDirectory(resolvedPath);
+        var scope = new ResolvedScope(new ScopeSelection(resolvedPath, ScopeRecursion.TopLevelOnly), root.ResolvedPath, root.Identity);
+        using var protection = ProtectDirectory(scope, root, resolvedPath, CancellationToken.None);
+        foreach (var entry in protection.Enumerate(CancellationToken.None)) yield return entry;
     }
+
+    public IWindowsDirectoryProtection ProtectDirectory(ResolvedScope scope, WindowsDirectoryFacts expected,
+        string discoveredPath, CancellationToken cancellationToken) =>
+        new WindowsDirectoryProtection(scope, expected, discoveredPath, fileFacts, cancellationToken);
 
     public WindowsFileReadProbeResult ProbeFileForRead(string path)
     {
@@ -129,6 +98,26 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
         return new WindowsFileReadProbeResult(
             cloudState,
             fileReadProbe.TryOpenForRead(path));
+    }
+
+    public PhysicalFileKey InspectFileIdentity(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var displayPath = Path.GetFullPath(path);
+        using var handle = NativeMethods.CreateFile(
+            ToExtendedLengthPath(displayPath),
+            desiredAccess: 0,
+            FileShare.ReadWrite | FileShare.Delete,
+            securityAttributes: 0,
+            NativeMethods.OpenExisting,
+            NativeMethods.FileFlagOpenNoRecall | NativeMethods.FileFlagOpenReparsePoint,
+            templateFile: 0);
+        ThrowIfInvalid(handle.IsInvalid, displayPath);
+
+        var information = GetIdentityInformation(handle, displayPath);
+        return new PhysicalFileKey(
+            information.VolumeSerialNumber,
+            new FileId128(information.FileId.High, information.FileId.Low));
     }
 
     public bool IsCodecAvailable(SupportedImageFormat format) => codecs.IsAvailable(format);
@@ -231,6 +220,17 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
         Microsoft.Win32.SafeHandles.SafeFileHandle handle,
         string path)
     {
+        var information = GetIdentityInformation(handle, path);
+        return new DirectoryIdentity(
+            information.VolumeSerialNumber,
+            information.FileId.High,
+            information.FileId.Low);
+    }
+
+    private static unsafe FILE_ID_INFO GetIdentityInformation(
+        Microsoft.Win32.SafeHandles.SafeFileHandle handle,
+        string path)
+    {
         if (!NativeMethods.GetFileInformationByHandleEx(
                 handle,
                 FileInfoByHandleClass.FileIdInfo,
@@ -240,10 +240,7 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
             throw CreateException(path, Marshal.GetLastPInvokeError());
         }
 
-        return new DirectoryIdentity(
-            information.VolumeSerialNumber,
-            information.FileId.High,
-            information.FileId.Low);
+        return information;
     }
 
     private static unsafe FILE_ATTRIBUTE_TAG_INFO GetAttributeTag(

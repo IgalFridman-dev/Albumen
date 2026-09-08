@@ -1,6 +1,9 @@
 using System.Security.AccessControl;
 using System.Security.Principal;
+using PhotoSift.Application.Scan;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
+using PhotoSift.Infrastructure.Windows.Scan;
 using PhotoSift.Infrastructure.Windows.Scope;
 using Xunit;
 
@@ -8,6 +11,69 @@ namespace PhotoSift.Infrastructure.Tests.Scope;
 
 public sealed class WindowsTraversalIntegrationTests
 {
+    [Fact]
+    public async Task RealScanEnumerationEmitsUnicodeAndLongPathsWithPhysicalIdentity()
+    {
+        var root = Directory.CreateTempSubdirectory("PhotoSiftScanTraversal-");
+        try
+        {
+            var unicodePath = Path.Combine(root.FullName, "רחוב-日本語.PNG");
+            File.WriteAllText(unicodePath, "fixture-one");
+            var deep = root.FullName;
+            for (var index = 0; index < 4; index++)
+            {
+                deep = Path.Combine(deep, $"segment-{index}-{new string('x', 58)}");
+            }
+
+            Assert.True(deep.Length > 260, $"Fixture path length was only {deep.Length}.");
+            Directory.CreateDirectory(deep);
+            var deepPath = Path.Combine(deep, "deep.jpeg");
+            File.WriteAllText(deepPath, "fixture-two");
+
+            var selection = new ScopeSelection(
+                root.FullName,
+                ScopeRecursion.IncludeSubfolders);
+            var evidence = await new WindowsLocalScopePreflight().InspectAsync(
+                selection,
+                CancellationToken.None);
+            var scope = Assert.IsType<ResolvedScope>(evidence.Scope);
+            var context = new ScanRunContext(
+                new ScanPin(
+                    new Guid("33333333-3333-3333-3333-333333333333"),
+                    1,
+                    1,
+                    1),
+                scope);
+            var events = new List<ScanEnumerationEvent>();
+
+            await foreach (var item in new WindowsScanEnumerator().EnumerateAsync(
+                context,
+                TestContext.Current.CancellationToken))
+            {
+                events.Add(item);
+            }
+
+            var files = events.OfType<ScanFileFound>().Select(item => item.File).ToArray();
+            Assert.Equal(2, files.Length);
+            Assert.All(files, file =>
+            {
+                Assert.NotNull(file.PhysicalFileKey);
+                Assert.Equal(
+                    new StageOutcome(ScanStageState.Succeeded, ScanReason.None),
+                    file.Outcome);
+            });
+            Assert.Contains(files, file => Path.GetFileName(file.DiscoveredPath) == "רחוב-日本語.PNG");
+            Assert.Contains(files, file => file.ResolvedPath == deepPath);
+            Assert.Equal(
+                new StageOutcome(ScanStageState.Succeeded, ScanReason.None),
+                Assert.Single(events.OfType<ScanEnumerationEnded>()).Outcome);
+        }
+        finally
+        {
+            CleanupAll(() => root.Delete(recursive: true));
+        }
+    }
+
     [Fact]
     public async Task RealFilesystemHonorsTopLevelRecursionUnicodeAndLongPaths()
     {

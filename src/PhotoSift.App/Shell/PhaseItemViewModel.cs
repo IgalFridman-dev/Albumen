@@ -7,12 +7,14 @@ public sealed record PhaseItemViewModel(
     string DisplayName,
     PhaseAvailability Availability)
 {
-    public bool IsAvailable => Availability is PhaseAvailability.Current;
+    public bool IsAvailable => Availability is PhaseAvailability.Current or PhaseAvailability.Available;
 
     public string AvailabilityLabel => Availability switch
     {
         PhaseAvailability.Current => "Available now",
+        PhaseAvailability.Available => "Available",
         PhaseAvailability.Unavailable => "Unavailable",
         _ => throw new InvalidOperationException($"Unknown availability: {Availability}"),
     };
 }
+

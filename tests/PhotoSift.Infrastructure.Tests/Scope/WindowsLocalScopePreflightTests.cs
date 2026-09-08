@@ -458,6 +458,24 @@ public sealed class WindowsLocalScopePreflightTests
     }
 
     [Fact]
+    public async Task UnknownFileReadProbeFailureReturnsUnknownWithoutCompleteCounts()
+    {
+        const string path = @"C:\Resolved\Photos\unknown.jpg";
+        var native = LocalRoot()
+            .AddFile(@"C:\Resolved\Photos", path)
+            .FailReadProbe(path, new IOException("fixture read-probe uncertainty"));
+        var adapter = new WindowsLocalScopePreflight(native);
+
+        var evidence = await adapter.InspectAsync(
+            Selection(ScopeRecursion.IncludeSubfolders),
+            CancellationToken.None);
+
+        Assert.Equal(ScopeTraversalState.Unknown, evidence.Traversal);
+        Assert.Equal(new ScopeOutcomeCounts(0, 0, 0, 0), evidence.Counts);
+        Assert.Null(ScopePreflightPolicy.Evaluate(evidence).CompleteCounts);
+    }
+
+    [Fact]
     public async Task CancellationIsPropagatedInsteadOfBecomingUnknownEvidence()
     {
         var adapter = new WindowsLocalScopePreflight(LocalRoot());
