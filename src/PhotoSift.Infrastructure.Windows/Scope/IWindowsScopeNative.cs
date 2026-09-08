@@ -1,3 +1,4 @@
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
 
 namespace PhotoSift.Infrastructure.Windows.Scope;
@@ -11,6 +12,8 @@ internal interface IWindowsScopeNative
     IEnumerable<WindowsScopeEntry> EnumerateDirectory(string resolvedPath);
 
     WindowsFileReadProbeResult ProbeFileForRead(string path);
+
+    PhysicalFileKey InspectFileIdentity(string path);
 
     bool IsCodecAvailable(SupportedImageFormat format);
 }

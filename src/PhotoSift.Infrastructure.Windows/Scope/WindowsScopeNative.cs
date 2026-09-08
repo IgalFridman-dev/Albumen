@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
 
 namespace PhotoSift.Infrastructure.Windows.Scope;
@@ -131,6 +132,26 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
             fileReadProbe.TryOpenForRead(path));
     }
 
+    public PhysicalFileKey InspectFileIdentity(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var displayPath = Path.GetFullPath(path);
+        using var handle = NativeMethods.CreateFile(
+            ToExtendedLengthPath(displayPath),
+            desiredAccess: 0,
+            FileShare.ReadWrite | FileShare.Delete,
+            securityAttributes: 0,
+            NativeMethods.OpenExisting,
+            NativeMethods.FileFlagOpenNoRecall | NativeMethods.FileFlagOpenReparsePoint,
+            templateFile: 0);
+        ThrowIfInvalid(handle.IsInvalid, displayPath);
+
+        var information = GetIdentityInformation(handle, displayPath);
+        return new PhysicalFileKey(
+            information.VolumeSerialNumber,
+            new FileId128(information.FileId.High, information.FileId.Low));
+    }
+
     public bool IsCodecAvailable(SupportedImageFormat format) => codecs.IsAvailable(format);
 
     internal static ScopeVolumeKind MapDriveType(uint driveType) => driveType switch
@@ -231,6 +252,17 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
         Microsoft.Win32.SafeHandles.SafeFileHandle handle,
         string path)
     {
+        var information = GetIdentityInformation(handle, path);
+        return new DirectoryIdentity(
+            information.VolumeSerialNumber,
+            information.FileId.High,
+            information.FileId.Low);
+    }
+
+    private static unsafe FILE_ID_INFO GetIdentityInformation(
+        Microsoft.Win32.SafeHandles.SafeFileHandle handle,
+        string path)
+    {
         if (!NativeMethods.GetFileInformationByHandleEx(
                 handle,
                 FileInfoByHandleClass.FileIdInfo,
@@ -240,10 +272,7 @@ internal sealed class WindowsScopeNative : IWindowsScopeNative
             throw CreateException(path, Marshal.GetLastPInvokeError());
         }
 
-        return new DirectoryIdentity(
-            information.VolumeSerialNumber,
-            information.FileId.High,
-            information.FileId.Low);
+        return information;
     }
 
     private static unsafe FILE_ATTRIBUTE_TAG_INFO GetAttributeTag(

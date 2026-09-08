@@ -1,3 +1,4 @@
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
 using PhotoSift.Infrastructure.Windows.Scope;
 
@@ -15,8 +16,15 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WindowsFileReadProbeResult> readResults =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Exception> readProbeFailures =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PhysicalFileKey> fileIdentities =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Exception> fileIdentityFailures =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<SupportedImageFormat, bool> codecs = [];
     private readonly ScopeVolumeKind volume;
+    private ulong nextFileIdentity = 100;
 
     private FakeWindowsScopeNative(
         ScopeVolumeKind volume,
@@ -49,6 +57,8 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
 
     public List<string> ReadOpenPaths { get; } = [];
 
+    public List<string> InspectedFileIdentityPaths { get; } = [];
+
     public List<SupportedImageFormat> CodecQueries { get; } = [];
 
     public static FakeWindowsScopeNative ForRoot(
@@ -66,7 +76,8 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         ScopeCloudState cloud = ScopeCloudState.Local,
         bool canRead = true,
         ScopeCloudState? readCloud = null,
-        bool isReparsePoint = false)
+        bool isReparsePoint = false,
+        PhysicalFileKey? physicalFileKey = null)
     {
         EntriesFor(directory).Add(new WindowsScopeEntry(
             path,
@@ -76,6 +87,7 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         readResults[path] = new WindowsFileReadProbeResult(
             readCloud ?? cloud,
             canRead);
+        fileIdentities[path] = physicalFileKey ?? FileIdentity(nextFileIdentity++);
         return this;
     }
 
@@ -122,6 +134,18 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         return this;
     }
 
+    public FakeWindowsScopeNative FailFileIdentity(string path, Exception exception)
+    {
+        fileIdentityFailures[path] = exception;
+        return this;
+    }
+
+    public FakeWindowsScopeNative FailReadProbe(string path, Exception exception)
+    {
+        readProbeFailures[path] = exception;
+        return this;
+    }
+
     public WindowsDirectoryFacts InspectDirectory(string path)
     {
         InspectedPaths.Add(path);
@@ -157,6 +181,11 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
     public WindowsFileReadProbeResult ProbeFileForRead(string path)
     {
         ReadProbePaths.Add(path);
+        if (readProbeFailures.TryGetValue(path, out var failure))
+        {
+            throw failure;
+        }
+
         var result = readResults.TryGetValue(path, out var configured)
             ? configured
             : new WindowsFileReadProbeResult(ScopeCloudState.Local, CanOpenForRead: true);
@@ -166,6 +195,19 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
         }
 
         return result;
+    }
+
+    public PhysicalFileKey InspectFileIdentity(string path)
+    {
+        InspectedFileIdentityPaths.Add(path);
+        if (fileIdentityFailures.TryGetValue(path, out var failure))
+        {
+            throw failure;
+        }
+
+        return fileIdentities.TryGetValue(path, out var identity)
+            ? identity
+            : throw new InvalidOperationException($"No file identity for '{path}'.");
     }
 
     public bool IsCodecAvailable(SupportedImageFormat format)
@@ -184,4 +226,7 @@ internal sealed class FakeWindowsScopeNative : IWindowsScopeNative
 
         return directoryEntries;
     }
+
+    private static PhysicalFileKey FileIdentity(ulong value) =>
+        new(7, new FileId128(0, value));
 }
