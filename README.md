@@ -4,13 +4,14 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Planning is complete and validated. E1-S1 has implemented and verified the native offline application boundary and is done. E1-S2 remains intentionally locked in backlog; `next_eligible_story` remains E1-S1 until the implementation policy is deliberately advanced.
+Planning is complete and validated. E1-S1 implemented and verified the native offline application boundary and is done. E1-S2 is implemented, reviewed, verified by the complete offline Full gate, and done. The policy still names E1-S2 as the sole eligible story; E1-S3 and all later work remain deliberately locked until a separate policy transition.
 
-- Current implementation entry point: **E1-S1 — Bootstrap the native offline application boundary**
+- Latest completed story: **E1-S2 — Select and preflight an exact local Scope (done)**
 - Current tracking: [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)
 - Story contracts: [`_bmad-output/specs/`](_bmad-output/specs/)
 - Documentation map: [`docs/README.md`](docs/README.md)
 - E1-S1 verification: [`docs/evidence/e1-s1/verification.md`](docs/evidence/e1-s1/verification.md)
+- E1-S2 final verification: [`docs/evidence/e1-s2/verification.md`](docs/evidence/e1-s2/verification.md)
 
 The mandatory first-epic sequence is:
 
@@ -35,7 +36,7 @@ The project deliberately excludes cloud inference, accounts, telemetry, automati
 5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
 6. Stop at E1-S6 until the safety gate is explicitly recorded as `PASS`.
 
-The repository now contains the E1-S1 .NET 10/C# 14/WPF `win-x64` structural seed, its five test projects, and a network-disabled Windows Sandbox verification gate. Later-story behavior remains intentionally absent.
+The repository contains the .NET 10/C# 14/WPF `win-x64` application with exact local Scope selection and preflight, five test projects, and a NIC-free Golden Hyper-V VM verification gate. Later-story behavior remains intentionally absent.
 
 ## Repository layout
 
@@ -59,8 +60,28 @@ Local `.uv-cache-bmad-*` directories are disposable workflow caches and are not 
 
 The repository pins .NET SDK `10.0.400` and requires the .NET/Desktop `10.0.11` runtime family. The complete executable gate is:
 
+Capture and validate the clean credential baseline once from an elevated PowerShell window. This authenticates the current VM state before any restore, preserves `Clean-Evaluation-Base`, and creates `Credential-Evaluation-Base` without saving or changing the password:
+
 ```powershell
-pwsh -NoProfile -File eng/sandbox/Invoke-PhotoSiftSandbox.ps1 -Stage Full
+pwsh -NoProfile -File eng/verification/Repair-PhotoSiftGoldenVmCredential.ps1
 ```
 
-Windows Sandbox is used because this development host's Application Control policy blocks unsigned locally built executables. The harness keeps networking disabled and does not weaken that host policy.
+Then provision the toolchain checkpoint once. This restores `Credential-Evaluation-Base` and creates a re-authenticated `Toolchain-Evaluation-Base`:
+
+```powershell
+pwsh -NoProfile -File eng/verification/Initialize-PhotoSiftGoldenVm.ps1
+```
+
+Normal gates restore `Toolchain-Evaluation-Base` and copy only the project source:
+
+```powershell
+pwsh -NoProfile -File eng/verification/Invoke-PhotoSiftHyperV.ps1 -Stage Full
+```
+
+From an elevated PowerShell window, run all three local gates with one guest credential prompt:
+
+```powershell
+pwsh -NoProfile -File eng/verification/Invoke-PhotoSiftHyperVStages.ps1
+```
+
+The Golden Hyper-V VM is used because this development host's Application Control policy blocks unsigned locally built executables and Windows Sandbox also blocks the xUnit adapter. The VM has zero virtual NICs. `Clean-Evaluation-Base` remains the immutable emergency checkpoint; `Credential-Evaluation-Base` seals the verified local account; normal runs restore the additive toolchain checkpoint and do not weaken host or guest policy.

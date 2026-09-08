@@ -5,81 +5,280 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="PhotoSift"
-        Width="880"
-        Height="620"
+        Width="960"
+        Height="720"
         MinWidth="680"
-        MinHeight="500"
+        MinHeight="520"
+        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+        Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
         WindowStartupLocation="CenterScreen">
-    <Grid Margin="36">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </Window.Resources>
+
+    <Grid Margin="24">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,24">
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
             <TextBlock FontSize="30"
                        FontWeight="SemiBold"
                        Text="PhotoSift" />
-            <TextBlock Margin="0,8,0,0"
+            <TextBlock Margin="0,6,0,0"
                        FontSize="16"
-                       Text="A careful, local workflow for reviewing photo cleanup." />
+                       TextWrapping="Wrap"
+                       Text="Choose one local photo folder. PhotoSift checks it without changing or uploading your photos." />
         </StackPanel>
 
-        <Border Grid.Row="1"
-                Margin="0,0,0,24"
-                Padding="16"
-                CornerRadius="8"
-                BorderThickness="1"
-                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
-            <StackPanel>
-                <TextBlock FontWeight="SemiBold"
-                           Text="PhotoSift works offline. This workflow stays on this PC." />
-                <TextBlock Margin="0,6,0,0"
-                           TextWrapping="Wrap"
-                           Text="{Binding Instruction}" />
-            </StackPanel>
-        </Border>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="240" />
+                <ColumnDefinition Width="24" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-        <ItemsControl Grid.Row="2" ItemsSource="{Binding Phases}">
-            <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                    <Border Margin="0,0,0,10"
+            <ScrollViewer Grid.Column="0"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="PhaseRail"
+                              AutomationProperties.Name="Workflow phases"
+                              ItemsSource="{Binding Phases}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Margin="0,0,0,10"
+                                    Padding="12"
+                                    CornerRadius="4"
+                                    BorderThickness="1"
+                                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock FontSize="15"
+                                               FontWeight="SemiBold"
+                                               Text="{Binding DisplayName}" />
+                                    <TextBlock Grid.Row="1"
+                                               Margin="0,3,0,8"
+                                               Text="{Binding AvailabilityLabel}" />
+                                    <Button Grid.Row="2"
+                                            MinHeight="32"
+                                            Padding="10,5"
+                                            AutomationProperties.Name="{Binding DisplayName}"
+                                            Command="{Binding DataContext.ChooseScopeCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            Content="{Binding DisplayName}"
+                                            IsEnabled="{Binding IsAvailable}" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <ScrollViewer Grid.Column="2"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock FontSize="24"
+                               FontWeight="SemiBold"
+                               Text="Choose Scope" />
+
+                    <Border Margin="0,14,0,0"
                             Padding="14"
-                            CornerRadius="6"
+                            CornerRadius="4"
                             BorderThickness="1"
                             BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock FontSize="16"
+                            <Path x:Name="ScopeStatusIcon"
+                                  Width="18"
+                                  Height="18"
+                                  Margin="0,2,10,0"
+                                  VerticalAlignment="Top"
+                                  AutomationProperties.ItemStatus="{Binding ScopeStatus}"
+                                  AutomationProperties.Name="{Binding ScopeStatus, StringFormat='Scope status: {0}'}"
+                                  Fill="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                                  Stretch="Uniform">
+                                <Path.Style>
+                                    <Style TargetType="Path">
+                                        <Setter Property="Data"
+                                                Value="M 9,0 L 18,9 L 9,18 L 0,9 Z" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsReady}" Value="True">
+                                                <Setter Property="Data"
+                                                        Value="M 1,9 L 6,14 L 17,3 L 14,0 L 6,8 L 4,6 Z" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                                <Setter Property="Data"
+                                                        Value="M 9,0 L 18,18 L 0,18 Z M 8,5 L 10,5 L 10,12 L 8,12 Z M 8,14 L 10,14 L 10,16 L 8,16 Z" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Path.Style>
+                            </Path>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock x:Name="ScopeStatusText"
+                                           FontSize="18"
                                            FontWeight="SemiBold"
-                                           Text="{Binding DisplayName}" />
-                                <TextBlock Margin="0,4,0,0"
-                                           Opacity="0.72"
-                                           Text="{Binding AvailabilityLabel}" />
+                                           AutomationProperties.HelpText="{Binding Instruction}"
+                                           AutomationProperties.ItemStatus="{Binding ScopeStatus}"
+                                           AutomationProperties.LiveSetting="Polite"
+                                           AutomationProperties.Name="Scope status"
+                                           Text="{Binding ScopeStatus}" />
+                                <TextBlock Margin="0,5,0,0"
+                                           TextWrapping="Wrap"
+                                           Text="{Binding Instruction}" />
                             </StackPanel>
-                            <Button Grid.Column="1"
-                                    MinWidth="120"
-                                    Padding="16,7"
-                                    VerticalAlignment="Center"
-                                    AutomationProperties.Name="{Binding DisplayName}"
-                                    Command="{Binding DataContext.ChooseScopeCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    Content="{Binding DisplayName}"
-                                    IsEnabled="{Binding IsAvailable}" />
                         </Grid>
                     </Border>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
 
-        <TextBlock Grid.Row="3"
+                    <Border x:Name="BlockingNotice"
+                            Margin="0,14,0,0"
+                            Padding="14"
+                            Focusable="True"
+                            AutomationProperties.Name="{Binding BlockingNoticeAutomationName}"
+                            Background="{DynamicResource {x:Static SystemColors.InfoBrushKey}}"
+                            BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                            BorderThickness="1"
+                            TextElement.Foreground="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}"
+                            Visibility="{Binding IsBlocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold"
+                                       Text="This folder cannot be used yet." />
+                            <ItemsControl Margin="0,6,0,0"
+                                          AutomationProperties.Name="Blocking reasons"
+                                          ItemsSource="{Binding BlockingReasons}" />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Margin="0,16,0,0">
+                        <TextBlock FontWeight="SemiBold"
+                                   Text="Selected Scope" />
+                        <TextBox x:Name="SelectedPathTextBox"
+                                 Margin="0,5,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 Text="{Binding SelectedPath, Mode=OneWay}"
+                                 TextWrapping="Wrap"
+                                 AutomationProperties.Name="Selected Scope" />
+
+                        <TextBlock Margin="0,12,0,0"
+                                   FontWeight="SemiBold"
+                                   Text="Resolved Scope" />
+                        <TextBox x:Name="ResolvedPathTextBox"
+                                 Margin="0,5,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 Text="{Binding ResolvedPath, Mode=OneWay}"
+                                 TextWrapping="Wrap"
+                                 AutomationProperties.Name="Resolved Scope" />
+
+                        <CheckBox x:Name="IncludeSubfoldersCheckBox"
+                                  Margin="0,14,0,0"
+                                  AutomationProperties.Name="Include subfolders"
+                                  Command="{Binding ChangeRecursionCommand}"
+                                  CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                  Content="Include subfolders"
+                                  IsEnabled="{Binding CanChangeRecursion}"
+                                  IsChecked="{Binding IncludeSubfolders, Mode=OneWay}" />
+                    </StackPanel>
+
+                    <TextBlock Margin="0,18,0,0"
+                               FontSize="17"
+                               FontWeight="SemiBold"
+                               Text="Preflight summary" />
+                    <ItemsControl x:Name="ScopeSummaryList"
+                                  Margin="0,8,0,0"
+                                  AutomationProperties.Name="Scope preflight summary"
+                                  ItemsSource="{Binding ScopeSummary}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,5">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Label}" />
+                                    <TextBlock Grid.Column="1"
+                                               Margin="16,0,0,0"
+                                               FontWeight="SemiBold"
+                                               Text="{Binding Value}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock x:Name="RuleSetStatusText"
+                               Margin="0,14,0,0"
+                               FontWeight="SemiBold"
+                               Text="{Binding RuleSetStatus, StringFormat='Rule Set: {0}'}" />
+
+                    <WrapPanel Margin="0,18,0,0">
+                        <Button x:Name="ChooseAnotherScopeButton"
+                                MinWidth="160"
+                                MinHeight="36"
+                                Margin="0,0,10,10"
+                                Padding="14,7"
+                                AutomationProperties.Name="{Binding Content, RelativeSource={RelativeSource Self}}"
+                                Command="{Binding ChooseScopeCommand}">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Content" Value="Choose folder" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsChecking}" Value="True">
+                                            <Setter Property="Content" Value="Choose another folder" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsReady}" Value="True">
+                                            <Setter Property="Content" Value="Choose another folder" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                            <Setter Property="Content" Value="Choose another folder" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsCanceled}" Value="True">
+                                            <Setter Property="Content" Value="Choose another folder" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+
+                        <Button x:Name="RetryScopeButton"
+                                MinWidth="160"
+                                MinHeight="36"
+                                Margin="0,0,10,10"
+                                Padding="14,7"
+                                AutomationProperties.Name="Retry Scope verification"
+                                Command="{Binding RetryScopeCommand}"
+                                Content="Retry verification">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsCanceled}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </WrapPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <TextBlock Grid.Row="2"
                    Margin="0,16,0,0"
-                   Opacity="0.7"
-                   Text="No account or network connection is required." />
+                   TextWrapping="Wrap"
+                   Text="No account or network connection is required. Your source photos remain unchanged." />
     </Grid>
 </Window>

@@ -2,7 +2,17 @@ namespace PhotoSift.Application.Shell;
 
 public interface IChooseScopeWorkflow
 {
-    Task<ShellSnapshot> OpenAsync(
-        OpenChooseScopeCommand command,
+    event EventHandler<ShellSnapshot>? SnapshotChanged;
+
+    ShellSnapshot Current { get; }
+
+    Task HandleAsync(ChooseScopeCommand command, CancellationToken cancellationToken);
+
+    Task HandleAsync(
+        ChangeScopeRecursionCommand command,
+        CancellationToken cancellationToken);
+
+    Task HandleAsync(
+        RetryScopePreflightCommand command,
         CancellationToken cancellationToken);
 }

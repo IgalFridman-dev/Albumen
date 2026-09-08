@@ -89,7 +89,7 @@ function Assert-NoForbiddenProductionApis {
     }
 
     $sourceFiles = @(
-        Get-ChildItem -Recurse -File -Filter '*.cs' -LiteralPath $resolvedRootPath |
+        Get-ChildItem -Recurse -Force -File -Filter '*.cs' -LiteralPath $resolvedRootPath |
             Where-Object { $_.FullName -notmatch '[\\/](?:bin|obj)[\\/]' } |
             Sort-Object FullName)
     if ($sourceFiles.Count -eq 0) {
@@ -111,18 +111,35 @@ function Assert-NoForbiddenProductionApis {
     $violations = New-Object 'System.Collections.Generic.List[string]'
     foreach ($sourceFile in $sourceFiles) {
         $source = Get-Content -Raw -LiteralPath $sourceFile.FullName
+        $relativePath = $sourceFile.FullName.Substring($resolvedRootPath.Length).TrimStart(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar)
         foreach ($entry in $forbiddenApiPatterns.GetEnumerator()) {
             if ($source -match $entry.Value) {
-                $relativePath = $sourceFile.FullName.Substring($resolvedRootPath.Length).TrimStart(
-                    [System.IO.Path]::DirectorySeparatorChar,
-                    [System.IO.Path]::AltDirectorySeparatorChar)
                 $violations.Add("$relativePath -> $($entry.Key)")
             }
+        }
+
+        $isWindowsInfrastructure = $relativePath -like 'PhotoSift.Infrastructure.Windows\*'
+        $isApp = $relativePath -like 'PhotoSift.App\*'
+        if ($source -match '\[\s*(?:(?:global\s*::\s*)?System\s*\.\s*Runtime\s*\.\s*InteropServices\s*\.\s*)?(?:LibraryImport|DllImport)(?:Attribute)?\b' -and
+            -not $isWindowsInfrastructure) {
+            $violations.Add("$relativePath -> native interop outside Windows infrastructure")
+        }
+        if ($source -match '\b(?:Directory\.EnumerateFileSystemEntries|File\.OpenHandle|SafeFileHandle)\b' -and
+            -not $isWindowsInfrastructure) {
+            $violations.Add("$relativePath -> direct filesystem inspection outside Windows infrastructure")
+        }
+        if ($source -match '\bOpenFolderDialog\b' -and -not $isApp) {
+            $violations.Add("$relativePath -> folder picker outside App")
         }
     }
 
     if ($violations.Count -gt 0) {
         $distinctViolations = @($violations | Sort-Object -Unique)
+        foreach ($violation in $distinctViolations) {
+            [Console]::Error.WriteLine($violation)
+        }
         throw "Forbidden production source APIs: $($distinctViolations -join ', ')"
     }
 

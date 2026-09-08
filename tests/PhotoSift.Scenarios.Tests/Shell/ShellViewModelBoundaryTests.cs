@@ -1,6 +1,7 @@
-using System.Collections.Immutable;
 using PhotoSift.App.Shell;
+using PhotoSift.App.Composition;
 using PhotoSift.Application.Shell;
+using PhotoSift.Domain.Scope;
 using PhotoSift.Domain.Workflow;
 using Xunit;
 
@@ -9,70 +10,82 @@ namespace PhotoSift.Scenarios.Tests.Shell;
 public sealed class ShellViewModelBoundaryTests
 {
     [Fact]
-    public async Task ChooseScopeCommandUsesApplicationPortAndConsumesItsSnapshot()
+    public void ConcreteCompositionStartsColdUnselectedLockedAndKeepsOfflineMarker()
     {
-        var returnedPhases = ImmutableArray.Create(
-            new WorkflowPhaseState(
-                WorkflowPhase.ChooseScope,
-                "Choose Scope",
-                PhaseAvailability.Unavailable),
-            new WorkflowPhaseState(
-                WorkflowPhase.ConfirmRules,
-                "Confirm Rules",
-                PhaseAvailability.Current),
-            new WorkflowPhaseState(
-                WorkflowPhase.Scan,
-                "Scan",
-                PhaseAvailability.Unavailable),
-            new WorkflowPhaseState(
-                WorkflowPhase.Review,
-                "Review",
-                PhaseAvailability.Unavailable),
-            new WorkflowPhaseState(
-                WorkflowPhase.ApproveCleanup,
-                "Approve Cleanup",
-                PhaseAvailability.Unavailable));
-        var workflow = new RecordingChooseScopeWorkflow(
-            new ShellSnapshot(returnedPhases, "Instruction returned by Application."));
-        var viewModel = new ShellViewModel(workflow);
-
-        await viewModel.ChooseScopeCommand.ExecuteAsync();
-
-        Assert.Equal(1, workflow.CallCount);
-        Assert.IsType<OpenChooseScopeCommand>(workflow.ReceivedCommand);
-        Assert.Equal("Instruction returned by Application.", viewModel.Instruction);
-        Assert.Equal(
-            returnedPhases.Select(phase => (phase.Phase, phase.DisplayName, phase.Availability)),
-            viewModel.Phases.Select(phase => (phase.Phase, phase.DisplayName, phase.Availability)));
-    }
-
-    [Fact]
-    public void SmokeProbeAcceptsOnlyTheExpectedInitialShellBoundary()
-    {
-        var viewModel = new ShellViewModel(new NativeOfflineShell());
+        var viewModel = CompositionRoot.CreateShellViewModel();
 
         var marker = ShellSmokeProbe.Validate(viewModel);
 
+        Assert.Equal("Choose one local folder", viewModel.ScopeStatus);
+        Assert.Equal(string.Empty, viewModel.SelectedPath);
+        Assert.All(viewModel.Phases.Skip(1), phase => Assert.False(phase.IsAvailable));
         Assert.Equal(
             "PHOTOSIFT_SMOKE_OK phases=5 current=ChooseScope offline=true",
             marker);
     }
 
-    private sealed class RecordingChooseScopeWorkflow(ShellSnapshot snapshot)
+    [Fact]
+    public void SmokeProbeRejectsANonzeroInitialScopeRevision()
+    {
+        var snapshot = ColdSnapshot() with { Revision = 1 };
+        var viewModel = new ShellViewModel(new StaticChooseScopeWorkflow(snapshot));
+
+        Assert.Throws<InvalidOperationException>(() => ShellSmokeProbe.Validate(viewModel));
+    }
+
+    [Fact]
+    public void SmokeProbeRejectsAnInitialScopeSelection()
+    {
+        var snapshot = ColdSnapshot() with
+        {
+            Selection = new ScopeSelection(
+                @"C:\Photos",
+                ScopeRecursion.TopLevelOnly),
+        };
+        var viewModel = new ShellViewModel(new StaticChooseScopeWorkflow(snapshot));
+
+        Assert.Throws<InvalidOperationException>(() => ShellSmokeProbe.Validate(viewModel));
+    }
+
+    [Fact]
+    public void SmokeProbeRejectsANonColdInitialScopeState()
+    {
+        var snapshot = ColdSnapshot() with { ScopeState = ScopeSessionState.Checking };
+        var viewModel = new ShellViewModel(new StaticChooseScopeWorkflow(snapshot));
+
+        Assert.Throws<InvalidOperationException>(() => ShellSmokeProbe.Validate(viewModel));
+    }
+
+    private static ShellSnapshot ColdSnapshot() =>
+        new(
+            InitialWorkflow.Create(),
+            "Choose one local folder to scan.",
+            ScopeSessionState.Cold);
+
+    private sealed class StaticChooseScopeWorkflow(ShellSnapshot current)
         : IChooseScopeWorkflow
     {
-        public int CallCount { get; private set; }
-
-        public OpenChooseScopeCommand? ReceivedCommand { get; private set; }
-
-        public Task<ShellSnapshot> OpenAsync(
-            OpenChooseScopeCommand command,
-            CancellationToken cancellationToken)
+        public event EventHandler<ShellSnapshot>? SnapshotChanged
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            CallCount++;
-            ReceivedCommand = command;
-            return Task.FromResult(snapshot);
+            add { }
+            remove { }
         }
+
+        public ShellSnapshot Current { get; } = current;
+
+        public Task HandleAsync(
+            ChooseScopeCommand command,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public Task HandleAsync(
+            ChangeScopeRecursionCommand command,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public Task HandleAsync(
+            RetryScopePreflightCommand command,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
     }
 }
