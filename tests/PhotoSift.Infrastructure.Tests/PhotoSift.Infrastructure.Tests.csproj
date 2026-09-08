@@ -13,4 +13,7 @@
     <ProjectReference Include="..\..\src\PhotoSift.Infrastructure.Sqlite\PhotoSift.Infrastructure.Sqlite.csproj" />
     <ProjectReference Include="..\..\src\PhotoSift.Infrastructure.Windows\PhotoSift.Infrastructure.Windows.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Exact\ExactCorpusManifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

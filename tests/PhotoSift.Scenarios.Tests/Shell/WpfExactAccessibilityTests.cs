@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -175,9 +176,9 @@ public sealed class WpfExactAccessibilityTests
                 try
                 {
                     dispatcher.BeginInvoke(publishRunning);
-                    Assert.Contains("Running", NextAnnouncement(statuses, cancellationToken));
+                    Assert.StartsWith("Running;", NextAnnouncement(statuses, "Running", cancellationToken));
                     dispatcher.BeginInvoke(publishComplete);
-                    Assert.Contains("Complete", NextAnnouncement(statuses, cancellationToken));
+                    Assert.StartsWith("Complete;", NextAnnouncement(statuses, "Complete", cancellationToken));
                 }
                 finally
                 {
@@ -207,11 +208,22 @@ public sealed class WpfExactAccessibilityTests
         failure?.Throw();
     }
 
-    private static string NextAnnouncement(BlockingCollection<string> statuses, CancellationToken cancellationToken)
+    private static string NextAnnouncement(BlockingCollection<string> statuses, string requiredStatus,
+        CancellationToken cancellationToken)
     {
-        Assert.True(statuses.TryTake(out var observed, 4000, cancellationToken),
-            "The status transition did not raise a live-region announcement.");
-        return Assert.IsType<string>(observed);
+        var started = Stopwatch.GetTimestamp();
+        string? observed = null;
+        while (true)
+        {
+            // A live-region callback reads the element's current ItemStatus,
+            // so queued events can repeat a status. Require the actual desired
+            // event, without restarting the deadline for unrelated deliveries.
+            var remaining = 4000 - (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            Assert.True(remaining > 0 && statuses.TryTake(out observed, remaining, cancellationToken),
+                $"No {requiredStatus} live-region announcement arrived within four seconds. Last status: {observed ?? "none"}.");
+            var status = Assert.IsType<string>(observed);
+            if (status.StartsWith(requiredStatus + ";", StringComparison.Ordinal)) return status;
+        }
     }
     private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
     {
