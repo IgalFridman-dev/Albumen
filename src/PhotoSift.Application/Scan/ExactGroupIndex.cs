@@ -7,10 +7,19 @@ namespace PhotoSift.Application.Scan;
 // connected components of accepted byte comparisons define actual groups.
 internal sealed class ExactGroupIndex
 {
+    private readonly Func<long, long> advanceRevision;
     private readonly Dictionary<PhysicalFileKey, (OccurrenceWork Work, ContentRevision Content)> representatives = [];
     private readonly HashSet<ComparisonWork> pending = [];
     private readonly List<EqualityEvidence> equality = [];
     private readonly Dictionary<Guid, PublishedGroup> published = [];
+
+    public ExactGroupIndex() : this(AdvanceRevision) { }
+
+    internal ExactGroupIndex(Func<long, long> advanceRevision)
+    {
+        ArgumentNullException.ThrowIfNull(advanceRevision);
+        this.advanceRevision = advanceRevision;
+    }
 
     public int PendingCount => pending.Count;
 
@@ -103,7 +112,7 @@ internal sealed class ExactGroupIndex
                 ? 1
                 : continuing.Fingerprint.Equals(fingerprint)
                     ? continuing.GroupRevision
-                    : AdvanceRevision(continuing.GroupRevision);
+                    : advanceRevision(continuing.GroupRevision);
 
             groups.Add(new CandidateGroup(
                 groupId,

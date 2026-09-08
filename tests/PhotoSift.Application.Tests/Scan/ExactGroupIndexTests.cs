@@ -54,6 +54,68 @@ public sealed class ExactGroupIndexTests
         Assert.Equal(2, neutral.GroupRevision);
     }
 
+    [Theory]
+    [InlineData("revision")]
+    [InlineData("attempt")]
+    public void OccurrenceTokenRevisionOrAttemptChangeAdvancesRevision(string change)
+    {
+        var index = new ExactGroupIndex();
+        var projection = TestGroups.Component(1, 2);
+        var initial = TestGroups.Publish(index, projection);
+        var member = projection.Members[0];
+        var changedToken = change == "revision"
+            ? member.Token with { OccurrenceRevision = 2 }
+            : member.Token with { Attempt = 2 };
+        var changedProjection = projection with
+        {
+            Members = projection.Members.SetItem(0, TestGroups.Copy(member, token: changedToken)),
+        };
+
+        var changed = TestGroups.Publish(index, changedProjection);
+
+        Assert.Equal(initial.GroupId, changed.GroupId);
+        Assert.Equal(2, changed.GroupRevision);
+    }
+
+    [Fact]
+    public void ContentRevisionChangeAdvancesRevision()
+    {
+        var index = new ExactGroupIndex();
+        var projection = TestGroups.Component(1, 2);
+        var initial = TestGroups.Publish(index, projection);
+        var member = projection.Members[0];
+        var changedContent = new ContentRevision(member.PhysicalFileKey!.Value, 2, ScanTestData.Digest);
+        var changedProjection = projection with
+        {
+            Members = projection.Members.SetItem(0, TestGroups.Copy(member, content: changedContent)),
+        };
+
+        var changed = TestGroups.Publish(index, changedProjection);
+
+        Assert.Equal(initial.GroupId, changed.GroupId);
+        Assert.Equal(2, changed.GroupRevision);
+    }
+
+    [Fact]
+    public void AllocationEvidenceChangeAdvancesRevision()
+    {
+        var index = new ExactGroupIndex();
+        var projection = TestGroups.Component(1, 2);
+        var initial = TestGroups.Publish(index, projection);
+        var member = projection.Members[0];
+        var changedProjection = projection with
+        {
+            Members = projection.Members.SetItem(0, TestGroups.Copy(
+                member,
+                allocation: new AllocationEvidence(8192, 1, true))),
+        };
+
+        var changed = TestGroups.Publish(index, changedProjection);
+
+        Assert.Equal(initial.GroupId, changed.GroupId);
+        Assert.Equal(2, changed.GroupRevision);
+    }
+
     [Fact]
     public void CaseEquivalentPresentationPathsDoNotAdvanceRevision()
     {
@@ -138,6 +200,28 @@ public sealed class ExactGroupIndexTests
     public void RevisionOverflowIsVisibleProgrammingFault()
     {
         Assert.Throws<OverflowException>(() => ExactGroupIndex.AdvanceRevision(long.MaxValue));
+    }
+
+    [Fact]
+    public void LaterRevisionOverflowLeavesEveryPreviousPublicationCurrent()
+    {
+        var advances = 0;
+        var index = new ExactGroupIndex(revision => ++advances == 2
+            ? ExactGroupIndex.AdvanceRevision(long.MaxValue)
+            : ExactGroupIndex.AdvanceRevision(revision));
+        var firstProjection = TestGroups.Component(1, 2);
+        var secondProjection = TestGroups.Component(3, 4);
+        var initial = TestGroups.PublishMany(index, firstProjection, secondProjection);
+
+        Assert.Throws<OverflowException>(() => TestGroups.PublishMany(
+            index,
+            firstProjection with { Uncertain = true },
+            secondProjection with { Uncertain = true }));
+
+        Assert.All(initial, group => Assert.True(index.IsCurrent(group.GroupId, group.GroupRevision)));
+        var unchanged = TestGroups.PublishMany(index, firstProjection, secondProjection);
+        Assert.Equal(initial.Select(group => (group.GroupId, group.GroupRevision)),
+            unchanged.Select(group => (group.GroupId, group.GroupRevision)));
     }
 
     [Fact]
@@ -350,6 +434,20 @@ internal static class TestGroups
             new ContentRevision(key, 1, ScanTestData.Digest),
             new AllocationEvidence(4096, 1, true));
     }
+
+    public static ScanFileOccurrence Copy(
+        ScanFileOccurrence row,
+        OccurrenceToken? token = null,
+        ContentRevision? content = null,
+        AllocationEvidence? allocation = null) => new(
+            token ?? row.Token,
+            row.DiscoveredPath,
+            row.ResolvedPath,
+            row.PhysicalFileKey,
+            row.Enumerate,
+            row.Exact,
+            content ?? row.Content,
+            allocation ?? row.Allocation);
 
     public static EqualityEvidence Edge(ScanFileOccurrence left, ScanFileOccurrence right) =>
         new(left.Token, right.Token, left.Content!, right.Content!);
