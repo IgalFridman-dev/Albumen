@@ -18,6 +18,7 @@ using WpfPath = System.Windows.Shapes.Path;
 
 namespace PhotoSift.Scenarios.Tests.Shell;
 
+[Collection("WPF UI Automation")]
 public sealed class WpfScopeAccessibilityTests
 {
     [Theory]
@@ -598,3 +599,4 @@ public sealed class WpfScopeAccessibilityTests
         }
     }
 }
+
