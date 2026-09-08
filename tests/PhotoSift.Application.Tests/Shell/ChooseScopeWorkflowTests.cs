@@ -71,18 +71,21 @@ public sealed class ChooseScopeWorkflowTests
     {
         var firstCompletion = NewCompletion();
         var secondCompletion = NewCompletion();
+        using var preflight = new DelayedPreflight(firstCompletion, secondCompletion);
         var workflow = new ChooseScopeWorkflow(
             new StubFolderPicker(@"C:\Photos"),
-            new DelayedPreflight(firstCompletion, secondCompletion));
+            preflight);
         var states = new List<ScopeSessionState>();
         workflow.SnapshotChanged += (_, snapshot) => states.Add(snapshot.ScopeState);
 
         var firstOperation = workflow.HandleAsync(
             new ChooseScopeCommand(),
             CancellationToken.None);
+        await preflight.WaitForStartAsync(1);
         var secondOperation = workflow.HandleAsync(
             new ChooseScopeCommand(),
             CancellationToken.None);
+        await preflight.WaitForStartAsync(2);
 
         secondCompletion.SetResult(ReadyEvidence(@"C:\Photos"));
         await secondOperation;
@@ -102,8 +105,14 @@ public sealed class ChooseScopeWorkflowTests
     [Fact]
     public async Task ReentrantSelectionCannotDeliverAnOlderSnapshotAfterANewerRevision()
     {
-        var picker = new SequenceFolderPicker(@"C:\First", @"C:\Second");
-        var workflow = new ChooseScopeWorkflow(picker, new SelectionPreflight());
+        var nextFolder = new TaskCompletionSource<string?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var picker = new SequenceFolderPicker(
+            Task.FromResult<string?>(@"C:\First"), nextFolder.Task);
+        var firstCompletion = NewCompletion();
+        var secondCompletion = NewCompletion();
+        using var preflight = new DelayedPreflight(firstCompletion, secondCompletion);
+        var workflow = new ChooseScopeWorkflow(picker, preflight);
         var observedRevisions = new List<long>();
         Task? reentrantSelection = null;
 
@@ -120,9 +129,23 @@ public sealed class ChooseScopeWorkflowTests
         workflow.SnapshotChanged += (_, snapshot) =>
             observedRevisions.Add(snapshot.Revision);
 
-        await workflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None);
-        Assert.NotNull(reentrantSelection);
-        await reentrantSelection;
+        var firstOperation = workflow.HandleAsync(
+            new ChooseScopeCommand(), CancellationToken.None);
+        try
+        {
+            await preflight.WaitForStartAsync(1);
+            Assert.NotNull(reentrantSelection);
+            nextFolder.SetResult(@"C:\Second");
+            await preflight.WaitForStartAsync(2);
+            secondCompletion.SetResult(ReadyEvidence(@"C:\Second"));
+            await reentrantSelection;
+            firstCompletion.SetResult(ReadyEvidence(@"C:\First"));
+            await firstOperation;
+        }
+        finally
+        {
+            nextFolder.TrySetResult(null);
+        }
 
         Assert.Equal([1, 2, 2], observedRevisions);
         Assert.Equal(@"C:\Second", workflow.Current.Selection?.SelectedPath);
@@ -132,8 +155,17 @@ public sealed class ChooseScopeWorkflowTests
     [Fact]
     public async Task FolderSelectionStartedFromRetryPublicationSupersedesTheRetry()
     {
-        var picker = new SequenceFolderPicker(@"C:\First", @"C:\Second");
-        var workflow = new ChooseScopeWorkflow(picker, new SelectionPreflight());
+        var nextFolder = new TaskCompletionSource<string?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var picker = new SequenceFolderPicker(
+            Task.FromResult<string?>(@"C:\First"), nextFolder.Task);
+        var initialCompletion = NewCompletion();
+        initialCompletion.SetResult(ReadyEvidence(@"C:\First"));
+        var retryCompletion = NewCompletion();
+        var replacementCompletion = NewCompletion();
+        using var preflight = new DelayedPreflight(
+            initialCompletion, retryCompletion, replacementCompletion);
+        var workflow = new ChooseScopeWorkflow(picker, preflight);
         await workflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None);
         var observedRevisions = new List<long>();
         Task? newerSelection = null;
@@ -151,11 +183,24 @@ public sealed class ChooseScopeWorkflowTests
         workflow.SnapshotChanged += (_, snapshot) =>
             observedRevisions.Add(snapshot.Revision);
 
-        await workflow.HandleAsync(
+        var retryOperation = workflow.HandleAsync(
             new RetryScopePreflightCommand(),
             CancellationToken.None);
-        Assert.NotNull(newerSelection);
-        await newerSelection;
+        try
+        {
+            await preflight.WaitForStartAsync(2);
+            Assert.NotNull(newerSelection);
+            nextFolder.SetResult(@"C:\Second");
+            await preflight.WaitForStartAsync(3);
+            replacementCompletion.SetResult(ReadyEvidence(@"C:\Second"));
+            await newerSelection;
+            retryCompletion.SetResult(ReadyEvidence(@"C:\First"));
+            await retryOperation;
+        }
+        finally
+        {
+            nextFolder.TrySetResult(null);
+        }
 
         Assert.Equal([2, 3, 3], observedRevisions);
         Assert.Equal(@"C:\Second", workflow.Current.Selection?.SelectedPath);
@@ -251,14 +296,16 @@ public sealed class ChooseScopeWorkflowTests
         var initialCompletion = NewCompletion();
         initialCompletion.SetResult(ReadyEvidence(@"C:\Photos"));
         var changedCompletion = NewCompletion();
+        using var preflight = new DelayedPreflight(initialCompletion, changedCompletion);
         var workflow = new ChooseScopeWorkflow(
             new StubFolderPicker(@"C:\Photos"),
-            new DelayedPreflight(initialCompletion, changedCompletion));
+            preflight);
         await workflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None);
 
         var changeOperation = workflow.HandleAsync(
             new ChangeScopeRecursionCommand(IncludeSubfolders: true),
             CancellationToken.None);
+        await preflight.WaitForStartAsync(2);
 
         Assert.Equal(ScopeSessionState.Checking, workflow.Current.ScopeState);
         Assert.Equal(ScopeRecursion.IncludeSubfolders, workflow.Current.Selection?.Recursion);
@@ -313,14 +360,16 @@ public sealed class ChooseScopeWorkflowTests
         var initialCompletion = NewCompletion();
         initialCompletion.SetResult(ReadyEvidence(@"C:\Photos"));
         var retryCompletion = NewCompletion();
+        using var preflight = new DelayedPreflight(initialCompletion, retryCompletion);
         var workflow = new ChooseScopeWorkflow(
             new StubFolderPicker(@"C:\Photos"),
-            new DelayedPreflight(initialCompletion, retryCompletion));
+            preflight);
         await workflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None);
 
         var retryOperation = workflow.HandleAsync(
             new RetryScopePreflightCommand(),
             CancellationToken.None);
+        await preflight.WaitForStartAsync(2);
 
         Assert.Equal(ScopeSessionState.Checking, workflow.Current.ScopeState);
         Assert.Equal(@"C:\Photos", workflow.Current.Selection?.SelectedPath);
@@ -335,9 +384,10 @@ public sealed class ChooseScopeWorkflowTests
     public async Task CanceledPreflightRetainsSelectionWithoutEvidence()
     {
         var completion = NewCompletion();
+        using var preflight = new DelayedPreflight(completion);
         var workflow = new ChooseScopeWorkflow(
             new StubFolderPicker(@"C:\Photos"),
-            new DelayedPreflight(completion));
+            preflight);
         var states = new List<ScopeSessionState>();
         workflow.SnapshotChanged += (_, snapshot) => states.Add(snapshot.ScopeState);
 
@@ -438,14 +488,19 @@ public sealed class ChooseScopeWorkflowTests
         }
     }
 
-    private sealed class SequenceFolderPicker(params string?[] paths) : ILocalFolderPicker
+    private sealed class SequenceFolderPicker(params Task<string?>[] paths) : ILocalFolderPicker
     {
-        private readonly Queue<string?> pending = new(paths);
+        private readonly Queue<Task<string?>> pending = new(paths);
+
+        public SequenceFolderPicker(params string?[] paths)
+            : this(paths.Select(Task.FromResult).ToArray())
+        {
+        }
 
         public Task<string?> PickSingleAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(pending.Dequeue());
+            return pending.Dequeue();
         }
     }
 
@@ -475,15 +530,33 @@ public sealed class ChooseScopeWorkflowTests
 
     private sealed class DelayedPreflight(
         params TaskCompletionSource<ScopePreflightEvidence>[] completions)
-        : ILocalScopePreflight
+        : ILocalScopePreflight, IDisposable
     {
-        private readonly Queue<TaskCompletionSource<ScopePreflightEvidence>> pending =
-            new(completions);
+        private readonly TaskCompletionSource[] started = completions
+            .Select(_ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously))
+            .ToArray();
+        private int invocationCount;
+
+        public Task WaitForStartAsync(int invocation) =>
+            started[invocation - 1].Task.WaitAsync(
+                TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
 
         public Task<ScopePreflightEvidence> InspectAsync(
             ScopeSelection selection,
-            CancellationToken cancellationToken) =>
-            pending.Dequeue().Task;
+            CancellationToken cancellationToken)
+        {
+            var index = Interlocked.Increment(ref invocationCount) - 1;
+            started[index].TrySetResult();
+            return completions[index].Task;
+        }
+
+        public void Dispose()
+        {
+            foreach (var completion in completions)
+            {
+                completion.TrySetCanceled();
+            }
+        }
     }
 
     private sealed class ThrowingPreflight(Exception exception) : ILocalScopePreflight

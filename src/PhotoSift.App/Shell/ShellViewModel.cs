@@ -11,9 +11,6 @@ namespace PhotoSift.App.Shell;
 public sealed class ShellViewModel : INotifyPropertyChanged
 {
     private readonly IChooseScopeWorkflow chooseScopeWorkflow;
-    private readonly SynchronizationContext? synchronizationContext;
-    private readonly object scopeOperationGate = new();
-    private ScopeOperationCancellation? currentScopeOperation;
     private ShellSnapshot? currentSnapshot;
     private ImmutableArray<PhaseItemViewModel> phases = [];
     private ImmutableArray<ScopeSummaryItemViewModel> scopeSummary = [];
@@ -36,25 +33,17 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     {
         this.chooseScopeWorkflow = chooseScopeWorkflow
             ?? throw new ArgumentNullException(nameof(chooseScopeWorkflow));
-        synchronizationContext = SynchronizationContext.Current;
         ChooseScopeCommand = new AsyncCommand(
-            () => ReplaceScopeOperationAsync(
-                cancellationToken => this.chooseScopeWorkflow.HandleAsync(
-                    new ChooseScopeCommand(),
-                    cancellationToken)),
+            () => this.chooseScopeWorkflow.HandleAsync(
+                new ChooseScopeCommand(), CancellationToken.None),
             allowConcurrentExecutions: true);
         RetryScopeCommand = new AsyncCommand(
-            () => ReplaceScopeOperationAsync(
-                cancellationToken => this.chooseScopeWorkflow.HandleAsync(
-                    new RetryScopePreflightCommand(),
-                    cancellationToken)),
+            () => this.chooseScopeWorkflow.HandleAsync(
+                new RetryScopePreflightCommand(), CancellationToken.None),
             allowConcurrentExecutions: true);
         ChangeRecursionCommand = new AsyncCommand(
-            parameter => ReplaceScopeOperationAsync(
-                cancellationToken => this.chooseScopeWorkflow.HandleAsync(
-                    new ChangeScopeRecursionCommand(RequireBoolean(parameter)),
-                    cancellationToken),
-                isNeutral: () => IsSameValueRecursion(parameter)),
+            parameter => this.chooseScopeWorkflow.HandleAsync(
+                new ChangeScopeRecursionCommand(RequireBoolean(parameter)), CancellationToken.None),
             allowConcurrentExecutions: true);
         this.chooseScopeWorkflow.SnapshotChanged += OnSnapshotChanged;
         Apply(this.chooseScopeWorkflow.Current);
@@ -167,17 +156,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     internal ShellSnapshot CurrentSnapshot => currentSnapshot
         ?? throw new InvalidOperationException("The shell has no current snapshot.");
 
-    private void OnSnapshotChanged(object? sender, ShellSnapshot snapshot)
-    {
-        if (synchronizationContext is null ||
-            ReferenceEquals(SynchronizationContext.Current, synchronizationContext))
-        {
-            Apply(snapshot);
-            return;
-        }
-
-        synchronizationContext.Send(_ => Apply(snapshot), state: null);
-    }
+    // The composition root schedules the workflow's ordered publications on the
+    // UI Dispatcher. Workers never call the ViewModel or synchronously Send here.
+    private void OnSnapshotChanged(object? sender, ShellSnapshot snapshot) => Apply(snapshot);
 
     private void Apply(ShellSnapshot snapshot)
     {
@@ -300,136 +281,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged
             : throw new ArgumentException(
                 "Recursion command requires a Boolean parameter.",
                 nameof(parameter));
-
-    private bool IsSameValueRecursion(object? parameter)
-    {
-        if (parameter is not bool includeSubfolders)
-        {
-            return false;
-        }
-
-        var selection = chooseScopeWorkflow.Current.Selection;
-        return selection is not null &&
-            ProjectRecursion(selection) == includeSubfolders;
-    }
-
-    private async Task ReplaceScopeOperationAsync(
-        Func<CancellationToken, Task> operation,
-        Func<bool>? isNeutral = null)
-    {
-        ArgumentNullException.ThrowIfNull(operation);
-
-        using var owner = new ScopeOperationCancellation();
-        try
-        {
-            ScopeOperationCancellation? preceding;
-            lock (scopeOperationGate)
-            {
-                if (isNeutral?.Invoke() is true)
-                {
-                    return;
-                }
-
-                preceding = currentScopeOperation;
-                currentScopeOperation = owner;
-            }
-
-            preceding?.Cancel();
-
-            Task execution;
-            lock (scopeOperationGate)
-            {
-                if (!ReferenceEquals(currentScopeOperation, owner))
-                {
-                    return;
-                }
-
-                execution = operation(owner.Token);
-            }
-
-            await execution;
-        }
-        finally
-        {
-            lock (scopeOperationGate)
-            {
-                if (ReferenceEquals(currentScopeOperation, owner))
-                {
-                    currentScopeOperation = null;
-                }
-            }
-        }
-    }
-
-    private sealed class ScopeOperationCancellation : IDisposable
-    {
-        private readonly object gate = new();
-        private readonly CancellationTokenSource source = new();
-        private bool cancellationInProgress;
-        private bool cancellationRequested;
-        private bool disposeRequested;
-        private bool disposed;
-
-        public CancellationToken Token => source.Token;
-
-        public void Cancel()
-        {
-            lock (gate)
-            {
-                if (disposed || cancellationRequested)
-                {
-                    return;
-                }
-
-                cancellationRequested = true;
-                cancellationInProgress = true;
-            }
-
-            try
-            {
-                source.Cancel();
-            }
-            finally
-            {
-                var dispose = false;
-                lock (gate)
-                {
-                    cancellationInProgress = false;
-                    if (disposeRequested && !disposed)
-                    {
-                        disposed = true;
-                        dispose = true;
-                    }
-                }
-
-                if (dispose)
-                {
-                    source.Dispose();
-                }
-            }
-        }
-
-        public void Dispose()
-        {
-            lock (gate)
-            {
-                if (disposed)
-                {
-                    return;
-                }
-
-                if (cancellationInProgress)
-                {
-                    disposeRequested = true;
-                    return;
-                }
-
-                disposed = true;
-            }
-
-            source.Dispose();
-        }
-    }
 
     private static ImmutableArray<PhaseItemViewModel> Project(
         ImmutableArray<WorkflowPhaseState> phases) =>

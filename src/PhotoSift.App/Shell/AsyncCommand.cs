@@ -40,7 +40,7 @@ public sealed class AsyncCommand : ICommand
             return;
         }
 
-        CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+        NotifyAvailabilityChanged();
         try
         {
             await execute(parameter);
@@ -48,7 +48,7 @@ public sealed class AsyncCommand : ICommand
         finally
         {
             Interlocked.Decrement(ref executionCount);
-            CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+            NotifyAvailabilityChanged();
         }
     }
 
@@ -61,5 +61,15 @@ public sealed class AsyncCommand : ICommand
         }
 
         return Interlocked.CompareExchange(ref executionCount, 1, 0) == 0;
+    }
+
+    private void NotifyAvailabilityChanged()
+    {
+        // Concurrent scope commands stay available throughout execution. Do not
+        // notify WPF controls from arbitrary command callers when nothing changed.
+        if (!allowConcurrentExecutions)
+        {
+            CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 }

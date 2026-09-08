@@ -8,21 +8,25 @@ namespace PhotoSift.Application.Shell;
 public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
 {
     private const string RuleSetNotConfigured = "Not configured";
-    private readonly object gate = new();
-    private readonly Queue<ShellSnapshot> pendingSnapshotChanges = new();
+    private readonly WorkflowInbox inbox;
+    private readonly IWorkflowScheduler scheduler;
     private readonly ILocalFolderPicker folderPicker;
     private readonly ILocalScopePreflight preflight;
     private ShellSnapshot current;
-    private bool isDeliveringSnapshotChanges;
+    private ScopeRequest? pendingPicker;
+    private ScopeOperation? currentOperation;
 
     public ChooseScopeWorkflow(
         ILocalFolderPicker folderPicker,
-        ILocalScopePreflight preflight)
+        ILocalScopePreflight preflight,
+        IWorkflowScheduler? scheduler = null)
     {
         this.folderPicker = folderPicker
             ?? throw new ArgumentNullException(nameof(folderPicker));
         this.preflight = preflight
             ?? throw new ArgumentNullException(nameof(preflight));
+        this.scheduler = scheduler ?? new SynchronizationContextWorkflowScheduler();
+        inbox = new WorkflowInbox(this.scheduler);
         current = new ShellSnapshot(
             InitialWorkflow.Create(),
             "Choose one local folder to scan.",
@@ -35,16 +39,7 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
 
     public event EventHandler<ShellSnapshot>? SnapshotChanged;
 
-    public ShellSnapshot Current
-    {
-        get
-        {
-            lock (gate)
-            {
-                return current;
-            }
-        }
-    }
+    public ShellSnapshot Current => Volatile.Read(ref current);
 
     public async Task HandleAsync(
         ChooseScopeCommand command,
@@ -52,22 +47,16 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        var selectedPath = await folderPicker
-            .PickSingleAsync(cancellationToken)
-            .ConfigureAwait(false);
-        if (selectedPath is null)
+        await SubmitAsync(request =>
         {
-            return;
-        }
-
-        var selection = new ScopeSelection(
-            selectedPath,
-            ScopeRecursion.TopLevelOnly);
-        var start = BeginPreflight(selection);
-        DeliverSnapshotChangesIfNeeded(start.ShouldDeliver);
-
-        await RunPreflightAsync(selection, start.Revision, cancellationToken)
-            .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var precedingPicker = pendingPicker;
+            pendingPicker = request;
+            precedingPicker?.RequestCancellation();
+            // Opening a dialog is not an accepted replacement scope. The active
+            // preflight remains relevant until a new selection is accepted.
+            return () => PickAndPreflightAsync(request);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task HandleAsync(
@@ -76,14 +65,12 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        ScopeSelection selection;
-        (long Revision, bool ShouldDeliver) start;
-        lock (gate)
+        await SubmitAsync(request =>
         {
             var currentSelection = current.Selection;
             if (currentSelection is null)
             {
-                return;
+                return null;
             }
 
             var recursion = command.IncludeSubfolders
@@ -91,16 +78,14 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
                 : ScopeRecursion.TopLevelOnly;
             if (currentSelection.Recursion == recursion)
             {
-                return;
+                return null;
             }
 
-            selection = new ScopeSelection(currentSelection.SelectedPath, recursion);
-            start = BeginPreflightUnderLock(selection);
-        }
-
-        DeliverSnapshotChangesIfNeeded(start.ShouldDeliver);
-        await RunPreflightAsync(selection, start.Revision, cancellationToken)
-            .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var operation = Accept(request,
+                new ScopeSelection(currentSelection.SelectedPath, recursion));
+            return () => RunPreflightAsync(operation);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task HandleAsync(
@@ -109,123 +94,181 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        ScopeSelection selection;
-        (long Revision, bool ShouldDeliver) start;
-        lock (gate)
+        await SubmitAsync(request =>
         {
-            selection = current.Selection
+            var selection = current.Selection
                 ?? throw new InvalidOperationException(
                     "Scope preflight cannot be retried before a Scope is selected.");
-            start = BeginPreflightUnderLock(selection);
-        }
-
-        DeliverSnapshotChangesIfNeeded(start.ShouldDeliver);
-        await RunPreflightAsync(selection, start.Revision, cancellationToken)
-            .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var operation = Accept(request, selection);
+            return () => RunPreflightAsync(operation);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task RunPreflightAsync(
-        ScopeSelection selection,
-        long revision,
+    private async Task SubmitAsync(
+        Func<ScopeRequest, Func<Task>?> begin,
         CancellationToken cancellationToken)
     {
-        ScopePreflightEvidence evidence;
+        var request = new ScopeRequest(cancellationToken);
+        Exception? failure = null;
         try
         {
-            evidence = await preflight
-                .InspectAsync(selection, cancellationToken)
-                .ConfigureAwait(false);
+            var effect = await inbox.InvokeAsync(() =>
+            {
+                request.RegisterCallerCancellation(() =>
+                    _ = inbox.InvokeAsync(request.RequestCancellation));
+                return begin(request);
+            }).ConfigureAwait(false);
+
+            // Never hold a coordinator turn across an external operation, even
+            // when its Task completes synchronously or it opens a modal dialog.
+            if (effect is not null)
+            {
+                await effect().ConfigureAwait(false);
+            }
         }
-        catch (OperationCanceledException)
+        catch (Exception exception)
         {
-            PublishIfCurrent(revision, CreateCanceled(selection, revision));
+            failure = exception;
+        }
+
+        try
+        {
+            var cancellation = await inbox.InvokeAsync(() =>
+            {
+                if (ReferenceEquals(pendingPicker, request))
+                {
+                    pendingPicker = null;
+                }
+
+                return request.FinishWork();
+            }).ConfigureAwait(false);
+            try
+            {
+                await cancellation.ConfigureAwait(false);
+            }
+            finally
+            {
+                await inbox.InvokeAsync(request.Dispose).ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception)
+        {
+            failure = failure is null ? exception : new AggregateException(failure, exception);
+        }
+
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+    }
+
+    private async Task PickAndPreflightAsync(ScopeRequest request)
+    {
+        string? selectedPath;
+        try
+        {
+            // This dispatch is deliberately outside the inbox. WPF's modal
+            // picker can pump UI messages without reentering a state transition.
+            var picking = new TaskCompletionSource<Task<string?>>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            scheduler.Post(() =>
+            {
+                try
+                {
+                    request.Token.ThrowIfCancellationRequested();
+                    picking.SetResult(folderPicker.PickSingleAsync(request.Token));
+                }
+                catch (Exception exception)
+                {
+                    picking.SetException(exception);
+                }
+            });
+            selectedPath = await picking.Task.Unwrap().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (request.Token.IsCancellationRequested &&
+            !request.CallerCancellation.IsCancellationRequested)
+        {
+            // Superseding a picker cancels only that interaction, not the scope
+            // that remains selected behind it.
             return;
         }
 
-        var result = ScopePreflightPolicy.Evaluate(evidence);
-        PublishIfCurrent(revision, CreateCompleted(selection, result, revision));
-    }
-
-    private (long Revision, bool ShouldDeliver) BeginPreflight(
-        ScopeSelection selection)
-    {
-        lock (gate)
+        var operation = await inbox.InvokeAsync(() =>
         {
-            return BeginPreflightUnderLock(selection);
+            if (!ReferenceEquals(pendingPicker, request))
+            {
+                return null;
+            }
+
+            pendingPicker = null;
+            if (selectedPath is null || request.Token.IsCancellationRequested ||
+                request.CallerCancellation.IsCancellationRequested)
+            {
+                return null;
+            }
+
+            return Accept(request, new ScopeSelection(selectedPath, ScopeRecursion.TopLevelOnly));
+        }).ConfigureAwait(false);
+
+        if (operation is not null)
+        {
+            await RunPreflightAsync(operation).ConfigureAwait(false);
         }
     }
 
-    private (long Revision, bool ShouldDeliver) BeginPreflightUnderLock(
-        ScopeSelection selection)
+    // Inbox-only. Identity and Checking state are committed before callbacks can
+    // run; callbacks can submit a request but cannot execute a nested transition.
+    private ScopeOperation Accept(ScopeRequest request, ScopeSelection selection)
     {
-        var revision = current.Revision + 1;
-        var checking = CreateChecking(selection, revision);
-        current = checking;
-        return (revision, EnqueueSnapshotChangeUnderLock(checking));
+        var operation = new ScopeOperation(request, selection, current.Revision + 1);
+        var precedingOperation = currentOperation;
+        var precedingPicker = pendingPicker;
+        var checking = CreateChecking(selection, operation.Revision);
+        currentOperation = operation;
+        pendingPicker = null;
+        Volatile.Write(ref current, checking);
+
+        precedingOperation?.Request.RequestCancellation();
+        precedingPicker?.RequestCancellation();
+        SnapshotChanged?.Invoke(this, checking);
+        return operation;
     }
 
-    private void PublishIfCurrent(long revision, ShellSnapshot completed)
+    private async Task RunPreflightAsync(ScopeOperation operation)
     {
-        bool shouldDeliver;
-        lock (gate)
+        ScopePreflightEvidence? evidence = null;
+        var canceled = false;
+        try
         {
-            if (current.Revision != revision)
+            operation.Request.Token.ThrowIfCancellationRequested();
+            evidence = await preflight.InspectAsync(
+                operation.Selection, operation.Request.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            canceled = true;
+        }
+
+        // Policy work and unexpected failures stay outside the owner turn. A
+        // subscriber's exception is never reclassified as worker cancellation.
+        var result = canceled ? null : ScopePreflightPolicy.Evaluate(evidence!);
+        await inbox.InvokeAsync(() =>
+        {
+            if (!ReferenceEquals(currentOperation, operation))
             {
                 return;
             }
 
-            current = completed;
-            shouldDeliver = EnqueueSnapshotChangeUnderLock(completed);
-        }
+            var completed = canceled || operation.Request.Token.IsCancellationRequested ||
+                operation.Request.CallerCancellation.IsCancellationRequested
+                ? CreateCanceled(operation.Selection, operation.Revision)
+                : CreateCompleted(operation.Selection, result!, operation.Revision);
 
-        DeliverSnapshotChangesIfNeeded(shouldDeliver);
-    }
-
-    private bool EnqueueSnapshotChangeUnderLock(ShellSnapshot snapshot)
-    {
-        pendingSnapshotChanges.Enqueue(snapshot);
-        if (isDeliveringSnapshotChanges)
-        {
-            return false;
-        }
-
-        isDeliveringSnapshotChanges = true;
-        return true;
-    }
-
-    private void DeliverSnapshotChangesIfNeeded(bool shouldDeliver)
-    {
-        if (!shouldDeliver)
-        {
-            return;
-        }
-
-        ExceptionDispatchInfo? deliveryFailure = null;
-        while (true)
-        {
-            ShellSnapshot snapshot;
-            lock (gate)
-            {
-                if (pendingSnapshotChanges.Count == 0)
-                {
-                    isDeliveringSnapshotChanges = false;
-                    break;
-                }
-
-                snapshot = pendingSnapshotChanges.Dequeue();
-            }
-
-            try
-            {
-                SnapshotChanged?.Invoke(this, snapshot);
-            }
-            catch (Exception exception)
-            {
-                deliveryFailure ??= ExceptionDispatchInfo.Capture(exception);
-            }
-        }
-
-        deliveryFailure?.Throw();
+            // No await or external call separates the relevance check and commit.
+            Volatile.Write(ref current, completed);
+            SnapshotChanged?.Invoke(this, completed);
+        }).ConfigureAwait(false);
     }
 
     private static ShellSnapshot CreateChecking(

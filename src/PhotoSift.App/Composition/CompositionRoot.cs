@@ -12,7 +12,10 @@ public static class CompositionRoot
         ILocalFolderPicker picker = new WpfLocalFolderPicker(
             () => System.Windows.Application.Current.MainWindow);
         ILocalScopePreflight preflight = new WindowsLocalScopePreflight();
-        IChooseScopeWorkflow workflow = new ChooseScopeWorkflow(picker, preflight);
+        IChooseScopeWorkflow workflow = new ChooseScopeWorkflow(
+            picker,
+            preflight,
+            new DispatcherWorkflowScheduler(System.Windows.Threading.Dispatcher.CurrentDispatcher));
         return new ShellViewModel(workflow);
     }
 }

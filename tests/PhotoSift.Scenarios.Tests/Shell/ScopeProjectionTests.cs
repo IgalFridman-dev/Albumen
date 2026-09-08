@@ -340,7 +340,7 @@ public sealed class ScopeProjectionTests
     {
         const string path = @"C:\Photos";
         ShellViewModel? viewModel = null;
-        var preflight = new ReentrantReplacementPreflight(
+        using var preflight = new ReentrantReplacementPreflight(
             () => viewModel!.ChangeRecursionCommand.ExecuteAsync(true));
         var workflow = new ChooseScopeWorkflow(
             new SequenceFolderPicker(path),
@@ -353,14 +353,15 @@ public sealed class ScopeProjectionTests
             TestContext.Current.CancellationToken);
 
         var supersededOperation = viewModel.RetryScopeCommand.ExecuteAsync();
+        var newestOperation = await preflight.ReplacementOperation.Task.WaitAsync(
+            TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
         await preflight.ReplacementStarted.Task.WaitAsync(
             TimeSpan.FromSeconds(2),
             TestContext.Current.CancellationToken);
         preflight.ReplacementCompletion.SetResult(
             ReadyEvidence(path, ScopeRecursion.IncludeSubfolders));
 
-        var newestOperation = Assert.IsAssignableFrom<Task>(
-            preflight.ReplacementOperation);
         await Task.WhenAll(
             firstOperation,
             supersededOperation,
@@ -372,7 +373,8 @@ public sealed class ScopeProjectionTests
         Assert.Equal(
             ScopeRecursion.IncludeSubfolders,
             workflow.Current.Selection?.Recursion);
-        Assert.Equal(2, workflow.Current.Revision);
+        // Retry is accepted before its asynchronous cancellation callback submits recursion.
+        Assert.Equal(3, workflow.Current.Revision);
     }
 
     [Fact]
@@ -599,8 +601,9 @@ public sealed class ScopeProjectionTests
 
     private sealed class ReentrantReplacementPreflight(
         Func<Task> launchReplacement)
-        : ILocalScopePreflight
+        : ILocalScopePreflight, IDisposable
     {
+        private readonly CancellationTokenSource cleanupCancellation = new();
         private readonly TaskCompletionSource<bool> firstCancellation =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int invocationCount;
@@ -614,40 +617,63 @@ public sealed class ScopeProjectionTests
         public TaskCompletionSource<ScopePreflightEvidence> ReplacementCompletion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public Task? ReplacementOperation { get; private set; }
+        public TaskCompletionSource<Task> ReplacementOperation { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public async Task<ScopePreflightEvidence> InspectAsync(
             ScopeSelection selection,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken, cleanupCancellation.Token);
             var invocation = Interlocked.Increment(ref invocationCount);
             if (invocation == 1)
             {
-                FirstStarted.TrySetResult(true);
                 using var registration = cancellationToken.Register(() =>
                 {
                     try
                     {
-                        ReplacementOperation = launchReplacement();
+                        ReplacementOperation.TrySetResult(launchReplacement());
+                    }
+                    catch (Exception exception)
+                    {
+                        ReplacementOperation.TrySetException(exception);
+                        throw;
                     }
                     finally
                     {
                         firstCancellation.TrySetResult(true);
                     }
                 });
-                await firstCancellation.Task;
+                FirstStarted.TrySetResult(true);
+                await firstCancellation.Task.WaitAsync(cleanupCancellation.Token);
                 throw new OperationCanceledException(cancellationToken);
             }
 
-            if (invocation == 2)
+            if (invocation is 2 or 3 &&
+                selection.Recursion is ScopeRecursion.TopLevelOnly)
+            {
+                // Retry may start before recursion cancels it, or be canceled before entry.
+                await Task.Delay(Timeout.InfiniteTimeSpan, linkedCancellation.Token);
+                throw new InvalidOperationException("The superseded retry completed unexpectedly.");
+            }
+
+            if (invocation is 2 or 3 &&
+                selection.Recursion is ScopeRecursion.IncludeSubfolders)
             {
                 ReplacementStarted.TrySetResult(true);
-                return await ReplacementCompletion.Task.WaitAsync(cancellationToken);
+                return await ReplacementCompletion.Task.WaitAsync(linkedCancellation.Token);
             }
 
             throw new InvalidOperationException(
                 $"Unexpected preflight invocation: {invocation}.");
+        }
+
+        public void Dispose()
+        {
+            cleanupCancellation.Cancel();
+            cleanupCancellation.Dispose();
         }
     }
 
