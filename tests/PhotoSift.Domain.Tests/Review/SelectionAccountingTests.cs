@@ -81,7 +81,7 @@ public sealed class SelectionAccountingTests
     }
 
     [Fact]
-    public void StableExternalLinkStillRequiresKnownAllocationEvidence()
+    public void StableExternalLinkMakesRecoveryZeroWithoutAllocationEvidence()
     {
         var group = ReviewGroups.OnePhysicalKey(
             [@"C:\scope\a.jpg"],
@@ -91,9 +91,7 @@ public sealed class SelectionAccountingTests
 
         var recovery = SelectionAccounting.Calculate(group, ReviewGroups.Ids(group), [1]);
 
-        Assert.Equal(
-            new SelectionRecovery(null, SelectionRecoveryUnavailableReason.UnknownAllocation),
-            recovery);
+        Assert.Equal(new SelectionRecovery(0, SelectionRecoveryUnavailableReason.None), recovery);
     }
 
     [Fact]
@@ -232,6 +230,22 @@ public sealed class SelectionAccountingTests
             allocatedBytes: null,
             linkCount: 1,
             stable: true);
+        var eligible = ReviewGroups.Ids(group);
+
+        var recovery = SelectionAccounting.Calculate(group, eligible, eligible);
+
+        Assert.Equal(
+            new SelectionRecovery(null, SelectionRecoveryUnavailableReason.InconsistentFacts),
+            recovery);
+    }
+
+    [Fact]
+    public void KnownLinkCoverageBelowTwoSelectedPathsPrecedesUnknownLinks()
+    {
+        var key = ReviewGroups.Key(1);
+        var group = ReviewGroups.Group(
+            ReviewGroups.Occurrence(1, key, @"C:\scope\a.jpg", 4096, 1),
+            ReviewGroups.Occurrence(2, key, @"C:\scope\alias.jpg", 4096, null));
         var eligible = ReviewGroups.Ids(group);
 
         var recovery = SelectionAccounting.Calculate(group, eligible, eligible);

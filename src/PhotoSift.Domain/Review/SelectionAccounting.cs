@@ -113,11 +113,19 @@ public static class SelectionAccounting
             return new RecoveryEvidence(RecoveryEvidenceKind.Inconsistent, 0);
         }
 
-        if (knownLinkCounts.Length == 1
-            && observations.All(member => member.Allocation.LinkCount is not null)
-            && knownLinkCounts[0] < knownPathCount)
+        if (knownLinkCounts.Any(linkCount => linkCount < knownPathCount))
         {
             return new RecoveryEvidence(RecoveryEvidenceKind.Inconsistent, 0);
+        }
+
+        if (observations.Any(member => member.Allocation.LinkCount is null))
+        {
+            return new RecoveryEvidence(RecoveryEvidenceKind.UnknownLinks, 0);
+        }
+
+        if (knownLinkCounts[0] > knownPathCount)
+        {
+            return new RecoveryEvidence(RecoveryEvidenceKind.External, 0);
         }
 
         var knownAllocations = observations
@@ -134,17 +142,6 @@ public static class SelectionAccounting
         if (observations.Any(member => member.Allocation.AllocatedBytes is null))
         {
             return new RecoveryEvidence(RecoveryEvidenceKind.UnknownAllocation, 0);
-        }
-
-        if (observations.Any(member => member.Allocation.LinkCount is null))
-        {
-            return new RecoveryEvidence(RecoveryEvidenceKind.UnknownLinks, 0);
-        }
-
-        var linkCount = knownLinkCounts[0];
-        if (linkCount > knownPathCount)
-        {
-            return new RecoveryEvidence(RecoveryEvidenceKind.External, 0);
         }
 
         return new RecoveryEvidence(RecoveryEvidenceKind.Recoverable, knownAllocations[0]);

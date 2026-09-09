@@ -85,6 +85,24 @@ public sealed class SurvivorPolicyTests
     }
 
     [Fact]
+    public void AnUnavailableCurrentPathRaisesTheExternalLinkProofThresholdWithoutBecomingAKnownSurvivor()
+    {
+        var key = ReviewGroups.Key(1);
+        var group = ReviewGroups.Group(
+            ReviewGroups.Occurrence(1, key, @"C:\scope\eligible.jpg", 4096, 2),
+            ReviewGroups.Occurrence(2, key, @"C:\scope\pending.jpg", 4096, 2));
+        var eligible = ImmutableHashSet.Create(1L);
+
+        var decision = SurvivorPolicy.Evaluate(group, eligible, [1]);
+
+        Assert.Equal(SurvivorDecisionKind.OverrideRequired, decision.Kind);
+        Assert.Equal(SurvivorUnavailableReason.NoProvenSurvivor, decision.Reason);
+        Assert.Equal(0, decision.RemainingKnownPathOccurrences);
+        Assert.Equal(0, decision.RemainingPhysicalKeys);
+        Assert.Empty(decision.ExternalSurvivors);
+    }
+
+    [Fact]
     public void ALinkCountBelowDistinctKnownPathsIsInconsistentBeforeOverride()
     {
         var group = ReviewGroups.OnePhysicalKey(
@@ -107,6 +125,52 @@ public sealed class SurvivorPolicyTests
         var group = ReviewGroups.Group(
             ReviewGroups.Occurrence(1, key, @"C:\scope\a.jpg", 4096, 2),
             ReviewGroups.Occurrence(2, key, @"C:\scope\b.jpg", 4096, 3));
+        var eligible = ReviewGroups.Ids(group);
+
+        var decision = SurvivorPolicy.Evaluate(group, eligible, eligible);
+
+        Assert.Equal(SurvivorDecisionKind.InconsistentEvidence, decision.Kind);
+        Assert.Equal(SurvivorUnavailableReason.InconsistentFacts, decision.Reason);
+    }
+
+    [Fact]
+    public void ContradictoryKnownLinkCountsPrecedeAnUnknownObservation()
+    {
+        var key = ReviewGroups.Key(1);
+        var group = ReviewGroups.Group(
+            ReviewGroups.Occurrence(1, key, @"C:\scope\a.jpg", 4096, 3),
+            ReviewGroups.Occurrence(2, key, @"C:\scope\b.jpg", 4096, 4),
+            ReviewGroups.Occurrence(3, key, @"C:\scope\c.jpg", 4096, null));
+        var eligible = ReviewGroups.Ids(group);
+
+        var decision = SurvivorPolicy.Evaluate(group, eligible, eligible);
+
+        Assert.Equal(SurvivorDecisionKind.InconsistentEvidence, decision.Kind);
+        Assert.Equal(SurvivorUnavailableReason.InconsistentFacts, decision.Reason);
+    }
+
+    [Fact]
+    public void ZeroLinkCountPrecedesAnUnknownObservation()
+    {
+        var key = ReviewGroups.Key(1);
+        var group = ReviewGroups.Group(
+            ReviewGroups.Occurrence(1, key, @"C:\scope\a.jpg", 4096, 0),
+            ReviewGroups.Occurrence(2, key, @"C:\scope\b.jpg", 4096, null));
+        var eligible = ReviewGroups.Ids(group);
+
+        var decision = SurvivorPolicy.Evaluate(group, eligible, eligible);
+
+        Assert.Equal(SurvivorDecisionKind.InconsistentEvidence, decision.Kind);
+        Assert.Equal(SurvivorUnavailableReason.InconsistentFacts, decision.Reason);
+    }
+
+    [Fact]
+    public void KnownLinkCoverageBelowCurrentPathsPrecedesAnUnknownObservation()
+    {
+        var key = ReviewGroups.Key(1);
+        var group = ReviewGroups.Group(
+            ReviewGroups.Occurrence(1, key, @"C:\scope\a.jpg", 4096, 1),
+            ReviewGroups.Occurrence(2, key, @"C:\scope\b.jpg", 4096, null));
         var eligible = ReviewGroups.Ids(group);
 
         var decision = SurvivorPolicy.Evaluate(group, eligible, eligible);

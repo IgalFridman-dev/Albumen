@@ -68,3 +68,32 @@ public sealed record SelectionRecovery(
 public sealed record SelectionEvaluation(
     SurvivorDecision Survivor,
     SelectionRecovery Recovery);
+
+public readonly record struct OverrideEvidenceId(Guid Value);
+
+public sealed record OverrideProposalToken(
+    Guid ProposalId,
+    ReviewCommandPin Pin,
+    ImmutableArray<long> ProposedSelectedOccurrenceIds,
+    string SurvivorPolicyVersion,
+    string ConsequenceTextVersion);
+
+public sealed record OverrideAffirmationCommand(
+    OverrideProposalToken Proposal,
+    OverrideEvidenceId EvidenceId,
+    DateTimeOffset AffirmedUtc);
+
+public sealed record AffectedPhysicalRevision(
+    PhysicalFileKey PhysicalFileKey,
+    ContentRevision Content,
+    AllocationEvidence Allocation);
+
+public sealed record DeliberateOverrideEvidence(
+    OverrideEvidenceId EvidenceId,
+    DateTimeOffset AffirmedUtc,
+    ReviewCommandPin Pin,
+    ImmutableArray<long> SelectedOccurrenceIds,
+    ImmutableArray<AffectedPhysicalRevision> AffectedPhysicalRevisions,
+    string SurvivorPolicyVersion,
+    string ConsequenceTextVersion,
+    bool DeliberatelyAffirmed);

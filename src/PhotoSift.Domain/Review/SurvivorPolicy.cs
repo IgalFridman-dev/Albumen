@@ -60,6 +60,11 @@ public static class SurvivorPolicy
             var pathGroups = observations.GroupBy(
                 member => member.ResolvedPath,
                 StringComparer.OrdinalIgnoreCase).ToArray();
+            var currentPathCount = group.Members
+                .Where(member => member.PhysicalFileKey == physicalGroup.Key)
+                .Select(member => member.ResolvedPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
 
             var knownPathsForKey = 0;
             foreach (var pathGroup in pathGroups)
@@ -79,7 +84,7 @@ public static class SurvivorPolicy
                 remainingPhysicalKeys.Add(physicalGroup.Key);
             }
 
-            var linkEvidence = EvaluateLinkEvidence(observations, pathGroups.Length);
+            var linkEvidence = EvaluateLinkEvidence(observations, currentPathCount);
             switch (linkEvidence.Kind)
             {
                 case LinkEvidenceKind.External:
@@ -87,7 +92,7 @@ public static class SurvivorPolicy
                         new ExternalSurvivor(
                             physicalGroup.Key,
                             linkEvidence.LinkCount,
-                            pathGroups.Length));
+                            currentPathCount));
                     remainingPhysicalKeys.Add(physicalGroup.Key);
                     break;
                 case LinkEvidenceKind.Unknown:
@@ -133,19 +138,26 @@ public static class SurvivorPolicy
         ScanFileOccurrence[] observations,
         int knownPathCount)
     {
+        var usableKnownLinkCounts = observations
+            .Where(member => member.Allocation.Stable)
+            .Select(member => member.Allocation.LinkCount)
+            .Where(linkCount => linkCount is not null)
+            .Select(linkCount => linkCount!.Value)
+            .Distinct()
+            .ToArray();
+        if (usableKnownLinkCounts.Length > 1
+            || usableKnownLinkCounts.Any(linkCount => linkCount == 0 || linkCount < knownPathCount))
+        {
+            return new LinkEvidence(LinkEvidenceKind.Inconsistent, 0);
+        }
+
         if (observations.Any(member => !member.Allocation.Stable)
             || observations.Any(member => member.Allocation.LinkCount is null))
         {
             return new LinkEvidence(LinkEvidenceKind.Unknown, 0);
         }
 
-        var linkCount = observations[0].Allocation.LinkCount!.Value;
-        if (linkCount == 0
-            || observations.Any(member => member.Allocation.LinkCount != linkCount)
-            || linkCount < knownPathCount)
-        {
-            return new LinkEvidence(LinkEvidenceKind.Inconsistent, 0);
-        }
+        var linkCount = usableKnownLinkCounts[0];
 
         return linkCount > knownPathCount
             ? new LinkEvidence(LinkEvidenceKind.External, linkCount)
