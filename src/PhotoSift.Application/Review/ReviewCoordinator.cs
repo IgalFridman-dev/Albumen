@@ -32,6 +32,14 @@ public sealed class ReviewCoordinator : IReviewCoordinator, IReviewResultSink
     public ReviewSnapshot Current => Volatile.Read(ref current);
     public event EventHandler<ReviewSnapshot>? SnapshotChanged;
 
+    public async Task ReportObserverFaultAsync(ReviewSessionPin session) =>
+        await inbox.CommandAsync(() =>
+        {
+            if (!disposed && active is { Invalidated: false } operation && operation.Session == session
+                && current.Pin == session && current.Status != ReviewStatus.Faulted) Fault(operation);
+            return true;
+        }).ConfigureAwait(false);
+
     public async Task<ReviewCommandResult> OpenAsync(ReviewOpenRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);

@@ -8,6 +8,37 @@ namespace PhotoSift.Application.Tests.Review;
 public sealed class ReviewReplacementTests
 {
     [Fact]
+    public async Task ObserverFaultReportIsQueuedAndOnlyFaultsItsExactLiveSessionBeforeCancellation()
+    {
+        await using var f = new ReviewFixture();
+        await f.Open();
+        var old = f.Owner.Current.Pin!;
+        await f.Run();
+        f.Executor.Arrived = ScanTestData.Signal<ReviewTestRun>();
+        await f.Open();
+        var run = await f.Run();
+        var canceled = ScanTestData.Signal<ReviewStatus>();
+        run.OnCancel = () => { canceled.TrySetResult(f.Owner.Current.Status); return Task.CompletedTask; };
+        var current = f.Owner.Current;
+        await f.Pump(f.Owner.ReportObserverFaultAsync(old));
+        Assert.Same(current, f.Owner.Current);
+        var reported = f.Owner.ReportObserverFaultAsync(current.Pin!);
+        Assert.False(reported.IsCompleted);
+        Assert.Same(current, f.Owner.Current);
+        await f.Pump(reported);
+        Assert.Equal(ReviewStatus.Faulted, f.Owner.Current.Status);
+        Assert.Equal(ReviewUnavailableReason.ProgrammingFault, f.Owner.Current.FaultReason);
+        await f.Pump(canceled.Task);
+        Assert.Equal(ReviewStatus.Faulted, await canceled.Task);
+        await f.Pump(f.Owner.InvalidateAsync(null));
+        await f.Pump(f.Owner.ReportObserverFaultAsync(current.Pin!));
+        Assert.Null(f.Owner.Current.Pin);
+        await f.Pump(f.Owner.DisposeAsync().AsTask());
+        await f.Pump(f.Owner.ReportObserverFaultAsync(current.Pin!));
+        Assert.Null(f.Owner.Current.Pin);
+    }
+
+    [Fact]
     public async Task DelayedLowerRevisionInvalidationCannotReopenAnObsoleteScan()
     {
         await using var f = new ReviewFixture();
