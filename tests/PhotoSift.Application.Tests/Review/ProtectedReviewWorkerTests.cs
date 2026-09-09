@@ -155,6 +155,69 @@ public sealed class ProtectedReviewWorkerTests
         Assert.Equal(0, reader.Live);
     }
 
+    // A throwing asynchronous cleanup must add evidence, never replace an earlier fault.
+    [Theory]
+    [InlineData("analyzer")]
+    [InlineData("acknowledgment")]
+    [InlineData("analyzer-and-acknowledgment")]
+    [InlineData("disposal-only")]
+    public async Task AsynchronousDisposalPreservesEveryPrimaryFaultAfterAcknowledgment(string scenario)
+    {
+        var analyzerFault = new InvalidOperationException("analyzer fault");
+        var acknowledgmentFault = new ArgumentException("acknowledgment fault");
+        var disposalFault = new IOException("disposal fault");
+        var failAnalyzer = scenario is "analyzer" or "analyzer-and-acknowledgment";
+        var failAcknowledgment = scenario is "acknowledgment" or "analyzer-and-acknowledgment";
+        var ack = ScanTestData.Signal<bool>();
+        var sink = new ReviewSink { Commit = _ => new(ack.Task), Failure = (_, _) => new(ack.Task) };
+        var reader = new DisposalFailureReader(disposalFault);
+        var analyzer = new ScanTestAnalyzer { Hash = (_, _) => failAnalyzer
+            ? ValueTask.FromException<StreamDigest>(analyzerFault)
+            : ValueTask.FromResult(new StreamDigest(1, ScanTestData.Digest)) };
+        var work = new ProtectedReviewWorker(reader, analyzer)
+            .RevalidateAsync(ReviewData.Request(), sink, TestContext.Current.CancellationToken);
+        try
+        {
+            await ScanTestData.Bound(sink.Submitted.Task);
+            var lease = Assert.IsType<DisposalFailureLease>(reader.Lease);
+            Assert.True(lease.Content.CanRead);
+            Assert.Equal(0, lease.DisposalAttempts);
+            Assert.False(work.IsCompleted);
+            if (failAnalyzer)
+            {
+                Assert.Empty(sink.Evidence);
+                Assert.Equal(ReviewUnavailableReason.ProgrammingFault, Assert.Single(sink.Failures).Reason);
+            }
+            else { Assert.Single(sink.Evidence); Assert.Empty(sink.Failures); }
+
+            if (failAcknowledgment) ack.SetException(acknowledgmentFault);
+            else ack.SetResult(true);
+            await ScanTestData.Bound(lease.DisposalStarted.Task);
+            Assert.Equal(1, lease.DisposalAttempts);
+            Assert.True(lease.Content.CanRead);
+            Assert.False(work.IsCompleted);
+            lease.ReleaseDisposal.SetResult(true);
+            var observed = await Record.ExceptionAsync(() => ScanTestData.Bound(work));
+            Assert.Equal(1, lease.DisposalAttempts);
+            Assert.False(lease.Content.CanRead);
+            if (!failAnalyzer && !failAcknowledgment) Assert.Same(disposalFault, observed);
+            else
+            {
+                var faults = Assert.IsType<AggregateException>(observed).Flatten().InnerExceptions;
+                Assert.Equal(failAnalyzer && failAcknowledgment ? 3 : 2, faults.Count);
+                Assert.Contains(disposalFault, faults);
+                if (failAnalyzer) Assert.Contains(analyzerFault, faults);
+                if (failAcknowledgment) Assert.Contains(acknowledgmentFault, faults);
+            }
+        }
+        finally
+        {
+            ack.TrySetResult(false);
+            reader.Lease?.ReleaseDisposal.TrySetResult(true);
+            await Record.ExceptionAsync(() => ScanTestData.Bound(work));
+        }
+    }
+
     [Fact]
     public async Task CancellationDuringHashStillAcknowledgesFailureBeforeDisposal()
     {
@@ -214,6 +277,35 @@ public sealed class ProtectedReviewWorkerTests
         "read" => new IOException(),
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
+
+    private sealed class DisposalFailureReader(Exception failure) : IProtectedFileReader
+    {
+        internal DisposalFailureLease? Lease { get; private set; }
+        public ValueTask<IProtectedFileLease> OpenAsync(ProtectedOpenRequest request, CancellationToken cancellationToken)
+        {
+            Lease = new DisposalFailureLease(request, failure);
+            return ValueTask.FromResult<IProtectedFileLease>(Lease);
+        }
+    }
+
+    private sealed class DisposalFailureLease(ProtectedOpenRequest request, Exception failure) : IProtectedFileLease
+    {
+        private readonly ScanTestLease inner = new(request);
+        internal TaskCompletionSource<bool> DisposalStarted { get; } = ScanTestData.Signal<bool>();
+        internal TaskCompletionSource<bool> ReleaseDisposal { get; } = ScanTestData.Signal<bool>();
+        internal int DisposalAttempts { get; private set; }
+        public Stream Content => inner.Content;
+        public ProtectedFileFacts OpenedFacts => inner.OpenedFacts;
+        public ValueTask<ProtectedFileFacts> RefreshAsync(CancellationToken cancellationToken) => inner.RefreshAsync(cancellationToken);
+        public async ValueTask DisposeAsync()
+        {
+            DisposalAttempts++;
+            DisposalStarted.TrySetResult(true);
+            await ReleaseDisposal.Task;
+            await inner.DisposeAsync();
+            throw failure;
+        }
+    }
 }
 
 internal static class ReviewData

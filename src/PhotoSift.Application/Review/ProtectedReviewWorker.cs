@@ -22,9 +22,10 @@ public sealed class ProtectedReviewWorker
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(sink);
         IProtectedFileLease? lease = null;
+        ExceptionDispatchInfo? primaryFault = null;
         try
         {
-            ReviewRevalidationEvidence evidence;
+            ReviewRevalidationEvidence? evidence = null;
             try
             {
                 token.ThrowIfCancellationRequested();
@@ -52,17 +53,28 @@ public sealed class ProtectedReviewWorker
             catch (Exception exception)
             {
                 await ReportFailureAsync(request, exception, sink, token).ConfigureAwait(false);
-                return;
             }
 
             // Neither admission nor acknowledgment receives worker cancellation.
             // Rejection, stale state, and owner faults settle while the lease lives.
-            await sink.CommitRevalidationAsync(evidence).ConfigureAwait(false);
+            if (evidence is not null) await sink.CommitRevalidationAsync(evidence).ConfigureAwait(false);
         }
-        finally
+        catch (Exception exception)
+        {
+            primaryFault = ExceptionDispatchInfo.Capture(exception);
+        }
+
+        // Cleanup runs once, after acknowledgment, without replacing the captured
+        // work/owner fault. A successful cleanup preserves its original dispatch.
+        try
         {
             if (lease is not null) await lease.DisposeAsync().ConfigureAwait(false);
         }
+        catch (Exception disposalFault) when (primaryFault is not null)
+        {
+            throw new AggregateException(primaryFault.SourceException, disposalFault);
+        }
+        primaryFault?.Throw();
     }
 
     private static void ValidateFacts(ReviewRevalidationRequest request, ProtectedFileFacts facts, ContentRevision expected)
