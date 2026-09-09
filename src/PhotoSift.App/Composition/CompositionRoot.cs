@@ -7,6 +7,8 @@ using PhotoSift.Infrastructure.Sqlite.Review;
 using PhotoSift.Infrastructure.Windows.Scan;
 using PhotoSift.Application.Scope;
 using PhotoSift.Application.Shell;
+using PhotoSift.Domain.Review;
+using PhotoSift.Domain.Workflow;
 using PhotoSift.Infrastructure.Windows.Scope;
 
 namespace PhotoSift.App.Composition;
@@ -33,9 +35,81 @@ public static class CompositionRoot
         var evidenceStore = new SqliteOverrideEvidenceStore(databasePath);
         var review = new ReviewCoordinator(scheduler,
             new BoundedReviewRevalidator(reader, analyzer), evidenceStore);
-        var photoWorkflow = new PhotoSiftWorkflow(workflow, scan, scheduler, review);
+        var photoWorkflow = new OwnedPhotoSiftWorkflow(
+            new PhotoSiftWorkflow(workflow, scan, scheduler, review),
+            review,
+            evidenceStore);
         var dialog = new WpfReviewDialogService(() => System.Windows.Application.Current?.MainWindow);
         return new ShellViewModel(workflow, photoWorkflow, dialog);
+    }
+
+    private sealed class OwnedPhotoSiftWorkflow(
+        IPhotoSiftWorkflow workflow,
+        IAsyncDisposable review,
+        IAsyncDisposable evidenceStore) : IPhotoSiftWorkflow, IAsyncDisposable
+    {
+        private readonly object lifetime = new();
+        private Task? disposalTask;
+
+        public PhotoSiftSnapshot Current => workflow.Current;
+
+        public event EventHandler<PhotoSiftSnapshot>? SnapshotChanged
+        {
+            add => workflow.SnapshotChanged += value;
+            remove => workflow.SnapshotChanged -= value;
+        }
+
+        public Task ContinueAsync() => workflow.ContinueAsync();
+        public Task ConfirmExactRulesAsync() => workflow.ConfirmExactRulesAsync();
+        public Task StartScanAsync() => workflow.StartScanAsync();
+        public Task CancelScanAsync() => workflow.CancelScanAsync();
+        public Task OpenReviewAsync() => workflow.OpenReviewAsync();
+        public Task<ReviewCommandResult> ChangeReviewSelectionAsync(
+            SelectionCommand command,
+            CancellationToken cancellationToken) =>
+            workflow.ChangeReviewSelectionAsync(command, cancellationToken);
+        public Task<ReviewCommandResult> AffirmReviewOverrideAsync(
+            OverrideAffirmationCommand command,
+            CancellationToken cancellationToken) =>
+            workflow.AffirmReviewOverrideAsync(command, cancellationToken);
+        public Task<ReviewCommandResult> ApproveReviewAsync(
+            ApproveSelectionCommand command,
+            CancellationToken cancellationToken) =>
+            workflow.ApproveReviewAsync(command, cancellationToken);
+        public Task NavigateAsync(WorkflowPhase phase) => workflow.NavigateAsync(phase);
+
+        public ValueTask DisposeAsync()
+        {
+            lock (lifetime)
+                return new(disposalTask ??= DisposeCoreAsync());
+        }
+
+        private async Task DisposeCoreAsync()
+        {
+            List<Exception>? failures = null;
+            try
+            {
+                await review.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
+
+            try
+            {
+                await evidenceStore.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
+
+            if (failures?.Count == 1)
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            if (failures is { Count: > 1 })
+                throw new AggregateException(failures);
+        }
     }
 }
 

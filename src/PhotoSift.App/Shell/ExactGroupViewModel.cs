@@ -95,21 +95,27 @@ public sealed class ExactGroupViewModel
 
     private static string FormatSurvivor(ReviewGroupSnapshot group)
     {
-        var pathsByPhysical = group.Members.Where(member => member.Occurrence.PhysicalFileKey is not null)
-            .GroupBy(member => member.Occurrence.PhysicalFileKey!.Value)
-            .ToDictionary(values => values.Key,
-                values => values.Select(value => value.Occurrence.ResolvedPath)
-                    .Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        var external = group.Members.Select(member => member.Occurrence)
-            .Where(occurrence => occurrence.PhysicalFileKey is { } key
-                && occurrence.Allocation is { Stable: true, LinkCount: { } links }
-                && pathsByPhysical.TryGetValue(key, out var known) && links > known)
-            .Select(occurrence => occurrence.PhysicalFileKey!.Value).Distinct().Count();
-        if (external > 0)
-            return $"A proven external hard-link survivor remains; its path is unknown to this Scan ({external.ToString(CultureInfo.InvariantCulture)} physical file).";
-        var remaining = group.Members.Count(member => member.Eligibility == ReviewEligibilityState.Eligible && !member.Selected);
-        return remaining > 0
-            ? $"{remaining.ToString(CultureInfo.InvariantCulture)} proven in-Scan survivor occurrence(s) remain."
+        var eligible = group.Members
+            .Where(member => member.Eligibility == ReviewEligibilityState.Eligible)
+            .Select(member => member.Occurrence.Token.OccurrenceId)
+            .ToImmutableHashSet();
+        var currentCandidate = group.Candidate with
+        {
+            Members = group.Members.Select(member => member.Occurrence).ToImmutableArray(),
+        };
+        var decision = SurvivorPolicy.Evaluate(currentCandidate, eligible, group.SelectedOccurrenceIds);
+        var completeSelection = SurvivorPolicy.Evaluate(currentCandidate, eligible, eligible);
+        if (decision.Kind == SurvivorDecisionKind.InconsistentEvidence
+            || completeSelection.Kind == SurvivorDecisionKind.InconsistentEvidence)
+            return "Survivor evidence is inconsistent; no survivor assurance is available.";
+        if (decision.Kind == SurvivorDecisionKind.IneligibleSelection)
+            return "Survivor status is unavailable because the Selection contains an ineligible occurrence.";
+        if (!decision.ExternalSurvivors.IsEmpty)
+            return $"A proven external hard-link survivor remains; its path is unknown to this Scan ({decision.ExternalSurvivors.Length.ToString(CultureInfo.InvariantCulture)} physical file).";
+        if (decision.RemainingKnownPathOccurrences > 0)
+            return $"{decision.RemainingKnownPathOccurrences.ToString(CultureInfo.InvariantCulture)} proven in-Scan survivor occurrence(s) remain.";
+        return decision.Reason == SurvivorUnavailableReason.UnknownLinks
+            ? "No proven survivor is available because hard-link evidence is unknown."
             : "No proven survivor remains; deliberate override is required.";
     }
 }

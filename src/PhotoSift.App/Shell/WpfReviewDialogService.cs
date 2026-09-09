@@ -9,6 +9,7 @@ namespace PhotoSift.App.Shell;
 public sealed class WpfReviewDialogService(Func<Window?> ownerProvider) : IReviewDialogService
 {
     private readonly Func<Window?> ownerProvider = ownerProvider ?? throw new ArgumentNullException(nameof(ownerProvider));
+    private int blockingLayer;
 
     public async Task<SurvivorOverrideDialogResult> ShowSurvivorOverrideAsync(
         OverrideProposalToken proposal,
@@ -31,31 +32,41 @@ public sealed class WpfReviewDialogService(Func<Window?> ownerProvider) : IRevie
         return ShowCore(proposal, invokingFocus, owner, cancellationToken);
     }
 
-    private static SurvivorOverrideDialogResult ShowCore(
+    private SurvivorOverrideDialogResult ShowCore(
         OverrideProposalToken proposal,
         IInputElement invokingFocus,
         Window? owner,
         CancellationToken cancellationToken)
     {
-        var dispatcher = owner?.Dispatcher ?? Dispatcher.CurrentDispatcher;
-        var focusIdentity = CaptureFocusIdentity(invokingFocus);
-        var dialog = new SurvivorOverrideDialog(proposal);
-        if (owner is { IsVisible: true }) dialog.Owner = owner;
-        using var registration = cancellationToken.Register(() => dialog.Dispatcher.BeginInvoke(
-            DispatcherPriority.Send, new Action(() =>
-            {
-                if (dialog.IsVisible) dialog.Close();
-            })));
+        if (Interlocked.CompareExchange(ref blockingLayer, 1, 0) != 0)
+            return SurvivorOverrideDialogResult.Cancel;
+
         try
         {
-            dialog.ShowDialog();
-            return dialog.Result;
+            var dispatcher = owner?.Dispatcher ?? Dispatcher.CurrentDispatcher;
+            var focusIdentity = CaptureFocusIdentity(invokingFocus);
+            var dialog = new SurvivorOverrideDialog(proposal);
+            if (owner is { IsVisible: true }) dialog.Owner = owner;
+            using var registration = cancellationToken.Register(() => dialog.Dispatcher.BeginInvoke(
+                DispatcherPriority.Send, new Action(() =>
+                {
+                    if (dialog.IsVisible) dialog.Close();
+                })));
+            try
+            {
+                dialog.ShowDialog();
+                return dialog.Result;
+            }
+            finally
+            {
+                if (!dispatcher.HasShutdownStarted)
+                    dispatcher.BeginInvoke(DispatcherPriority.Input,
+                        new Action(() => RestoreFocus(owner, invokingFocus, focusIdentity)));
+            }
         }
         finally
         {
-            if (!dispatcher.HasShutdownStarted)
-                dispatcher.BeginInvoke(DispatcherPriority.Input,
-                    new Action(() => RestoreFocus(owner, invokingFocus, focusIdentity)));
+            Volatile.Write(ref blockingLayer, 0);
         }
     }
 

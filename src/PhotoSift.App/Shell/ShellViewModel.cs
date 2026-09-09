@@ -13,7 +13,7 @@ using PhotoSift.Domain.Workflow;
 
 namespace PhotoSift.App.Shell;
 
-public sealed class ShellViewModel : INotifyPropertyChanged
+public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 {
     private readonly IChooseScopeWorkflow chooseScopeWorkflow;
     private readonly IPhotoSiftWorkflow? photoWorkflow;
@@ -50,6 +50,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private ReviewSessionPin? approvalIdentitySession;
     private long approvalIdentityRevision;
     private Guid approvalIdentityKey;
+    private string approvalAutomationStatus = string.Empty;
+    private readonly object lifetime = new();
+    private Task? disposalTask;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
@@ -71,7 +74,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         ConfirmExactRulesCommand = new AsyncCommand(() => photoWorkflow?.ConfirmExactRulesAsync() ?? Task.CompletedTask);
         StartScanCommand = new AsyncCommand(() => photoWorkflow?.StartScanAsync() ?? Task.CompletedTask);
         CancelScanCommand = new AsyncCommand(() => photoWorkflow?.CancelScanAsync() ?? Task.CompletedTask);
-        OpenReviewCommand = new AsyncCommand(() => photoWorkflow?.NavigateAsync(WorkflowPhase.Review) ?? Task.CompletedTask);
+        OpenReviewCommand = new AsyncCommand(() => photoWorkflow?.OpenReviewAsync() ?? Task.CompletedTask);
         ApproveReviewCommand = new AsyncCommand(ApproveReviewAsync);
         NavigateCommand = new AsyncCommand(parameter => photoWorkflow is not null && parameter is WorkflowPhase phase
             ? photoWorkflow.NavigateAsync(phase) : parameter is WorkflowPhase.ChooseScope
@@ -85,7 +88,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     {
         photoWorkflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
         this.reviewDialog = reviewDialog;
-        workflow.SnapshotChanged += (_, snapshot) => ApplyCombined(snapshot);
+        workflow.SnapshotChanged += OnPhotoSnapshotChanged;
         ApplyCombined(workflow.Current);
     }
 
@@ -128,7 +131,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     public string ReviewAnnouncement
     {
         get => reviewAnnouncement;
-        private set => SetField(ref reviewAnnouncement, value);
+        private set
+        {
+            reviewAnnouncement = value;
+            OnPropertyChanged();
+        }
     }
 
     public string ApprovalSelectedOccurrenceText
@@ -182,6 +189,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     public string ApprovalDestinationText { get; } = "Future destination: Windows Recycle Bin.";
     public string ApprovalRevalidationText { get; } =
         "Only the listed, revalidated selected occurrences are included. E1-S5 will revalidate Scope, identity, content, and override evidence again before any Action.";
+    public string ApprovalAutomationStatus
+    {
+        get => approvalAutomationStatus;
+        private set => SetField(ref approvalAutomationStatus, value);
+    }
     public bool CanApproveReview
     {
         get => canApproveReview;
@@ -302,9 +314,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         if (photoWorkflow is null) Apply(snapshot);
     }
 
+    private void OnPhotoSnapshotChanged(object? sender, PhotoSiftSnapshot snapshot) =>
+        ApplyCombined(snapshot);
+
     private void ApplyCombined(PhotoSiftSnapshot snapshot)
     {
-        var preserveReviewProjection = ReviewProjectionUnchanged(photoSnapshot?.Review, snapshot.Review);
+        var preserveReviewProjection = ReviewProjectionUnchanged(photoSnapshot?.Review, snapshot.Review)
+            && (snapshot.Review.Pin is not null || ScanProjectionUnchanged(photoSnapshot?.Scan, snapshot.Scan));
         var previousPhase = CurrentPhase;
         var previousStatus = ScanStatus;
         var previousBusy = IsScanBusy;
@@ -390,8 +406,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged
 
     private void ApplyReviewResult(ReviewCommandResult result)
     {
-        if (photoWorkflow is not null && !ReviewProjectionUnchanged(photoSnapshot?.Review, result.Snapshot))
-            ApplyCombined(photoWorkflow.Current with { Review = result.Snapshot });
+        if (photoWorkflow is { } workflow && !ReferenceEquals(photoSnapshot, workflow.Current))
+            ApplyCombined(workflow.Current);
         var announcement = result.Outcome switch
         {
             ReviewCommandOutcome.Stale => "The Review changed; the stale command made no change.",
@@ -405,6 +421,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     }
 
     private static bool ReviewProjectionUnchanged(ReviewSnapshot? current, ReviewSnapshot next) =>
+        ReferenceEquals(current, next) || current == next;
+
+    private static bool ScanProjectionUnchanged(
+        PhotoSift.Application.Scan.ScanSnapshot? current,
+        PhotoSift.Application.Scan.ScanSnapshot next) =>
         ReferenceEquals(current, next) || current == next;
 
     private void ProjectReview(ReviewSnapshot review)
@@ -424,6 +445,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         ApprovalUnresolvedText = $"Unresolved total: {review.Unresolved.Total.ToString(CultureInfo.InvariantCulture)}";
         ApprovalUnresolvedSubtotals = $"Incomplete enumeration: {review.Unresolved.IncompleteEnumeration.ToString(CultureInfo.InvariantCulture)}; failed Scan rows: {review.Unresolved.FailedScanRows.ToString(CultureInfo.InvariantCulture)}; canceled Scan rows: {review.Unresolved.CanceledScanRows.ToString(CultureInfo.InvariantCulture)}; unprocessed Scan rows: {review.Unresolved.UnprocessedScanRows.ToString(CultureInfo.InvariantCulture)}; pending Review members: {review.Unresolved.PendingReviewMembers.ToString(CultureInfo.InvariantCulture)}; unavailable Review members: {review.Unresolved.UnavailableReviewMembers.ToString(CultureInfo.InvariantCulture)}";
         ApprovalUnselectedSurvivorsText = $"Ordinary unselected survivors: {review.Unresolved.UnselectedSurvivorMembers.ToString(CultureInfo.InvariantCulture)}";
+        ApprovalAutomationStatus = $"{ApprovalSelectedOccurrenceText}; {ApprovalSelectedPathText}; {ApprovalSelectedPhysicalText}; {ApprovalRecoveryText} {ApprovalCoverageText}; {ApprovalUnresolvedText}; {ApprovalUnresolvedSubtotals}; {ApprovalUnselectedSurvivorsText}; {ApprovalDestinationText} {ApprovalRevalidationText}";
         SelectionSummary = $"{ApprovalSelectedOccurrenceText}; {ApprovalRecoveryText} {ApprovalCoverageText}; unresolved total {review.Unresolved.Total.ToString(CultureInfo.InvariantCulture)}.";
         CanApproveReview = review.Status == ReviewStatus.Ready
             && review.Coverage is ScanSessionStatus.Complete or ScanSessionStatus.Incomplete
@@ -596,6 +618,21 @@ public sealed class ShellViewModel : INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    public ValueTask DisposeAsync()
+    {
+        lock (lifetime)
+            return new(disposalTask ??= DisposeCoreAsync());
+    }
+
+    private async Task DisposeCoreAsync()
+    {
+        chooseScopeWorkflow.SnapshotChanged -= OnSnapshotChanged;
+        if (photoWorkflow is not null)
+            photoWorkflow.SnapshotChanged -= OnPhotoSnapshotChanged;
+        if (photoWorkflow is IAsyncDisposable disposable)
+            await disposable.DisposeAsync().ConfigureAwait(false);
+    }
 }
 
 

@@ -239,6 +239,78 @@ public sealed class WpfReviewSelectionTests
         });
     }
 
+    [Fact]
+    public async Task DelayedOlderCommandResultCannotReplaceTheNewerPublishedReview()
+    {
+        var fixture = ReviewShellFixture.Ready();
+        var initial = fixture.Workflow.Current.Review;
+        var delayed = fixture.Workflow.DeferNextSelection();
+        var command = fixture.ViewModel.ExactGroups[0].ReplaceSelectionCommand.ExecuteAsync(new long[] { 1 });
+        var newer = ReviewData.WithSelection(initial, [4], 11);
+        fixture.Workflow.Publish(newer);
+
+        delayed.SetResult(new(ReviewCommandOutcome.Committed,
+            ReviewData.WithSelection(initial, [1], 10)));
+        await command;
+
+        var group = Assert.Single(fixture.ViewModel.ExactGroups);
+        Assert.Equal(11, group.SelectionRevision);
+        Assert.Equal([4], group.SelectedOccurrenceIds.Order().ToArray());
+    }
+
+    [Fact]
+    public void SpaceCommitRestoresFocusToTheReplacementControlForTheSameOccurrence()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = ReviewShellFixture.Ready();
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            try
+            {
+                window.Show();
+                Drain();
+                var original = Descendants<ReviewSelectionCheckBox>(window)
+                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                Assert.True(original.Focus());
+                Keyboard.Focus(original);
+                Assert.True(original.IsKeyboardFocused);
+
+                Press(original, Key.Space);
+                Drain();
+
+                var replacement = Descendants<ReviewSelectionCheckBox>(window)
+                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                Assert.NotSame(original, replacement);
+                Assert.True(replacement.IsKeyboardFocused);
+                Assert.True(replacement.IsEnabled);
+                Assert.True(Assert.IsType<AsyncCommand>(replacement.Command).CanExecute(null));
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
+    public void UnavailableHighLinkEvidenceNeverClaimsAnExternalSurvivor()
+    {
+        var fixture = ReviewShellFixture.Ready(review: ReviewData.ExternalUnavailableSnapshot());
+
+        var text = Assert.Single(fixture.ViewModel.ExactGroups).SurvivorText;
+
+        Assert.DoesNotContain("external", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("in-Scan", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ContradictoryHighLinkEvidenceIsReportedAsInconsistentNotReassuring()
+    {
+        var fixture = ReviewShellFixture.Ready(review: ReviewData.InconsistentExternalSnapshot());
+
+        var text = Assert.Single(fixture.ViewModel.ExactGroups).SurvivorText;
+
+        Assert.DoesNotContain("external", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("inconsistent", text, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void AssertSelection(SelectionCommand command, ExactGroupViewModel group,
         SelectionCommandKind kind, long[] ids)
         => AssertSelection(command, group, group.SelectionRevision, kind, ids);
@@ -276,9 +348,35 @@ public sealed class WpfReviewSelectionTests
         var thread = new Thread(() =>
         {
             dispatcher = Dispatcher.CurrentDispatcher;
+            var previousContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(
+                new DispatcherSynchronizationContext(dispatcher));
             dispatcherReady.Set();
-            try { action(); }
-            catch (Exception error) { failure = ExceptionDispatchInfo.Capture(error); }
+            try
+            {
+                action();
+                Drain();
+            }
+            catch (Exception error)
+            {
+                failure = ExceptionDispatchInfo.Capture(error);
+            }
+            finally
+            {
+                try
+                {
+                    Drain();
+                    if (!dispatcher.HasShutdownStarted) dispatcher.InvokeShutdown();
+                }
+                catch (Exception error)
+                {
+                    failure ??= ExceptionDispatchInfo.Capture(error);
+                }
+                finally
+                {
+                    SynchronizationContext.SetSynchronizationContext(previousContext);
+                }
+            }
         }) { IsBackground = false };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
@@ -307,6 +405,8 @@ public sealed class WpfReviewSelectionTests
         Assert.NotNull(source);
         var down = new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, key);
         down.RoutedEvent = Keyboard.PreviewKeyDownEvent;
+        down.Source = target;
+        Assert.Same(target, down.OriginalSource);
         target.RaiseEvent(down);
         if (!down.Handled && target.IsVisible)
         {
@@ -316,6 +416,8 @@ public sealed class WpfReviewSelectionTests
         if (!target.IsVisible) return;
         var up = new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, key);
         up.RoutedEvent = Keyboard.PreviewKeyUpEvent;
+        up.Source = target;
+        Assert.Same(target, up.OriginalSource);
         target.RaiseEvent(up);
         if (!up.Handled && target.IsVisible)
         {
@@ -363,11 +465,11 @@ internal sealed class ReviewSelectionInputProbe : ReviewSelectionCheckBox
 internal sealed class ReviewShellFixture
 {
     private ReviewShellFixture(bool twoGroups, bool externalSurvivor, ImmutableArray<long> selected,
-        IReviewDialogService? dialog)
+        IReviewDialogService? dialog, ReviewSnapshot? review)
     {
         Scope = new ReviewStaticScope();
         Workflow = new RecordingReviewWorkflow(Scope.Current,
-            ReviewData.CreateSnapshot(twoGroups, externalSurvivor, selected));
+            review ?? ReviewData.CreateSnapshot(twoGroups, externalSurvivor, selected));
         Dialog = dialog ?? new RecordingReviewDialogService();
         ViewModel = new ShellViewModel(Scope, Workflow, Dialog);
     }
@@ -378,8 +480,8 @@ internal sealed class ReviewShellFixture
     public ShellViewModel ViewModel { get; }
 
     public static ReviewShellFixture Ready(bool twoGroups = false, bool externalSurvivor = false,
-        ImmutableArray<long> selected = default, IReviewDialogService? dialog = null) =>
-        new(twoGroups, externalSurvivor, selected.IsDefault ? [] : selected, dialog);
+        ImmutableArray<long> selected = default, IReviewDialogService? dialog = null, ReviewSnapshot? review = null) =>
+        new(twoGroups, externalSurvivor, selected.IsDefault ? [] : selected, dialog, review);
 }
 
 internal sealed class ReviewStaticScope : IChooseScopeWorkflow
@@ -405,6 +507,8 @@ internal sealed class ReviewStaticScope : IChooseScopeWorkflow
 internal sealed class RecordingReviewWorkflow : IPhotoSiftWorkflow
 {
     private readonly Queue<ReviewCommandResult> selectionResults = new();
+    private TaskCompletionSource<ReviewCommandResult>? deferredSelection;
+    private TaskCompletionSource<ReviewCommandResult>? deferredAffirmation;
 
     public RecordingReviewWorkflow(ShellSnapshot scope, ReviewSnapshot review)
     {
@@ -432,18 +536,28 @@ internal sealed class RecordingReviewWorkflow : IPhotoSiftWorkflow
     public Task OpenReviewAsync() => Task.CompletedTask;
     public Task NavigateAsync(WorkflowPhase phase) => Task.CompletedTask;
 
-    public Task<ReviewCommandResult> ChangeReviewSelectionAsync(SelectionCommand command, CancellationToken token)
+    public TaskCompletionSource<ReviewCommandResult> DeferNextSelection() =>
+        deferredSelection = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public TaskCompletionSource<ReviewCommandResult> DeferNextAffirmation() =>
+        deferredAffirmation = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task<ReviewCommandResult> ChangeReviewSelectionAsync(SelectionCommand command, CancellationToken token)
     {
         SelectionCommands.Add(command);
+        if (Interlocked.Exchange(ref deferredSelection, null) is { } deferred)
+            return await deferred.Task;
         var result = selectionResults.Count > 0 ? selectionResults.Dequeue() : CommitSelection(command);
         Publish(result.Snapshot);
-        return Task.FromResult(result);
+        return result;
     }
 
-    public Task<ReviewCommandResult> AffirmReviewOverrideAsync(OverrideAffirmationCommand command, CancellationToken token)
+    public async Task<ReviewCommandResult> AffirmReviewOverrideAsync(OverrideAffirmationCommand command, CancellationToken token)
     {
         Affirmations.Add(command);
-        return Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Committed, Current.Review));
+        if (Interlocked.Exchange(ref deferredAffirmation, null) is { } deferred)
+            return await deferred.Task;
+        return new ReviewCommandResult(ReviewCommandOutcome.Committed, Current.Review);
     }
 
     public Task<ReviewCommandResult> ApproveReviewAsync(ApproveSelectionCommand command, CancellationToken token)
@@ -492,6 +606,59 @@ internal sealed class RecordingReviewDialogService : IReviewDialogService
 
 internal static class ReviewData
 {
+    internal static ReviewSnapshot WithSelection(
+        ReviewSnapshot snapshot, ImmutableArray<long> selected, long selectionRevision)
+    {
+        var selectedSet = selected.ToImmutableHashSet();
+        var group = snapshot.Groups[0];
+        var members = group.Members.Select(member => member with
+            { Selected = selectedSet.Contains(member.Occurrence.Token.OccurrenceId) }).ToImmutableArray();
+        return snapshot with
+        {
+            SelectionRevision = selectionRevision,
+            Groups = snapshot.Groups.SetItem(0, group with
+            {
+                Members = members,
+                SelectedOccurrenceIds = selectedSet,
+                Recovery = new(selected.Length * 512, SelectionRecoveryUnavailableReason.None),
+            }),
+        };
+    }
+
+    internal static ReviewSnapshot ExternalUnavailableSnapshot()
+    {
+        var snapshot = CreateSnapshot(externalSurvivor: true);
+        var group = snapshot.Groups[0];
+        return snapshot with { Groups = snapshot.Groups.SetItem(0, group with
+        {
+            Members = group.Members.SetItem(0, group.Members[0] with
+                { Eligibility = ReviewEligibilityState.Unavailable, Reason = ReviewUnavailableReason.Missing }),
+        }) };
+    }
+
+    internal static ReviewSnapshot InconsistentExternalSnapshot()
+    {
+        var snapshot = CreateSnapshot();
+        var group = snapshot.Groups[0];
+        var first = group.Members[0].Occurrence;
+        var fourth = group.Members[3].Occurrence;
+        var key = first.PhysicalFileKey!.Value;
+        first = new(first.Token, first.DiscoveredPath, first.ResolvedPath, first.PhysicalFileKey,
+            first.Enumerate, first.Exact, first.Content, new(512, 3, true));
+        fourth = new(fourth.Token, fourth.DiscoveredPath, fourth.ResolvedPath, key,
+            fourth.Enumerate, fourth.Exact, new(key, fourth.Content!.ByteLength, fourth.Content.Sha256),
+            new(512, 1, true));
+        var candidateMembers = group.Candidate.Members.SetItem(0, first).SetItem(3, fourth);
+        var reviewMembers = group.Members
+            .SetItem(0, group.Members[0] with { Occurrence = first })
+            .SetItem(3, group.Members[3] with { Occurrence = fourth });
+        return snapshot with { Groups = snapshot.Groups.SetItem(0, group with
+        {
+            Candidate = group.Candidate with { Members = candidateMembers },
+            Members = reviewMembers,
+        }) };
+    }
+
     internal static ReviewSnapshot CreateSnapshot(bool twoGroups = false, bool externalSurvivor = false,
         ImmutableArray<long> selected = default)
     {

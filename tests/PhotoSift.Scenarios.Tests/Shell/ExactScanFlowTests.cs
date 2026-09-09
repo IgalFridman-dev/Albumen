@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
+using PhotoSift.App;
 using PhotoSift.App.Shell;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Review;
@@ -54,6 +56,82 @@ public sealed class ExactScanFlowTests
         Assert.False(scopeOnly.CanContinue);
         Assert.All(scopeOnly.Phases.Skip(1), p => Assert.False(p.IsAvailable));
     }
+
+    [Fact]
+    public async Task OpenReviewCommandAdmitsTheFreshCompletedScanThroughTheRealWorkflow()
+    {
+        var scope = new ExactShellFixture.StaticScope();
+        var scheduler = new ManualWorkflowScheduler();
+        var scan = new CompletedScanOwner();
+        var review = new OpeningReviewOwner();
+        var workflow = new PhotoSiftWorkflow(scope, scan, scheduler, review);
+        var viewModel = new ShellViewModel(scope, workflow);
+
+        await scheduler.Finish(viewModel.ContinueCommand.ExecuteAsync());
+        await scheduler.Finish(viewModel.ConfirmExactRulesCommand.ExecuteAsync());
+        scan.Publish(CompletedScanOwner.CreateCompleted());
+        scheduler.Drain();
+        await scheduler.Finish(viewModel.OpenReviewCommand.ExecuteAsync());
+
+        Assert.Equal(1, review.OpenCount);
+        Assert.NotEqual(Guid.Empty, viewModel.ExactGroups.Single().GroupId);
+        Assert.NotNull(workflow.Current.Review.Pin);
+        Assert.True(viewModel.IsReviewPhase);
+    }
+
+    [Fact]
+    public void ClosedReviewProjectionTracksEachNewScanInsteadOfReusingStaleGroups()
+    {
+        var fixture = new ExactShellFixture();
+
+        fixture.PublishClosedScan(1, @"C:\Photos\first.jpg");
+        Assert.Equal(@"C:\Photos\first.jpg", Assert.Single(fixture.ViewModel.ExactGroups).Members[0].DiscoveredPath);
+
+        fixture.PublishClosedScan(2, @"C:\Photos\replacement.jpg");
+        Assert.Equal(@"C:\Photos\replacement.jpg", Assert.Single(fixture.ViewModel.ExactGroups).Members[0].DiscoveredPath);
+    }
+
+    [Fact]
+    public async Task ShellLifetimeDisposesOneInFlightOwnerAndIgnoresLatePublication()
+    {
+        var fixture = new ExactShellFixture();
+        fixture.PublishReview(ScanStatus.Incomplete);
+        fixture.Workflow.HoldDisposal = true;
+        var before = Assert.Single(fixture.ViewModel.ExactGroups);
+        var lifetime = Assert.IsAssignableFrom<IAsyncDisposable>(fixture.ViewModel);
+
+        var first = lifetime.DisposeAsync().AsTask();
+        await fixture.Workflow.DisposeEntered.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        var second = lifetime.DisposeAsync().AsTask();
+        fixture.PublishClosedScan(7, @"C:\Photos\late.jpg");
+        fixture.Workflow.DisposeRelease.TrySetResult();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, fixture.Workflow.DisposeCalls);
+        Assert.Same(before, Assert.Single(fixture.ViewModel.ExactGroups));
+    }
+
+    [Theory]
+    [InlineData(false, 0, "PHOTOSIFT_SMOKE_OK", "")]
+    [InlineData(true, 1, "", "PHOTOSIFT_SMOKE_FAIL type=InvalidOperationException")]
+    public async Task SmokeSuccessAndFailureDisposeBeforeReturningExitCode(
+        bool failProbe, int expectedExitCode, string expectedOutput, string expectedError)
+    {
+        var fixture = new ExactShellFixture();
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await PhotoSift.App.App.RunSmokeAsync(fixture.ViewModel, _ => failProbe
+            ? throw new InvalidOperationException("probe failure")
+            : "PHOTOSIFT_SMOKE_OK", output, error);
+
+        Assert.Equal(expectedExitCode, exitCode);
+        if (expectedOutput.Length == 0) Assert.Empty(output.ToString());
+        else Assert.Contains(expectedOutput, output.ToString(), StringComparison.Ordinal);
+        if (expectedError.Length == 0) Assert.Empty(error.ToString());
+        else Assert.Contains(expectedError, error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, fixture.Workflow.DisposeCalls);
+    }
 }
 
 internal sealed class ExactShellFixture
@@ -91,6 +169,16 @@ internal sealed class ExactShellFixture
     {
         Workflow.Publish(Workflow.Current with { CurrentPhase = phase, Rules = new(1, 1), Scan = Workflow.Current.Scan with { Status = status } });
     }
+    public void PublishClosedScan(long occurrenceId, string path)
+    {
+        var pin = new ScanPin(Guid.NewGuid(), 1, 1, occurrenceId);
+        var row = Row(pin, occurrenceId, (ulong)occurrenceId, path);
+        var group = new CandidateGroup(Guid.NewGuid(), occurrenceId, pin, CandidateCategory.Exact,
+            [row], [], false, null, new(17, RecoveryUnavailableReason.None));
+        var scan = new ScanSnapshot(pin, ScanStatus.Complete, new(ScanStageState.Succeeded, ScanReason.None),
+            [row], [group], new(1, 1, 0, 0, 0, 0));
+        Workflow.Publish(new(Scope.Current, new(1, 1), scan, WorkflowPhase.Review, InitialWorkflow.Create()));
+    }
     private static ScanFileOccurrence Row(ScanPin pin, long id, ulong physical, string path)
     {
         var key = new PhysicalFileKey(1, new(0, physical));
@@ -107,11 +195,15 @@ internal sealed class ExactShellFixture
         public Task HandleAsync(ChangeScopeRecursionCommand command, CancellationToken token) => Task.CompletedTask;
         public Task HandleAsync(RetryScopePreflightCommand command, CancellationToken token) => Task.CompletedTask;
     }
-    internal sealed class PublishingWorkflow(ShellSnapshot scope) : IPhotoSiftWorkflow
+    internal sealed class PublishingWorkflow(ShellSnapshot scope) : IPhotoSiftWorkflow, IAsyncDisposable
     {
         public PhotoSiftSnapshot Current { get; private set; } = new(scope, null,
             new(null, ScanStatus.Idle, new(ScanStageState.Pending, ScanReason.None), [], [], new(0, 0, 0, 0, 0, 0)), WorkflowPhase.ChooseScope, InitialWorkflow.Create());
         public List<string> Actions { get; } = [];
+        public bool HoldDisposal { get; set; }
+        public int DisposeCalls { get; private set; }
+        public TaskCompletionSource DisposeEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource DisposeRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public event EventHandler<PhotoSiftSnapshot>? SnapshotChanged;
         public void Publish(PhotoSiftSnapshot snapshot) { Current = snapshot; SnapshotChanged?.Invoke(this, snapshot); }
         private Task Act(string action) { Actions.Add(action); return Task.CompletedTask; }
@@ -127,7 +219,94 @@ internal sealed class ExactShellFixture
         public Task<ReviewCommandResult> ApproveReviewAsync(ApproveSelectionCommand command, CancellationToken token) =>
             Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current.Review));
         public Task NavigateAsync(WorkflowPhase phase) => Act(phase.ToString());
+        public async ValueTask DisposeAsync()
+        {
+            DisposeCalls++;
+            DisposeEntered.TrySetResult();
+            if (HoldDisposal) await DisposeRelease.Task;
+        }
     }
+}
+
+internal sealed class ManualWorkflowScheduler : IWorkflowScheduler
+{
+    private readonly System.Collections.Concurrent.ConcurrentQueue<Action> pending = new();
+    public void Post(Action callback) => pending.Enqueue(callback);
+    public void Drain()
+    {
+        for (var turn = 0; turn < 100; turn++)
+        {
+            if (!pending.TryDequeue(out var callback)) return;
+            callback();
+        }
+        Assert.True(pending.IsEmpty, "The manual workflow queue did not drain after one hundred bounded turns.");
+    }
+    public async Task Finish(Task task)
+    {
+        var started = Stopwatch.GetTimestamp();
+        while (!task.IsCompleted && Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2))
+        {
+            Drain();
+            await Task.Yield();
+        }
+        Assert.True(task.IsCompleted, "The manual workflow did not settle before the two-second deadline.");
+        await task;
+        Drain();
+    }
+}
+
+internal sealed class CompletedScanOwner : IScanCoordinator
+{
+    public ScanSnapshot Current { get; private set; } = new(null, ScanStatus.Idle,
+        new(ScanStageState.Pending, ScanReason.None), [], [], new(0, 0, 0, 0, 0, 0));
+    public event EventHandler<ScanSnapshot>? SnapshotChanged;
+    public void Publish(ScanSnapshot snapshot) { Current = snapshot; SnapshotChanged?.Invoke(this, snapshot); }
+    public Task StartAsync(ShellSnapshot scope, ExactRuleConfirmation rules, CancellationToken token) => Task.CompletedTask;
+    public Task InvalidateAsync(long scopeRevision, long? ruleSetRevision) => Task.CompletedTask;
+    public Task CancelAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    public static ScanSnapshot CreateCompleted()
+    {
+        var pin = new ScanPin(Guid.Parse("71000000-0000-0000-0000-000000000001"), 1, 1, 1);
+        var key = new PhysicalFileKey(7, new(0, 71));
+        var row = new ScanFileOccurrence(new(pin, 71, 1, 1), @"C:\Photos\fresh.jpg", @"C:\Photos\fresh.jpg", key,
+            new(ScanStageState.Succeeded, ScanReason.None), new(ScanStageState.Succeeded, ScanReason.None),
+            new(key, 17, new string('A', 64)), new(17, 1, true));
+        var group = new CandidateGroup(Guid.Parse("72000000-0000-0000-0000-000000000002"), 1, pin,
+            CandidateCategory.Exact, [row], [], false, null, new(17, RecoveryUnavailableReason.None));
+        return new(pin, ScanStatus.Complete, new(ScanStageState.Succeeded, ScanReason.None), [row], [group],
+            new(1, 1, 0, 0, 0, 0));
+    }
+}
+
+internal sealed class OpeningReviewOwner : IReviewCoordinator
+{
+    public ReviewSnapshot Current { get; private set; } = ReviewSnapshot.Closed;
+    public int OpenCount { get; private set; }
+    public event EventHandler<ReviewSnapshot>? SnapshotChanged;
+    public Task<ReviewCommandResult> OpenAsync(ReviewOpenRequest request, CancellationToken cancellationToken)
+    {
+        OpenCount++;
+        var groups = request.Scan.Groups.Select(group => new ReviewGroupSnapshot(group,
+            group.Members.Select(member => new ReviewMemberSnapshot(member, ReviewEligibilityState.Eligible,
+                ReviewUnavailableReason.None, false)).ToImmutableArray(), [], new(0, SelectionRecoveryUnavailableReason.None),
+            false, null)).ToImmutableArray();
+        Current = new(new(Guid.Parse("73000000-0000-0000-0000-000000000003"), request.Scan.Pin!),
+            ReviewStatus.Ready, request.Scan.Status, 1, groups, new(0, 0, 0, 0, 0, 0, 1), false, null,
+            ReviewUnavailableReason.None);
+        SnapshotChanged?.Invoke(this, Current);
+        return Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Committed, Current));
+    }
+    public Task<ReviewCommandResult> ChangeSelectionAsync(SelectionCommand command, CancellationToken cancellationToken) =>
+        Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current));
+    public Task<ReviewCommandResult> AffirmOverrideAsync(OverrideAffirmationCommand command, CancellationToken cancellationToken) =>
+        Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current));
+    public Task<ReviewCommandResult> ApproveAsync(ApproveSelectionCommand command, CancellationToken cancellationToken) =>
+        Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current));
+    public Task ReportObserverFaultAsync(ReviewSessionPin session) => Task.CompletedTask;
+    public Task InvalidateAsync(ScanPin? currentScan) => Task.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
 

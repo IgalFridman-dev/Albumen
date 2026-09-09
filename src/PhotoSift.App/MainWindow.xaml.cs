@@ -18,8 +18,11 @@ public partial class MainWindow : Window
     private ShellViewModel? shellViewModel;
     private int dataContextGeneration;
     private bool isClosed;
-    private int reviewAnnouncementGeneration;
-    private IInputElement? lastReviewFocus;
+    private int selectionSummaryAnnouncementGeneration;
+    private ReviewFocusIdentity? reviewFocusIdentity;
+    private bool closeAfterLifetime;
+    private Task? closeCompletionTask;
+    private Task? exitLifetimeObservationTask;
 
     public MainWindow()
     {
@@ -39,6 +42,7 @@ public partial class MainWindow : Window
         DependencyPropertyChangedEventArgs eventArgs)
     {
         dataContextGeneration++;
+        reviewFocusIdentity = null;
         if (shellViewModel is not null)
         {
             shellViewModel.PropertyChanged -= OnViewModelPropertyChanged;
@@ -82,10 +86,18 @@ public partial class MainWindow : Window
         {
             QueueScopeStatusAnnouncement();
         }
-        if (eventArgs.PropertyName is nameof(ShellViewModel.SelectionSummary)
-            or nameof(ShellViewModel.ReviewAnnouncement))
+        if (eventArgs.PropertyName == nameof(ShellViewModel.SelectionSummary))
         {
-            QueueReviewAnnouncement(eventArgs.PropertyName);
+            QueueSelectionSummaryAnnouncement();
+        }
+        if (eventArgs.PropertyName == nameof(ShellViewModel.ReviewAnnouncement))
+        {
+            QueueReviewFailureAnnouncement();
+            QueueReviewFocusRestoration();
+        }
+        if (eventArgs.PropertyName == nameof(ShellViewModel.ExactGroups))
+        {
+            QueueReviewFocusRestoration();
         }
 
         if (eventArgs.PropertyName == nameof(ShellViewModel.IsBlocked) &&
@@ -97,8 +109,12 @@ public partial class MainWindow : Window
 
     private void OnReviewKeyboardFocusChanged(object sender, KeyboardFocusChangedEventArgs eventArgs)
     {
-        if (shellViewModel?.IsReviewPhase is true && eventArgs.NewFocus is not null)
-            lastReviewFocus = eventArgs.NewFocus;
+        if (shellViewModel?.IsReviewPhase is not true
+            || eventArgs.NewFocus is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } element)
+            return;
+        var group = FindDataContext<ExactGroupViewModel>(element);
+        if (group is not null)
+            reviewFocusIdentity = new(group.GroupId, member.OccurrenceId);
     }
 
     private void OnCanSelectFocusedReviewGroup(object sender, CanExecuteRoutedEventArgs eventArgs)
@@ -210,27 +226,141 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Background);
     }
 
-    private void QueueReviewAnnouncement(string propertyName)
+    private void QueueSelectionSummaryAnnouncement()
     {
         var generation = dataContextGeneration;
         var expected = shellViewModel;
-        var announcement = Interlocked.Increment(ref reviewAnnouncementGeneration);
+        var announcement = Interlocked.Increment(ref selectionSummaryAnnouncementGeneration);
         Dispatcher.InvokeAsync(() =>
         {
-            if (isClosed || generation != dataContextGeneration || announcement != reviewAnnouncementGeneration
+            if (isClosed || generation != dataContextGeneration
+                || announcement != selectionSummaryAnnouncementGeneration
                 || !ReferenceEquals(expected, shellViewModel) || expected?.IsReviewPhase is not true) return;
-            var target = propertyName == nameof(ShellViewModel.SelectionSummary)
-                ? SelectionSummaryText : ReviewAnnouncementText;
-            if (!target.IsVisible) return;
-            var peer = UIElementAutomationPeer.FromElement(target)
-                ?? UIElementAutomationPeer.CreatePeerForElement(target);
+            if (!SelectionSummaryText.IsVisible) return;
+            var peer = UIElementAutomationPeer.FromElement(SelectionSummaryText)
+                ?? UIElementAutomationPeer.CreatePeerForElement(SelectionSummaryText);
             peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
         }, DispatcherPriority.Background);
     }
 
-    private void OnClosing(object? sender, CancelEventArgs eventArgs) => CancelBlockingReviewLayer();
+    private void QueueReviewFailureAnnouncement()
+    {
+        var generation = dataContextGeneration;
+        var expected = shellViewModel;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || generation != dataContextGeneration
+                || !ReferenceEquals(expected, shellViewModel) || expected?.IsReviewPhase is not true
+                || !ReviewAnnouncementText.IsVisible) return;
+            var peer = UIElementAutomationPeer.FromElement(ReviewAnnouncementText)
+                ?? UIElementAutomationPeer.CreatePeerForElement(ReviewAnnouncementText);
+            peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        }, DispatcherPriority.Background);
+    }
 
-    public void OnApplicationExit(object? sender, EventArgs eventArgs) => CancelBlockingReviewLayer();
+    private void QueueReviewFocusRestoration()
+    {
+        var identity = reviewFocusIdentity;
+        var generation = dataContextGeneration;
+        var expected = shellViewModel;
+        if (identity is null || expected?.IsReviewPhase is not true) return;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || generation != dataContextGeneration || !IsVisible
+                || Dispatcher.HasShutdownStarted || !ReferenceEquals(expected, shellViewModel)
+                || expected.IsReviewPhase is not true) return;
+            UpdateLayout();
+            var target = FindCurrentSelectionControl(this, identity);
+            if (target is null) return;
+            Activate();
+            if (target.Focus()) Keyboard.Focus(target);
+        }, DispatcherPriority.Input);
+    }
+
+    private static ReviewSelectionCheckBox? FindCurrentSelectionControl(
+        DependencyObject root,
+        ReviewFocusIdentity identity)
+    {
+        foreach (var control in Descendants<ReviewSelectionCheckBox>(root))
+        {
+            if (control.DataContext is not ScanOccurrenceViewModel member
+                || member.OccurrenceId != identity.OccurrenceId)
+                continue;
+            var group = FindDataContext<ExactGroupViewModel>(control);
+            if (group?.GroupId == identity.GroupId && CanReceiveFocus(control)) return control;
+        }
+        return null;
+    }
+
+    private static bool CanReceiveFocus(UIElement element) =>
+        element.IsVisible && element.IsEnabled && element.Focusable
+        && PresentationSource.FromVisual(element) is not null;
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is T match) yield return match;
+            foreach (var nested in Descendants<T>(child)) yield return nested;
+        }
+    }
+
+    private void OnClosing(object? sender, CancelEventArgs eventArgs)
+    {
+        CancelBlockingReviewLayer();
+        if (closeAfterLifetime || shellViewModel is null) return;
+        var disposal = shellViewModel.DisposeAsync();
+        if (disposal.IsCompletedSuccessfully)
+        {
+            closeAfterLifetime = true;
+            return;
+        }
+
+        eventArgs.Cancel = true;
+        closeCompletionTask ??= CompleteLifetimeAndCloseAsync(disposal.AsTask());
+    }
+
+    public void OnApplicationExit(object? sender, EventArgs eventArgs)
+    {
+        CancelBlockingReviewLayer();
+        if (shellViewModel is null) return;
+        var disposal = shellViewModel.DisposeAsync();
+        if (!disposal.IsCompletedSuccessfully)
+            exitLifetimeObservationTask ??= ObserveLifetimeAsync(disposal.AsTask());
+    }
+
+    private async Task CompleteLifetimeAndCloseAsync(Task disposal)
+    {
+        try
+        {
+            await disposal;
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine(exception);
+        }
+        finally
+        {
+            if (!isClosed && !Dispatcher.HasShutdownStarted)
+            {
+                closeAfterLifetime = true;
+                Close();
+            }
+        }
+    }
+
+    private static async Task ObserveLifetimeAsync(Task disposal)
+    {
+        try
+        {
+            await disposal.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine(exception);
+        }
+    }
 
     private void CancelBlockingReviewLayer()
     {
@@ -248,8 +378,25 @@ public partial class MainWindow : Window
         }
         if (System.Windows.Application.Current is { } application)
             application.Exit -= OnApplicationExit;
-        lastReviewFocus = null;
+        reviewFocusIdentity = null;
     }
+
+    private sealed record ReviewFocusIdentity(Guid GroupId, long OccurrenceId);
+}
+
+public class ReviewAutomationBorder : Border
+{
+    protected override AutomationPeer OnCreateAutomationPeer() =>
+        new ReviewAutomationBorderPeer(this);
+}
+
+internal sealed class ReviewAutomationBorderPeer(ReviewAutomationBorder owner)
+    : FrameworkElementAutomationPeer(owner)
+{
+    protected override string GetClassNameCore() => nameof(ReviewAutomationBorder);
+    protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Group;
+    protected override bool IsControlElementCore() => true;
+    protected override bool IsContentElementCore() => true;
 }
 
 public class ReviewSelectionCheckBox : CheckBox

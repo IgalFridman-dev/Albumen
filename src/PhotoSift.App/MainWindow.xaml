@@ -406,7 +406,7 @@
                          Style="{StaticResource ReviewListStyle}" AutomationProperties.Name="Exact duplicate groups">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Border Margin="4,8" Padding="6" BorderThickness="1"
+                            <app:ReviewAutomationBorder Margin="4,8" Padding="6" BorderThickness="1"
                                     BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                                     AutomationProperties.AutomationId="exact-group"
                                     AutomationProperties.Name="{Binding AutomationName}"
@@ -420,7 +420,7 @@
                                              ItemTemplate="{StaticResource ReviewOccurrenceTemplate}"
                                              AutomationProperties.Name="Review occurrences and selection controls" />
                                 </StackPanel>
-                            </Border>
+                            </app:ReviewAutomationBorder>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
@@ -430,11 +430,12 @@
                          AutomationProperties.Name="Could Not Analyze" />
                 <ScrollViewer Grid.Row="5" MaxHeight="240" Margin="0,10,0,0"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <Border x:Name="ApprovalPanel" Padding="12" Focusable="True"
+                    <app:ReviewAutomationBorder x:Name="ApprovalPanel" Padding="12" Focusable="True"
                             BorderThickness="1"
                             BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                             AutomationProperties.AutomationId="approval-panel"
-                            AutomationProperties.Name="Cleanup approval disclosure">
+                            AutomationProperties.Name="Cleanup approval disclosure"
+                            AutomationProperties.ItemStatus="{Binding ApprovalAutomationStatus}">
                         <StackPanel>
                             <TextBlock Text="Approval" FontSize="18" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding ApprovalSelectedOccurrenceText}" TextWrapping="Wrap" />
@@ -454,7 +455,7 @@
                                     Command="{Binding ApproveReviewCommand}"
                                     IsEnabled="{Binding CanApproveReview}" />
                         </StackPanel>
-                    </Border>
+                    </app:ReviewAutomationBorder>
                 </ScrollViewer>
                 <StackPanel Grid.Row="6" Margin="0,10,0,0">
                     <TextBlock Text="{Binding ReviewDisclaimer}" TextWrapping="Wrap" />

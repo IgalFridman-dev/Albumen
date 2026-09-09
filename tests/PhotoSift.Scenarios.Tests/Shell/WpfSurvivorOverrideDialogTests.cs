@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -46,6 +47,10 @@ public sealed class WpfSurvivorOverrideDialogTests
                     Assert.False(cancel.IsDefault);
                     Assert.False(affirm.IsKeyboardFocused);
                     Assert.True(consequence.IsKeyboardFocused || cancel.IsKeyboardFocused);
+                    var consequencePeer = UIElementAutomationPeer.CreatePeerForElement(consequence);
+                    Assert.NotNull(consequencePeer);
+                    Assert.Contains("This Selection removes every survivor", consequencePeer.GetName(),
+                        StringComparison.OrdinalIgnoreCase);
                     WpfReviewSelectionTests.Press(dialog, Key.Enter);
                     Assert.True(dialog.IsVisible);
                     Assert.False(affirm.IsKeyboardFocused);
@@ -56,6 +61,37 @@ public sealed class WpfSurvivorOverrideDialogTests
                 Assert.Equal(SurvivorOverrideDialogResult.Cancel, result);
                 Assert.True(interaction.DialogClosed);
                 Assert.True(invoker.IsKeyboardFocused);
+            }
+            finally { owner.Close(); }
+        });
+    }
+
+    [Fact]
+    public void RenderedConsequenceVersionUsesTheProposalBindingValue()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var owner = new Window { Content = new Button { Content = "Invoker" } };
+            owner.Show();
+            var invoker = Assert.IsType<Button>(owner.Content);
+            invoker.Focus();
+            Keyboard.Focus(invoker);
+            var service = new WpfReviewDialogService(() => owner);
+            var proposal = ReviewData.Proposal(ReviewData.CreateSnapshot());
+            try
+            {
+                var result = SurvivorOverrideDialogResult.Affirm;
+                var interaction = RunModalInteraction(owner, dialog =>
+                {
+                    var version = WpfReviewSelectionTests.Descendants<TextBlock>(dialog)
+                        .Single(text => text.Text.Contains("Consequence text version", StringComparison.Ordinal));
+                    Assert.Equal("Consequence text version: consequence-v1", version.Text);
+                    dialog.Close();
+                }, () => result = service.ShowSurvivorOverrideAsync(
+                    proposal, invoker, TestContext.Current.CancellationToken).GetAwaiter().GetResult());
+
+                Assert.Equal(SurvivorOverrideDialogResult.Cancel, result);
+                Assert.True(interaction.DialogClosed);
             }
             finally { owner.Close(); }
         });
@@ -206,6 +242,129 @@ public sealed class WpfSurvivorOverrideDialogTests
         });
     }
 
+    [Fact]
+    public void DelayedPersistenceFailureRestoresFocusOnlyAfterTheSelectionCommandReenables()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var owner = new MainWindow();
+            var service = new WpfReviewDialogService(() => owner);
+            var fixture = ReviewShellFixture.Ready(dialog: service);
+            owner.DataContext = fixture.ViewModel;
+            owner.Show();
+            WpfReviewSelectionTests.Drain();
+            try
+            {
+                var before = fixture.Workflow.Current.Review;
+                fixture.Workflow.NextSelectionResult = new(ReviewCommandOutcome.OverrideRequired, before,
+                    ReviewData.Proposal(before));
+                var delayed = fixture.Workflow.DeferNextAffirmation();
+                var selection = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(owner)
+                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                var command = Assert.IsType<AsyncCommand>(selection.Command);
+                Assert.True(selection.Focus());
+                Keyboard.Focus(selection);
+
+                DispatcherOperation? focusMove = null;
+                Task? pending = null;
+                var failureResult = new ReviewCommandResult(ReviewCommandOutcome.PersistenceFailed, before);
+                try
+                {
+                    var interaction = RunModalInteraction(owner, dialog =>
+                    {
+                        dialog.Closed += (_, _) => focusMove = owner.Dispatcher.BeginInvoke(
+                            DispatcherPriority.Send, new Action(() =>
+                            {
+                                var heading = Assert.IsType<TextBlock>(owner.FindName("ReviewHeading"));
+                                heading.Focus();
+                                Keyboard.Focus(heading);
+                            }));
+                        dialog.OnAffirm(dialog, new RoutedEventArgs(Button.ClickEvent));
+                    }, () => pending = command.ExecuteAsync());
+
+                    Assert.True(interaction.DialogClosed);
+                    Assert.Single(fixture.Workflow.Affirmations);
+                    Assert.False(command.CanExecute(null));
+                    delayed.TrySetResult(failureResult);
+                    PumpUntil(() => pending?.IsCompleted is true && focusMove?.Status
+                        is DispatcherOperationStatus.Completed or DispatcherOperationStatus.Aborted);
+                    Assert.NotNull(pending);
+                    pending.GetAwaiter().GetResult();
+                    if (focusMove?.Status == DispatcherOperationStatus.Completed)
+                        focusMove.Task.GetAwaiter().GetResult();
+
+                    Assert.True(command.CanExecute(null));
+                    var current = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(owner)
+                        .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                    Assert.True(current.IsKeyboardFocused);
+                }
+                finally
+                {
+                    delayed.TrySetResult(failureResult);
+                    if (pending is not null && !pending.IsCompleted)
+                        PumpUntil(() => pending.IsCompleted);
+                    if (pending?.IsCompleted is true) pending.GetAwaiter().GetResult();
+                    if (focusMove is not null && focusMove.Status == DispatcherOperationStatus.Pending)
+                        PumpUntil(() => focusMove.Status != DispatcherOperationStatus.Pending);
+                    if (focusMove?.Status == DispatcherOperationStatus.Completed)
+                        focusMove.Task.GetAwaiter().GetResult();
+                }
+            }
+            finally { owner.Close(); }
+        });
+    }
+
+    [Fact]
+    public void ConcurrentOverrideProposalsShareOneBlockingLayerAndBothSettleCancel()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var owner = new Window { Content = new Button { Content = "Invoker" } };
+            owner.Show();
+            var invoker = Assert.IsType<Button>(owner.Content);
+            invoker.Focus();
+            Keyboard.Focus(invoker);
+            var service = new WpfReviewDialogService(() => owner);
+            var firstProposal = ReviewData.Proposal(ReviewData.CreateSnapshot());
+            var secondProposal = firstProposal with { ProposalId = Guid.Parse("61000000-0000-0000-0000-000000000006") };
+            try
+            {
+                var firstResult = SurvivorOverrideDialogResult.Affirm;
+                var secondResult = SurvivorOverrideDialogResult.Affirm;
+                var maximumOwnedDialogs = 0;
+                var interaction = RunModalInteraction(owner, outer =>
+                {
+                    maximumOwnedDialogs = Math.Max(maximumOwnedDialogs,
+                        owner.OwnedWindows.OfType<SurvivorOverrideDialog>().Count());
+                    var nestedProbe = owner.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+                    {
+                        maximumOwnedDialogs = Math.Max(maximumOwnedDialogs,
+                            owner.OwnedWindows.OfType<SurvivorOverrideDialog>().Count());
+                        foreach (var dialog in owner.OwnedWindows.OfType<SurvivorOverrideDialog>().ToArray())
+                            dialog.Close();
+                    }));
+                    secondResult = service.ShowSurvivorOverrideAsync(secondProposal, invoker,
+                        TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+                    if (nestedProbe.Status == DispatcherOperationStatus.Pending)
+                        Assert.True(nestedProbe.Abort());
+                    else if (nestedProbe.Status == DispatcherOperationStatus.Completed)
+                        nestedProbe.Task.GetAwaiter().GetResult();
+                    maximumOwnedDialogs = Math.Max(maximumOwnedDialogs,
+                        owner.OwnedWindows.OfType<SurvivorOverrideDialog>().Count());
+                    if (outer.IsVisible) outer.Close();
+                }, () => firstResult = service.ShowSurvivorOverrideAsync(firstProposal, invoker,
+                    TestContext.Current.CancellationToken).GetAwaiter().GetResult());
+
+                Assert.True(interaction.DialogClosed);
+                Assert.Equal(1, maximumOwnedDialogs);
+                Assert.Equal(SurvivorOverrideDialogResult.Cancel, firstResult);
+                Assert.Equal(SurvivorOverrideDialogResult.Cancel, secondResult);
+                Assert.Empty(owner.OwnedWindows.OfType<SurvivorOverrideDialog>());
+            }
+            finally { owner.Close(); }
+        });
+    }
+
     internal static ModalInteraction RunModalInteraction(
         Window owner,
         Action<SurvivorOverrideDialog> activation,
@@ -227,7 +386,7 @@ public sealed class WpfSurvivorOverrideDialogTests
             foreach (var dialog in owner.OwnedWindows.OfType<SurvivorOverrideDialog>().ToArray())
                 dialog.Close();
         };
-        dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        var activationOperation = dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
         {
             SurvivorOverrideDialog? dialog = null;
             try
@@ -259,10 +418,20 @@ public sealed class WpfSurvivorOverrideDialogTests
                 dialog.Close();
             WpfReviewSelectionTests.Drain();
         }
+        Assert.Equal(DispatcherOperationStatus.Completed, activationOperation.Status);
+        activationOperation.Task.GetAwaiter().GetResult();
         callbackFailure?.Throw();
         Assert.True(callbackRan, "The modal interaction callback did not run.");
         Assert.False(watchdogFired, "The modal interaction watchdog had to unwind the dialog.");
         return new ModalInteraction(dialogClosed, dialogResult);
+    }
+
+    private static void PumpUntil(Func<bool> condition)
+    {
+        var started = Stopwatch.GetTimestamp();
+        while (!condition() && Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2))
+            WpfReviewSelectionTests.Drain();
+        Assert.True(condition(), "The dispatcher condition did not settle before the two-second deadline.");
     }
 }
 

@@ -1,10 +1,15 @@
 using System.Collections.Immutable;
+using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PhotoSift.App;
@@ -104,10 +109,11 @@ public sealed class WpfApprovalAccessibilityTests
                 window.Show();
                 WpfReviewSelectionTests.Drain();
                 window.UpdateLayout();
-                var group = Assert.Single(WpfReviewSelectionTests.Descendants<FrameworkElement>(window),
-                    element => AutomationProperties.GetAutomationId(element) == "exact-group");
-                var groupName = AutomationProperties.GetName(group);
-                var groupStatus = AutomationProperties.GetItemStatus(group);
+                var root = UIElementAutomationPeer.CreatePeerForElement(window);
+                Assert.NotNull(root);
+                var group = FindPeer(root, "exact-group");
+                var groupName = group.GetName();
+                var groupStatus = group.GetItemStatus();
                 Assert.Contains("group 1 of 1", groupName, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("4 paths", groupName, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("4 physical", groupName, StringComparison.OrdinalIgnoreCase);
@@ -116,10 +122,14 @@ public sealed class WpfApprovalAccessibilityTests
                 Assert.Contains("path is unknown to this Scan", groupStatus, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("Estimated recovery", groupStatus, StringComparison.OrdinalIgnoreCase);
 
-                var selection = WpfReviewSelectionTests.Descendants<ToggleButton>(group)
-                    .First(control => AutomationProperties.GetAutomationId(control) == "selection-control");
-                Assert.Contains("Eligible", AutomationProperties.GetItemStatus(selection), StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("selected", AutomationProperties.GetName(selection), StringComparison.OrdinalIgnoreCase);
+                var selection = FindPeer(group, "selection-control");
+                Assert.Contains("Eligible", selection.GetItemStatus(), StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("selected", selection.GetName(), StringComparison.OrdinalIgnoreCase);
+
+                var approval = FindPeer(root, "approval-panel");
+                Assert.Contains("Cleanup approval disclosure", approval.GetName(), StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("1 selected", approval.GetItemStatus(), StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("Incomplete Scan coverage", approval.GetItemStatus(), StringComparison.OrdinalIgnoreCase);
 
                 var summary = Assert.IsType<TextBlock>(window.FindName("SelectionSummaryText"));
                 Assert.Equal(AutomationLiveSetting.Polite, AutomationProperties.GetLiveSetting(summary));
@@ -150,9 +160,71 @@ public sealed class WpfApprovalAccessibilityTests
         await Assert.IsType<AsyncCommand>(fixture.ViewModel.ExactGroups[0].Members[0].ToggleSelectionCommand).ExecuteAsync();
         await Assert.IsType<AsyncCommand>(fixture.ViewModel.ExactGroups[0].Members[0].ToggleSelectionCommand).ExecuteAsync();
 
-        Assert.Equal(2, announcements.Count);
+        Assert.Equal(4, announcements.Count);
         Assert.Contains("persistence", announcements[0], StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("stale", announcements[1], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("persistence", announcements[1], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stale", announcements[2], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stale", announcements[3], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void QueuedSelectionSummaryCannotCancelTheOnlyFailureLiveAnnouncement()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = ReviewShellFixture.Ready();
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            try
+            {
+                window.Show();
+                WpfReviewSelectionTests.Drain();
+                var handle = new WindowInteropHelper(window).Handle;
+                Assert.NotEqual(nint.Zero, handle);
+                var current = fixture.Workflow.Current.Review;
+
+                VerifyFailureAnnouncementOnMta(handle, () =>
+                {
+                    fixture.Workflow.NextSelectionResult = new(ReviewCommandOutcome.PersistenceFailed, current);
+                    var pending = Assert.IsType<AsyncCommand>(fixture.ViewModel.ExactGroups[0].Members[0]
+                        .ToggleSelectionCommand).ExecuteAsync();
+                    fixture.Workflow.Publish(ReviewData.WithSelection(current, [4], 10));
+                    return pending;
+                });
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
+    public void NormalWindowCloseWaitsForOneAsynchronousLifetimeDrain()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new ExactShellFixture();
+            fixture.Workflow.HoldDisposal = true;
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            window.Show();
+            try
+            {
+                window.Close();
+
+                Assert.True(window.IsVisible);
+                Assert.True(fixture.Workflow.DisposeEntered.Task.IsCompleted);
+                Assert.Equal(1, fixture.Workflow.DisposeCalls);
+                fixture.Workflow.DisposeRelease.TrySetResult();
+                PumpUntil(() => !window.IsVisible);
+                Assert.Equal(1, fixture.Workflow.DisposeCalls);
+            }
+            finally
+            {
+                fixture.Workflow.DisposeRelease.TrySetResult();
+                if (window.IsVisible)
+                {
+                    window.Close();
+                    PumpUntil(() => !window.IsVisible);
+                }
+            }
+        });
     }
 
     [Fact]
@@ -275,5 +347,109 @@ public sealed class WpfApprovalAccessibilityTests
         Assert.True(earlierIndex >= 0, $"Missing source-order text: {earlier}");
         Assert.True(laterIndex >= 0, $"Missing source-order text: {later}");
         Assert.True(earlierIndex < laterIndex, $"Expected '{earlier}' before '{later}'.");
+    }
+
+    private static AutomationPeer FindPeer(AutomationPeer root, string automationId)
+    {
+        return FindPeerOrNull(root, automationId)
+            ?? throw new InvalidOperationException(
+                $"Automation peer '{automationId}' was not present in the product tree.");
+    }
+
+    private static AutomationPeer? FindPeerOrNull(AutomationPeer root, string automationId)
+    {
+        if (root.GetAutomationId() == automationId) return root;
+        foreach (var child in root.GetChildren() ?? [])
+            if (FindPeerOrNull(child, automationId) is { } match) return match;
+        return null;
+    }
+
+    private static void VerifyFailureAnnouncementOnMta(nint handle, Func<Task> publish)
+    {
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        var frame = new DispatcherFrame();
+        ExceptionDispatchInfo? failure = null;
+        DispatcherOperation? stopOperation = null;
+        var client = new Thread(() =>
+        {
+            try
+            {
+                var root = AutomationElement.FromHandle(handle);
+                var element = root.FindFirst(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.NameProperty, "Review command status"));
+                Assert.NotNull(element);
+                using var statuses = new BlockingCollection<string>();
+                using var callbackIdle = new ManualResetEventSlim(initialState: true);
+                ExceptionDispatchInfo? callbackFailure = null;
+                var acceptingCallbacks = 1;
+                var activeCallbacks = 0;
+                AutomationEventHandler handler = (sender, _) =>
+                {
+                    callbackIdle.Reset();
+                    Interlocked.Increment(ref activeCallbacks);
+                    try
+                    {
+                        if (Volatile.Read(ref acceptingCallbacks) != 0 && sender is AutomationElement source)
+                            statuses.TryAdd(source.Current.ItemStatus);
+                    }
+                    catch (Exception error)
+                    {
+                        Interlocked.CompareExchange(ref callbackFailure,
+                            ExceptionDispatchInfo.Capture(error), null);
+                    }
+                    finally
+                    {
+                        if (Interlocked.Decrement(ref activeCallbacks) == 0) callbackIdle.Set();
+                    }
+                };
+                Automation.AddAutomationEventHandler(AutomationElementIdentifiers.LiveRegionChangedEvent,
+                    element, TreeScope.Element, handler);
+                try
+                {
+                    Task? published = null;
+                    var publication = dispatcher.BeginInvoke(new Action(() => published = publish()));
+                    publication.Task.WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+                    Assert.NotNull(published);
+                    published.WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+                    Assert.True(statuses.TryTake(out var status, TimeSpan.FromSeconds(4)),
+                        "The failure live-region announcement was canceled or never raised.");
+                    Assert.NotNull(status);
+                    Assert.Contains("persistence", status, StringComparison.OrdinalIgnoreCase);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref acceptingCallbacks, 0);
+                    Automation.RemoveAutomationEventHandler(AutomationElementIdentifiers.LiveRegionChangedEvent,
+                        element, handler);
+                    Assert.True(callbackIdle.Wait(TimeSpan.FromSeconds(2)),
+                        "The UIA live-region callback did not settle after unregistration.");
+                    callbackFailure?.Throw();
+                }
+            }
+            catch (Exception error)
+            {
+                failure = ExceptionDispatchInfo.Capture(error);
+            }
+            finally
+            {
+                stopOperation = dispatcher.BeginInvoke(new Action(() => frame.Continue = false));
+            }
+        }) { IsBackground = true };
+        client.SetApartmentState(ApartmentState.MTA);
+        client.Start();
+        Dispatcher.PushFrame(frame);
+        Assert.True(client.Join(TimeSpan.FromSeconds(2)), "The UIA failure-announcement client did not settle.");
+        Assert.NotNull(stopOperation);
+        Assert.Equal(DispatcherOperationStatus.Completed, stopOperation.Status);
+        stopOperation.Task.GetAwaiter().GetResult();
+        failure?.Throw();
+    }
+
+    private static void PumpUntil(Func<bool> condition)
+    {
+        var started = Stopwatch.GetTimestamp();
+        while (!condition() && Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2))
+            WpfReviewSelectionTests.Drain();
+        Assert.True(condition(), "The window lifetime did not settle before the two-second deadline.");
     }
 }

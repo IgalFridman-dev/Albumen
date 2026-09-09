@@ -33,14 +33,14 @@
                 <TextBlock x:Name="OverrideConsequenceText"
                            Focusable="True"
                            TextWrapping="Wrap"
-                           AutomationProperties.Name="Final survivor consequence"
+                           AutomationProperties.Name="Final survivor consequence. This Selection removes every survivor currently proven by this Scan. Continue only if you deliberately accept that no proven in-Scan copy will remain."
                            Text="This Selection removes every survivor currently proven by this Scan. Continue only if you deliberately accept that no proven in-Scan copy will remain." />
                 <TextBlock Margin="0,14,0,0"
                            TextWrapping="Wrap"
                            Text="The affirmation is durable evidence for this exact Review revision. It does not remove files or authorize Action execution." />
                 <TextBlock Margin="0,14,0,0"
                            TextWrapping="Wrap"
-                           Text="Consequence text version: {Binding ConsequenceTextVersion}" />
+                           Text="{Binding ConsequenceTextVersion, StringFormat='Consequence text version: {0}'}" />
             </StackPanel>
         </ScrollViewer>
         <WrapPanel Grid.Row="2" HorizontalAlignment="Right">
