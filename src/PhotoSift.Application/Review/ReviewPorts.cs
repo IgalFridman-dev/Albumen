@@ -1,0 +1,34 @@
+using System.Collections.Immutable;
+using PhotoSift.Application.Scan;
+using PhotoSift.Domain.Review;
+using PhotoSift.Domain.Scan;
+
+namespace PhotoSift.Application.Review;
+
+public interface IReviewResultSink
+{
+    // The returned acknowledgment settles after owner delivery, independently of
+    // worker cancellation. The worker retains its lease until this value settles.
+    ValueTask<bool> CommitRevalidationAsync(ReviewRevalidationEvidence evidence);
+    ValueTask<bool> FailRevalidationAsync(ReviewRevalidationRequest request, ReviewUnavailableReason reason);
+}
+
+public interface IReviewRun : IAsyncDisposable
+{
+    Task Completion { get; }
+    Task CancelAsync();
+}
+
+public interface IReviewRevalidationExecutor
+{
+    // The Review owner admits terminal Complete/Incomplete Scan groups before
+    // starting a run; this transport does not own Scan status or member eligibility.
+    IReviewRun Start(ReviewSessionPin session, ScanRunContext context,
+        ImmutableArray<CandidateGroup> groups, IReviewResultSink sink);
+}
+
+public interface IOverrideEvidenceStore
+{
+    ValueTask<OverridePersistResult> PersistAsync(DeliberateOverrideEvidence evidence, CancellationToken cancellationToken);
+    ValueTask<OverrideReadResult> ReadAsync(OverrideEvidenceId evidenceId, CancellationToken cancellationToken);
+}
