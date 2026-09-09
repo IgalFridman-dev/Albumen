@@ -122,6 +122,18 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
 
     public Task CancelScanAsync() => ObserveCommandAsync(CancelScanCoreAsync);
 
+    public Task<ReviewCommandResult> ChangeReviewSelectionAsync(
+        SelectionCommand command, CancellationToken cancellationToken) =>
+        ObserveReviewCommandAsync(coordinator => coordinator.ChangeSelectionAsync(command, cancellationToken));
+
+    public Task<ReviewCommandResult> AffirmReviewOverrideAsync(
+        OverrideAffirmationCommand command, CancellationToken cancellationToken) =>
+        ObserveReviewCommandAsync(coordinator => coordinator.AffirmOverrideAsync(command, cancellationToken));
+
+    public Task<ReviewCommandResult> ApproveReviewAsync(
+        ApproveSelectionCommand command, CancellationToken cancellationToken) =>
+        ObserveReviewCommandAsync(coordinator => coordinator.ApproveAsync(command, cancellationToken));
+
     private async Task CancelScanCoreAsync()
     {
         await inbox.InvokeAsync(RefreshScope).ConfigureAwait(false);
@@ -304,6 +316,15 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     }
 
     private Task ConsumeNextAdapterFailureAsync() => adapterFailures.TryDequeue(out var failure) ? failure : Task.CompletedTask;
+
+    private async Task<ReviewCommandResult> ObserveReviewCommandAsync(
+        Func<IReviewCoordinator, Task<ReviewCommandResult>> command)
+    {
+        if (review is null) return new(ReviewCommandOutcome.Invalid, Current.Review);
+        var result = await command(review).ConfigureAwait(false);
+        await ConsumeNextAdapterFailureAsync().ConfigureAwait(false);
+        return result;
+    }
 
     private void ObserveAdapter(Func<Task> work, ReviewSessionPin? origin)
     {

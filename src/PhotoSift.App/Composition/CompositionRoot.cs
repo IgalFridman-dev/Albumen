@@ -1,6 +1,9 @@
+using System.IO;
 using PhotoSift.App.Shell;
 using PhotoSift.Analysis.Exact;
 using PhotoSift.Application.Scan;
+using PhotoSift.Application.Review;
+using PhotoSift.Infrastructure.Sqlite.Review;
 using PhotoSift.Infrastructure.Windows.Scan;
 using PhotoSift.Application.Scope;
 using PhotoSift.Application.Shell;
@@ -20,10 +23,19 @@ public static class CompositionRoot
             picker,
             preflight,
             scheduler);
-        var executor = new BoundedScanExecutor(new WindowsScanEnumerator(),
-            new WindowsProtectedFileReader(), new StreamingExactContentAnalyzer());
+        var reader = new WindowsProtectedFileReader();
+        var analyzer = new StreamingExactContentAnalyzer();
+        var executor = new BoundedScanExecutor(new WindowsScanEnumerator(), reader, analyzer);
         var scan = new ScanCoordinator(scheduler, preflight, executor);
-        return new ShellViewModel(workflow, new PhotoSiftWorkflow(workflow, scan, scheduler));
+        var databasePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "PhotoSift", "photosift.db");
+        var evidenceStore = new SqliteOverrideEvidenceStore(databasePath);
+        var review = new ReviewCoordinator(scheduler,
+            new BoundedReviewRevalidator(reader, analyzer), evidenceStore);
+        var photoWorkflow = new PhotoSiftWorkflow(workflow, scan, scheduler, review);
+        var dialog = new WpfReviewDialogService(() => System.Windows.Application.Current?.MainWindow);
+        return new ShellViewModel(workflow, photoWorkflow, dialog);
     }
 }
 

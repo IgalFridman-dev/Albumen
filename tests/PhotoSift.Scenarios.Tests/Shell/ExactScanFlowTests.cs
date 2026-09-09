@@ -1,7 +1,9 @@
 using System.Collections.Immutable;
 using PhotoSift.App.Shell;
 using PhotoSift.Application.Scan;
+using PhotoSift.Application.Review;
 using PhotoSift.Application.Shell;
+using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
 using PhotoSift.Domain.Workflow;
@@ -76,7 +78,14 @@ internal sealed class ExactShellFixture
         var groups = Enumerable.Range(0, groupCount).Select(_ => new CandidateGroup(Guid.NewGuid(), 1, pin, CandidateCategory.Exact,
             members, [], false, null, new(null, RecoveryUnavailableReason.UnknownAllocation))).ToImmutableArray();
         var scan = new ScanSnapshot(pin, status, new(ScanStageState.Succeeded, ScanReason.None), [a, alias, b, failed], groups, new(4, 3, 0, 1, 0, 0));
-        Workflow.Publish(new(Scope.Current, new(1, 1), scan, WorkflowPhase.Review, InitialWorkflow.Create()));
+        var reviewGroups = groups.Select(group => new ReviewGroupSnapshot(group,
+            group.Members.Select(member => new ReviewMemberSnapshot(member, ReviewEligibilityState.Eligible,
+                ReviewUnavailableReason.None, false)).ToImmutableArray(), [],
+            new(null, SelectionRecoveryUnavailableReason.UnknownAllocation), false, null)).ToImmutableArray();
+        var review = new ReviewSnapshot(new(Guid.NewGuid(), pin), ReviewStatus.Ready, status, 1, reviewGroups,
+            new(0, 1, 0, 0, 0, 0, groupCount), false, null, ReviewUnavailableReason.None);
+        Workflow.Publish(new PhotoSiftSnapshot(Scope.Current, new(1, 1), scan, WorkflowPhase.Review,
+            InitialWorkflow.Create()) { Review = review });
     }
     public void PublishPhase(WorkflowPhase phase, ScanStatus status = ScanStatus.Idle)
     {
@@ -111,6 +120,12 @@ internal sealed class ExactShellFixture
         public Task StartScanAsync() => Act("start");
         public Task CancelScanAsync() => Act("cancel");
         public Task OpenReviewAsync() => Act("Review");
+        public Task<ReviewCommandResult> ChangeReviewSelectionAsync(SelectionCommand command, CancellationToken token) =>
+            Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current.Review));
+        public Task<ReviewCommandResult> AffirmReviewOverrideAsync(OverrideAffirmationCommand command, CancellationToken token) =>
+            Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current.Review));
+        public Task<ReviewCommandResult> ApproveReviewAsync(ApproveSelectionCommand command, CancellationToken token) =>
+            Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current.Review));
         public Task NavigateAsync(WorkflowPhase phase) => Act(phase.ToString());
     }
 }

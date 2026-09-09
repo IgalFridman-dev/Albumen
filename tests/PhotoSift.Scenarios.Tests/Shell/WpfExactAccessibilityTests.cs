@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -79,7 +80,10 @@ public sealed class WpfExactAccessibilityTests
                     Assert.Equal(TextWrapping.Wrap, path.TextWrapping);
                     Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(path)));
                 });
-                Assert.Empty(Descendants<CheckBox>(groups));
+                var selectionControls = Descendants<ToggleButton>(groups)
+                    .Where(control => AutomationProperties.GetAutomationId(control) == "selection-control").ToArray();
+                Assert.NotEmpty(selectionControls);
+                Assert.All(selectionControls, control => Assert.True(control.IsTabStop));
                 Assert.DoesNotContain(Descendants<Button>(window), button => button.IsEnabled &&
                     (button.Content?.ToString()?.Contains("Remove", StringComparison.OrdinalIgnoreCase) == true ||
                      button.Content?.ToString() == "Approve Cleanup"));
@@ -88,6 +92,33 @@ public sealed class WpfExactAccessibilityTests
                 Drain();
                 Assert.Same(textBrush, window.Foreground);
                 Assert.NotEmpty(Assert.IsType<ListBox>(window.FindName("CouldNotAnalyzeList")).Items);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
+    public void ReviewMetadataRemainsReadOnlyNonTabStopContentAtTwoHundredPercentTextScale()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = ReviewShellFixture.Ready();
+            var window = new MainWindow { DataContext = fixture.ViewModel, FontSize = 24 };
+            try
+            {
+                window.Show();
+                Drain();
+                window.UpdateLayout();
+                var groups = Assert.IsType<ListBox>(window.FindName("ExactGroupsList"));
+                Assert.True(VirtualizingPanel.GetIsVirtualizing(groups));
+                Assert.All(Descendants<TextBox>(groups), path =>
+                {
+                    Assert.True(path.IsReadOnly);
+                    Assert.Equal(TextWrapping.Wrap, path.TextWrapping);
+                    Assert.False(path.IsTabStop);
+                });
+                Assert.All(Descendants<TextBlock>(groups), metadata => Assert.False(metadata.Focusable));
+                Assert.Contains("照片-very-long-name", fixture.ViewModel.ExactGroups[0].Members[0].DiscoveredPath);
             }
             finally { window.Close(); }
         });

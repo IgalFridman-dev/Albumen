@@ -2,7 +2,11 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using PhotoSift.App.Shell;
 using PhotoSift.Domain.Workflow;
@@ -14,13 +18,20 @@ public partial class MainWindow : Window
     private ShellViewModel? shellViewModel;
     private int dataContextGeneration;
     private bool isClosed;
+    private int reviewAnnouncementGeneration;
+    private IInputElement? lastReviewFocus;
 
     public MainWindow()
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
+        Closing += OnClosing;
         Closed += OnClosed;
+        AddHandler(Keyboard.GotKeyboardFocusEvent,
+            new KeyboardFocusChangedEventHandler(OnReviewKeyboardFocusChanged), true);
+        if (System.Windows.Application.Current is { } application)
+            application.Exit += OnApplicationExit;
     }
 
     private void OnDataContextChanged(
@@ -71,12 +82,47 @@ public partial class MainWindow : Window
         {
             QueueScopeStatusAnnouncement();
         }
+        if (eventArgs.PropertyName is nameof(ShellViewModel.SelectionSummary)
+            or nameof(ShellViewModel.ReviewAnnouncement))
+        {
+            QueueReviewAnnouncement(eventArgs.PropertyName);
+        }
 
         if (eventArgs.PropertyName == nameof(ShellViewModel.IsBlocked) &&
             shellViewModel?.IsBlocked is true)
         {
             FocusBlockingNotice();
         }
+    }
+
+    private void OnReviewKeyboardFocusChanged(object sender, KeyboardFocusChangedEventArgs eventArgs)
+    {
+        if (shellViewModel?.IsReviewPhase is true && eventArgs.NewFocus is not null)
+            lastReviewFocus = eventArgs.NewFocus;
+    }
+
+    private void OnCanSelectFocusedReviewGroup(object sender, CanExecuteRoutedEventArgs eventArgs)
+    {
+        eventArgs.CanExecute = FindDataContext<ExactGroupViewModel>(eventArgs.OriginalSource as DependencyObject) is not null;
+        eventArgs.Handled = eventArgs.CanExecute;
+    }
+
+    private void OnSelectFocusedReviewGroup(object sender, ExecutedRoutedEventArgs eventArgs)
+    {
+        var group = FindDataContext<ExactGroupViewModel>(eventArgs.OriginalSource as DependencyObject);
+        if (group is null) return;
+        group.SelectAllCommand.Execute(null);
+        eventArgs.Handled = true;
+    }
+
+    private static T? FindDataContext<T>(DependencyObject? current) where T : class
+    {
+        while (current is not null)
+        {
+            if (current is FrameworkElement { DataContext: T match }) return match;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
     }
 
     private void FocusBlockingNotice() =>
@@ -164,6 +210,34 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Background);
     }
 
+    private void QueueReviewAnnouncement(string propertyName)
+    {
+        var generation = dataContextGeneration;
+        var expected = shellViewModel;
+        var announcement = Interlocked.Increment(ref reviewAnnouncementGeneration);
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || generation != dataContextGeneration || announcement != reviewAnnouncementGeneration
+                || !ReferenceEquals(expected, shellViewModel) || expected?.IsReviewPhase is not true) return;
+            var target = propertyName == nameof(ShellViewModel.SelectionSummary)
+                ? SelectionSummaryText : ReviewAnnouncementText;
+            if (!target.IsVisible) return;
+            var peer = UIElementAutomationPeer.FromElement(target)
+                ?? UIElementAutomationPeer.CreatePeerForElement(target);
+            peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        }, DispatcherPriority.Background);
+    }
+
+    private void OnClosing(object? sender, CancelEventArgs eventArgs) => CancelBlockingReviewLayer();
+
+    public void OnApplicationExit(object? sender, EventArgs eventArgs) => CancelBlockingReviewLayer();
+
+    private void CancelBlockingReviewLayer()
+    {
+        foreach (var dialog in OwnedWindows.OfType<SurvivorOverrideDialog>().ToArray())
+            dialog.Close();
+    }
+
     private void OnClosed(object? sender, EventArgs eventArgs)
     {
         isClosed = true;
@@ -172,7 +246,45 @@ public partial class MainWindow : Window
         {
             shellViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         }
+        if (System.Windows.Application.Current is { } application)
+            application.Exit -= OnApplicationExit;
+        lastReviewFocus = null;
     }
+}
+
+public class ReviewSelectionCheckBox : CheckBox
+{
+    protected override AutomationPeer OnCreateAutomationPeer() =>
+        new ReviewSelectionCheckBoxAutomationPeer(this);
+
+    protected override void OnToggle()
+    {
+        // Selection is projected exclusively from the coordinator snapshot.
+        // OnClick still executes the bound command for every activation path.
+    }
+
+    internal void ActivateFromAutomation() => OnClick();
+}
+
+internal sealed class ReviewSelectionCheckBoxAutomationPeer(ReviewSelectionCheckBox owner)
+    : CheckBoxAutomationPeer(owner), IToggleProvider
+{
+    private ReviewSelectionCheckBox ReviewOwner => (ReviewSelectionCheckBox)Owner;
+
+    void IToggleProvider.Toggle()
+    {
+        if (!IsEnabled()) throw new ElementNotEnabledException();
+        ReviewOwner.Dispatcher.BeginInvoke(
+            DispatcherPriority.Input,
+            new Action(ReviewOwner.ActivateFromAutomation));
+    }
+
+    ToggleState IToggleProvider.ToggleState => ReviewOwner.IsChecked switch
+    {
+        true => ToggleState.On,
+        false => ToggleState.Off,
+        null => ToggleState.Indeterminate,
+    };
 }
 
 

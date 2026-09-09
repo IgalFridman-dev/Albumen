@@ -2,8 +2,11 @@ using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Windows.Input;
+using PhotoSift.Application.Review;
 using PhotoSift.Application.Shell;
 using ScanSessionStatus = PhotoSift.Application.Scan.ScanStatus;
+using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
 using PhotoSift.Domain.Workflow;
@@ -14,6 +17,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
 {
     private readonly IChooseScopeWorkflow chooseScopeWorkflow;
     private readonly IPhotoSiftWorkflow? photoWorkflow;
+    private readonly IReviewDialogService? reviewDialog;
     private PhotoSiftSnapshot? photoSnapshot;
     private ShellSnapshot? currentSnapshot;
     private ImmutableArray<PhaseItemViewModel> phases = [];
@@ -32,6 +36,20 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     private bool isReady;
     private bool isBlocked;
     private bool isCanceled;
+    private string selectionSummary = "0 selected occurrences.";
+    private string reviewAnnouncement = string.Empty;
+    private string approvalSelectedOccurrenceText = "0 selected occurrences";
+    private string approvalSelectedPathText = "0 selected paths";
+    private string approvalSelectedPhysicalText = "0 distinct physical files";
+    private string approvalRecoveryText = "Estimated recovery for this Selection: 0 bytes.";
+    private string approvalCoverageText = "No terminal Scan coverage.";
+    private string approvalUnresolvedText = "Unresolved total: 0";
+    private string approvalUnresolvedSubtotals = string.Empty;
+    private string approvalUnselectedSurvivorsText = "Ordinary unselected survivors: 0";
+    private bool canApproveReview;
+    private ReviewSessionPin? approvalIdentitySession;
+    private long approvalIdentityRevision;
+    private Guid approvalIdentityKey;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
@@ -54,6 +72,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         StartScanCommand = new AsyncCommand(() => photoWorkflow?.StartScanAsync() ?? Task.CompletedTask);
         CancelScanCommand = new AsyncCommand(() => photoWorkflow?.CancelScanAsync() ?? Task.CompletedTask);
         OpenReviewCommand = new AsyncCommand(() => photoWorkflow?.NavigateAsync(WorkflowPhase.Review) ?? Task.CompletedTask);
+        ApproveReviewCommand = new AsyncCommand(ApproveReviewAsync);
         NavigateCommand = new AsyncCommand(parameter => photoWorkflow is not null && parameter is WorkflowPhase phase
             ? photoWorkflow.NavigateAsync(phase) : parameter is WorkflowPhase.ChooseScope
                 ? this.chooseScopeWorkflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None) : Task.CompletedTask);
@@ -61,9 +80,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         Apply(this.chooseScopeWorkflow.Current);
     }
 
-    public ShellViewModel(IChooseScopeWorkflow scope, IPhotoSiftWorkflow workflow) : this(scope)
+    public ShellViewModel(IChooseScopeWorkflow scope, IPhotoSiftWorkflow workflow,
+        IReviewDialogService? reviewDialog = null) : this(scope)
     {
         photoWorkflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
+        this.reviewDialog = reviewDialog;
         workflow.SnapshotChanged += (_, snapshot) => ApplyCombined(snapshot);
         ApplyCombined(workflow.Current);
     }
@@ -73,6 +94,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     public AsyncCommand StartScanCommand { get; }
     public AsyncCommand CancelScanCommand { get; }
     public AsyncCommand OpenReviewCommand { get; }
+    public AsyncCommand ApproveReviewCommand { get; }
     public AsyncCommand NavigateCommand { get; }
     public WorkflowPhase CurrentPhase => photoSnapshot?.CurrentPhase ?? WorkflowPhase.ChooseScope;
     public bool IsChooseScopePhase => CurrentPhase == WorkflowPhase.ChooseScope;
@@ -96,6 +118,75 @@ public sealed class ShellViewModel : INotifyPropertyChanged
     public string ReviewDisclaimer { get; } = "Analyzed revisions; scan again after files change. Results are memory-only and are not restored after restart.";
     public ImmutableArray<ExactGroupViewModel> ExactGroups { get; private set; } = [];
     public ImmutableArray<ScanOccurrenceViewModel> CouldNotAnalyze { get; private set; } = [];
+
+    public string SelectionSummary
+    {
+        get => selectionSummary;
+        private set => SetField(ref selectionSummary, value);
+    }
+
+    public string ReviewAnnouncement
+    {
+        get => reviewAnnouncement;
+        private set => SetField(ref reviewAnnouncement, value);
+    }
+
+    public string ApprovalSelectedOccurrenceText
+    {
+        get => approvalSelectedOccurrenceText;
+        private set => SetField(ref approvalSelectedOccurrenceText, value);
+    }
+
+    public string ApprovalSelectedPathText
+    {
+        get => approvalSelectedPathText;
+        private set => SetField(ref approvalSelectedPathText, value);
+    }
+
+    public string ApprovalSelectedPhysicalText
+    {
+        get => approvalSelectedPhysicalText;
+        private set => SetField(ref approvalSelectedPhysicalText, value);
+    }
+
+    public string ApprovalRecoveryText
+    {
+        get => approvalRecoveryText;
+        private set => SetField(ref approvalRecoveryText, value);
+    }
+
+    public string ApprovalCoverageText
+    {
+        get => approvalCoverageText;
+        private set => SetField(ref approvalCoverageText, value);
+    }
+
+    public string ApprovalUnresolvedText
+    {
+        get => approvalUnresolvedText;
+        private set => SetField(ref approvalUnresolvedText, value);
+    }
+
+    public string ApprovalUnresolvedSubtotals
+    {
+        get => approvalUnresolvedSubtotals;
+        private set => SetField(ref approvalUnresolvedSubtotals, value);
+    }
+
+    public string ApprovalUnselectedSurvivorsText
+    {
+        get => approvalUnselectedSurvivorsText;
+        private set => SetField(ref approvalUnselectedSurvivorsText, value);
+    }
+
+    public string ApprovalDestinationText { get; } = "Future destination: Windows Recycle Bin.";
+    public string ApprovalRevalidationText { get; } =
+        "Only the listed, revalidated selected occurrences are included. E1-S5 will revalidate Scope, identity, content, and override evidence again before any Action.";
+    public bool CanApproveReview
+    {
+        get => canApproveReview;
+        private set => SetField(ref canApproveReview, value);
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -213,6 +304,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged
 
     private void ApplyCombined(PhotoSiftSnapshot snapshot)
     {
+        var preserveReviewProjection = ReviewProjectionUnchanged(photoSnapshot?.Review, snapshot.Review);
         var previousPhase = CurrentPhase;
         var previousStatus = ScanStatus;
         var previousBusy = IsScanBusy;
@@ -221,18 +313,140 @@ public sealed class ShellViewModel : INotifyPropertyChanged
         photoSnapshot = snapshot;
         Phases = Project(snapshot.Phases);
         RuleSetStatus = snapshot.Rules is null ? "Not configured" : "Exact duplicates only — confirmed";
-        ExactGroups = snapshot.Scan.Groups.Select(group => new ExactGroupViewModel(group)).ToImmutableArray();
+        if (!preserveReviewProjection)
+        {
+            ExactGroups = snapshot.Review.Pin is null
+                ? snapshot.Scan.Groups.Select(group => new ExactGroupViewModel(group)).ToImmutableArray()
+                : snapshot.Review.Groups.Select((group, index) => new ExactGroupViewModel(group,
+                    snapshot.Review.SelectionRevision, index + 1, snapshot.Review.Groups.Length,
+                    (kind, ids) => ChangeReviewSelectionAsync(group.Candidate.GroupId, kind, ids))).ToImmutableArray();
+        }
         CouldNotAnalyze = snapshot.Scan.Occurrences
             .Where(row => row.Exact.State is ScanStageState.FailedRetryable or ScanStageState.FailedTerminal or ScanStageState.Canceled)
             .Select(row => new ScanOccurrenceViewModel(row)).ToImmutableArray();
+        ProjectReview(snapshot.Review);
         foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsScanPhase), nameof(IsReviewPhase),
             nameof(CanContinue), nameof(CanStartScan), nameof(CanOpenReview),
-            nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(ExactGroups), nameof(CouldNotAnalyze) })
+            nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze) })
             OnPropertyChanged(name);
+        if (!preserveReviewProjection) OnPropertyChanged(nameof(ExactGroups));
         if (previousBusy != IsScanBusy) OnPropertyChanged(nameof(IsScanBusy));
         if (previousCanConfirm != CanConfirmExactRules) OnPropertyChanged(nameof(CanConfirmExactRules));
         if (previousStatus != ScanStatus) OnPropertyChanged(nameof(ScanStatus));
         if (previousPhase != CurrentPhase) OnPropertyChanged(nameof(CurrentPhase));
+    }
+
+    private async Task ChangeReviewSelectionAsync(
+        Guid groupId,
+        SelectionCommandKind kind,
+        ImmutableArray<long> occurrenceIds)
+    {
+        var workflow = photoWorkflow;
+        var snapshot = photoSnapshot?.Review;
+        var group = snapshot?.Groups.FirstOrDefault(candidate => candidate.Candidate.GroupId == groupId);
+        if (workflow is null || snapshot?.Pin is null || group is null) return;
+        var command = new SelectionCommand(
+            new(snapshot.Pin, groupId, group.Candidate.GroupRevision, snapshot.SelectionRevision),
+            kind, occurrenceIds, Guid.NewGuid());
+        var invokingFocus = Thread.CurrentThread.GetApartmentState() == ApartmentState.STA
+            ? Keyboard.FocusedElement
+            : null;
+        var result = await workflow.ChangeReviewSelectionAsync(command, CancellationToken.None);
+        if (result.Outcome != ReviewCommandOutcome.OverrideRequired || result.OverrideProposal is not { } proposal)
+        {
+            ApplyReviewResult(result);
+            return;
+        }
+
+        if (reviewDialog is null || invokingFocus is null)
+        {
+            ReviewAnnouncement = "Final-survivor override requires an explicitly focused invoking control.";
+            return;
+        }
+
+        var dialogResult = await reviewDialog.ShowSurvivorOverrideAsync(
+            proposal, invokingFocus, CancellationToken.None);
+        if (dialogResult != SurvivorOverrideDialogResult.Affirm) return;
+        var affirmation = new OverrideAffirmationCommand(
+            proposal, new OverrideEvidenceId(Guid.NewGuid()), DateTimeOffset.UtcNow);
+        ApplyReviewResult(await workflow.AffirmReviewOverrideAsync(affirmation, CancellationToken.None));
+    }
+
+    private async Task ApproveReviewAsync()
+    {
+        var workflow = photoWorkflow;
+        var review = photoSnapshot?.Review;
+        if (workflow is null || review?.Pin is null || !CanApproveReview) return;
+        if (approvalIdentitySession != review.Pin || approvalIdentityRevision != review.SelectionRevision)
+        {
+            approvalIdentitySession = review.Pin;
+            approvalIdentityRevision = review.SelectionRevision;
+            approvalIdentityKey = Guid.NewGuid();
+        }
+        var command = new ApproveSelectionCommand(
+            review.Pin, review.SelectionRevision, approvalIdentityKey, DateTimeOffset.UtcNow);
+        ApplyReviewResult(await workflow.ApproveReviewAsync(command, CancellationToken.None));
+    }
+
+    private void ApplyReviewResult(ReviewCommandResult result)
+    {
+        if (photoWorkflow is not null && !ReviewProjectionUnchanged(photoSnapshot?.Review, result.Snapshot))
+            ApplyCombined(photoWorkflow.Current with { Review = result.Snapshot });
+        var announcement = result.Outcome switch
+        {
+            ReviewCommandOutcome.Stale => "The Review changed; the stale command made no change.",
+            ReviewCommandOutcome.PersistenceFailed => "Override evidence persistence failed; Selection is unchanged.",
+            ReviewCommandOutcome.EvidenceUnavailable => "Override evidence is unavailable; approval is blocked.",
+            ReviewCommandOutcome.Faulted => "Review is faulted; controls are unavailable.",
+            ReviewCommandOutcome.Sealed => "Selection is sealed by explicit approval.",
+            _ => null,
+        };
+        if (announcement is not null) ReviewAnnouncement = announcement;
+    }
+
+    private static bool ReviewProjectionUnchanged(ReviewSnapshot? current, ReviewSnapshot next) =>
+        ReferenceEquals(current, next) || current == next;
+
+    private void ProjectReview(ReviewSnapshot review)
+    {
+        var selectedMembers = review.Groups.SelectMany(group => group.Members)
+            .Where(member => member.Selected).ToArray();
+        var selectedCount = selectedMembers.LongLength;
+        var distinctPhysical = selectedMembers.Where(member => member.Occurrence.PhysicalFileKey is not null)
+            .Select(member => member.Occurrence.PhysicalFileKey!.Value).Distinct().LongCount();
+        ApprovalSelectedOccurrenceText = $"{selectedCount.ToString(CultureInfo.InvariantCulture)} selected occurrences";
+        ApprovalSelectedPathText = $"{selectedCount.ToString(CultureInfo.InvariantCulture)} selected paths";
+        ApprovalSelectedPhysicalText = $"{distinctPhysical.ToString(CultureInfo.InvariantCulture)} distinct physical files";
+        ApprovalRecoveryText = FormatReviewRecovery(review);
+        ApprovalCoverageText = review.Coverage == ScanSessionStatus.Complete
+            ? "Complete Scan coverage"
+            : review.Coverage == ScanSessionStatus.Incomplete ? "Incomplete Scan coverage" : "No terminal Scan coverage";
+        ApprovalUnresolvedText = $"Unresolved total: {review.Unresolved.Total.ToString(CultureInfo.InvariantCulture)}";
+        ApprovalUnresolvedSubtotals = $"Incomplete enumeration: {review.Unresolved.IncompleteEnumeration.ToString(CultureInfo.InvariantCulture)}; failed Scan rows: {review.Unresolved.FailedScanRows.ToString(CultureInfo.InvariantCulture)}; canceled Scan rows: {review.Unresolved.CanceledScanRows.ToString(CultureInfo.InvariantCulture)}; unprocessed Scan rows: {review.Unresolved.UnprocessedScanRows.ToString(CultureInfo.InvariantCulture)}; pending Review members: {review.Unresolved.PendingReviewMembers.ToString(CultureInfo.InvariantCulture)}; unavailable Review members: {review.Unresolved.UnavailableReviewMembers.ToString(CultureInfo.InvariantCulture)}";
+        ApprovalUnselectedSurvivorsText = $"Ordinary unselected survivors: {review.Unresolved.UnselectedSurvivorMembers.ToString(CultureInfo.InvariantCulture)}";
+        SelectionSummary = $"{ApprovalSelectedOccurrenceText}; {ApprovalRecoveryText} {ApprovalCoverageText}; unresolved total {review.Unresolved.Total.ToString(CultureInfo.InvariantCulture)}.";
+        CanApproveReview = review.Status == ReviewStatus.Ready
+            && review.Coverage is ScanSessionStatus.Complete or ScanSessionStatus.Incomplete
+            && selectedCount > 0 && !review.Sealed
+            && selectedMembers.All(member => member.Eligibility == ReviewEligibilityState.Eligible);
+    }
+
+    private static string FormatReviewRecovery(ReviewSnapshot review)
+    {
+        var selectedGroups = review.Groups.Where(group => group.SelectedOccurrenceIds.Count > 0).ToArray();
+        var unavailable = selectedGroups.FirstOrDefault(group => group.Recovery.Bytes is null)?.Recovery;
+        if (unavailable is not null)
+            return $"Estimated recovery for this Selection: unavailable ({unavailable.Reason}).";
+        try
+        {
+            var bytes = selectedGroups.Aggregate(0L,
+                (sum, group) => checked(sum + group.Recovery.Bytes.GetValueOrDefault()));
+            return $"Estimated recovery for this Selection: {bytes.ToString(CultureInfo.InvariantCulture)} bytes.";
+        }
+        catch (OverflowException)
+        {
+            return $"Estimated recovery for this Selection: unavailable ({SelectionRecoveryUnavailableReason.Overflow}).";
+        }
     }
 
     private void Apply(ShellSnapshot snapshot)
