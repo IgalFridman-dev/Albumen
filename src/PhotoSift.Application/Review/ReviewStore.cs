@@ -467,24 +467,23 @@ internal sealed class ReviewStore
             }
 
             var survivor = SurvivorPolicy.Evaluate(ForPolicy(group), eligible, selected);
-            if (survivor.Kind == SurvivorDecisionKind.Allowed)
+            var hasEvidence = attachedOverrideEvidence.TryGetValue(
+                group.Candidate.GroupId, out var evidence);
+            if (group.OverrideEvidenceId is not null || hasEvidence)
             {
-                if (group.OverrideEvidenceId is not null
-                    || attachedOverrideEvidence.ContainsKey(group.Candidate.GroupId))
+                if (group.OverrideEvidenceId is not { } attachedEvidenceId
+                    || !hasEvidence
+                    || evidence!.EvidenceId != attachedEvidenceId
+                    || !EvidenceMatchesSelection(evidence, pin, group, selected)
+                    || survivor.Kind is not (SurvivorDecisionKind.Allowed
+                        or SurvivorDecisionKind.OverrideRequired))
                 {
                     return Result(ReviewCommandOutcome.Invalid);
                 }
-            }
-            else if (survivor.Kind == SurvivorDecisionKind.OverrideRequired
-                     && group.OverrideEvidenceId is { } evidenceId
-                     && attachedOverrideEvidence.TryGetValue(group.Candidate.GroupId,
-                         out var evidence)
-                     && evidence.EvidenceId == evidenceId
-                     && EvidenceMatchesSelection(evidence, pin, group, selected))
-            {
+
                 expected.Add(evidence);
             }
-            else
+            else if (survivor.Kind != SurvivorDecisionKind.Allowed)
             {
                 return Result(ReviewCommandOutcome.Invalid);
             }
@@ -514,6 +513,15 @@ internal sealed class ReviewStore
             Current.Unresolved.UnselectedSurvivorMembers,
         };
         if (values.Any(value => value < 0))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = Current.Unresolved.Total;
+        }
+        catch (OverflowException)
         {
             return false;
         }

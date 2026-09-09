@@ -531,6 +531,68 @@ public sealed class PhotoSiftWorkflowTests
         Assert.Equal(WorkflowPhase.Scan, workflow.Current.CurrentPhase);
     }
 
+    [Theory]
+    [InlineData(WorkflowNonApprovalEvent.RuleConfirmation)]
+    [InlineData(WorkflowNonApprovalEvent.ScanStart)]
+    [InlineData(WorkflowNonApprovalEvent.ScanRetry)]
+    [InlineData(WorkflowNonApprovalEvent.ScanCancel)]
+    [InlineData(WorkflowNonApprovalEvent.Navigate)]
+    [InlineData(WorkflowNonApprovalEvent.OpenReview)]
+    public async Task CurrentWorkflowEventsNeverInvokeApprovalAuthority(
+        WorkflowNonApprovalEvent action)
+    {
+        await using var fixture = new ReviewFixture();
+        var scope = new ScopeOwner(fixture.Request.Scope);
+        var scan = new ScanOwner();
+        var review = new ApprovalProbeReview(fixture.Owner);
+        var workflow = new PhotoSiftWorkflow(scope, scan, fixture.Scheduler, review);
+        await fixture.Pump(workflow.ContinueAsync());
+        if (action != WorkflowNonApprovalEvent.RuleConfirmation)
+        {
+            await fixture.Pump(workflow.ConfirmExactRulesAsync());
+        }
+
+        switch (action)
+        {
+            case WorkflowNonApprovalEvent.RuleConfirmation:
+                await fixture.Pump(workflow.ConfirmExactRulesAsync());
+                Assert.NotNull(workflow.Current.Rules);
+                break;
+            case WorkflowNonApprovalEvent.ScanStart:
+                await fixture.Pump(workflow.StartScanAsync());
+                Assert.Single(scan.Starts);
+                break;
+            case WorkflowNonApprovalEvent.ScanRetry:
+                await fixture.Pump(workflow.StartScanAsync());
+                scan.Publish(fixture.Request.Scan with { Status = ScanStatus.Incomplete });
+                await fixture.Pump(workflow.StartScanAsync());
+                Assert.Equal(2, scan.Starts.Count);
+                break;
+            case WorkflowNonApprovalEvent.ScanCancel:
+                await fixture.Pump(workflow.StartScanAsync());
+                await fixture.Pump(workflow.CancelScanAsync());
+                Assert.Equal(1, scan.Cancellations);
+                break;
+            case WorkflowNonApprovalEvent.Navigate:
+                await fixture.Pump(workflow.NavigateAsync(WorkflowPhase.Scan));
+                Assert.Equal(WorkflowPhase.Scan, workflow.Current.CurrentPhase);
+                break;
+            case WorkflowNonApprovalEvent.OpenReview:
+                scan.Publish(fixture.Request.Scan);
+                await fixture.Pump(workflow.OpenReviewAsync());
+                Assert.Equal(1, review.Opens);
+                Assert.NotNull(workflow.Current.Review.Pin);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(action), action, null);
+        }
+
+        Assert.Equal(0, review.Approvals);
+        Assert.Null(review.Current.ApprovedRequest);
+        Assert.False(review.Current.Sealed);
+        Assert.Null(workflow.Current.Review.ApprovedRequest);
+    }
+
     [Fact]
     public async Task ColdAndUnconfirmedScopeCannotBypassContinue()
     {
@@ -810,6 +872,43 @@ public sealed class PhotoSiftWorkflowTests
         public Task ReportObserverFaultAsync(ReviewSessionPin session) => Task.CompletedTask;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
+    private sealed class ApprovalProbeReview(IReviewCoordinator owner) : IReviewCoordinator
+    {
+        internal int Opens { get; private set; }
+        internal int Approvals { get; private set; }
+        public ReviewSnapshot Current => owner.Current;
+        public event EventHandler<ReviewSnapshot>? SnapshotChanged
+        {
+            add => owner.SnapshotChanged += value;
+            remove => owner.SnapshotChanged -= value;
+        }
+        public Task<ReviewCommandResult> OpenAsync(
+            ReviewOpenRequest request,
+            CancellationToken cancellationToken)
+        {
+            Opens++;
+            return owner.OpenAsync(request, cancellationToken);
+        }
+        public Task<ReviewCommandResult> ChangeSelectionAsync(
+            SelectionCommand command,
+            CancellationToken cancellationToken) =>
+            owner.ChangeSelectionAsync(command, cancellationToken);
+        public Task<ReviewCommandResult> AffirmOverrideAsync(
+            OverrideAffirmationCommand command,
+            CancellationToken cancellationToken) =>
+            owner.AffirmOverrideAsync(command, cancellationToken);
+        public Task<ReviewCommandResult> ApproveAsync(
+            ApproveSelectionCommand command,
+            CancellationToken cancellationToken)
+        {
+            Approvals++;
+            return owner.ApproveAsync(command, cancellationToken);
+        }
+        public Task InvalidateAsync(ScanPin? currentScan) => owner.InvalidateAsync(currentScan);
+        public Task ReportObserverFaultAsync(ReviewSessionPin session) =>
+            owner.ReportObserverFaultAsync(session);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
     private sealed class ManualScheduler : IWorkflowScheduler
     {
         private readonly System.Collections.Concurrent.ConcurrentQueue<Action> queue = new();
@@ -841,6 +940,16 @@ public sealed class PhotoSiftWorkflowTests
         public Task CancelAsync() { Cancellations++; CancellationEntered.TrySetResult(true); return Cancellation?.Task ?? Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
+}
+
+public enum WorkflowNonApprovalEvent
+{
+    RuleConfirmation,
+    ScanStart,
+    ScanRetry,
+    ScanCancel,
+    Navigate,
+    OpenReview,
 }
 
 

@@ -135,6 +135,31 @@ public sealed class ReviewApprovalAuthorityTests
     }
 
     [Fact]
+    public async Task UnrepresentableUnresolvedTotalIsRejectedBeforeApprovalIsSealed()
+    {
+        await using var fixture = new ApprovalFixture(
+            new ApprovalEvidenceStore(), ScanStatus.Incomplete);
+        fixture.ReplaceRequest(fixture.Request with
+        {
+            Scan = fixture.Request.Scan with
+            {
+                Enumeration = ScanTestData.Success,
+                Counts = new(5, 5, 0, long.MaxValue, 1, 0),
+            },
+        });
+        await fixture.OpenSelectedAsync();
+        var selectionRevision = fixture.Owner.Current.SelectionRevision;
+
+        var result = await fixture.ApproveAsync(fixture.ApprovalCommand());
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, result.Outcome);
+        Assert.Equal(selectionRevision, result.Snapshot.SelectionRevision);
+        Assert.Null(result.ApprovedRequest);
+        Assert.Null(result.Snapshot.ApprovedRequest);
+        Assert.False(result.Snapshot.Sealed);
+    }
+
+    [Fact]
     public async Task FaultedReviewCannotApproveItsFormerSelection()
     {
         await using var fixture = new ApprovalFixture(new ApprovalEvidenceStore());
@@ -235,20 +260,45 @@ public sealed class ReviewApprovalAuthorityTests
         Assert.False(result.Snapshot.Sealed);
     }
 
+    [Fact]
+    public async Task RetainedExactOverrideCanApproveAfterAnUnselectedSurvivorBecomesEligible()
+    {
+        var store = new ApprovalEvidenceStore();
+        await using var fixture = new ApprovalFixture(store);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await fixture.OpenAsync()).Outcome);
+        await fixture.PumpAsync(fixture.Executor.Arrived.Task);
+        await fixture.RevalidateAsync(1, 2);
+        var proposal = await fixture.ChangeAsync(fixture.SelectionCommand(0,
+            SelectionCommandKind.ReplaceFocusedGroup, 1, 2));
+        Assert.Equal(ReviewCommandOutcome.OverrideRequired, proposal.Outcome);
+        var evidenceId = new OverrideEvidenceId(
+            Guid.Parse("0a70e6aa-0186-4654-9ed7-d3ae574f1552"));
+        var affirmed = await fixture.AffirmAsync(new(proposal.OverrideProposal!, evidenceId,
+            new DateTimeOffset(2026, 9, 9, 17, 30, 0, TimeSpan.Zero)));
+        Assert.Equal(ReviewCommandOutcome.Committed, affirmed.Outcome);
+        var selectionRevision = affirmed.Snapshot.SelectionRevision;
+
+        await fixture.RevalidateAsync(3);
+        var unchanged = await fixture.ChangeAsync(fixture.SelectionCommand(0,
+            SelectionCommandKind.ReplaceFocusedGroup, 2, 1));
+
+        Assert.Equal(ReviewCommandOutcome.Neutral, unchanged.Outcome);
+        Assert.Equal(selectionRevision, unchanged.Snapshot.SelectionRevision);
+        Assert.Equal(evidenceId, unchanged.Snapshot.Groups[0].OverrideEvidenceId);
+        var result = await fixture.ApproveAsync(fixture.ApprovalCommand());
+        Assert.Equal(ReviewCommandOutcome.Approved, result.Outcome);
+        Assert.True(result.Snapshot.Sealed);
+        Assert.Same(result.ApprovedRequest, result.Snapshot.ApprovedRequest);
+        Assert.Equal([evidenceId], store.ReadEvidenceIds);
+        Assert.All(result.ApprovedRequest!.Items,
+            item => Assert.Equal(evidenceId, item.OverrideEvidenceId));
+    }
+
     [Theory]
-    [InlineData(NonApprovalEvent.ScanStart)]
-    [InlineData(NonApprovalEvent.ScanRetry)]
-    [InlineData(NonApprovalEvent.ScanCancel)]
-    [InlineData(NonApprovalEvent.RuleConfirmation)]
-    [InlineData(NonApprovalEvent.ReviewOpen)]
-    [InlineData(NonApprovalEvent.Selection)]
-    [InlineData(NonApprovalEvent.OverrideDialogOpen)]
-    [InlineData(NonApprovalEvent.OverrideDialogCancel)]
-    [InlineData(NonApprovalEvent.Navigate)]
-    [InlineData(NonApprovalEvent.Focus)]
-    [InlineData(NonApprovalEvent.WindowClose)]
-    [InlineData(NonApprovalEvent.Shutdown)]
-    public async Task NonApprovalEventsNeverCreateAnActionRequest(NonApprovalEvent action)
+    [InlineData(ReviewOwnerEvent.ReviewOpen)]
+    [InlineData(ReviewOwnerEvent.Selection)]
+    [InlineData(ReviewOwnerEvent.OverrideDialogOpen)]
+    public async Task NonApprovalOwnerEventsNeverCreateAnActionRequest(ReviewOwnerEvent action)
     {
         var store = new ApprovalEvidenceStore();
         await using var fixture = new ApprovalFixture(store);
@@ -269,43 +319,33 @@ public sealed class ReviewApprovalAuthorityTests
             first with { Allocation = first.Allocation with { LinkCount = 99 } });
     }
 
-    private static async Task ApplyAsync(ApprovalFixture fixture, NonApprovalEvent action)
+    private static async Task ApplyAsync(ApprovalFixture fixture, ReviewOwnerEvent action)
     {
         switch (action)
         {
-            case NonApprovalEvent.ReviewOpen:
+            case ReviewOwnerEvent.ReviewOpen:
                 var opened = fixture.Owner.OpenAsync(fixture.Request,
                     TestContext.Current.CancellationToken);
                 await fixture.PumpAsync(opened);
                 await opened;
                 break;
-            case NonApprovalEvent.Selection:
+            case ReviewOwnerEvent.Selection:
                 await fixture.ChangeAsync(
                     fixture.SelectionCommand(0, SelectionCommandKind.Toggle, 3));
                 break;
-            case NonApprovalEvent.OverrideDialogOpen:
+            case ReviewOwnerEvent.OverrideDialogOpen:
                 await fixture.ChangeAsync(fixture.SelectionCommand(0,
                     SelectionCommandKind.ReplaceFocusedGroup, 1, 2, 3));
                 break;
             default:
-                await Task.CompletedTask;
-                break;
+                throw new ArgumentOutOfRangeException(nameof(action), action, null);
         }
     }
 }
 
-public enum NonApprovalEvent
+public enum ReviewOwnerEvent
 {
-    ScanStart,
-    ScanRetry,
-    ScanCancel,
-    RuleConfirmation,
     ReviewOpen,
     Selection,
     OverrideDialogOpen,
-    OverrideDialogCancel,
-    Navigate,
-    Focus,
-    WindowClose,
-    Shutdown,
 }
