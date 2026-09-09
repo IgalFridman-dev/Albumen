@@ -10,6 +10,7 @@ public sealed class ReviewCoordinator : IReviewCoordinator, IReviewResultSink
 {
     private readonly ReviewOwnerInbox inbox;
     private readonly IReviewRevalidationExecutor revalidation;
+    private readonly IOverrideEvidenceStore evidenceStore;
     private readonly Queue<(ReviewSnapshot Snapshot, Operation? Operation)> publications = new();
     private readonly HashSet<Operation> operations = [];
     private readonly HashSet<ScanPin> revoked = [];
@@ -27,7 +28,7 @@ public sealed class ReviewCoordinator : IReviewCoordinator, IReviewResultSink
         inbox = new(scheduler, resultCapacity);
         inbox.DeliverAfterTurn = DeliverPublications;
         this.revalidation = revalidation ?? throw new ArgumentNullException(nameof(revalidation));
-        ArgumentNullException.ThrowIfNull(evidenceStore);
+        this.evidenceStore = evidenceStore ?? throw new ArgumentNullException(nameof(evidenceStore));
     }
     public ReviewSnapshot Current => Volatile.Read(ref current);
     public event EventHandler<ReviewSnapshot>? SnapshotChanged;
@@ -93,6 +94,92 @@ public sealed class ReviewCoordinator : IReviewCoordinator, IReviewResultSink
                 return new ReviewCommandResult(ReviewCommandOutcome.Faulted, current);
             }
         });
+
+    public async Task<ReviewCommandResult> AffirmOverrideAsync(
+        OverrideAffirmationCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var start = await inbox.CommandAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (disposed || active is null || active.Invalidated)
+            {
+                return (Result: new ReviewCommandResult(ReviewCommandOutcome.Stale, current),
+                    Operation: (Operation?)null, Attempt: (OverridePersistenceAttempt?)null);
+            }
+
+            try
+            {
+                var begun = active.Store.BeginAffirmation(command);
+                return (begun.Result, Operation: begun.Attempt is null ? null : active, begun.Attempt);
+            }
+            catch (Exception)
+            {
+                Fault(active);
+                return (Result: new ReviewCommandResult(ReviewCommandOutcome.Faulted, current),
+                    Operation: (Operation?)null, Attempt: (OverridePersistenceAttempt?)null);
+            }
+        }).ConfigureAwait(false);
+        if (start.Operation is not { } operation || start.Attempt is not { } attempt)
+        {
+            return start.Result;
+        }
+
+        OverridePersistResult persisted;
+        try
+        {
+            persisted = await evidenceStore.PersistAsync(attempt.Evidence, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await inbox.CommandAsync(() =>
+            {
+                operation.Store.AbandonAffirmation(attempt);
+                return true;
+            }).ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception)
+        {
+            return await inbox.CommandAsync(() =>
+            {
+                operation.Store.AbandonAffirmation(attempt);
+                if (disposed || !ReferenceEquals(active, operation) || operation.Invalidated)
+                {
+                    return new ReviewCommandResult(ReviewCommandOutcome.Stale, current);
+                }
+
+                Fault(operation);
+                return new ReviewCommandResult(ReviewCommandOutcome.Faulted, current);
+            }).ConfigureAwait(false);
+        }
+
+        return await inbox.CommandAsync(() =>
+        {
+            if (disposed || !ReferenceEquals(active, operation) || operation.Invalidated)
+            {
+                operation.Store.AbandonAffirmation(attempt);
+                return new ReviewCommandResult(ReviewCommandOutcome.Stale, current);
+            }
+
+            try
+            {
+                var result = operation.Store.CompleteAffirmation(attempt, persisted);
+                if (!ReferenceEquals(result.Snapshot, current))
+                {
+                    Publish(result.Snapshot);
+                }
+
+                return result;
+            }
+            catch (Exception)
+            {
+                Fault(operation);
+                return new ReviewCommandResult(ReviewCommandOutcome.Faulted, current);
+            }
+        }).ConfigureAwait(false);
+    }
 
     public async Task InvalidateAsync(ScanPin? currentScan)
     {

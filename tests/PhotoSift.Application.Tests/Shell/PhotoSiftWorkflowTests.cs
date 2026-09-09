@@ -778,6 +778,7 @@ public sealed class PhotoSiftWorkflowTests
             return await owner.OpenAsync(request, cancellationToken);
         }
         public Task<ReviewCommandResult> ChangeSelectionAsync(SelectionCommand command, CancellationToken cancellationToken) => owner.ChangeSelectionAsync(command, cancellationToken);
+        public Task<ReviewCommandResult> AffirmOverrideAsync(OverrideAffirmationCommand command, CancellationToken cancellationToken) => owner.AffirmOverrideAsync(command, cancellationToken);
         public Task InvalidateAsync(ScanPin? currentScan) => InvalidationOverride?.Invoke(currentScan) ?? owner.InvalidateAsync(currentScan);
         public Task ReportObserverFaultAsync(ReviewSessionPin session) => owner.ReportObserverFaultAsync(session);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -796,6 +797,7 @@ public sealed class PhotoSiftWorkflowTests
         public Task<ReviewCommandResult> OpenAsync(ReviewOpenRequest request, CancellationToken cancellationToken)
         { Request = request; Entered.TrySetResult(true); return Done.Task; }
         public Task<ReviewCommandResult> ChangeSelectionAsync(SelectionCommand command, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ReviewCommandResult> AffirmOverrideAsync(OverrideAffirmationCommand command, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task InvalidateAsync(ScanPin? currentScan)
         {
             Invalidations++;

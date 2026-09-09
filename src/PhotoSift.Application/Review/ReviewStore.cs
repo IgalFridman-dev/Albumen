@@ -10,6 +10,8 @@ internal sealed class ReviewStore
 {
     private readonly ScanRunContext context;
     private readonly ImmutableDictionary<Guid, CandidateGroup> originals;
+    private readonly HashSet<Guid> affirmationOperations = [];
+    private OverrideProposalToken? issuedProposal;
     internal ReviewStore(ReviewSessionPin session, ReviewOpenRequest request)
     {
         context = new(session.Scan, request.Scope.Preflight!.Scope!);
@@ -29,6 +31,7 @@ internal sealed class ReviewStore
     internal bool Accept(ReviewRevalidationEvidence evidence)
     {
         if (!Matches(evidence.Request)) return false;
+        InvalidateProposal();
         var member = evidence.Request.Occurrence;
         var content = member.Content!;
         if (!ValidFacts(member, evidence.Opened) || !ValidFacts(member, evidence.Final)
@@ -52,6 +55,7 @@ internal sealed class ReviewStore
     internal bool Fail(ReviewRevalidationRequest request, ReviewUnavailableReason reason)
     {
         if (!Matches(request)) return false;
+        InvalidateProposal();
         if (reason == ReviewUnavailableReason.None || !Enum.IsDefined(reason)) reason = ReviewUnavailableReason.ProgrammingFault;
         var key = request.Occurrence.PhysicalFileKey;
         var changedSelection = Current.Groups.Any(g => g.Members.Any(m => m.Occurrence.PhysicalFileKey == key && m.Selected));
@@ -105,9 +109,14 @@ internal sealed class ReviewStore
         var candidate = ForPolicy(group);
         var decision = SurvivorPolicy.Evaluate(candidate, eligible, proposed);
         if (decision.Kind == SurvivorDecisionKind.OverrideRequired)
-            return new(ReviewCommandOutcome.OverrideRequired, Current,
-                new(Guid.NewGuid(), command.Pin, proposed.Order().ToImmutableArray(), SurvivorPolicy.Version, "survivor-consequence-v1"));
+        {
+            InvalidateProposal();
+            issuedProposal = new(Guid.NewGuid(), command.Pin, proposed.Order().ToImmutableArray(),
+                SurvivorPolicy.Version, "survivor-consequence-v1");
+            return new(ReviewCommandOutcome.OverrideRequired, Current, issuedProposal);
+        }
         if (decision.Kind != SurvivorDecisionKind.Allowed) return Result(ReviewCommandOutcome.Invalid);
+        InvalidateProposal();
         var replacement = group with
         {
             SelectedOccurrenceIds = proposed,
@@ -121,8 +130,106 @@ internal sealed class ReviewStore
         return Result(ReviewCommandOutcome.Committed);
     }
 
+    internal AffirmationStart BeginAffirmation(OverrideAffirmationCommand command)
+    {
+        if (Current.Status == ReviewStatus.Faulted)
+        {
+            return new(Result(ReviewCommandOutcome.Faulted), null);
+        }
+
+        if (Current.Sealed)
+        {
+            return new(Result(ReviewCommandOutcome.Sealed), null);
+        }
+
+        if (command.EvidenceId.Value == Guid.Empty)
+        {
+            return new(Result(ReviewCommandOutcome.Invalid), null);
+        }
+
+        if (!IsCurrentProposal(command.Proposal, out var group, out var selected))
+        {
+            return new(Result(ReviewCommandOutcome.Stale), null);
+        }
+
+        var affected = ImmutableArray.CreateBuilder<AffectedPhysicalRevision>();
+        foreach (var physicalGroup in group.Members
+                     .Where(member => selected.Contains(member.Occurrence.Token.OccurrenceId))
+                     .GroupBy(member => member.Occurrence.PhysicalFileKey!.Value)
+                     .OrderBy(values => values.Key.VolumeSerial)
+                     .ThenBy(values => values.Key.FileId.High)
+                     .ThenBy(values => values.Key.FileId.Low))
+        {
+            var observations = physicalGroup.Select(member => member.Occurrence).ToArray();
+            var first = observations[0];
+            if (first.Content is null || observations.Any(member => member.Content != first.Content
+                    || member.Allocation != first.Allocation))
+            {
+                return new(Result(ReviewCommandOutcome.Invalid), null);
+            }
+
+            affected.Add(new(physicalGroup.Key, first.Content, first.Allocation));
+        }
+
+        var attempt = new OverridePersistenceAttempt(Guid.NewGuid(), command.Proposal,
+            new(command.EvidenceId, command.AffirmedUtc.ToUniversalTime(), command.Proposal.Pin,
+                selected.Order().ToImmutableArray(), affected.ToImmutable(),
+                command.Proposal.SurvivorPolicyVersion, command.Proposal.ConsequenceTextVersion, true));
+        affirmationOperations.Add(attempt.OperationId);
+        return new(Result(ReviewCommandOutcome.Neutral), attempt);
+    }
+
+    internal ReviewCommandResult CompleteAffirmation(
+        OverridePersistenceAttempt attempt,
+        OverridePersistResult persisted)
+    {
+        if (!affirmationOperations.Remove(attempt.OperationId)
+            || !IsCurrentProposal(attempt.Proposal, out var group, out var selected))
+        {
+            return Result(ReviewCommandOutcome.Stale);
+        }
+
+        if (persisted.Outcome is OverridePersistOutcome.Conflict or OverridePersistOutcome.Unavailable)
+        {
+            return Result(ReviewCommandOutcome.PersistenceFailed);
+        }
+
+        if (persisted.Outcome is not (OverridePersistOutcome.Persisted or OverridePersistOutcome.ExactRetry))
+        {
+            Fault();
+            return Result(ReviewCommandOutcome.Faulted);
+        }
+
+        var replacement = group with
+        {
+            SelectedOccurrenceIds = selected,
+            Members = group.Members.Select(member => member with
+            {
+                Selected = selected.Contains(member.Occurrence.Token.OccurrenceId),
+            }).ToImmutableArray(),
+            OverrideEvidenceId = attempt.Evidence.EvidenceId,
+        };
+        Current = Current with
+        {
+            SelectionRevision = checked(Current.SelectionRevision + 1),
+            Groups = Current.Groups.Replace(group, replacement),
+        };
+        InvalidateProposal();
+        Refresh(Current.Groups);
+        return Result(ReviewCommandOutcome.Committed);
+    }
+
+    internal void AbandonAffirmation(OverridePersistenceAttempt attempt) =>
+        affirmationOperations.Remove(attempt.OperationId);
+
     internal void Finish(ReviewUnavailableReason pendingReason)
     {
+        if (Current.Groups.Any(group => group.Members.Any(member =>
+                member.Eligibility == ReviewEligibilityState.PendingRevalidation)))
+        {
+            InvalidateProposal();
+        }
+
         Refresh(Current.Groups.Select(g => g with
         {
             Members = g.Members.Select(m => m.Eligibility == ReviewEligibilityState.PendingRevalidation
@@ -132,6 +239,7 @@ internal sealed class ReviewStore
 
     internal void Fault()
     {
+        InvalidateProposal();
         Finish(ReviewUnavailableReason.ProgrammingFault);
         Current = Current with { Status = ReviewStatus.Faulted, FaultReason = ReviewUnavailableReason.ProgrammingFault };
     }
@@ -144,6 +252,7 @@ internal sealed class ReviewStore
         if (Current.Sealed || Current.Pin is not { } pin || request.ReviewSessionId != pin.ReviewSessionId
             || request.Scan != pin.Scan || request.SelectionRevision != checked(Current.SelectionRevision + 1))
             throw new InvalidOperationException("The seal must match the current session and next revision.");
+        InvalidateProposal();
         Current = Current with { Sealed = true, ApprovedRequest = request, SelectionRevision = request.SelectionRevision,
             Groups = Current.Groups.Select(g => g with { Sealed = true }).ToImmutableArray() };
     }
@@ -167,8 +276,61 @@ internal sealed class ReviewStore
     }
 
     private ReviewCommandResult Result(ReviewCommandOutcome outcome) => new(outcome, Current);
+
+    private bool IsCurrentProposal(
+        OverrideProposalToken proposal,
+        out ReviewGroupSnapshot group,
+        out ImmutableHashSet<long> selected)
+    {
+        group = null!;
+        selected = [];
+        if (issuedProposal is null || !SameProposal(issuedProposal, proposal)
+            || Current.Pin != proposal.Pin.Session
+            || Current.SelectionRevision != proposal.Pin.SelectionRevision)
+        {
+            return false;
+        }
+
+        group = Current.Groups.FirstOrDefault(value => value.Candidate.GroupId == proposal.Pin.GroupId)!;
+        if (group is null || group.Candidate.GroupRevision != proposal.Pin.GroupRevision)
+        {
+            return false;
+        }
+
+        selected = proposal.ProposedSelectedOccurrenceIds.ToImmutableHashSet();
+        if (selected.Count != proposal.ProposedSelectedOccurrenceIds.Length)
+        {
+            return false;
+        }
+
+        var eligible = Eligible(group);
+        return selected.IsSubsetOf(eligible)
+            && SurvivorPolicy.Evaluate(ForPolicy(group), eligible, selected).Kind == SurvivorDecisionKind.OverrideRequired;
+    }
+
+    private void InvalidateProposal()
+    {
+        issuedProposal = null;
+        affirmationOperations.Clear();
+    }
+
+    private static bool SameProposal(OverrideProposalToken left, OverrideProposalToken right) =>
+        left.ProposalId == right.ProposalId
+        && left.Pin == right.Pin
+        && StringComparer.Ordinal.Equals(left.SurvivorPolicyVersion, right.SurvivorPolicyVersion)
+        && StringComparer.Ordinal.Equals(left.ConsequenceTextVersion, right.ConsequenceTextVersion)
+        && left.ProposedSelectedOccurrenceIds.SequenceEqual(right.ProposedSelectedOccurrenceIds);
     private static ImmutableHashSet<long> Eligible(ReviewGroupSnapshot group) => group.Members
         .Where(m => m.Eligibility == ReviewEligibilityState.Eligible).Select(m => m.Occurrence.Token.OccurrenceId).ToImmutableHashSet();
     private static CandidateGroup ForPolicy(ReviewGroupSnapshot group) => group.Candidate with
     { Members = group.Members.Select(m => m.Occurrence).ToImmutableArray() };
 }
+
+internal sealed record OverridePersistenceAttempt(
+    Guid OperationId,
+    OverrideProposalToken Proposal,
+    DeliberateOverrideEvidence Evidence);
+
+internal sealed record AffirmationStart(
+    ReviewCommandResult Result,
+    OverridePersistenceAttempt? Attempt);
