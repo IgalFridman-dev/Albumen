@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Review;
@@ -23,7 +24,12 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     private int reviewRefreshScheduled;
     private readonly object adapterLifecycle = new();
     private readonly List<Task> adapterTasks = [];
-    private Task? adapterFailure;
+    private readonly ConcurrentQueue<Task> adapterFailures = new();
+    private static readonly IEqualityComparer<EqualityEvidence> equalityComparison =
+        EqualityComparer<EqualityEvidence>.Create(SameEquality,
+            edge => HashCode.Combine(edge.Left, edge.LeftContent) ^ HashCode.Combine(edge.Right, edge.RightContent));
+    private static readonly IEqualityComparer<CandidateGroup> candidateComparison =
+        EqualityComparer<CandidateGroup>.Create(SameCandidate, group => group.GroupId.GetHashCode());
 
     public PhotoSiftWorkflow(IChooseScopeWorkflow scope, IScanCoordinator scan, IWorkflowScheduler scheduler,
         IReviewCoordinator? review = null)
@@ -67,7 +73,7 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
                     || acceptedScan.Status is not (ScanStatus.Complete or ScanStatus.Incomplete)) return false;
                 // ScanPin alone does not identify its candidate projection. A
                 // same-pin update during admission is reconciled by the owner.
-                if (acceptedScan != request.Scan) return true;
+                if (!SameScan(acceptedScan, request.Scan)) return true;
                 var acceptedReview = review.Current;
                 if (result.Outcome != ReviewCommandOutcome.Committed || acceptedReview.Pin != result.Snapshot.Pin
                     || !ReviewMatchesScan(acceptedReview, acceptedScan)) return false;
@@ -162,9 +168,7 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         var liveReview = review?.Current;
         var replaceReview = liveReview is { Pin: { } reviewPin } && reviewPin.Scan == snapshot.Pin
             && snapshot.Status is ScanStatus.Complete or ScanStatus.Incomplete
-            && (liveReview.Groups.Length != snapshot.Groups.Length || liveReview.Groups.Any(g =>
-                !snapshot.Groups.Any(candidate => candidate.GroupId == g.Candidate.GroupId
-                    && candidate.GroupRevision == g.Candidate.GroupRevision)));
+            && !ReviewMatchesScan(liveReview, snapshot);
         // Submission occurs synchronously at the Scan publication boundary.
         // InvalidateAsync queues data acceptance before its first await.
         if (review is not null && snapshot.Pin != Current.Scan.Pin)
@@ -250,16 +254,56 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
 
     private static bool ReviewMatchesScan(ReviewSnapshot reviewSnapshot, ScanSnapshot scanSnapshot) =>
         reviewSnapshot.Pin?.Scan == scanSnapshot.Pin && reviewSnapshot.Coverage == scanSnapshot.Status
-        && reviewSnapshot.Groups.Select(group => group.Candidate).SequenceEqual(scanSnapshot.Groups);
+        && !scanSnapshot.Groups.IsDefault
+        && SameValues(reviewSnapshot.Groups.Select(group => group.Candidate), scanSnapshot.Groups, candidateComparison);
+
+    private static bool SameScan(ScanSnapshot left, ScanSnapshot right) =>
+        // Record equality still compares every scalar fact. Only collection
+        // identity is replaced by value comparison below.
+        left with { Occurrences = right.Occurrences, Groups = right.Groups } == right
+        && SameArray(left.Occurrences, right.Occurrences)
+        && SameArray(left.Groups, right.Groups, candidateComparison);
+
+    private static bool SameCandidate(CandidateGroup? left, CandidateGroup? right) =>
+        left is not null && right is not null
+        && left with { Members = right.Members, Equality = right.Equality } == right
+        && SameArray(left.Members, right.Members)
+        && SameArray(left.Equality, right.Equality, equalityComparison);
+
+    private static bool SameEquality(EqualityEvidence? left, EqualityEvidence? right) =>
+        left == right || (left is not null && right is not null
+            && left.Left == right.Right && left.Right == right.Left
+            && left.LeftContent == right.RightContent && left.RightContent == right.LeftContent);
+
+    private static bool SameArray<T>(ImmutableArray<T> left, ImmutableArray<T> right,
+        IEqualityComparer<T>? comparison = null) where T : notnull =>
+        left.IsDefault || right.IsDefault ? left.IsDefault && right.IsDefault : SameValues(left, right, comparison);
+
+    private static bool SameValues<T>(IEnumerable<T> left, IEnumerable<T> right,
+        IEqualityComparer<T>? comparison = null) where T : notnull
+    {
+        // Group membership and equality edges are unordered, but multiplicity
+        // is significant: a malformed duplicate cannot disappear in a set.
+        var counts = new Dictionary<T, int>(comparison);
+        foreach (var value in left) counts[value] = counts.GetValueOrDefault(value) + 1;
+        foreach (var value in right)
+        {
+            if (!counts.TryGetValue(value, out var count)) return false;
+            if (count == 1) counts.Remove(value);
+            else counts[value] = count - 1;
+        }
+        return counts.Count == 0;
+    }
 
     private async Task ObserveCommandAsync(Func<Task> command)
     {
-        await ObserveRetainedFailureAsync().ConfigureAwait(false);
+        // Diagnostics never gate the command (especially cancellation). A
+        // command exception wins and leaves queued diagnostics for later calls.
         await command().ConfigureAwait(false);
-        await ObserveRetainedFailureAsync().ConfigureAwait(false);
+        await ConsumeNextAdapterFailureAsync().ConfigureAwait(false);
     }
 
-    private Task ObserveRetainedFailureAsync() => Volatile.Read(ref adapterFailure) ?? Task.CompletedTask;
+    private Task ConsumeNextAdapterFailureAsync() => adapterFailures.TryDequeue(out var failure) ? failure : Task.CompletedTask;
 
     private void ObserveAdapter(Func<Task> work, ReviewSessionPin? origin)
     {
@@ -293,7 +337,9 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         // Observe now, retain for the existing Task-returning command surface.
         // Failures without a live session cannot be attached to a newer Review.
         _ = failure.Exception;
-        Interlocked.CompareExchange(ref adapterFailure, failure, null);
+        // FIFO arrival, exactly one delivery per successful command completion.
+        // Concurrent commands claim distinct diagnostics atomically.
+        adapterFailures.Enqueue(failure);
     }
 
     private static bool CanNavigate(PhotoSiftSnapshot snapshot, WorkflowPhase phase) => phase switch
