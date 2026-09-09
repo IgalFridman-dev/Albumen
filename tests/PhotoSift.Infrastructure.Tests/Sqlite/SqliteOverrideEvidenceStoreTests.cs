@@ -26,7 +26,7 @@ public sealed class SqliteOverrideEvidenceStoreTests
         Assert.Equal("wal", Assert.IsType<string>(await ScalarAsync(connection, "PRAGMA journal_mode;")),
             ignoreCase: true);
         Assert.Equal(["override_evidence"], await ReadStringsAsync(connection,
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;"));
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 7) <> 'sqlite_' ORDER BY name;"));
         Assert.Equal(OverrideEvidenceData.ExpectedColumns, await ReadStringsAsync(connection,
             "SELECT name FROM pragma_table_info('override_evidence') ORDER BY cid;"));
     }
@@ -398,8 +398,36 @@ public sealed class SqliteOverrideEvidenceStoreTests
         await using var verify = await fixture.OpenRawAsync();
         Assert.Equal(0L, await ScalarLongAsync(verify, "PRAGMA user_version;"));
         Assert.Equal(["retained"], await ReadStringsAsync(verify,
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;"));
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 7) <> 'sqlite_' ORDER BY name;"));
         Assert.Equal("keep", Assert.IsType<string>(await ScalarAsync(verify, "SELECT value FROM retained;")));
+    }
+
+    [Fact]
+    public async Task SqliteXPrefixedVersionZeroTableIsRejectedWithoutChangingAnyDatabaseByte()
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        await using (var connection = await fixture.OpenRawAsync())
+        {
+            await ExecuteAsync(connection,
+                "CREATE TABLE sqliteXretained (value TEXT NOT NULL); INSERT INTO sqliteXretained VALUES ('keep'); PRAGMA user_version = 0;");
+        }
+        SqliteConnection.ClearAllPools();
+        var before = await File.ReadAllBytesAsync(fixture.DatabasePath, TestContext.Current.CancellationToken);
+
+        OverridePersistResult result;
+        await using (var store = fixture.CreateStore())
+        {
+            result = await store.PersistAsync(OverrideEvidenceData.Create(), TestContext.Current.CancellationToken);
+        }
+        SqliteConnection.ClearAllPools();
+
+        Assert.Equal(before, await File.ReadAllBytesAsync(fixture.DatabasePath, TestContext.Current.CancellationToken));
+        Assert.Equal(OverridePersistOutcome.Unavailable, result.Outcome);
+        await using var verify = await fixture.OpenRawAsync();
+        Assert.Equal(0L, await ScalarLongAsync(verify, "PRAGMA user_version;"));
+        Assert.Equal(["sqliteXretained"], await ReadStringsAsync(verify,
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 7) <> 'sqlite_' ORDER BY name;"));
+        Assert.Equal("keep", Assert.IsType<string>(await ScalarAsync(verify, "SELECT value FROM sqliteXretained;")));
     }
 
     [Fact]

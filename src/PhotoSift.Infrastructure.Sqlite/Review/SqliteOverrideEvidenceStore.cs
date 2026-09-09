@@ -318,7 +318,7 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
         CancellationToken cancellationToken)
     {
         var count = await ScalarLongAsync(connection,
-            "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%';", cancellationToken)
+            "SELECT COUNT(*) FROM sqlite_master WHERE substr(name, 1, 7) <> 'sqlite_';", cancellationToken)
             .ConfigureAwait(false);
         return count == 0;
     }
@@ -341,7 +341,7 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
     {
         await using (var tables = connection.CreateCommand())
         {
-            tables.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;";
+            tables.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 7) <> 'sqlite_' ORDER BY name;";
             await using var reader = await tables.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
                 || !reader.GetString(0).Equals("override_evidence", StringComparison.Ordinal)
