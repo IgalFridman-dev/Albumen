@@ -5,6 +5,15 @@ using PhotoSift.Domain.Scan;
 
 namespace PhotoSift.Application.Review;
 
+public interface IReviewCoordinator : IAsyncDisposable
+{
+    ReviewSnapshot Current { get; }
+    event EventHandler<ReviewSnapshot>? SnapshotChanged;
+    Task<ReviewCommandResult> OpenAsync(ReviewOpenRequest request, CancellationToken cancellationToken);
+    Task<ReviewCommandResult> ChangeSelectionAsync(SelectionCommand command, CancellationToken cancellationToken);
+    Task InvalidateAsync(ScanPin? currentScan);
+}
+
 public interface IReviewResultSink
 {
     // The returned acknowledgment settles after owner delivery, independently of

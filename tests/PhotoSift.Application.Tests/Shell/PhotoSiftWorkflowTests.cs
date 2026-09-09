@@ -1,4 +1,7 @@
 using PhotoSift.Application.Scan;
+using PhotoSift.Application.Review;
+using PhotoSift.Application.Tests.Review;
+using PhotoSift.Domain.Review;
 using PhotoSift.Application.Scope;
 using PhotoSift.Application.Tests.Scan;
 using PhotoSift.Application.Shell;
@@ -10,6 +13,89 @@ namespace PhotoSift.Application.Tests.Shell;
 
 public sealed class PhotoSiftWorkflowTests
 {
+    [Fact]
+    public async Task SameScanNewerCandidateReplacesReviewDirectlyWithEmptySelection()
+    {
+        await using var f = new ReviewFixture();
+        var scan = new ScanOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(f.Request.Scope), scan, f.Scheduler, f.Owner);
+        await f.Pump(workflow.ContinueAsync());
+        await f.Pump(workflow.ConfirmExactRulesAsync());
+        scan.Publish(f.Request.Scan);
+        await f.Pump(workflow.OpenReviewAsync());
+        await f.Eligible(1, 2, 3);
+        await f.Change(f.Command(SelectionCommandKind.Toggle, 1));
+        var previous = f.Owner.Current;
+        var stale = f.Command(SelectionCommandKind.Toggle, 2);
+        var replacement = ScanTestData.Signal<bool>();
+        var observedClosed = false;
+        f.Owner.SnapshotChanged += (_, snapshot) =>
+        {
+            observedClosed |= snapshot.Status == ReviewStatus.Closed;
+            if (snapshot.Groups.Any(g => g.Candidate.GroupRevision == 2)) replacement.TrySetResult(true);
+        };
+        scan.Publish(f.Request.Scan with { Groups = [f.Request.Scan.Groups[0] with { GroupRevision = 2 }] });
+        try { await f.Pump(replacement.Task); }
+        catch (TimeoutException) { }
+        Assert.True(replacement.Task.IsCompletedSuccessfully, "A newer same-Scan candidate must replace the active Review.");
+        Assert.NotEqual(previous.Pin, f.Owner.Current.Pin);
+        Assert.Empty(f.Owner.Current.Groups[0].SelectedOccurrenceIds);
+        Assert.False(observedClosed);
+        Assert.Equal(ReviewCommandOutcome.Stale, (await f.Change(stale)).Outcome);
+    }
+
+    [Fact]
+    public async Task OpeningReviewCapturesImmutableRequestAndDoesNotHoldWorkflowTurn()
+    {
+        var scheduler = new ManualScanScheduler();
+        await using var data = new ReviewFixture();
+        var scope = new ScopeOwner(data.Request.Scope);
+        var scan = new ScanOwner();
+        var review = new DeferredReview();
+        var workflow = new PhotoSiftWorkflow(scope, scan, scheduler, review);
+        await ScanTestData.Bound(scheduler.PumpUntilAsync(workflow.ContinueAsync()));
+        await ScanTestData.Bound(scheduler.PumpUntilAsync(workflow.ConfirmExactRulesAsync()));
+        scan.Publish(data.Request.Scan);
+        var opening = workflow.OpenReviewAsync();
+        await ScanTestData.Bound(scheduler.PumpUntilAsync(review.Entered.Task));
+        Assert.Same(data.Request.Scope, review.Request!.Scope);
+        Assert.Same(data.Request.Scan, review.Request.Scan);
+        await ScanTestData.Bound(scheduler.PumpUntilAsync(workflow.NavigateAsync(WorkflowPhase.ChooseScope)));
+        Assert.False(opening.IsCompleted);
+        scope.Publish(data.Request.Scope with { Revision = 2 });
+        Assert.Equal(2, review.Invalidations);
+        Assert.Null(review.LastInvalidation);
+        var accepted = await data.Open();
+        review.Done.SetResult(accepted);
+        await ScanTestData.Bound(scheduler.PumpUntilAsync(opening));
+        Assert.Equal(WorkflowPhase.ChooseScope, workflow.Current.CurrentPhase);
+        Assert.Null(workflow.Current.Review.Pin);
+    }
+
+    [Fact]
+    public async Task ReviewProjectionPreservesSelectionThroughNavigationAndQueuesScanInvalidation()
+    {
+        await using var f = new ReviewFixture();
+        var scope = new ScopeOwner(f.Request.Scope);
+        var scan = new ScanOwner();
+        var workflow = new PhotoSiftWorkflow(scope, scan, f.Scheduler, f.Owner);
+        await f.Pump(workflow.ContinueAsync());
+        await f.Pump(workflow.ConfirmExactRulesAsync());
+        scan.Publish(f.Request.Scan);
+        await f.Pump(workflow.OpenReviewAsync());
+        await f.Eligible(1, 2, 3);
+        await f.Change(f.Command(SelectionCommandKind.Toggle, 1));
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.Scan));
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.Review));
+        Assert.Same(f.Owner.Current, workflow.Current.Review);
+        Assert.Equal([1L], workflow.Current.Review.Groups[0].SelectedOccurrenceIds);
+        Assert.Null(workflow.Current.Review.ApprovedRequest);
+        scan.Publish(f.Request.Scan with { Pin = f.Request.Scan.Pin! with { ScanId = Guid.NewGuid() }, Status = ScanStatus.Checking });
+        var late = f.Owner.ChangeSelectionAsync(f.Command(SelectionCommandKind.Toggle, 2), TestContext.Current.CancellationToken);
+        await f.Pump(late);
+        Assert.Equal(ReviewCommandOutcome.Stale, (await late).Outcome);
+        Assert.Null(f.Owner.Current.Pin);
+    }
     [Fact]
     public async Task ContinueAndConfirmationDoNotStartWorkAndStartRequiresExplicitConfirmation()
     {
@@ -196,6 +282,21 @@ public sealed class PhotoSiftWorkflowTests
         }
     }
     private sealed class PostedScheduler : IWorkflowScheduler { public void Post(Action action) => ThreadPool.QueueUserWorkItem(_ => action()); }
+    private sealed class DeferredReview : IReviewCoordinator
+    {
+        public ReviewSnapshot Current => ReviewSnapshot.Closed;
+        public event EventHandler<ReviewSnapshot>? SnapshotChanged { add { } remove { } }
+        internal TaskCompletionSource<bool> Entered { get; } = ScanTestData.Signal<bool>();
+        internal TaskCompletionSource<ReviewCommandResult> Done { get; } = ScanTestData.Signal<ReviewCommandResult>();
+        internal ReviewOpenRequest? Request { get; private set; }
+        internal int Invalidations { get; private set; }
+        internal ScanPin? LastInvalidation { get; private set; }
+        public Task<ReviewCommandResult> OpenAsync(ReviewOpenRequest request, CancellationToken cancellationToken)
+        { Request = request; Entered.TrySetResult(true); return Done.Task; }
+        public Task<ReviewCommandResult> ChangeSelectionAsync(SelectionCommand command, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task InvalidateAsync(ScanPin? currentScan) { Invalidations++; LastInvalidation = currentScan; return Task.CompletedTask; }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
     private sealed class ManualScheduler : IWorkflowScheduler
     {
         private readonly System.Collections.Concurrent.ConcurrentQueue<Action> queue = new();

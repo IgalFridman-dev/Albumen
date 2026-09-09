@@ -110,6 +110,7 @@ internal sealed class ExactShellFixture
         public Task ConfirmExactRulesAsync() => Act("confirm");
         public Task StartScanAsync() => Act("start");
         public Task CancelScanAsync() => Act("cancel");
+        public Task OpenReviewAsync() => Act("Review");
         public Task NavigateAsync(WorkflowPhase phase) => Act(phase.ToString());
     }
 }

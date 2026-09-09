@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using PhotoSift.Application.Scan;
+using PhotoSift.Application.Review;
 using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Workflow;
 
@@ -11,24 +12,50 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
 {
     private readonly IChooseScopeWorkflow scope;
     private readonly IScanCoordinator scan;
+    private readonly IReviewCoordinator? review;
     private readonly WorkflowInbox inbox;
     private PhotoSiftSnapshot current;
     private long nextRuleRevision;
     private ScanSnapshot? pendingScan;
     private int scanRefreshScheduled;
+    private ReviewSnapshot? pendingReview;
+    private int reviewRefreshScheduled;
 
-    public PhotoSiftWorkflow(IChooseScopeWorkflow scope, IScanCoordinator scan, IWorkflowScheduler scheduler)
+    public PhotoSiftWorkflow(IChooseScopeWorkflow scope, IScanCoordinator scan, IWorkflowScheduler scheduler,
+        IReviewCoordinator? review = null)
     {
         this.scope = scope ?? throw new ArgumentNullException(nameof(scope));
         this.scan = scan ?? throw new ArgumentNullException(nameof(scan));
+        this.review = review;
         inbox = new(scheduler ?? throw new ArgumentNullException(nameof(scheduler)));
         current = new(scope.Current, null, EmptyScan(), WorkflowPhase.ChooseScope, InitialWorkflow.Create());
         scope.SnapshotChanged += OnScopeChanged;
         scan.SnapshotChanged += OnScanChanged;
+        if (review is not null) review.SnapshotChanged += OnReviewChanged;
     }
 
     public PhotoSiftSnapshot Current => Volatile.Read(ref current);
     public event EventHandler<PhotoSiftSnapshot>? SnapshotChanged;
+
+    public async Task OpenReviewAsync()
+    {
+        var request = await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            if (review is null || current.Scan.Status is not (ScanStatus.Complete or ScanStatus.Incomplete)) return null;
+            return CaptureReviewRequest(current.Scan);
+        }).ConfigureAwait(false);
+        if (request is null) return;
+        var result = await review!.OpenAsync(request, CancellationToken.None).ConfigureAwait(false);
+        await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            if (result.Outcome != ReviewCommandOutcome.Committed || current.Scope.Revision != request.Scope.Revision
+                || current.Rules != request.Rules || current.Scan.Pin != request.Scan.Pin
+                || review.Current.Pin != result.Snapshot.Pin) return;
+            Publish(current with { Review = review.Current, CurrentPhase = WorkflowPhase.Review });
+        }).ConfigureAwait(false);
+    }
 
     public Task ContinueAsync() => inbox.InvokeAsync(() =>
     {
@@ -82,8 +109,10 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         var invalidation = snapshot.Revision != Current.Scope.Revision
             ? scan.InvalidateAsync(snapshot.Revision, null)
             : Task.CompletedTask;
+        var reviewInvalidation = snapshot.Revision != Current.Scope.Revision && review is not null
+            ? review.InvalidateAsync(null) : Task.CompletedTask;
         await inbox.InvokeAsync(RefreshScope).ConfigureAwait(false);
-        await invalidation.ConfigureAwait(false);
+        await Task.WhenAll(invalidation, reviewInvalidation).ConfigureAwait(false);
     }
 
     private void RefreshScope()
@@ -91,7 +120,7 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         var accepted = scope.Current;
         if (accepted.Revision != current.Scope.Revision)
         {
-            Publish(current with { Scope = accepted, Rules = null, Scan = EmptyScan(), CurrentPhase = WorkflowPhase.ChooseScope });
+            Publish(current with { Scope = accepted, Rules = null, Scan = EmptyScan(), Review = ReviewSnapshot.Closed, CurrentPhase = WorkflowPhase.ChooseScope });
         }
         else if (!ReferenceEquals(accepted, current.Scope))
         {
@@ -101,10 +130,73 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
 
     private void OnScanChanged(object? sender, ScanSnapshot snapshot)
     {
+        var liveReview = review?.Current;
+        var replaceReview = liveReview is { Pin: { } reviewPin } && reviewPin.Scan == snapshot.Pin
+            && snapshot.Status is ScanStatus.Complete or ScanStatus.Incomplete
+            && (liveReview.Groups.Length != snapshot.Groups.Length || liveReview.Groups.Any(g =>
+                !snapshot.Groups.Any(candidate => candidate.GroupId == g.Candidate.GroupId
+                    && candidate.GroupRevision == g.Candidate.GroupRevision)));
+        // Submission occurs synchronously at the Scan publication boundary.
+        // InvalidateAsync queues data acceptance before its first await.
+        if (review is not null && snapshot.Pin != Current.Scan.Pin)
+            ObserveReviewInvalidationAsync(review.InvalidateAsync(snapshot.Pin));
         // Coalesce presentation notifications, not accepted results: the latest
         // immutable snapshot retains all terminal rows and evidence.
         Interlocked.Exchange(ref pendingScan, snapshot);
         ScheduleScanRefresh();
+        if (replaceReview) ReplaceReviewAsync(snapshot);
+    }
+
+    private async void ReplaceReviewAsync(ScanSnapshot expected)
+    {
+        var request = await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            return current.Scan == expected ? CaptureReviewRequest(expected) : null;
+        }).ConfigureAwait(false);
+        if (request is not null) await review!.OpenAsync(request, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    // Called only in a workflow data turn; the returned values are immutable.
+    private ReviewOpenRequest? CaptureReviewRequest(ScanSnapshot snapshot)
+    {
+        if (current.Rules is not { } rules || snapshot.Pin is not { } pin
+            || pin.ScopeRevision != current.Scope.Revision || pin.RuleSetRevision != rules.RuleSetRevision) return null;
+        return new ReviewOpenRequest(current.Scope, rules, snapshot);
+    }
+
+    private static async void ObserveReviewInvalidationAsync(Task invalidation) => await invalidation.ConfigureAwait(false);
+
+    private void OnReviewChanged(object? sender, ReviewSnapshot snapshot)
+    {
+        Interlocked.Exchange(ref pendingReview, snapshot);
+        ScheduleReviewRefresh();
+    }
+
+    private void ScheduleReviewRefresh()
+    {
+        if (Interlocked.CompareExchange(ref reviewRefreshScheduled, 1, 0) == 0) ApplyReviewAsync();
+    }
+
+    private async void ApplyReviewAsync()
+    {
+        await inbox.InvokeAsync(() =>
+        {
+            try
+            {
+                var snapshot = Interlocked.Exchange(ref pendingReview, null);
+                RefreshScope();
+                if (snapshot is null) return;
+                if (snapshot.Pin is { } pin && (pin.Scan != current.Scan.Pin || current.Rules is null
+                    || pin.Scan.ScopeRevision != current.Scope.Revision || pin.Scan.RuleSetRevision != current.Rules.RuleSetRevision)) return;
+                Publish(current with { Review = snapshot });
+            }
+            finally
+            {
+                Volatile.Write(ref reviewRefreshScheduled, 0);
+                if (Volatile.Read(ref pendingReview) is not null) ScheduleReviewRefresh();
+            }
+        }).ConfigureAwait(false);
     }
 
     private void ScheduleScanRefresh()

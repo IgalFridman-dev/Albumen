@@ -10,5 +10,6 @@ public interface IPhotoSiftWorkflow
     Task ConfirmExactRulesAsync();
     Task StartScanAsync();
     Task CancelScanAsync();
+    Task OpenReviewAsync();
     Task NavigateAsync(WorkflowPhase phase);
 }
