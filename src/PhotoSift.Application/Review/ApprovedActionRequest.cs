@@ -15,3 +15,5 @@ public sealed record ApprovedActionItem(Guid GroupId, long GroupRevision, Occurr
 public sealed record ApprovedActionRequest(Guid RequestId, DateTimeOffset ApprovedUtc, Guid ReviewSessionId,
     long SelectionRevision, ScanPin Scan, ResolvedScope Scope, ImmutableArray<ApprovedActionItem> Items,
     ImmutableArray<long> SelectedOccurrenceIds, ApprovalDisclosure Disclosure);
+public sealed record ApproveSelectionCommand(ReviewSessionPin Session, long SelectionRevision,
+    Guid IdempotencyKey, DateTimeOffset ApprovedUtc);

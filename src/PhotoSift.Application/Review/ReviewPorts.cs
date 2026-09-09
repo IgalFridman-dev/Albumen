@@ -12,6 +12,7 @@ public interface IReviewCoordinator : IAsyncDisposable
     Task<ReviewCommandResult> OpenAsync(ReviewOpenRequest request, CancellationToken cancellationToken);
     Task<ReviewCommandResult> ChangeSelectionAsync(SelectionCommand command, CancellationToken cancellationToken);
     Task<ReviewCommandResult> AffirmOverrideAsync(OverrideAffirmationCommand command, CancellationToken cancellationToken);
+    Task<ReviewCommandResult> ApproveAsync(ApproveSelectionCommand command, CancellationToken cancellationToken);
     Task ReportObserverFaultAsync(ReviewSessionPin session);
     Task InvalidateAsync(ScanPin? currentScan);
 }

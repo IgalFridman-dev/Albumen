@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Review;
@@ -166,6 +167,83 @@ public sealed class ReviewCoordinator : IReviewCoordinator, IReviewResultSink
             try
             {
                 var result = operation.Store.CompleteAffirmation(attempt, persisted);
+                if (!ReferenceEquals(result.Snapshot, current))
+                {
+                    Publish(result.Snapshot);
+                }
+
+                return result;
+            }
+            catch (Exception)
+            {
+                Fault(operation);
+                return new ReviewCommandResult(ReviewCommandOutcome.Faulted, current);
+            }
+        }).ConfigureAwait(false);
+    }
+
+    public async Task<ReviewCommandResult> ApproveAsync(
+        ApproveSelectionCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var start = await inbox.CommandAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (disposed || active is null || active.Invalidated)
+            {
+                return (Result: new ReviewCommandResult(ReviewCommandOutcome.Stale, current),
+                    Operation: (Operation?)null, Attempt: (ApprovalAttempt?)null);
+            }
+
+            try
+            {
+                var begun = active.Store.BeginApproval(command);
+                return (begun.Result, Operation: begun.Attempt is null ? null : active,
+                    begun.Attempt);
+            }
+            catch (Exception)
+            {
+                Fault(active);
+                return (Result: new ReviewCommandResult(ReviewCommandOutcome.Faulted, current),
+                    Operation: (Operation?)null, Attempt: (ApprovalAttempt?)null);
+            }
+        }).ConfigureAwait(false);
+        if (start.Operation is not { } operation || start.Attempt is not { } attempt)
+        {
+            return start.Result;
+        }
+
+        var reads = ImmutableArray.CreateBuilder<OverrideReadResult>(
+            attempt.ExpectedEvidence.Length);
+        foreach (var expected in attempt.ExpectedEvidence)
+        {
+            try
+            {
+                reads.Add(await evidenceStore.ReadAsync(expected.EvidenceId,
+                    cancellationToken).ConfigureAwait(false));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                reads.Add(new(OverrideReadOutcome.Unavailable, null));
+            }
+        }
+
+        return await inbox.CommandAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (disposed || !ReferenceEquals(active, operation) || operation.Invalidated)
+            {
+                return new ReviewCommandResult(ReviewCommandOutcome.Stale, current);
+            }
+
+            try
+            {
+                var result = operation.Store.CompleteApproval(attempt, reads.ToImmutable());
                 if (!ReferenceEquals(result.Snapshot, current))
                 {
                     Publish(result.Snapshot);
