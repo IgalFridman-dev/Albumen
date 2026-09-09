@@ -171,6 +171,74 @@ public sealed class SqliteOverrideEvidenceStoreTests
     }
 
     [Fact]
+    public async Task DisposeWaitsForActiveWriterAndLetsItSettleBeforeClosingTheLane()
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var barrier = new SqliteStoreOperationBarrier();
+        var store = fixture.CreateStore(barrier.Observer);
+        try
+        {
+            var write = store.PersistAsync(OverrideEvidenceData.Create(), TestContext.Current.CancellationToken).AsTask();
+            await barrier.FirstLaneEntered;
+
+            var disposal = store.DisposeAsync().AsTask();
+            var disposedBeforeRelease = disposal.IsCompleted;
+            barrier.ReleaseFirstLane();
+
+            Assert.Equal(OverridePersistOutcome.Persisted, (await write).Outcome);
+            await disposal;
+            Assert.False(disposedBeforeRelease);
+            await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+                store.ReadAsync(OverrideEvidenceData.KnownEvidenceId, TestContext.Current.CancellationToken).AsTask());
+        }
+        finally
+        {
+            barrier.ReleaseFirstLane();
+            await store.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task DisposeDrainsActiveAndQueuedWritersBeforeClosingTheLane()
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var barrier = new SqliteStoreOperationBarrier();
+        var store = fixture.CreateStore(barrier.Observer);
+        try
+        {
+            var first = store.PersistAsync(OverrideEvidenceData.Create(), TestContext.Current.CancellationToken).AsTask();
+            await barrier.FirstLaneEntered;
+            var secondEvidence = OverrideEvidenceData.Create(Guid.Parse("a8608772-9964-4e58-babd-52aee94cb5bb"));
+            var second = store.PersistAsync(secondEvidence, TestContext.Current.CancellationToken).AsTask();
+            Assert.False(await barrier.SecondWaitCompletedSynchronously);
+
+            var disposal = store.DisposeAsync().AsTask();
+            var disposedBeforeRelease = disposal.IsCompleted;
+            barrier.ReleaseFirstLane();
+
+            var firstFailure = await Record.ExceptionAsync(() => first);
+            if (disposedBeforeRelease)
+            {
+                Assert.IsType<ObjectDisposedException>(firstFailure);
+                Assert.False(disposedBeforeRelease, "Disposal completed while an active and a queued writer were admitted.");
+            }
+
+            Assert.Null(firstFailure);
+            var results = await Task.WhenAll(first, second);
+            await disposal;
+            Assert.All(results, result => Assert.Equal(OverridePersistOutcome.Persisted, result.Outcome));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+                store.PersistAsync(OverrideEvidenceData.Create(Guid.NewGuid()), TestContext.Current.CancellationToken)
+                    .AsTask());
+        }
+        finally
+        {
+            barrier.ReleaseFirstLane();
+            await store.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task FailureBeforeCommitReturnsUnavailableAndDoesNotInsertOrReplace()
     {
         await using var fixture = new SqliteOverrideFixture();
@@ -247,6 +315,49 @@ public sealed class SqliteOverrideEvidenceStoreTests
     }
 
     [Fact]
+    public async Task NullAffectedPayloadElementReturnsTypedCorruptWithoutRepair()
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var evidence = OverrideEvidenceData.Create();
+        await using (var initialized = fixture.CreateStore())
+        {
+            Assert.Equal(OverridePersistOutcome.Persisted,
+                (await initialized.PersistAsync(evidence, TestContext.Current.CancellationToken)).Outcome);
+        }
+        await using (var connection = await fixture.OpenRawAsync())
+        {
+            await ExecuteAsync(connection, "UPDATE override_evidence SET affected_physical_revisions = '[null]';");
+        }
+
+        await using var store = fixture.CreateStore();
+        Assert.Equal(OverrideReadOutcome.Corrupt,
+            (await store.ReadAsync(evidence.EvidenceId, TestContext.Current.CancellationToken)).Outcome);
+        await using var verify = await fixture.OpenRawAsync();
+        Assert.Equal("[null]", Assert.IsType<string>(await ScalarAsync(verify,
+            "SELECT affected_physical_revisions FROM override_evidence;")));
+    }
+
+    [Fact]
+    public async Task NullAffectedPayloadElementMakesSameIdRetryAConflictWithoutRepair()
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var evidence = OverrideEvidenceData.Create();
+        await using var store = fixture.CreateStore();
+        Assert.Equal(OverridePersistOutcome.Persisted,
+            (await store.PersistAsync(evidence, TestContext.Current.CancellationToken)).Outcome);
+        await using (var connection = await fixture.OpenRawAsync())
+        {
+            await ExecuteAsync(connection, "UPDATE override_evidence SET affected_physical_revisions = '[null]';");
+        }
+
+        Assert.Equal(OverridePersistOutcome.Conflict,
+            (await store.PersistAsync(evidence, TestContext.Current.CancellationToken)).Outcome);
+        await using var verify = await fixture.OpenRawAsync();
+        Assert.Equal("[null]", Assert.IsType<string>(await ScalarAsync(verify,
+            "SELECT affected_physical_revisions FROM override_evidence;")));
+    }
+
+    [Fact]
     public async Task FailedVersionZeroMigrationLeavesPriorObjectAndVersionUntouched()
     {
         await using var fixture = new SqliteOverrideFixture();
@@ -262,6 +373,33 @@ public sealed class SqliteOverrideEvidenceStoreTests
         Assert.Equal(0L, await ScalarLongAsync(verify, "PRAGMA user_version;"));
         Assert.Equal(["legacy"], await ReadStringsAsync(verify,
             "SELECT name FROM pragma_table_info('override_evidence') ORDER BY cid;"));
+    }
+
+    [Fact]
+    public async Task UnsupportedVersionZeroContentsAreRejectedWithoutChangingAnyDatabaseByte()
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        await using (var connection = await fixture.OpenRawAsync())
+        {
+            await ExecuteAsync(connection,
+                "CREATE TABLE retained (value TEXT NOT NULL); INSERT INTO retained VALUES ('keep'); PRAGMA user_version = 0;");
+        }
+        SqliteConnection.ClearAllPools();
+        var before = await File.ReadAllBytesAsync(fixture.DatabasePath, TestContext.Current.CancellationToken);
+
+        await using (var store = fixture.CreateStore())
+        {
+            Assert.Equal(OverridePersistOutcome.Unavailable,
+                (await store.PersistAsync(OverrideEvidenceData.Create(), TestContext.Current.CancellationToken)).Outcome);
+        }
+        SqliteConnection.ClearAllPools();
+
+        Assert.Equal(before, await File.ReadAllBytesAsync(fixture.DatabasePath, TestContext.Current.CancellationToken));
+        await using var verify = await fixture.OpenRawAsync();
+        Assert.Equal(0L, await ScalarLongAsync(verify, "PRAGMA user_version;"));
+        Assert.Equal(["retained"], await ReadStringsAsync(verify,
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;"));
+        Assert.Equal("keep", Assert.IsType<string>(await ScalarAsync(verify, "SELECT value FROM retained;")));
     }
 
     [Fact]
@@ -332,6 +470,48 @@ public sealed class SqliteOverrideEvidenceStoreTests
     }
 }
 
+internal sealed class SqliteStoreOperationBarrier
+{
+    private readonly TaskCompletionSource firstLaneEntered =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource firstLaneRelease =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> secondWaitCompletedSynchronously =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int waitCount;
+    private int laneEntryCount;
+
+    internal SqliteStoreOperationBarrier()
+    {
+        Observer = new(OnLaneWaitStarted, OnLaneEnteredAsync);
+    }
+
+    internal SqliteOverrideEvidenceStoreObserver Observer { get; }
+    internal Task FirstLaneEntered => firstLaneEntered.Task;
+    internal Task<bool> SecondWaitCompletedSynchronously => secondWaitCompletedSynchronously.Task;
+
+    internal void ReleaseFirstLane() => firstLaneRelease.TrySetResult();
+
+    private void OnLaneWaitStarted(bool completedSynchronously)
+    {
+        if (Interlocked.Increment(ref waitCount) == 2)
+        {
+            secondWaitCompletedSynchronously.TrySetResult(completedSynchronously);
+        }
+    }
+
+    private ValueTask OnLaneEnteredAsync(CancellationToken cancellationToken)
+    {
+        if (Interlocked.Increment(ref laneEntryCount) != 1)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        firstLaneEntered.TrySetResult();
+        return new(firstLaneRelease.Task.WaitAsync(cancellationToken));
+    }
+}
+
 internal sealed class SqliteOverrideFixture : IAsyncDisposable
 {
     internal SqliteOverrideFixture()
@@ -344,6 +524,8 @@ internal sealed class SqliteOverrideFixture : IAsyncDisposable
     internal string RootPath { get; }
     internal string DatabasePath { get; }
     internal SqliteOverrideEvidenceStore CreateStore() => new(DatabasePath);
+    internal SqliteOverrideEvidenceStore CreateStore(SqliteOverrideEvidenceStoreObserver observer) =>
+        new(DatabasePath, observer);
 
     internal async Task<SqliteConnection> OpenRawAsync()
     {
