@@ -114,6 +114,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";
     public string ScanStatus => photoSnapshot is { } snapshot
         ? $"{snapshot.Scan.Status}; Enumeration: {snapshot.Scan.Enumeration.State}; Exact: {(snapshot.Scan.Counts.Outstanding > 0 ? "Running" : snapshot.Scan.Status is ScanSessionStatus.Complete or ScanSessionStatus.Incomplete ? "Finished" : "Pending")}" : "Idle";
+    public ReviewStatus ReviewState => photoSnapshot?.Review.Status ?? ReviewStatus.Closed;
+    public ReviewUnavailableReason ReviewFaultReason => photoSnapshot?.Review.FaultReason ?? ReviewUnavailableReason.None;
+    public string ReviewStatusText => ReviewState == ReviewStatus.Faulted
+        ? $"Review is faulted ({ReviewFaultReason}); controls are unavailable."
+        : $"Review: {ReviewState}";
     public string ScanCountsText => photoSnapshot is { Scan.Counts: var count }
         ? $"Discovered: {count.Discovered}; Analyzed: {count.Analyzed}; Excluded: {count.Excluded}; Failed: {count.Failed}; Canceled: {count.Canceled}; Outstanding: {count.Outstanding}" : string.Empty;
     public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
@@ -320,6 +325,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void ApplyCombined(PhotoSiftSnapshot snapshot)
     {
+        var previousReview = photoSnapshot?.Review;
+        var previousReviewStatusText = ReviewStatusText;
         var preserveReviewProjection = ReviewProjectionUnchanged(photoSnapshot?.Review, snapshot.Review)
             && (snapshot.Review.Pin is not null || ScanProjectionUnchanged(photoSnapshot?.Scan, snapshot.Scan));
         var previousPhase = CurrentPhase;
@@ -335,6 +342,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             ExactGroups = snapshot.Review.Pin is null
                 ? snapshot.Scan.Groups.Select(group => new ExactGroupViewModel(group)).ToImmutableArray()
                 : snapshot.Review.Groups.Select((group, index) => new ExactGroupViewModel(group,
+                    snapshot.Review.Status == ReviewStatus.Ready && !snapshot.Review.Sealed,
                     snapshot.Review.SelectionRevision, index + 1, snapshot.Review.Groups.Length,
                     (kind, ids) => ChangeReviewSelectionAsync(group.Candidate.GroupId, kind, ids))).ToImmutableArray();
         }
@@ -342,6 +350,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             .Where(row => row.Exact.State is ScanStageState.FailedRetryable or ScanStageState.FailedTerminal or ScanStageState.Canceled)
             .Select(row => new ScanOccurrenceViewModel(row)).ToImmutableArray();
         ProjectReview(snapshot.Review);
+        if (snapshot.Review.Pin is not null && snapshot.Review.Status == ReviewStatus.Faulted
+            && (previousReview is null || previousReview.Pin != snapshot.Review.Pin || previousReview.Status != ReviewStatus.Faulted
+                || previousReview.FaultReason != snapshot.Review.FaultReason))
+            ReviewAnnouncement = ReviewStatusText;
+        else if (previousReview?.Pin != snapshot.Review.Pin)
+            ReviewAnnouncement = string.Empty;
+        if (previousReview?.Status != snapshot.Review.Status) OnPropertyChanged(nameof(ReviewState));
+        if (previousReview?.FaultReason != snapshot.Review.FaultReason) OnPropertyChanged(nameof(ReviewFaultReason));
+        if (previousReviewStatusText != ReviewStatusText) OnPropertyChanged(nameof(ReviewStatusText));
         foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsScanPhase), nameof(IsReviewPhase),
             nameof(CanContinue), nameof(CanStartScan), nameof(CanOpenReview),
             nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze) })
@@ -414,7 +431,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             ReviewCommandOutcome.Stale => "The Review changed; the stale command made no change.",
             ReviewCommandOutcome.PersistenceFailed => "Override evidence persistence failed; Selection is unchanged.",
             ReviewCommandOutcome.EvidenceUnavailable => "Override evidence is unavailable; approval is blocked.",
-            ReviewCommandOutcome.Faulted => "Review is faulted; controls are unavailable.",
             ReviewCommandOutcome.Sealed => "Selection is sealed by explicit approval.",
             _ => null,
         };

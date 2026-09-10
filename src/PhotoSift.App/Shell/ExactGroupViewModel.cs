@@ -23,12 +23,13 @@ public sealed class ExactGroupViewModel
         AutomationName = Summary;
         ItemStatus = $"0 selected; {SelectionRecovery}";
         SelectedOccurrenceIds = [];
-        SelectAllCommand = new AsyncCommand(() => Task.CompletedTask);
-        ReplaceSelectionCommand = new AsyncCommand(_ => Task.CompletedTask);
+        SelectAllCommand = new AsyncCommand(() => Task.CompletedTask, canExecute: () => false);
+        ReplaceSelectionCommand = new AsyncCommand(_ => Task.CompletedTask, canExecute: () => false);
     }
 
     internal ExactGroupViewModel(
         ReviewGroupSnapshot group,
+        bool reviewAllowsSelection,
         long selectionRevision,
         int position,
         int count,
@@ -38,11 +39,12 @@ public sealed class ExactGroupViewModel
         GroupRevision = group.Candidate.GroupRevision;
         SelectionRevision = selectionRevision;
         SelectedOccurrenceIds = group.SelectedOccurrenceIds;
+        CanChangeSelection = reviewAllowsSelection && !group.Sealed;
         var seen = new HashSet<PhysicalFileKey>();
         Members = group.Members.OrderBy(member => member.Occurrence.Token.OccurrenceId)
             .Select(member => new ScanOccurrenceViewModel(member,
                 member.Occurrence.PhysicalFileKey is { } key && !seen.Add(key),
-                group.Sealed,
+                CanChangeSelection,
                 () => changeSelection(SelectionCommandKind.Toggle,
                     ImmutableArray.Create(member.Occurrence.Token.OccurrenceId))))
             .ToImmutableArray();
@@ -57,14 +59,17 @@ public sealed class ExactGroupViewModel
         var selectable = group.Members.Where(member => member.Eligibility == ReviewEligibilityState.Eligible)
             .Select(member => member.Occurrence.Token.OccurrenceId).Order().ToImmutableArray();
         SelectAllCommand = new AsyncCommand(() =>
-            changeSelection(SelectionCommandKind.ReplaceFocusedGroup, selectable));
+            changeSelection(SelectionCommandKind.ReplaceFocusedGroup, selectable),
+            canExecute: () => CanChangeSelection && !selectable.IsEmpty);
         ReplaceSelectionCommand = new AsyncCommand(parameter =>
-            changeSelection(SelectionCommandKind.ReplaceFocusedGroup, RequireIds(parameter)));
+            changeSelection(SelectionCommandKind.ReplaceFocusedGroup, RequireIds(parameter)),
+            canExecute: () => CanChangeSelection);
     }
 
     public Guid GroupId { get; }
     public long GroupRevision { get; }
     public long SelectionRevision { get; }
+    public bool CanChangeSelection { get; }
     public int PhysicalFileCount { get; }
     public int AliasCount { get; }
     public string Summary { get; }

@@ -21,7 +21,7 @@ public sealed class E1S4SqliteAcceptanceTests
         var rejected = OverrideEvidenceData.Create(
             Guid.Parse("46e1c5ee-238b-471f-933f-eb401e88425b"));
 
-        await using (var store = fixture.CreateStore())
+        await using (var store = fixture.CreateStore(SqliteFailureInjection.FailSecondInsert()))
         {
             Assert.Equal(OverridePersistOutcome.Persisted,
                 (await store.PersistAsync(original, TestContext.Current.CancellationToken)).Outcome);
@@ -29,16 +29,6 @@ public sealed class E1S4SqliteAcceptanceTests
                 (await store.PersistAsync(exactRetry, TestContext.Current.CancellationToken)).Outcome);
             Assert.Equal(OverridePersistOutcome.Conflict,
                 (await store.PersistAsync(conflict, TestContext.Current.CancellationToken)).Outcome);
-            await using (var connection = await fixture.OpenRawAsync())
-            {
-                await using var command = connection.CreateCommand();
-                command.CommandText = """
-                    CREATE TRIGGER reject_acceptance_insert BEFORE INSERT ON override_evidence
-                    BEGIN SELECT RAISE(ABORT, 'acceptance failure before commit'); END;
-                    """;
-                await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-            }
-
             Assert.Equal(OverridePersistOutcome.Unavailable,
                 (await store.PersistAsync(rejected, TestContext.Current.CancellationToken)).Outcome);
         }

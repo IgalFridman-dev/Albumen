@@ -59,6 +59,10 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
 
                 await using var connection = await OpenInitializedAsync(cancellationToken).ConfigureAwait(false);
                 await using var transaction = connection.BeginTransaction(deferred: false);
+                if (!await SchemaIsExactAsync(connection, cancellationToken, transaction).ConfigureAwait(false))
+                {
+                    throw new InvalidDataException("The SQLite override evidence schema changed before writing.");
+                }
                 var existing = await ReadRowAsync(connection, transaction, row.EvidenceId, cancellationToken)
                     .ConfigureAwait(false);
                 if (existing is not null)
@@ -89,6 +93,17 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
                     """;
                 Bind(command, row);
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                if (observer?.AfterInsert is { } afterInsert)
+                {
+                    await afterInsert(connection, transaction, cancellationToken).ConfigureAwait(false);
+                }
+
+                var inserted = await ReadRowAsync(connection, transaction, row.EvidenceId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (inserted is null || inserted != row || !TryReadEvidence(inserted, out _))
+                {
+                    throw new InvalidDataException("SQLite did not retain the exact canonical override evidence.");
+                }
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                 return new(OverridePersistOutcome.Persisted);
             }
@@ -256,6 +271,11 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
                 throw new InvalidDataException("SQLite WAL mode could not be enabled.");
             }
 
+            if (observer?.ConnectionInitialized is { } initialized)
+            {
+                await initialized(connection, cancellationToken).ConfigureAwait(false);
+            }
+
             return connection;
         }
         catch
@@ -337,14 +357,26 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
 
     private static async Task<bool> SchemaIsExactAsync(
         SqliteConnection connection,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SqliteTransaction? transaction = null)
     {
-        await using (var tables = connection.CreateCommand())
+        await using (var objects = connection.CreateCommand())
         {
-            tables.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 7) <> 'sqlite_' ORDER BY name;";
-            await using var reader = await tables.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            objects.Transaction = transaction;
+            objects.CommandText = "SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name;";
+            await using var reader = await objects.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-                || !reader.GetString(0).Equals("override_evidence", StringComparison.Ordinal)
+                || !reader.GetString(0).Equals("table", StringComparison.Ordinal)
+                || !reader.GetString(1).Equals("override_evidence", StringComparison.Ordinal)
+                || !reader.GetString(2).Equals("override_evidence", StringComparison.Ordinal)
+                || reader.IsDBNull(3)
+                || !NormalizeSql(reader.GetString(3)).Equals(NormalizeSql(OverrideEvidenceSchema.CreateTableSql),
+                    StringComparison.OrdinalIgnoreCase)
+                || !await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+                || !reader.GetString(0).Equals("index", StringComparison.Ordinal)
+                || !reader.GetString(1).Equals("sqlite_autoindex_override_evidence_1", StringComparison.Ordinal)
+                || !reader.GetString(2).Equals("override_evidence", StringComparison.Ordinal)
+                || !reader.IsDBNull(3)
                 || await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 return false;
@@ -353,6 +385,7 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
 
         await using (var columns = connection.CreateCommand())
         {
+            columns.Transaction = transaction;
             columns.CommandText = "PRAGMA table_info('override_evidence');";
             await using var reader = await columns.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             foreach (var expected in OverrideEvidenceSchema.Columns)
@@ -373,13 +406,7 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
             }
         }
 
-        await using var sql = connection.CreateCommand();
-        sql.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'override_evidence';";
-        var actual = Convert.ToString(await sql.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
-            CultureInfo.InvariantCulture);
-        return actual is not null
-            && NormalizeSql(actual).Equals(NormalizeSql(OverrideEvidenceSchema.CreateTableSql),
-                StringComparison.OrdinalIgnoreCase);
+        return true;
     }
 
     private static async Task<StoredRow?> ReadRowAsync(
@@ -647,4 +674,6 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
 
 internal sealed record SqliteOverrideEvidenceStoreObserver(
     Action<bool> LaneWaitStarted,
-    Func<CancellationToken, ValueTask> LaneEntered);
+    Func<CancellationToken, ValueTask> LaneEntered,
+    Func<SqliteConnection, CancellationToken, ValueTask>? ConnectionInitialized = null,
+    Func<SqliteConnection, SqliteTransaction, CancellationToken, ValueTask>? AfterInsert = null);

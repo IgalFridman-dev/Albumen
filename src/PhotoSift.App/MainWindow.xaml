@@ -387,8 +387,8 @@
                 <StackPanel>
                     <TextBlock x:Name="ReviewHeading" Text="Review" FontSize="24" FontWeight="SemiBold" Focusable="True"
                                AutomationProperties.Name="Survivor-safe Exact review" />
-                    <TextBlock x:Name="ReviewStatusText" Text="{Binding ScanStatus}" TextWrapping="Wrap"
-                               AutomationProperties.Name="Review scan status" AutomationProperties.ItemStatus="{Binding ScanStatus}"
+                    <TextBlock x:Name="ReviewStatusText" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
+                               AutomationProperties.Name="Review status" AutomationProperties.ItemStatus="{Binding ReviewStatusText}"
                                AutomationProperties.LiveSetting="Polite" />
                     <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" Margin="0,8" />
                     <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" />

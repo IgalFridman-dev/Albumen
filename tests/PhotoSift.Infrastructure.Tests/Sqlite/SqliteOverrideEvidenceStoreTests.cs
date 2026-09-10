@@ -35,25 +35,22 @@ public sealed class SqliteOverrideEvidenceStoreTests
     public async Task EveryWriteConnectionEnablesForeignKeysBeforeExecutingCommands()
     {
         await using var fixture = new SqliteOverrideFixture();
-        await using var store = fixture.CreateStore();
+        var observed = new List<long>();
+        var observer = new SqliteOverrideEvidenceStoreObserver(_ => { }, _ => ValueTask.CompletedTask,
+            ConnectionInitialized: async (connection, token) =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "PRAGMA foreign_keys;";
+                observed.Add(Convert.ToInt64(await command.ExecuteScalarAsync(token), CultureInfo.InvariantCulture));
+            });
+        await using var store = fixture.CreateStore(observer);
         Assert.Equal(OverridePersistOutcome.Persisted,
             (await store.PersistAsync(OverrideEvidenceData.Create(), TestContext.Current.CancellationToken)).Outcome);
-
-        await using (var connection = await fixture.OpenRawAsync())
-        {
-            await ExecuteAsync(connection, """
-                CREATE TRIGGER require_foreign_keys
-                BEFORE INSERT ON override_evidence
-                WHEN (SELECT foreign_keys FROM pragma_foreign_keys) = 0
-                BEGIN
-                    SELECT RAISE(ABORT, 'foreign keys disabled');
-                END;
-                """);
-        }
 
         var second = OverrideEvidenceData.Create(Guid.Parse("d2dcf033-0ab3-4138-8b78-4923ae74472c"));
         Assert.Equal(OverridePersistOutcome.Persisted,
             (await store.PersistAsync(second, TestContext.Current.CancellationToken)).Outcome);
+        Assert.Equal([1L, 1L], observed);
     }
 
     [Fact]
@@ -75,6 +72,69 @@ public sealed class SqliteOverrideEvidenceStoreTests
         OverrideEvidenceData.AssertEquivalent(evidence, read.Evidence);
         await using var connection = await fixture.OpenRawAsync();
         Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM override_evidence;"));
+    }
+
+    [Theory]
+    [InlineData("ignored-insert", "CREATE TRIGGER foreign_object BEFORE INSERT ON override_evidence BEGIN SELECT RAISE(IGNORE); END;")]
+    [InlineData("changed-history", "CREATE TRIGGER foreign_object AFTER INSERT ON override_evidence BEGIN DELETE FROM override_evidence WHERE evidence_id <> NEW.evidence_id; END;")]
+    [InlineData("changed-insert", "CREATE TRIGGER foreign_object AFTER INSERT ON override_evidence BEGIN UPDATE override_evidence SET consequence_text_version = 'changed' WHERE evidence_id = NEW.evidence_id; END;")]
+    [InlineData("view", "CREATE VIEW foreign_object AS SELECT evidence_id FROM override_evidence;")]
+    [InlineData("index", "CREATE INDEX foreign_object ON override_evidence (review_session_id);")]
+    public async Task ForeignVersionOneSchemaCannotForgeReceiptsOrChangeHistoryOrEnableWal(
+        string breakName, string foreignSchemaSql)
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var retained = OverrideEvidenceData.Create();
+        await using (var initialized = fixture.CreateStore())
+        {
+            Assert.Equal(OverridePersistOutcome.Persisted,
+                (await initialized.PersistAsync(retained, TestContext.Current.CancellationToken)).Outcome);
+        }
+
+        await using (var connection = await fixture.OpenRawAsync())
+        {
+            // Close the legitimate WAL before installing the unsupported object, so
+            // a rejected open must preserve both history and the original journal mode.
+            Assert.Equal("delete", Assert.IsType<string>(await ScalarAsync(connection,
+                "PRAGMA journal_mode = DELETE;")), ignoreCase: true);
+            await ExecuteAsync(connection, foreignSchemaSql);
+        }
+        SqliteConnection.ClearAllPools();
+        var before = await File.ReadAllBytesAsync(fixture.DatabasePath, TestContext.Current.CancellationToken);
+        var proposed = OverrideEvidenceData.Create(Guid.Parse("d2dcf033-0ab3-4138-8b78-4923ae74472c"));
+        OverridePersistResult receipt;
+        OverrideReadResult readback;
+        await using (var store = fixture.CreateStore())
+        {
+            receipt = await store.PersistAsync(proposed, TestContext.Current.CancellationToken);
+            readback = await store.ReadAsync(proposed.EvidenceId, TestContext.Current.CancellationToken);
+        }
+
+        // A success receipt cannot represent an ignored or trigger-rewritten row.
+        if (receipt.Outcome is OverridePersistOutcome.Persisted or OverridePersistOutcome.ExactRetry)
+        {
+            Assert.Equal(OverrideReadOutcome.Found, readback.Outcome);
+            OverrideEvidenceData.AssertEquivalent(proposed, readback.Evidence);
+        }
+
+        await using (var verify = await fixture.OpenRawAsync())
+        {
+            await using var retainedRow = verify.CreateCommand();
+            retainedRow.CommandText = "SELECT COUNT(*) FROM override_evidence WHERE evidence_id = $id;";
+            retainedRow.Parameters.AddWithValue("$id", retained.EvidenceId.Value.ToString("D", CultureInfo.InvariantCulture));
+            Assert.True(Convert.ToInt64(await retainedRow.ExecuteScalarAsync(TestContext.Current.CancellationToken),
+                CultureInfo.InvariantCulture) == 1, $"The {breakName} schema changed previously durable evidence.");
+        }
+
+        Assert.Equal(OverridePersistOutcome.Unavailable, receipt.Outcome);
+        Assert.Equal(OverrideReadOutcome.Unavailable, readback.Outcome);
+        SqliteConnection.ClearAllPools();
+        Assert.Equal(before, await File.ReadAllBytesAsync(fixture.DatabasePath, TestContext.Current.CancellationToken));
+        await using var unchanged = await fixture.OpenRawAsync();
+        Assert.Equal(1L, await ScalarLongAsync(unchanged, "PRAGMA user_version;"));
+        Assert.Equal("delete", Assert.IsType<string>(await ScalarAsync(unchanged,
+            "PRAGMA journal_mode;")), ignoreCase: true);
+        Assert.Equal(1L, await ScalarLongAsync(unchanged, "SELECT COUNT(*) FROM override_evidence;"));
     }
 
     [Fact]
@@ -242,18 +302,10 @@ public sealed class SqliteOverrideEvidenceStoreTests
     public async Task FailureBeforeCommitReturnsUnavailableAndDoesNotInsertOrReplace()
     {
         await using var fixture = new SqliteOverrideFixture();
-        await using var store = fixture.CreateStore();
+        await using var store = fixture.CreateStore(SqliteFailureInjection.FailSecondInsert());
         var first = OverrideEvidenceData.Create();
         Assert.Equal(OverridePersistOutcome.Persisted,
             (await store.PersistAsync(first, TestContext.Current.CancellationToken)).Outcome);
-        await using (var connection = await fixture.OpenRawAsync())
-        {
-            await ExecuteAsync(connection, """
-                CREATE TRIGGER reject_evidence BEFORE INSERT ON override_evidence
-                BEGIN SELECT RAISE(ABORT, 'injected pre-commit failure'); END;
-                """);
-        }
-
         var rejected = OverrideEvidenceData.Create(Guid.Parse("1e1d6efd-6e2c-4a30-b366-d9cf3a6baee8"));
         Assert.Equal(OverridePersistOutcome.Unavailable,
             (await store.PersistAsync(rejected, TestContext.Current.CancellationToken)).Outcome);
@@ -261,6 +313,45 @@ public sealed class SqliteOverrideEvidenceStoreTests
             (await store.ReadAsync(rejected.EvidenceId, TestContext.Current.CancellationToken)).Outcome);
         Assert.Equal(OverrideReadOutcome.Found,
             (await store.ReadAsync(first.EvidenceId, TestContext.Current.CancellationToken)).Outcome);
+    }
+
+    [Theory]
+    [InlineData("DELETE FROM override_evidence WHERE evidence_id = $id;")]
+    [InlineData("UPDATE override_evidence SET consequence_text_version = 'changed' WHERE evidence_id = $id;")]
+    public async Task TransactionReadbackRejectsMissingOrMismatchedInsertedRowAndRollsBack(string mutationSql)
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var retained = OverrideEvidenceData.Create();
+        await using (var initialized = fixture.CreateStore())
+        {
+            Assert.Equal(OverridePersistOutcome.Persisted,
+                (await initialized.PersistAsync(retained, TestContext.Current.CancellationToken)).Outcome);
+        }
+        var proposed = OverrideEvidenceData.Create(Guid.Parse("ec37e566-6bfe-4fc7-986c-fb4066786c6a"));
+        var observer = new SqliteOverrideEvidenceStoreObserver(_ => { }, _ => ValueTask.CompletedTask,
+            AfterInsert: async (connection, transaction, token) =>
+            {
+                await using var mutation = connection.CreateCommand();
+                mutation.Transaction = transaction;
+                mutation.CommandText = mutationSql;
+                mutation.Parameters.AddWithValue("$id", proposed.EvidenceId.Value.ToString("D", CultureInfo.InvariantCulture));
+                Assert.Equal(1, await mutation.ExecuteNonQueryAsync(token));
+            });
+        await using (var store = fixture.CreateStore(observer))
+        {
+            Assert.Equal(OverridePersistOutcome.Unavailable,
+                (await store.PersistAsync(proposed, TestContext.Current.CancellationToken)).Outcome);
+        }
+
+        await using var reopened = fixture.CreateStore();
+        Assert.Equal(OverrideReadOutcome.Missing,
+            (await reopened.ReadAsync(proposed.EvidenceId, TestContext.Current.CancellationToken)).Outcome);
+        var read = await reopened.ReadAsync(retained.EvidenceId, TestContext.Current.CancellationToken);
+        Assert.Equal(OverrideReadOutcome.Found, read.Outcome);
+        OverrideEvidenceData.AssertEquivalent(retained, read.Evidence);
+        await using var verify = await fixture.OpenRawAsync();
+        Assert.Equal(1L, await ScalarLongAsync(verify, "SELECT COUNT(*) FROM override_evidence;"));
+        Assert.Equal(0L, await ScalarLongAsync(verify, "SELECT COUNT(*) FROM sqlite_schema WHERE type IN ('trigger', 'view');"));
     }
 
     [Fact]
@@ -495,6 +586,24 @@ public sealed class SqliteOverrideEvidenceStoreTests
         var values = new List<string>();
         while (await reader.ReadAsync(TestContext.Current.CancellationToken)) values.Add(reader.GetString(0));
         return [.. values];
+    }
+}
+
+internal static class SqliteFailureInjection
+{
+    internal static SqliteOverrideEvidenceStoreObserver FailSecondInsert()
+    {
+        var inserts = 0;
+        return new(_ => { }, _ => ValueTask.CompletedTask,
+            AfterInsert: async (connection, transaction, token) =>
+            {
+                if (++inserts != 2) return;
+                await using var count = connection.CreateCommand();
+                count.Transaction = transaction;
+                count.CommandText = "SELECT COUNT(*) FROM override_evidence;";
+                Assert.Equal(2L, Convert.ToInt64(await count.ExecuteScalarAsync(token), CultureInfo.InvariantCulture));
+                throw new IOException("Injected failure after insert and before transaction commit.");
+            });
     }
 }
 

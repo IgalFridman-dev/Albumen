@@ -6,28 +6,33 @@ public sealed class AsyncCommand : ICommand
 {
     private readonly Func<object?, Task> execute;
     private readonly bool allowConcurrentExecutions;
+    private readonly Func<bool>? canExecute;
     private int executionCount;
 
     public AsyncCommand(
         Func<Task> execute,
-        bool allowConcurrentExecutions = false)
-        : this(_ => execute(), allowConcurrentExecutions)
+        bool allowConcurrentExecutions = false,
+        Func<bool>? canExecute = null)
+        : this(_ => execute(), allowConcurrentExecutions, canExecute)
     {
         ArgumentNullException.ThrowIfNull(execute);
     }
 
     public AsyncCommand(
         Func<object?, Task> execute,
-        bool allowConcurrentExecutions = false)
+        bool allowConcurrentExecutions = false,
+        Func<bool>? canExecute = null)
     {
         this.execute = execute ?? throw new ArgumentNullException(nameof(execute));
         this.allowConcurrentExecutions = allowConcurrentExecutions;
+        this.canExecute = canExecute;
     }
 
     public event EventHandler? CanExecuteChanged;
 
     public bool CanExecute(object? parameter) =>
-        allowConcurrentExecutions || Volatile.Read(ref executionCount) == 0;
+        (canExecute?.Invoke() ?? true)
+        && (allowConcurrentExecutions || Volatile.Read(ref executionCount) == 0);
 
     public async void Execute(object? parameter) => await ExecuteAsync(parameter);
 
@@ -35,7 +40,7 @@ public sealed class AsyncCommand : ICommand
 
     public async Task ExecuteAsync(object? parameter)
     {
-        if (!TryBeginExecution())
+        if (!(canExecute?.Invoke() ?? true) || !TryBeginExecution())
         {
             return;
         }

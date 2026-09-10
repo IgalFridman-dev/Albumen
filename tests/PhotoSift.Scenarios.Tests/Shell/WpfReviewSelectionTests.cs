@@ -519,7 +519,7 @@ public sealed class WpfReviewSelectionTests
         }
     }
 
-    private static void FinishOnSta(Task task, ManualWorkflowScheduler scheduler)
+    internal static void FinishOnSta(Task task, ManualWorkflowScheduler scheduler)
     {
         PumpWorkflowUntil(() => task.IsCompleted, scheduler);
         task.GetAwaiter().GetResult();

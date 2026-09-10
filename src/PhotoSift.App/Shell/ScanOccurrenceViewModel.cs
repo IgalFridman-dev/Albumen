@@ -14,13 +14,14 @@ public sealed class ScanOccurrenceViewModel
     internal ScanOccurrenceViewModel(
         ReviewMemberSnapshot member,
         bool isAlias,
-        bool sealedSelection,
+        bool selectionEnabled,
         Func<Task> toggle)
-        : this(member.Occurrence, isAlias, new AsyncCommand(toggle), member.Selected)
+        : this(member.Occurrence, isAlias, new AsyncCommand(toggle,
+            canExecute: () => selectionEnabled && member.Eligibility == ReviewEligibilityState.Eligible), member.Selected)
     {
         Eligibility = member.Eligibility;
         UnavailableReason = member.Reason;
-        CanSelect = member.Eligibility == ReviewEligibilityState.Eligible && !sealedSelection;
+        CanSelect = member.Eligibility == ReviewEligibilityState.Eligible && selectionEnabled;
         EligibilityText = member.Eligibility switch
         {
             ReviewEligibilityState.PendingRevalidation => "Pending revalidation — not selectable",
@@ -28,6 +29,8 @@ public sealed class ScanOccurrenceViewModel
             ReviewEligibilityState.Unavailable => $"Unavailable ({member.Reason}) — not selectable",
             _ => throw new InvalidOperationException($"Unknown Review eligibility: {member.Eligibility}"),
         };
+        if (member.Eligibility == ReviewEligibilityState.Eligible && !CanSelect)
+            EligibilityText += "; Review selection unavailable";
         AutomationName = $"{(member.Selected ? "Selected" : "Not selected")} occurrence: {member.Occurrence.DiscoveredPath}";
         ItemStatus = $"{EligibilityText}; {PathKind}; {Allocation}";
     }

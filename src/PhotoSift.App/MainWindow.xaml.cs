@@ -10,6 +10,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PhotoSift.App.Shell;
+using PhotoSift.Application.Review;
 using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Workflow;
 
@@ -86,7 +87,7 @@ public partial class MainWindow : Window
         {
             QueuePhaseFocus();
         }
-        if (eventArgs.PropertyName == nameof(ShellViewModel.ScanStatus))
+        if (eventArgs.PropertyName is nameof(ShellViewModel.ScanStatus) or nameof(ShellViewModel.ReviewStatusText))
         {
             QueueScanStatusAnnouncement();
         }
@@ -151,14 +152,15 @@ public partial class MainWindow : Window
 
     private void OnCanSelectFocusedReviewGroup(object sender, CanExecuteRoutedEventArgs eventArgs)
     {
-        eventArgs.CanExecute = FindDataContext<ExactGroupViewModel>(eventArgs.OriginalSource as DependencyObject) is not null;
-        eventArgs.Handled = eventArgs.CanExecute;
+        var group = FindDataContext<ExactGroupViewModel>(eventArgs.OriginalSource as DependencyObject);
+        eventArgs.CanExecute = group?.SelectAllCommand.CanExecute(null) is true;
+        eventArgs.Handled = group is not null;
     }
 
     private void OnSelectFocusedReviewGroup(object sender, ExecutedRoutedEventArgs eventArgs)
     {
         var group = FindDataContext<ExactGroupViewModel>(eventArgs.OriginalSource as DependencyObject);
-        if (group is null) return;
+        if (group is null || !group.SelectAllCommand.CanExecute(null)) return;
         group.SelectAllCommand.Execute(null);
         eventArgs.Handled = true;
     }
@@ -245,7 +247,9 @@ public partial class MainWindow : Window
     private void QueueScanStatusAnnouncement()
     {
         var expected = shellViewModel;
-        var status = expected?.ScanStatus;
+        // A Review fault uses its dedicated once-per-transition announcement.
+        if (expected is { IsReviewPhase: true, ReviewState: ReviewStatus.Faulted }) return;
+        var status = expected?.IsReviewPhase is true ? expected.ReviewStatusText : expected?.ScanStatus;
         var generation = dataContextGeneration;
         Dispatcher.InvokeAsync(() =>
         {
@@ -279,6 +283,7 @@ public partial class MainWindow : Window
     {
         var generation = dataContextGeneration;
         var expected = shellViewModel;
+        var session = expected?.ReviewSession;
         var payload = expected?.ReviewAnnouncement;
         if (string.IsNullOrEmpty(payload)) return;
         var sequence = ++reviewFailureAnnouncementSequence;
@@ -290,6 +295,7 @@ public partial class MainWindow : Window
             if (isClosed) skipReason = "closed";
             else if (generation != dataContextGeneration) skipReason = "data-context-generation";
             else if (!ReferenceEquals(expected, shellViewModel)) skipReason = "data-context-identity";
+            else if (expected?.ReviewSession != session) skipReason = "review-session";
             else if (expected?.IsReviewPhase is not true) skipReason = "not-review-phase";
             else if (!ReviewAnnouncementText.IsVisible) skipReason = "not-visible";
             if (skipReason is not null)
