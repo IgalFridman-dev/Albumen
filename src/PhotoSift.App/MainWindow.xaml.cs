@@ -24,6 +24,9 @@ public partial class MainWindow : Window
     private long reviewFailureAnnouncementSequence;
     private ReviewFocusIdentity? reviewFocusIdentity;
     private long reviewFocusGeneration;
+    private bool isRestoringReviewFocus;
+    private int reviewDialogFocusTransitionDepth;
+    private long reviewDialogFocusTransitionGeneration;
     private bool closeAfterLifetime;
     private Task? closeCompletionTask;
     private Task? exitLifetimeObservationTask;
@@ -114,16 +117,37 @@ public partial class MainWindow : Window
 
     private void OnReviewKeyboardFocusChanged(object sender, KeyboardFocusChangedEventArgs eventArgs)
     {
-        if (shellViewModel?.IsReviewPhase is not true
-            || eventArgs.NewFocus is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } element)
+        if (isRestoringReviewFocus
+            || reviewDialogFocusTransitionDepth != 0
+            || shellViewModel is not { IsReviewPhase: true, ReviewSession: { } session }
+            || eventArgs.NewFocus is not FrameworkElement element
+            || !ReferenceEquals(Keyboard.FocusedElement, element)
+            || !CanReceiveFocus(element))
             return;
-        var group = FindDataContext<ExactGroupViewModel>(element);
-        if (group is not null && shellViewModel.ReviewSession is { } session)
+        if (element.DataContext is ScanOccurrenceViewModel member
+            && FindDataContext<ExactGroupViewModel>(element) is { } group)
         {
             reviewFocusGeneration++;
             reviewFocusIdentity = new(session, group.GroupId, member.OccurrenceId);
+            return;
         }
+        if (reviewFocusIdentity?.Session != session || !IsDeliberateReviewFocusTarget(element)) return;
+        reviewFocusGeneration++;
+        reviewFocusIdentity = null;
     }
+
+    private bool IsDeliberateReviewFocusTarget(FrameworkElement element) =>
+        ReferenceEquals(element, ReviewHeading)
+        || ReferenceEquals(element, ApprovalPanel)
+        || element is ButtonBase;
+
+    internal long BeginReviewDialogFocusTransition()
+    {
+        reviewDialogFocusTransitionDepth++;
+        return ++reviewDialogFocusTransitionGeneration;
+    }
+
+    internal void EndReviewDialogFocusTransition() => reviewDialogFocusTransitionDepth--;
 
     private void OnCanSelectFocusedReviewGroup(object sender, CanExecuteRoutedEventArgs eventArgs)
     {
@@ -283,24 +307,74 @@ public partial class MainWindow : Window
 
     private void QueueReviewFocusRestoration()
     {
-        var identity = reviewFocusIdentity;
-        var generation = dataContextGeneration;
-        var focusGeneration = reviewFocusGeneration;
+        var token = CaptureReviewFocusRestorationToken(reviewFocusIdentity);
+        if (token is not null)
+            QueueReviewFocusRestoration(token, reviewDialogFocusTransitionGeneration);
+    }
+
+    internal ReviewFocusRestorationToken? CaptureReviewFocusRestorationToken(IInputElement invokingFocus)
+    {
+        if (invokingFocus is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } element
+            || shellViewModel?.ReviewSession is not { } session
+            || FindDataContext<ExactGroupViewModel>(element) is not { } group)
+            return null;
+        var identity = new ReviewFocusIdentity(session, group.GroupId, member.OccurrenceId);
+        return identity == reviewFocusIdentity ? CaptureReviewFocusRestorationToken(identity) : null;
+    }
+
+    private ReviewFocusRestorationToken? CaptureReviewFocusRestorationToken(ReviewFocusIdentity? identity)
+    {
         var expected = shellViewModel;
         if (identity is null || expected?.IsReviewPhase is not true
-            || expected.ReviewSession != identity.Session) return;
+            || expected.ReviewSession != identity.Session)
+            return null;
+        return new(expected, dataContextGeneration, identity.Session, identity.GroupId,
+            identity.OccurrenceId, reviewFocusGeneration);
+    }
+
+    internal void QueueReviewFocusRestoration(
+        ReviewFocusRestorationToken token,
+        long expectedDialogFocusTransitionGeneration)
+    {
         Dispatcher.InvokeAsync(() =>
         {
-            if (isClosed || generation != dataContextGeneration || focusGeneration != reviewFocusGeneration || !IsVisible
-                || Dispatcher.HasShutdownStarted || !ReferenceEquals(expected, shellViewModel)
-                || expected.IsReviewPhase is not true || expected.ReviewSession != identity.Session) return;
+            if (!IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration)) return;
             UpdateLayout();
+            if (!IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration)) return;
+            var identity = new ReviewFocusIdentity(token.Session, token.GroupId, token.OccurrenceId);
             var target = FindCurrentSelectionControl(this, identity);
-            if (target is null) return;
-            Activate();
-            if (target.Focus()) Keyboard.Focus(target);
+            if (target is null
+                || !IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration))
+                return;
+            isRestoringReviewFocus = true;
+            try
+            {
+                Activate();
+                if (IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration)
+                    && CanReceiveFocus(target) && target.Focus())
+                    Keyboard.Focus(target);
+            }
+            finally
+            {
+                isRestoringReviewFocus = false;
+            }
         }, DispatcherPriority.Input);
     }
+
+    private bool IsReviewFocusRestorationRelevant(
+        ReviewFocusRestorationToken token,
+        long expectedDialogFocusTransitionGeneration) =>
+        !isClosed
+        && token.DataContextGeneration == dataContextGeneration
+        && token.FocusGeneration == reviewFocusGeneration
+        && reviewDialogFocusTransitionDepth == 0
+        && expectedDialogFocusTransitionGeneration == reviewDialogFocusTransitionGeneration
+        && IsVisible
+        && !Dispatcher.HasShutdownStarted
+        && ReferenceEquals(token.ExpectedViewModel, shellViewModel)
+        && token.ExpectedViewModel.IsReviewPhase
+        && token.ExpectedViewModel.ReviewSession == token.Session
+        && reviewFocusIdentity == new ReviewFocusIdentity(token.Session, token.GroupId, token.OccurrenceId);
 
     private static ReviewSelectionCheckBox? FindCurrentSelectionControl(
         DependencyObject root,
@@ -410,6 +484,14 @@ public partial class MainWindow : Window
         reviewFocusIdentity = null;
         reviewFocusGeneration++;
     }
+
+    internal sealed record ReviewFocusRestorationToken(
+        ShellViewModel ExpectedViewModel,
+        int DataContextGeneration,
+        ReviewSessionPin Session,
+        Guid GroupId,
+        long OccurrenceId,
+        long FocusGeneration);
 
     private sealed record ReviewFocusIdentity(ReviewSessionPin Session, Guid GroupId, long OccurrenceId);
 }

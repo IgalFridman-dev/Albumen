@@ -44,24 +44,44 @@ public sealed class WpfReviewDialogService(Func<Window?> ownerProvider) : IRevie
         try
         {
             var dispatcher = owner?.Dispatcher ?? Dispatcher.CurrentDispatcher;
-            var focusIdentity = CaptureFocusIdentity(invokingFocus);
             var dialog = new SurvivorOverrideDialog(proposal);
             if (owner is { IsVisible: true }) dialog.Owner = owner;
-            using var registration = cancellationToken.Register(() => dialog.Dispatcher.BeginInvoke(
-                DispatcherPriority.Send, new Action(() =>
-                {
-                    if (dialog.IsVisible) dialog.Close();
-                })));
+            var focusTransitionOwner = owner as MainWindow;
+            var reviewFocusToken = focusTransitionOwner?.CaptureReviewFocusRestorationToken(invokingFocus);
+            var focusIdentity = focusTransitionOwner is null ? CaptureFocusIdentity(invokingFocus) : null;
+            var focusTransitionGeneration = focusTransitionOwner?.BeginReviewDialogFocusTransition() ?? 0;
             try
             {
-                dialog.ShowDialog();
-                return dialog.Result;
+                try
+                {
+                    using var registration = cancellationToken.Register(() => dialog.Dispatcher.BeginInvoke(
+                        DispatcherPriority.Send, new Action(() =>
+                        {
+                            if (dialog.IsVisible) dialog.Close();
+                        })));
+                    dialog.ShowDialog();
+                    return dialog.Result;
+                }
+                finally
+                {
+                    focusTransitionOwner?.EndReviewDialogFocusTransition();
+                }
             }
             finally
             {
                 if (!dispatcher.HasShutdownStarted)
-                    dispatcher.BeginInvoke(DispatcherPriority.Input,
-                        new Action(() => RestoreFocus(owner, invokingFocus, focusIdentity)));
+                {
+                    if (focusTransitionOwner is not null)
+                    {
+                        if (reviewFocusToken is not null)
+                            focusTransitionOwner.QueueReviewFocusRestoration(
+                                reviewFocusToken, focusTransitionGeneration);
+                    }
+                    else
+                    {
+                        RestoreFocus(owner, invokingFocus, focusIdentity);
+                    }
+                }
             }
         }
         finally

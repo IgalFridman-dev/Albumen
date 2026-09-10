@@ -382,6 +382,39 @@ public sealed class WpfReviewSelectionTests
     }
 
     [Fact]
+    public void QueuedRestoreDoesNotStealNewerDeliberateFocusFromReviewHeading()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = ReviewShellFixture.Ready();
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            try
+            {
+                window.Show();
+                Drain();
+                var original = Descendants<ReviewSelectionCheckBox>(window)
+                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                Assert.True(original.Focus());
+                Keyboard.Focus(original);
+                Assert.True(original.IsKeyboardFocused);
+
+                fixture.Workflow.Publish(ReviewData.WithSelection(
+                    fixture.Workflow.Current.Review, [1], 10));
+                var deliberate = Assert.IsType<TextBlock>(window.FindName("ReviewHeading"));
+                Assert.True(deliberate.Focus());
+                Keyboard.Focus(deliberate);
+                Assert.True(deliberate.IsKeyboardFocused);
+
+                Drain();
+
+                Assert.True(deliberate.IsKeyboardFocused);
+                Assert.Same(deliberate, Keyboard.FocusedElement);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
     public void QueuedRestoreDoesNotCrossAReplacementReviewSessionWithTheSameGroupIds()
     {
         RunOnSta(() =>

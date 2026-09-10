@@ -265,33 +265,32 @@ public sealed class WpfSurvivorOverrideDialogTests
                 Assert.True(selection.Focus());
                 Keyboard.Focus(selection);
 
-                DispatcherOperation? focusMove = null;
+                var incidentalFocusLoss = false;
                 Task? pending = null;
                 var failureResult = new ReviewCommandResult(ReviewCommandOutcome.PersistenceFailed, before);
                 try
                 {
                     var interaction = RunModalInteraction(owner, dialog =>
                     {
-                        dialog.Closed += (_, _) => focusMove = owner.Dispatcher.BeginInvoke(
-                            DispatcherPriority.Send, new Action(() =>
-                            {
-                                var heading = Assert.IsType<TextBlock>(owner.FindName("ReviewHeading"));
-                                heading.Focus();
-                                Keyboard.Focus(heading);
-                            }));
+                        dialog.Closed += (_, _) =>
+                        {
+                            var heading = Assert.IsType<TextBlock>(owner.FindName("ReviewHeading"));
+                            Assert.True(heading.Focus());
+                            Keyboard.Focus(heading);
+                            incidentalFocusLoss = heading.IsKeyboardFocused && !selection.IsKeyboardFocused;
+                        };
                         dialog.OnAffirm(dialog, new RoutedEventArgs(Button.ClickEvent));
                     }, () => pending = command.ExecuteAsync());
 
                     Assert.True(interaction.DialogClosed);
+                    Assert.True(incidentalFocusLoss,
+                        "Modal teardown did not move focus away from the invoking occurrence.");
                     Assert.Single(fixture.Workflow.Affirmations);
                     Assert.False(command.CanExecute(null));
                     delayed.TrySetResult(failureResult);
-                    PumpUntil(() => pending?.IsCompleted is true && focusMove?.Status
-                        is DispatcherOperationStatus.Completed or DispatcherOperationStatus.Aborted);
+                    PumpUntil(() => pending?.IsCompleted is true);
                     Assert.NotNull(pending);
                     pending.GetAwaiter().GetResult();
-                    if (focusMove?.Status == DispatcherOperationStatus.Completed)
-                        focusMove.Task.GetAwaiter().GetResult();
 
                     Assert.True(command.CanExecute(null));
                     var current = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(owner)
@@ -304,13 +303,56 @@ public sealed class WpfSurvivorOverrideDialogTests
                     if (pending is not null && !pending.IsCompleted)
                         PumpUntil(() => pending.IsCompleted);
                     if (pending?.IsCompleted is true) pending.GetAwaiter().GetResult();
-                    if (focusMove is not null && focusMove.Status == DispatcherOperationStatus.Pending)
-                        PumpUntil(() => focusMove.Status != DispatcherOperationStatus.Pending);
-                    if (focusMove?.Status == DispatcherOperationStatus.Completed)
-                        focusMove.Task.GetAwaiter().GetResult();
                 }
             }
             finally { owner.Close(); }
+        });
+    }
+
+    [Fact]
+    public void DeliberateReviewFocusAfterModalReturnSupersedesOwnerRestoration()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var owner = new MainWindow();
+            var service = new WpfReviewDialogService(() => owner);
+            var fixture = ReviewShellFixture.Ready();
+            owner.DataContext = fixture.ViewModel;
+            owner.Show();
+            WpfReviewSelectionTests.Drain();
+            try
+            {
+                var selection = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(owner)
+                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                Assert.True(selection.Focus());
+                Keyboard.Focus(selection);
+                Assert.True(selection.IsKeyboardFocused);
+
+                var result = SurvivorOverrideDialogResult.Affirm;
+                var interaction = RunModalInteraction(owner,
+                    dialog => dialog.Close(),
+                    () => result = service.ShowSurvivorOverrideAsync(
+                        ReviewData.Proposal(fixture.Workflow.Current.Review), selection,
+                        TestContext.Current.CancellationToken).GetAwaiter().GetResult(),
+                    drainAfterModal: false);
+
+                Assert.True(interaction.DialogClosed);
+                Assert.Equal(SurvivorOverrideDialogResult.Cancel, result);
+                var deliberate = Assert.IsType<TextBlock>(owner.FindName("ReviewHeading"));
+                Assert.True(deliberate.Focus());
+                Keyboard.Focus(deliberate);
+                Assert.True(deliberate.IsKeyboardFocused);
+
+                WpfReviewSelectionTests.Drain();
+
+                Assert.True(deliberate.IsKeyboardFocused);
+                Assert.Same(deliberate, Keyboard.FocusedElement);
+            }
+            finally
+            {
+                WpfReviewSelectionTests.Drain();
+                owner.Close();
+            }
         });
     }
 
@@ -368,7 +410,8 @@ public sealed class WpfSurvivorOverrideDialogTests
     internal static ModalInteraction RunModalInteraction(
         Window owner,
         Action<SurvivorOverrideDialog> activation,
-        Action showModal)
+        Action showModal,
+        bool drainAfterModal = true)
     {
         ExceptionDispatchInfo? callbackFailure = null;
         var callbackRan = false;
@@ -416,7 +459,7 @@ public sealed class WpfSurvivorOverrideDialogTests
             watchdog.Stop();
             foreach (var dialog in owner.OwnedWindows.OfType<SurvivorOverrideDialog>().ToArray())
                 dialog.Close();
-            WpfReviewSelectionTests.Drain();
+            if (drainAfterModal) WpfReviewSelectionTests.Drain();
         }
         Assert.Equal(DispatcherOperationStatus.Completed, activationOperation.Status);
         activationOperation.Task.GetAwaiter().GetResult();
