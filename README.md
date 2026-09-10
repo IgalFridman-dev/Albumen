@@ -4,10 +4,10 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Planning is complete and validated. E1-S1 implemented and verified the native offline application boundary and is done. E1-S2 is implemented, reviewed, verified by the complete offline Full gate, and done. E1-S3 implemented and verified byte-identical Exact grouping, alias accounting, protected leases, and retained directory traversal, and is done. E1-S4 is the sole eligible story and its approved survivor-safe Review/approval design is in implementation. E1-S5, E1-S6, and Epics 2–5 remain locked.
+Planning is complete and validated. E1-S1 through E1-S4 are implemented, reviewed, verified by their complete offline Full gates, and done. E1-S4 delivers survivor-safe Review Selection, protected revalidation, narrow durable override evidence, and an explicit immutable approval handoff. The execution policy remains pinned to E1-S4: E1-S5, E1-S6, and Epics 2–5 remain backlog until a separate authorized lifecycle decision.
 
-- Latest completed story: **E1-S3 — Detect byte-identical distinct files and hard-link aliases (done)**
-- Current implementation: **E1-S4 — Review Exact groups with survivor-safe Selection and approval (in progress)**
+- Latest completed story: **E1-S4 — Review Exact groups with survivor-safe Selection and approval (done)**
+- Current implementation authorization: **E1-S4 remains the policy lock; no later story is authorized**
 - Current tracking: [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)
 - Story contracts: [`_bmad-output/specs/`](_bmad-output/specs/)
 - Documentation map: [`docs/README.md`](docs/README.md)
@@ -17,6 +17,11 @@ Planning is complete and validated. E1-S1 implemented and verified the native of
 - E1-S3 exact corpus: [`docs/evidence/e1-s3/exact-corpus.md`](docs/evidence/e1-s3/exact-corpus.md)
 - E1-S3 concurrency: [`docs/evidence/e1-s3/concurrency.md`](docs/evidence/e1-s3/concurrency.md)
 - E1-S3 directory coverage: [`docs/evidence/e1-s3/directory-coverage.md`](docs/evidence/e1-s3/directory-coverage.md)
+- E1-S4 final verification: [`docs/evidence/e1-s4/verification.md`](docs/evidence/e1-s4/verification.md)
+- E1-S4 concurrency: [`docs/evidence/e1-s4/concurrency.md`](docs/evidence/e1-s4/concurrency.md)
+- E1-S4 SQLite override durability: [`docs/evidence/e1-s4/sqlite-override.md`](docs/evidence/e1-s4/sqlite-override.md)
+- E1-S4 Review accessibility: [`docs/evidence/e1-s4/review-accessibility.md`](docs/evidence/e1-s4/review-accessibility.md)
+- E1-S4 dependency/runtime inventory: [`docs/evidence/e1-s4/dependency-runtime-inventory.md`](docs/evidence/e1-s4/dependency-runtime-inventory.md)
 
 The mandatory first-epic sequence is:
 
@@ -41,7 +46,7 @@ The project deliberately excludes cloud inference, accounts, telemetry, automati
 5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
 6. Stop at E1-S6 until the safety gate is explicitly recorded as `PASS`.
 
-The repository contains the .NET 10/C# 14/WPF `win-x64` application with exact local Scope selection/preflight and accepted in-memory Exact duplicate detection/read-only Review, five test projects, and a NIC-free Golden Hyper-V VM verification gate. Survivor-safe Selection/approval is the active E1-S4 slice; Action and later-story behavior remain intentionally absent.
+The repository contains the .NET 10/C# 14/WPF `win-x64` application with exact local Scope selection/preflight, accepted Exact duplicate detection, survivor-safe Review Selection, narrow durable override evidence, and an immutable approved handoff, plus five test projects and a NIC-free Golden Hyper-V VM verification gate. Action execution and later-story behavior remain intentionally absent. E1-S4 approval does not authorize filesystem mutation; E1-S5 requires a separate lifecycle authorization.
 
 ## Repository layout
 
