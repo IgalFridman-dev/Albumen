@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
@@ -9,6 +10,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PhotoSift.App.Shell;
+using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Workflow;
 
 namespace PhotoSift.App;
@@ -19,7 +21,9 @@ public partial class MainWindow : Window
     private int dataContextGeneration;
     private bool isClosed;
     private int selectionSummaryAnnouncementGeneration;
+    private long reviewFailureAnnouncementSequence;
     private ReviewFocusIdentity? reviewFocusIdentity;
+    private long reviewFocusGeneration;
     private bool closeAfterLifetime;
     private Task? closeCompletionTask;
     private Task? exitLifetimeObservationTask;
@@ -43,6 +47,7 @@ public partial class MainWindow : Window
     {
         dataContextGeneration++;
         reviewFocusIdentity = null;
+        reviewFocusGeneration++;
         if (shellViewModel is not null)
         {
             shellViewModel.PropertyChanged -= OnViewModelPropertyChanged;
@@ -113,8 +118,11 @@ public partial class MainWindow : Window
             || eventArgs.NewFocus is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } element)
             return;
         var group = FindDataContext<ExactGroupViewModel>(element);
-        if (group is not null)
-            reviewFocusIdentity = new(group.GroupId, member.OccurrenceId);
+        if (group is not null && shellViewModel.ReviewSession is { } session)
+        {
+            reviewFocusGeneration++;
+            reviewFocusIdentity = new(session, group.GroupId, member.OccurrenceId);
+        }
     }
 
     private void OnCanSelectFocusedReviewGroup(object sender, CanExecuteRoutedEventArgs eventArgs)
@@ -247,14 +255,29 @@ public partial class MainWindow : Window
     {
         var generation = dataContextGeneration;
         var expected = shellViewModel;
+        var payload = expected?.ReviewAnnouncement;
+        if (string.IsNullOrEmpty(payload)) return;
+        var sequence = ++reviewFailureAnnouncementSequence;
+        ReviewAnnouncementText.CaptureDiagnostic(
+            ReviewAnnouncementDiagnosticStage.Queue, sequence, payload, generation);
         Dispatcher.InvokeAsync(() =>
         {
-            if (isClosed || generation != dataContextGeneration
-                || !ReferenceEquals(expected, shellViewModel) || expected?.IsReviewPhase is not true
-                || !ReviewAnnouncementText.IsVisible) return;
-            var peer = UIElementAutomationPeer.FromElement(ReviewAnnouncementText)
-                ?? UIElementAutomationPeer.CreatePeerForElement(ReviewAnnouncementText);
-            peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+            string? skipReason = null;
+            if (isClosed) skipReason = "closed";
+            else if (generation != dataContextGeneration) skipReason = "data-context-generation";
+            else if (!ReferenceEquals(expected, shellViewModel)) skipReason = "data-context-identity";
+            else if (expected?.IsReviewPhase is not true) skipReason = "not-review-phase";
+            else if (!ReviewAnnouncementText.IsVisible) skipReason = "not-visible";
+            if (skipReason is not null)
+            {
+                ReviewAnnouncementText.CaptureDiagnostic(
+                    ReviewAnnouncementDiagnosticStage.Skip, sequence, payload, generation,
+                    skipReason: skipReason);
+                return;
+            }
+            ReviewAnnouncementText.CaptureDiagnostic(
+                ReviewAnnouncementDiagnosticStage.Execute, sequence, payload, generation);
+            ReviewAnnouncementText.Announce(sequence, payload);
         }, DispatcherPriority.Background);
     }
 
@@ -262,13 +285,15 @@ public partial class MainWindow : Window
     {
         var identity = reviewFocusIdentity;
         var generation = dataContextGeneration;
+        var focusGeneration = reviewFocusGeneration;
         var expected = shellViewModel;
-        if (identity is null || expected?.IsReviewPhase is not true) return;
+        if (identity is null || expected?.IsReviewPhase is not true
+            || expected.ReviewSession != identity.Session) return;
         Dispatcher.InvokeAsync(() =>
         {
-            if (isClosed || generation != dataContextGeneration || !IsVisible
+            if (isClosed || generation != dataContextGeneration || focusGeneration != reviewFocusGeneration || !IsVisible
                 || Dispatcher.HasShutdownStarted || !ReferenceEquals(expected, shellViewModel)
-                || expected.IsReviewPhase is not true) return;
+                || expected.IsReviewPhase is not true || expected.ReviewSession != identity.Session) return;
             UpdateLayout();
             var target = FindCurrentSelectionControl(this, identity);
             if (target is null) return;
@@ -338,14 +363,18 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            System.Diagnostics.Debug.WriteLine(exception);
+            System.Diagnostics.Trace.WriteLine(exception);
         }
         finally
         {
             if (!isClosed && !Dispatcher.HasShutdownStarted)
             {
-                closeAfterLifetime = true;
-                Close();
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (isClosed) return;
+                    closeAfterLifetime = true;
+                    Close();
+                });
             }
         }
     }
@@ -358,7 +387,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            System.Diagnostics.Debug.WriteLine(exception);
+            System.Diagnostics.Trace.WriteLine(exception);
         }
     }
 
@@ -379,9 +408,10 @@ public partial class MainWindow : Window
         if (System.Windows.Application.Current is { } application)
             application.Exit -= OnApplicationExit;
         reviewFocusIdentity = null;
+        reviewFocusGeneration++;
     }
 
-    private sealed record ReviewFocusIdentity(Guid GroupId, long OccurrenceId);
+    private sealed record ReviewFocusIdentity(ReviewSessionPin Session, Guid GroupId, long OccurrenceId);
 }
 
 public class ReviewAutomationBorder : Border
@@ -397,6 +427,170 @@ internal sealed class ReviewAutomationBorderPeer(ReviewAutomationBorder owner)
     protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Group;
     protected override bool IsControlElementCore() => true;
     protected override bool IsContentElementCore() => true;
+}
+
+public class ReviewAnnouncementTextBlock : TextBlock
+{
+    private string itemStatus = string.Empty;
+    private ReviewAnnouncementDiagnosticBuffer? diagnosticBuffer;
+    private AutomationPeer? expectedDiagnosticPeer;
+
+    internal string ItemStatus => itemStatus;
+
+    internal void EnableDiagnosticCapture()
+    {
+        diagnosticBuffer = new ReviewAnnouncementDiagnosticBuffer(Environment.CurrentManagedThreadId);
+        expectedDiagnosticPeer = null;
+    }
+
+    internal ReviewAnnouncementDiagnosticSnapshot StopDiagnosticCapture()
+    {
+        var buffer = diagnosticBuffer;
+        diagnosticBuffer = null;
+        expectedDiagnosticPeer = null;
+        return buffer?.Snapshot() ?? new([], false, false, 0);
+    }
+
+    internal void CaptureDiagnostic(
+        ReviewAnnouncementDiagnosticStage stage,
+        long sequence,
+        string? payload,
+        int dataContextGeneration = 0,
+        string? previous = null,
+        string? current = null,
+        string? skipReason = null,
+        AutomationPeer? peer = null)
+    {
+        diagnosticBuffer?.Append(new(
+            stage,
+            sequence,
+            System.Diagnostics.Stopwatch.GetTimestamp(),
+            Environment.CurrentManagedThreadId,
+            payload,
+            dataContextGeneration,
+            previous,
+            current,
+            skipReason,
+            peer?.GetType(),
+            peer is null ? 0 : RuntimeHelpers.GetHashCode(peer),
+            expectedDiagnosticPeer?.GetType(),
+            expectedDiagnosticPeer is null ? 0 : RuntimeHelpers.GetHashCode(expectedDiagnosticPeer)));
+    }
+
+    internal void Announce(long sequence, string payload)
+    {
+        var previous = itemStatus;
+        itemStatus = payload;
+        CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.OwnerStatusSet,
+            sequence, payload, previous: previous, current: itemStatus);
+        var peer = UIElementAutomationPeer.FromElement(this)
+            ?? UIElementAutomationPeer.CreatePeerForElement(this);
+        CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.PeerResolved,
+            sequence, payload, previous: previous, current: itemStatus, peer: peer);
+        if (peer is ReviewAnnouncementTextBlockAutomationPeer announcementPeer)
+            announcementPeer.RaiseAnnouncement(sequence, previous, payload);
+    }
+
+    protected override AutomationPeer OnCreateAutomationPeer()
+    {
+        var peer = new ReviewAnnouncementTextBlockAutomationPeer(this);
+        if (diagnosticBuffer is not null) expectedDiagnosticPeer = peer;
+        _ = peer.GetItemStatus();
+        return peer;
+    }
+}
+
+internal sealed class ReviewAnnouncementTextBlockAutomationPeer(ReviewAnnouncementTextBlock owner)
+    : TextBlockAutomationPeer(owner)
+{
+    protected override string GetItemStatusCore()
+    {
+        var current = owner.ItemStatus;
+        owner.CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.GetItemStatusCore,
+            sequence: 0, payload: current, current: current, peer: this);
+        return current;
+    }
+
+    internal void RaiseAnnouncement(long sequence, string previous, string current)
+    {
+        owner.CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.PropertyRaiseBegin,
+            sequence, current, previous: previous, current: current, peer: this);
+        _ = GetItemStatus();
+        RaisePropertyChangedEvent(AutomationElementIdentifiers.ItemStatusProperty, previous, current);
+        owner.CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.PropertyRaiseReturn,
+            sequence, current, previous: previous, current: current, peer: this);
+        owner.CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.LiveRaiseBegin,
+            sequence, current, previous: previous, current: current, peer: this);
+        RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        owner.CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.LiveRaiseReturn,
+            sequence, current, previous: previous, current: current, peer: this);
+    }
+}
+
+internal enum ReviewAnnouncementDiagnosticStage
+{
+    Queue,
+    Execute,
+    Skip,
+    OwnerStatusSet,
+    PeerResolved,
+    PropertyRaiseBegin,
+    PropertyRaiseReturn,
+    LiveRaiseBegin,
+    LiveRaiseReturn,
+    GetItemStatusCore,
+}
+
+internal readonly record struct ReviewAnnouncementDiagnosticRecord(
+    ReviewAnnouncementDiagnosticStage Stage,
+    long NotificationSequence,
+    long Timestamp,
+    int ThreadId,
+    string? Payload,
+    int DataContextGeneration,
+    string? Previous,
+    string? Current,
+    string? SkipReason,
+    Type? PeerType,
+    int PeerIdentity,
+    Type? ExpectedPeerType,
+    int ExpectedPeerIdentity);
+
+internal sealed record ReviewAnnouncementDiagnosticSnapshot(
+    ReviewAnnouncementDiagnosticRecord[] Records,
+    bool CapacityOverflow,
+    bool WrongThread,
+    int OwnerThreadId);
+
+internal sealed class ReviewAnnouncementDiagnosticBuffer(int ownerThreadId)
+{
+    private const int Capacity = 256;
+    private readonly ReviewAnnouncementDiagnosticRecord[] records = new ReviewAnnouncementDiagnosticRecord[Capacity];
+    private int writeIndex;
+    private bool capacityOverflow;
+    private bool wrongThread;
+
+    internal void Append(ReviewAnnouncementDiagnosticRecord record)
+    {
+        if (record.ThreadId != ownerThreadId)
+        {
+            wrongThread = true;
+            return;
+        }
+        if (writeIndex >= records.Length)
+        {
+            capacityOverflow = true;
+            return;
+        }
+        records[writeIndex++] = record;
+    }
+
+    internal ReviewAnnouncementDiagnosticSnapshot Snapshot()
+    {
+        var captured = new ReviewAnnouncementDiagnosticRecord[writeIndex];
+        Array.Copy(records, captured, writeIndex);
+        return new(captured, capacityOverflow, wrongThread, ownerThreadId);
+    }
 }
 
 public class ReviewSelectionCheckBox : CheckBox

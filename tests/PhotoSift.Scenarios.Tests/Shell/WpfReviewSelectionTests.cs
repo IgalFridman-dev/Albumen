@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -25,6 +26,57 @@ namespace PhotoSift.Scenarios.Tests.Shell;
 [Collection("WPF UI Automation")]
 public sealed class WpfReviewSelectionTests
 {
+    [Fact]
+    public void VisibleReviewPhaseNavigationAdmitsFreshScanWithoutResettingAnExistingReview()
+    {
+        RunOnSta(() =>
+        {
+            var scope = new ExactShellFixture.StaticScope();
+            var scheduler = new ManualWorkflowScheduler();
+            var scan = new CompletedScanOwner();
+            var review = new OpeningReviewOwner();
+            var workflow = new PhotoSiftWorkflow(scope, scan, scheduler, review);
+            var viewModel = new ShellViewModel(scope, workflow);
+            var window = new MainWindow { DataContext = viewModel };
+            try
+            {
+                FinishOnSta(viewModel.ContinueCommand.ExecuteAsync(), scheduler);
+                FinishOnSta(viewModel.ConfirmExactRulesCommand.ExecuteAsync(), scheduler);
+                scan.Publish(CompletedScanOwner.CreateCompleted());
+                scheduler.Drain();
+                window.Show();
+                Drain();
+
+                InvokeReviewPhase(window, viewModel, scheduler);
+
+                var admittedPin = workflow.Current.Review.Pin;
+                Assert.NotNull(admittedPin);
+                Assert.Equal(1, review.OpenCount);
+                Assert.True(viewModel.IsReviewPhase);
+
+                review.Publish(workflow.Current.Review with { Sealed = true });
+                scheduler.Drain();
+                FinishOnSta(viewModel.NavigateCommand.ExecuteAsync(WorkflowPhase.Scan), scheduler);
+                InvokeReviewPhase(window, viewModel, scheduler);
+
+                Assert.Equal(1, review.OpenCount);
+                Assert.Equal(admittedPin, workflow.Current.Review.Pin);
+                Assert.True(workflow.Current.Review.Sealed);
+            }
+            finally
+            {
+                try
+                {
+                    window.Close();
+                }
+                finally
+                {
+                    FinishOnSta(viewModel.DisposeAsync().AsTask(), scheduler);
+                }
+            }
+        });
+    }
+
     [Fact]
     public void ReviewProjectsEmptySelectionEligibilityReasonsPathsAndPhysicalEvidence()
     {
@@ -290,6 +342,80 @@ public sealed class WpfReviewSelectionTests
     }
 
     [Fact]
+    public void QueuedRestoreDoesNotStealNewerDeliberateReviewFocus()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = ReviewShellFixture.Ready();
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            try
+            {
+                window.Show();
+                Drain();
+                var first = Descendants<ReviewSelectionCheckBox>(window)
+                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                Assert.True(first.Focus());
+                Keyboard.Focus(first);
+
+                fixture.Workflow.Publish(ReviewData.WithSelection(
+                    fixture.Workflow.Current.Review, [1], 10));
+                window.UpdateLayout();
+                var members = Descendants<ListBox>(window).Single(control =>
+                    AutomationProperties.GetName(control) == "Review occurrences and selection controls");
+                var fourth = fixture.ViewModel.ExactGroups[0].Members.Single(member => member.OccurrenceId == 4);
+                _ = RealizeContainer(members, fourth, drain: false);
+                var deliberate = Descendants<ReviewSelectionCheckBox>(window)
+                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 4 });
+                Assert.True(deliberate.Focus());
+                Keyboard.Focus(deliberate);
+                Assert.True(deliberate.IsKeyboardFocused);
+
+                Drain();
+
+                Assert.True(deliberate.IsKeyboardFocused);
+                Assert.Equal(4, Assert.IsType<ScanOccurrenceViewModel>(
+                    Assert.IsAssignableFrom<ReviewSelectionCheckBox>(Keyboard.FocusedElement)
+                        .DataContext).OccurrenceId);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
+    public void QueuedRestoreDoesNotCrossAReplacementReviewSessionWithTheSameGroupIds()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = ReviewShellFixture.Ready();
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            try
+            {
+                window.Show();
+                Drain();
+                var original = Descendants<ReviewSelectionCheckBox>(window)
+                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                Assert.True(original.Focus());
+                Keyboard.Focus(original);
+
+                var current = fixture.Workflow.Current.Review;
+                var replacement = current with
+                {
+                    Pin = new ReviewSessionPin(Guid.Parse("21000000-0000-0000-0000-000000000021"), current.Pin!.Scan),
+                    SelectionRevision = 1,
+                };
+                fixture.Workflow.Publish(replacement);
+                Drain();
+
+                var replacementControl = Descendants<ReviewSelectionCheckBox>(window)
+                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                Assert.NotSame(original, replacementControl);
+                Assert.False(replacementControl.IsKeyboardFocused);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
     public void UnavailableHighLinkEvidenceNeverClaimsAnExternalSurvivor()
     {
         var fixture = ReviewShellFixture.Ready(review: ReviewData.ExternalUnavailableSnapshot());
@@ -326,13 +452,66 @@ public sealed class WpfReviewSelectionTests
         Assert.NotEqual(Guid.Empty, command.CommandId);
     }
 
-    private static ListBoxItem RealizeContainer(ListBox list, object item)
+    private static void InvokeReviewPhase(
+        MainWindow window,
+        ShellViewModel viewModel,
+        ManualWorkflowScheduler scheduler)
+    {
+        window.UpdateLayout();
+        var button = Descendants<Button>(window)
+            .Single(control => control.DataContext is PhaseItemViewModel { Phase: WorkflowPhase.Review });
+        Assert.True(button.IsVisible);
+        Assert.True(button.IsEnabled);
+        var peer = UIElementAutomationPeer.CreatePeerForElement(button);
+        Assert.NotNull(peer);
+        var command = viewModel.NavigateCommand;
+        var started = false;
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void ObserveCommandExecution(object? sender, EventArgs eventArgs)
+        {
+            if (!command.CanExecute(WorkflowPhase.Review)) started = true;
+            else if (started) completed.TrySetResult();
+        }
+        command.CanExecuteChanged += ObserveCommandExecution;
+        try
+        {
+            Assert.IsAssignableFrom<IInvokeProvider>(peer.GetPattern(PatternInterface.Invoke)).Invoke();
+            PumpWorkflowUntil(() => completed.Task.IsCompleted, scheduler);
+            completed.Task.GetAwaiter().GetResult();
+            Assert.True(started, "The real Review phase button did not begin its bound command.");
+        }
+        finally
+        {
+            command.CanExecuteChanged -= ObserveCommandExecution;
+        }
+    }
+
+    private static void FinishOnSta(Task task, ManualWorkflowScheduler scheduler)
+    {
+        PumpWorkflowUntil(() => task.IsCompleted, scheduler);
+        task.GetAwaiter().GetResult();
+        scheduler.Drain();
+        Drain();
+    }
+
+    private static void PumpWorkflowUntil(Func<bool> condition, ManualWorkflowScheduler scheduler)
+    {
+        var started = Stopwatch.GetTimestamp();
+        while (!condition() && Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2))
+        {
+            scheduler.Drain();
+            Drain();
+        }
+        Assert.True(condition(), "The real workflow did not settle before the two-second deadline.");
+    }
+
+    private static ListBoxItem RealizeContainer(ListBox list, object item, bool drain = true)
     {
         for (var attempt = 0; attempt < 5; attempt++)
         {
             list.ScrollIntoView(item);
             list.UpdateLayout();
-            Drain();
+            if (drain) Drain();
             list.ApplyTemplate();
             if (list.ItemContainerGenerator.ContainerFromItem(item) is ListBoxItem container)
                 return container;

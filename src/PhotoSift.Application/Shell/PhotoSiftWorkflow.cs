@@ -58,9 +58,15 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
                 RefreshScope();
                 var acceptedScan = scan.Current;
                 if (review is null || acceptedScan.Status is not (ScanStatus.Complete or ScanStatus.Incomplete)
-                    || (expectedScan is not null && expectedScan != acceptedScan.Pin)
-                    || (!navigate && ReviewMatchesScan(review.Current, acceptedScan))) return null;
-                return CaptureReviewRequest(acceptedScan);
+                    || (expectedScan is not null && expectedScan != acceptedScan.Pin)) return null;
+                var request = CaptureReviewRequest(acceptedScan);
+                if (request is null) return null;
+                var acceptedReview = review.Current;
+                if (!ReviewMatchesScan(acceptedReview, acceptedScan)) return request;
+                if (navigate)
+                    Publish(current with { Scan = acceptedScan, Review = acceptedReview,
+                        CurrentPhase = WorkflowPhase.Review });
+                return null;
             }).ConfigureAwait(false);
             if (request is null) return;
             var result = await review!.OpenAsync(request, CancellationToken.None).ConfigureAwait(false);
@@ -140,11 +146,14 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         await scan.CancelAsync().ConfigureAwait(false);
     }
 
-    public Task NavigateAsync(WorkflowPhase phase) => ObserveCommandAsync(() => inbox.InvokeAsync(() =>
-    {
-        RefreshScope();
-        if (CanNavigate(current, phase)) Publish(current with { CurrentPhase = phase });
-    }));
+    public Task NavigateAsync(WorkflowPhase phase) => ObserveCommandAsync(() =>
+        phase == WorkflowPhase.Review && review is not null
+            ? OpenReviewCoreAsync(navigate: true)
+            : inbox.InvokeAsync(() =>
+            {
+                RefreshScope();
+                if (CanNavigate(current, phase)) Publish(current with { CurrentPhase = phase });
+            }));
 
     private void OnScopeChanged(object? sender, ShellSnapshot snapshot)
     {

@@ -201,6 +201,7 @@ internal sealed class ExactShellFixture
             new(null, ScanStatus.Idle, new(ScanStageState.Pending, ScanReason.None), [], [], new(0, 0, 0, 0, 0, 0)), WorkflowPhase.ChooseScope, InitialWorkflow.Create());
         public List<string> Actions { get; } = [];
         public bool HoldDisposal { get; set; }
+        public Exception? DisposalFailure { get; set; }
         public int DisposeCalls { get; private set; }
         public TaskCompletionSource DisposeEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource DisposeRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -224,6 +225,7 @@ internal sealed class ExactShellFixture
             DisposeCalls++;
             DisposeEntered.TrySetResult();
             if (HoldDisposal) await DisposeRelease.Task;
+            if (DisposalFailure is not null) throw DisposalFailure;
         }
     }
 }
@@ -285,6 +287,11 @@ internal sealed class OpeningReviewOwner : IReviewCoordinator
     public ReviewSnapshot Current { get; private set; } = ReviewSnapshot.Closed;
     public int OpenCount { get; private set; }
     public event EventHandler<ReviewSnapshot>? SnapshotChanged;
+    public void Publish(ReviewSnapshot snapshot)
+    {
+        Current = snapshot;
+        SnapshotChanged?.Invoke(this, snapshot);
+    }
     public Task<ReviewCommandResult> OpenAsync(ReviewOpenRequest request, CancellationToken cancellationToken)
     {
         OpenCount++;

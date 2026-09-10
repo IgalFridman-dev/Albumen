@@ -100,6 +100,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand ApproveReviewCommand { get; }
     public AsyncCommand NavigateCommand { get; }
     public WorkflowPhase CurrentPhase => photoSnapshot?.CurrentPhase ?? WorkflowPhase.ChooseScope;
+    internal ReviewSessionPin? ReviewSession => photoSnapshot?.Review.Pin;
     public bool IsChooseScopePhase => CurrentPhase == WorkflowPhase.ChooseScope;
     public bool IsConfirmRulesPhase => CurrentPhase == WorkflowPhase.ConfirmRules;
     public bool IsScanPhase => CurrentPhase == WorkflowPhase.Scan;

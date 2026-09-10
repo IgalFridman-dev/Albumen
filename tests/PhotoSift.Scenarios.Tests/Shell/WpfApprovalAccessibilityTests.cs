@@ -2,7 +2,11 @@ using System.Collections.Immutable;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
+using System.Runtime.CompilerServices;
+using System.Reflection;
+using System.Text;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
@@ -22,6 +26,11 @@ namespace PhotoSift.Scenarios.Tests.Shell;
 [Collection("WPF UI Automation")]
 public sealed class WpfApprovalAccessibilityTests
 {
+    private const string PersistenceFailureAnnouncement =
+        "Override evidence persistence failed; Selection is unchanged.";
+    private const string StaleFailureAnnouncement =
+        "The Review changed; the stale command made no change.";
+
     [Fact]
     public void ApprovalPanelDisclosesEveryCountRecoveryCoverageUnresolvedFactAndBoundaryInSourceOrder()
     {
@@ -168,30 +177,256 @@ public sealed class WpfApprovalAccessibilityTests
     }
 
     [Fact]
-    public void QueuedSelectionSummaryCannotCancelTheOnlyFailureLiveAnnouncement()
+    public Task QueuedSelectionSummaryCannotCancelTheOnlyFailureLiveAnnouncement()
     {
-        WpfReviewSelectionTests.RunOnSta(() =>
+        return RunIsolatedAsync("live-duplicate", nameof(QueuedSelectionSummaryCannotCancelTheOnlyFailureLiveAnnouncement), stage =>
         {
-            var fixture = ReviewShellFixture.Ready();
-            var window = new MainWindow { DataContext = fixture.ViewModel };
-            try
+            ExceptionDispatchInfo? scenarioFailure = null;
+            var cleanupSafe = false;
+            WpfReviewSelectionTests.RunOnSta(() =>
             {
-                window.Show();
-                WpfReviewSelectionTests.Drain();
-                var handle = new WindowInteropHelper(window).Handle;
-                Assert.NotEqual(nint.Zero, handle);
-                var current = fixture.Workflow.Current.Review;
-
-                VerifyFailureAnnouncementOnMta(handle, () =>
+                var fixture = ReviewShellFixture.Ready();
+                var window = new MainWindow { DataContext = fixture.ViewModel };
+                var diagnostics = new UiaDiagnosticLedger();
+                var status = Assert.IsType<ReviewAnnouncementTextBlock>(window.FindName("ReviewAnnouncementText"));
+                var captureEnabled = false;
+                object? productionDiagnostics = null;
+                Exception? scenarioError = null;
+                Exception? diagnosticError = null;
+                UiaDiagnosticSettlement? settlement = null;
+                var windowCloseSucceeded = false;
+                long viewModelSequence = 0;
+                PropertyChangedEventHandler viewModelObserver = (_, change) =>
                 {
-                    fixture.Workflow.NextSelectionResult = new(ReviewCommandOutcome.PersistenceFailed, current);
-                    var pending = Assert.IsType<AsyncCommand>(fixture.ViewModel.ExactGroups[0].Members[0]
-                        .ToggleSelectionCommand).ExecuteAsync();
-                    fixture.Workflow.Publish(ReviewData.WithSelection(current, [4], 10));
-                    return pending;
-                });
-            }
-            finally { window.Close(); }
+                    if (change.PropertyName == nameof(ShellViewModel.ReviewAnnouncement))
+                        diagnostics.Record("vm-notification", ++viewModelSequence,
+                            fixture.ViewModel.ReviewAnnouncement, fixture.ViewModel);
+                };
+                try
+                {
+                    EnableProductionDiagnostics(status);
+                    captureEnabled = true;
+                    fixture.ViewModel.PropertyChanged += viewModelObserver;
+                    window.Show();
+                    WpfReviewSelectionTests.Drain();
+                    RecordSetupPeer(status, diagnostics);
+                    var handle = new WindowInteropHelper(window).Handle;
+                    Assert.NotEqual(nint.Zero, handle);
+                    var current = fixture.Workflow.Current.Review;
+                    settlement = VerifyFailureLiveAnnouncementOnMta(
+                        handle, PersistenceFailureAnnouncement, diagnostics, () =>
+                    {
+                        diagnostics.Record("command-persistence-begin", payload: "PersistenceFailed");
+                        fixture.Workflow.NextSelectionResult = new(ReviewCommandOutcome.PersistenceFailed, current);
+                        var pending = Assert.IsType<AsyncCommand>(fixture.ViewModel.ExactGroups[0].Members[0]
+                            .ToggleSelectionCommand).ExecuteAsync();
+                        diagnostics.Record("command-persistence-return", payload: "PersistenceFailed");
+                        fixture.Workflow.Publish(ReviewData.WithSelection(current, [4], 10));
+                        diagnostics.Record("selection-publication-return", payload: "revision=10");
+                        return pending;
+                    });
+                    diagnosticError = settlement.DiagnosticFailure?.SourceException;
+                    settlement.OriginalFailure?.Throw();
+                }
+                catch (Exception error)
+                {
+                    scenarioError = error;
+                }
+                finally
+                {
+                    fixture.ViewModel.PropertyChanged -= viewModelObserver;
+                    try
+                    {
+                        if (captureEnabled && settlement?.SnapshotSafe is true)
+                            productionDiagnostics = StopProductionDiagnostics(status);
+                        else if (diagnosticError is null)
+                            diagnosticError = new IsolatedScenarioFailureException(
+                                "The UIA live diagnostic did not reach safe snapshot settlement.");
+                    }
+                    catch (Exception error)
+                    {
+                        diagnosticError ??= error;
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            window.Close();
+                            windowCloseSucceeded = true;
+                        }
+                        catch (Exception error)
+                        {
+                            diagnosticError ??= error;
+                        }
+                    }
+                }
+                cleanupSafe = settlement?.SnapshotSafe is true && windowCloseSucceeded;
+                if (settlement?.SnapshotSafe is not true)
+                {
+                    scenarioFailure = ExceptionDispatchInfo.Capture(new IsolatedScenarioFailureException(
+                        "diagnostic-settlement-unsafe: snapshot and ledgers were not read."));
+                }
+                else
+                {
+                    var invalid = diagnostics.Invalid;
+                    try
+                    {
+                        invalid |= ProductionDiagnosticsInvalid(productionDiagnostics);
+                        AssertProductAnnouncementCapture(productionDiagnostics, diagnostics,
+                            [PersistenceFailureAnnouncement]);
+                    }
+                    catch (Exception error)
+                    {
+                        scenarioError ??= error;
+                        invalid = true;
+                    }
+                    if (scenarioError is not null || diagnosticError is not null || invalid)
+                    {
+                        try
+                        {
+                            scenarioFailure = ExceptionDispatchInfo.Capture(new IsolatedScenarioFailureException(
+                                FormatDiagnostics(scenarioError, diagnosticError,
+                                    productionDiagnostics, diagnostics)));
+                        }
+                        catch (Exception error)
+                        {
+                            scenarioFailure = ExceptionDispatchInfo.Capture(new IsolatedScenarioFailureException(
+                                "diagnostic-format-failed: " + error));
+                        }
+                    }
+                }
+            });
+            if (cleanupSafe) stage.CleanupSucceeded();
+            scenarioFailure?.Throw();
+        });
+    }
+
+    [Fact]
+    public Task QueuedFailureAnnouncementsPreserveTheirOriginatingPayloadsOnceAndInOrder()
+    {
+        return RunIsolatedAsync("item-status", nameof(QueuedFailureAnnouncementsPreserveTheirOriginatingPayloadsOnceAndInOrder), stage =>
+        {
+            ExceptionDispatchInfo? scenarioFailure = null;
+            var cleanupSafe = false;
+            WpfReviewSelectionTests.RunOnSta(() =>
+            {
+                var fixture = ReviewShellFixture.Ready();
+                var window = new MainWindow { DataContext = fixture.ViewModel };
+                var diagnostics = new UiaDiagnosticLedger();
+                var status = Assert.IsType<ReviewAnnouncementTextBlock>(window.FindName("ReviewAnnouncementText"));
+                var captureEnabled = false;
+                object? productionDiagnostics = null;
+                Exception? scenarioError = null;
+                Exception? diagnosticError = null;
+                UiaDiagnosticSettlement? settlement = null;
+                var windowCloseSucceeded = false;
+                long viewModelSequence = 0;
+                PropertyChangedEventHandler viewModelObserver = (_, change) =>
+                {
+                    if (change.PropertyName == nameof(ShellViewModel.ReviewAnnouncement))
+                        diagnostics.Record("vm-notification", ++viewModelSequence,
+                            fixture.ViewModel.ReviewAnnouncement, fixture.ViewModel);
+                };
+                try
+                {
+                    EnableProductionDiagnostics(status);
+                    captureEnabled = true;
+                    fixture.ViewModel.PropertyChanged += viewModelObserver;
+                    window.Show();
+                    WpfReviewSelectionTests.Drain();
+                    RecordSetupPeer(status, diagnostics);
+                    var handle = new WindowInteropHelper(window).Handle;
+                    Assert.NotEqual(nint.Zero, handle);
+                    var current = fixture.Workflow.Current.Review;
+                    settlement = VerifyFailurePropertyAnnouncementsOnMta(
+                        handle, [PersistenceFailureAnnouncement, StaleFailureAnnouncement],
+                        diagnostics, async () =>
+                    {
+                        diagnostics.Record("command-persistence-begin", payload: "PersistenceFailed");
+                        fixture.Workflow.NextSelectionResult =
+                            new(ReviewCommandOutcome.PersistenceFailed, current);
+                        await Assert.IsType<AsyncCommand>(fixture.ViewModel.ExactGroups[0].Members[0]
+                            .ToggleSelectionCommand).ExecuteAsync();
+                        diagnostics.Record("command-persistence-return", payload: "PersistenceFailed");
+                        diagnostics.Record("command-stale-begin", payload: "Stale");
+                        fixture.Workflow.NextSelectionResult = new(ReviewCommandOutcome.Stale, current);
+                        await Assert.IsType<AsyncCommand>(fixture.ViewModel.ExactGroups[0].Members[0]
+                            .ToggleSelectionCommand).ExecuteAsync();
+                        diagnostics.Record("command-stale-return", payload: "Stale");
+                    });
+                    diagnosticError = settlement.DiagnosticFailure?.SourceException;
+                    settlement.OriginalFailure?.Throw();
+                }
+                catch (Exception error)
+                {
+                    scenarioError = error;
+                }
+                finally
+                {
+                    fixture.ViewModel.PropertyChanged -= viewModelObserver;
+                    try
+                    {
+                        if (captureEnabled && settlement?.SnapshotSafe is true)
+                            productionDiagnostics = StopProductionDiagnostics(status);
+                        else if (diagnosticError is null)
+                            diagnosticError = new IsolatedScenarioFailureException(
+                                "The UIA property diagnostic did not reach safe snapshot settlement.");
+                    }
+                    catch (Exception error)
+                    {
+                        diagnosticError ??= error;
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            window.Close();
+                            windowCloseSucceeded = true;
+                        }
+                        catch (Exception error)
+                        {
+                            diagnosticError ??= error;
+                        }
+                    }
+                }
+                cleanupSafe = settlement?.SnapshotSafe is true && windowCloseSucceeded;
+                if (settlement?.SnapshotSafe is not true)
+                {
+                    scenarioFailure = ExceptionDispatchInfo.Capture(new IsolatedScenarioFailureException(
+                        "diagnostic-settlement-unsafe: snapshot and ledgers were not read."));
+                }
+                else
+                {
+                    var invalid = diagnostics.Invalid;
+                    try
+                    {
+                        invalid |= ProductionDiagnosticsInvalid(productionDiagnostics);
+                        AssertProductAnnouncementCapture(productionDiagnostics, diagnostics,
+                            [PersistenceFailureAnnouncement, StaleFailureAnnouncement]);
+                    }
+                    catch (Exception error)
+                    {
+                        scenarioError ??= error;
+                        invalid = true;
+                    }
+                    if (scenarioError is not null || diagnosticError is not null || invalid)
+                    {
+                        try
+                        {
+                            scenarioFailure = ExceptionDispatchInfo.Capture(new IsolatedScenarioFailureException(
+                                FormatDiagnostics(scenarioError, diagnosticError,
+                                    productionDiagnostics, diagnostics)));
+                        }
+                        catch (Exception error)
+                        {
+                            scenarioFailure = ExceptionDispatchInfo.Capture(new IsolatedScenarioFailureException(
+                                "diagnostic-format-failed: " + error));
+                        }
+                    }
+                }
+            });
+            if (cleanupSafe) stage.CleanupSucceeded();
+            scenarioFailure?.Throw();
         });
     }
 
@@ -222,6 +457,135 @@ public sealed class WpfApprovalAccessibilityTests
                 {
                     window.Close();
                     PumpUntil(() => !window.IsVisible);
+                }
+            }
+        });
+    }
+
+    [Fact]
+    public Task FaultedLifetimeCloseUnwindsBeforeItsFinalCloseAndObservesTheFailure()
+    {
+        return RunIsolatedAsync("faulted-close", nameof(FaultedLifetimeCloseUnwindsBeforeItsFinalCloseAndObservesTheFailure), stage =>
+        {
+            ExceptionDispatchInfo? scenarioFailure = null;
+            WpfReviewSelectionTests.RunOnSta(() =>
+            {
+                var fixture = new ExactShellFixture();
+                var marker = $"faulted-close-{Guid.NewGuid():N}";
+                fixture.Workflow.DisposalFailure = new InvalidOperationException(marker);
+                using var listener = new MarkerTraceListener(marker);
+                MainWindow? window = null;
+                Trace.Listeners.Add(listener);
+                try
+                {
+                    window = new MainWindow { DataContext = fixture.ViewModel };
+                    var initialCloseReturned = false;
+                    var closingsBeforeReturn = 0;
+                    var totalClosings = 0;
+                    window.Closing += (_, _) =>
+                    {
+                        totalClosings++;
+                        if (!initialCloseReturned) closingsBeforeReturn++;
+                    };
+                    try
+                    {
+                        window.Show();
+                        window.Close();
+                        initialCloseReturned = true;
+                        var lifetimeFailure = ObserveLifetime(fixture.ViewModel);
+
+                        Assert.Equal(1, closingsBeforeReturn);
+                        PumpUntil(() => !window.IsVisible);
+                        Assert.Equal(2, totalClosings);
+                        Assert.Equal(1, fixture.Workflow.DisposeCalls);
+                        var observedFailure = Assert.IsType<InvalidOperationException>(lifetimeFailure);
+                        Assert.Contains(marker, observedFailure.Message, StringComparison.Ordinal);
+                        Assert.True(listener.SawMarker,
+                            "The asynchronous close owner did not observe and report its lifetime failure.");
+                    }
+                    catch (Exception error)
+                    {
+                        scenarioFailure = ExceptionDispatchInfo.Capture(error);
+                    }
+                }
+                finally
+                {
+                    try
+                    {
+                        fixture.Workflow.DisposeRelease.TrySetResult();
+                        _ = ObserveLifetime(fixture.ViewModel);
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            if (window?.IsVisible is true)
+                            {
+                                window.DataContext = null;
+                                window.Close();
+                                PumpUntil(() => !window.IsVisible);
+                            }
+                        }
+                        finally
+                        {
+                            Trace.Listeners.Remove(listener);
+                        }
+                    }
+                }
+            });
+            stage.CleanupSucceeded();
+            scenarioFailure?.Throw();
+        });
+    }
+
+    [Fact]
+    public void LifetimeCompletionDuringClosingStillSchedulesFinalCloseAfterUnwind()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new ExactShellFixture();
+            fixture.Workflow.HoldDisposal = true;
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            var initialCloseReturned = false;
+            var closingsBeforeReturn = 0;
+            var totalClosings = 0;
+            window.Closing += (_, _) =>
+            {
+                totalClosings++;
+                if (!initialCloseReturned)
+                {
+                    closingsBeforeReturn++;
+                    fixture.Workflow.DisposeRelease.TrySetResult();
+                }
+            };
+            try
+            {
+                window.Show();
+                window.Close();
+                initialCloseReturned = true;
+                Assert.Null(ObserveLifetime(fixture.ViewModel));
+
+                Assert.Equal(1, closingsBeforeReturn);
+                PumpUntil(() => !window.IsVisible);
+                Assert.Equal(2, totalClosings);
+                Assert.Equal(1, fixture.Workflow.DisposeCalls);
+            }
+            finally
+            {
+                try
+                {
+                    initialCloseReturned = true;
+                    fixture.Workflow.DisposeRelease.TrySetResult();
+                    _ = ObserveLifetime(fixture.ViewModel);
+                }
+                finally
+                {
+                    if (window.IsVisible)
+                    {
+                        window.DataContext = null;
+                        window.Close();
+                        PumpUntil(() => !window.IsVisible);
+                    }
                 }
             }
         });
@@ -364,12 +728,20 @@ public sealed class WpfApprovalAccessibilityTests
         return null;
     }
 
-    private static void VerifyFailureAnnouncementOnMta(nint handle, Func<Task> publish)
+    private static UiaDiagnosticSettlement VerifyFailureLiveAnnouncementOnMta(
+        nint handle,
+        string expectedPayload,
+        UiaDiagnosticLedger diagnostics,
+        Func<Task> publish)
     {
         var dispatcher = Dispatcher.CurrentDispatcher;
         var frame = new DispatcherFrame();
-        ExceptionDispatchInfo? failure = null;
+        ExceptionDispatchInfo? originalFailure = null;
+        ExceptionDispatchInfo? diagnosticFailure = null;
         DispatcherOperation? stopOperation = null;
+        var removalSucceeded = false;
+        var callbackIdleSettled = false;
+        var acceptedCallbacksZero = false;
         var client = new Thread(() =>
         {
             try
@@ -378,19 +750,45 @@ public sealed class WpfApprovalAccessibilityTests
                 var element = root.FindFirst(TreeScope.Descendants,
                     new PropertyCondition(AutomationElement.NameProperty, "Review command status"));
                 Assert.NotNull(element);
-                using var statuses = new BlockingCollection<string>();
-                using var callbackIdle = new ManualResetEventSlim(initialState: true);
+                var nativeRuntimeId = CaptureRuntimeId(element);
+                diagnostics.Record("setup-native", sender: element, runtimeId: nativeRuntimeId);
+                var statuses = new BlockingCollection<LiveNativeDelivery>(boundedCapacity: 256);
+                var callbackIdle = new ManualResetEventSlim(initialState: true);
                 ExceptionDispatchInfo? callbackFailure = null;
-                var acceptingCallbacks = 1;
+                var callbackGate = new object();
+                var acceptingCallbacks = true;
                 var activeCallbacks = 0;
-                AutomationEventHandler handler = (sender, _) =>
+                var handlerRegistered = false;
+                AutomationEventHandler handler = (sender, eventArgs) =>
                 {
-                    callbackIdle.Reset();
-                    Interlocked.Increment(ref activeCallbacks);
+                    var entryTimestamp = Stopwatch.GetTimestamp();
+                    lock (callbackGate)
+                    {
+                        if (!acceptingCallbacks) return;
+                        activeCallbacks++;
+                        callbackIdle.Reset();
+                    }
                     try
                     {
-                        if (Volatile.Read(ref acceptingCallbacks) != 0 && sender is AutomationElement source)
-                            statuses.TryAdd(source.Current.ItemStatus);
+                        var runtimeId = CaptureCachedRuntimeId(sender, out var cacheFailure);
+                        diagnostics.Record("uia-callback-live", sender: sender, runtimeId: runtimeId,
+                            eventId: eventArgs.EventId.Id, timestamp: entryTimestamp);
+                        if (cacheFailure is not null)
+                        {
+                            diagnostics.Invalidate();
+                            diagnostics.Record("uia-callback-live-runtime-cache-missing",
+                                payload: cacheFailure, sender: sender, eventId: eventArgs.EventId.Id);
+                        }
+                        if (sender is AutomationElement source)
+                        {
+                            diagnostics.Record("uia-live-current-read-begin", sender: source,
+                                runtimeId: runtimeId, eventId: eventArgs.EventId.Id);
+                            var status = source.Current.ItemStatus;
+                            diagnostics.Record("uia-live-current-read-end", payload: status,
+                                sender: source, runtimeId: runtimeId, eventId: eventArgs.EventId.Id);
+                            if (!statuses.TryAdd(new(runtimeId, eventArgs.EventId.Id, status)))
+                                diagnostics.InvalidateOverflow();
+                        }
                     }
                     catch (Exception error)
                     {
@@ -399,36 +797,99 @@ public sealed class WpfApprovalAccessibilityTests
                     }
                     finally
                     {
-                        if (Interlocked.Decrement(ref activeCallbacks) == 0) callbackIdle.Set();
+                        lock (callbackGate)
+                        {
+                            activeCallbacks--;
+                            if (activeCallbacks == 0) callbackIdle.Set();
+                        }
                     }
                 };
-                Automation.AddAutomationEventHandler(AutomationElementIdentifiers.LiveRegionChangedEvent,
-                    element, TreeScope.Element, handler);
+                ExceptionDispatchInfo? operationFailure = null;
+                ExceptionDispatchInfo? removalFailure = null;
                 try
                 {
+                    diagnostics.Record("registration-live-begin", sender: element, runtimeId: nativeRuntimeId);
+                    var cacheRequest = CreateRuntimeIdCacheRequest();
+                    using (cacheRequest.Activate())
+                        Automation.AddAutomationEventHandler(AutomationElementIdentifiers.LiveRegionChangedEvent,
+                            element, TreeScope.Element, handler);
+                    handlerRegistered = true;
+                    diagnostics.Record("registration-live-return", sender: element, runtimeId: nativeRuntimeId);
                     Task? published = null;
-                    var publication = dispatcher.BeginInvoke(new Action(() => published = publish()));
+                    diagnostics.Record("publication-dispatch-begin");
+                    var publication = dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        diagnostics.Record("publication-sta-begin");
+                        published = publish();
+                        diagnostics.Record("publication-sta-return");
+                    }));
+                    diagnostics.Record("publication-dispatch-return");
                     publication.Task.WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
                     Assert.NotNull(published);
+                    diagnostics.Record("command-task-await-begin");
                     published.WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
-                    Assert.True(statuses.TryTake(out var status, TimeSpan.FromSeconds(4)),
-                        "The failure live-region announcement was canceled or never raised.");
-                    Assert.NotNull(status);
-                    Assert.Contains("persistence", status, StringComparison.OrdinalIgnoreCase);
+                    diagnostics.Record("command-task-await-return");
+                    Assert.True(statuses.TryTake(out var delivery, TimeSpan.FromSeconds(4)),
+                        $"The '{expectedPayload}' failure live-region announcement was canceled or never raised.");
+                    var matchingDeliveries = 0;
+                    LiveNativeDelivery? previous = null;
+                    var drainStarted = Stopwatch.GetTimestamp();
+                    var drainLimit = TimeSpan.FromMilliseconds(250);
+                    while (true)
+                    {
+                        if (previous is not { } prior || !SameLiveDelivery(prior, delivery))
+                        {
+                            if (string.Equals(delivery.Payload, expectedPayload, StringComparison.Ordinal))
+                                matchingDeliveries++;
+                            previous = delivery;
+                        }
+                        var remaining = drainLimit - Stopwatch.GetElapsedTime(drainStarted);
+                        if (remaining <= TimeSpan.Zero || !statuses.TryTake(out delivery, remaining)) break;
+                    }
+                    Assert.True(matchingDeliveries >= 1,
+                        $"No normalized native live delivery contained '{expectedPayload}'.");
+                }
+                catch (Exception error)
+                {
+                    operationFailure = ExceptionDispatchInfo.Capture(error);
                 }
                 finally
                 {
-                    Interlocked.Exchange(ref acceptingCallbacks, 0);
-                    Automation.RemoveAutomationEventHandler(AutomationElementIdentifiers.LiveRegionChangedEvent,
-                        element, handler);
-                    Assert.True(callbackIdle.Wait(TimeSpan.FromSeconds(2)),
-                        "The UIA live-region callback did not settle after unregistration.");
-                    callbackFailure?.Throw();
+                    lock (callbackGate) acceptingCallbacks = false;
+                    try
+                    {
+                        diagnostics.Record("removal-live-begin", sender: element, runtimeId: nativeRuntimeId);
+                        if (handlerRegistered)
+                            Automation.RemoveAutomationEventHandler(
+                                AutomationElementIdentifiers.LiveRegionChangedEvent, element, handler);
+                        removalSucceeded = handlerRegistered;
+                        diagnostics.Record("removal-live-return", sender: element, runtimeId: nativeRuntimeId);
+                    }
+                    catch (Exception error)
+                    {
+                        removalFailure = ExceptionDispatchInfo.Capture(error);
+                    }
+                    diagnostics.Record("quiescence-live-begin");
+                    callbackIdleSettled = callbackIdle.Wait(TimeSpan.FromSeconds(2));
+                    lock (callbackGate) acceptedCallbacksZero = activeCallbacks == 0;
+                    diagnostics.Record("quiescence-live-return",
+                        payload: $"idle={callbackIdleSettled}; acceptedCallbacksZero={acceptedCallbacksZero}");
+                    if (callbackIdleSettled && acceptedCallbacksZero)
+                    {
+                        statuses.Dispose();
+                        callbackIdle.Dispose();
+                    }
                 }
+                originalFailure = operationFailure;
+                diagnosticFailure = callbackFailure ?? removalFailure;
+                if ((!callbackIdleSettled || !acceptedCallbacksZero || !removalSucceeded)
+                    && diagnosticFailure is null)
+                    diagnosticFailure = ExceptionDispatchInfo.Capture(new IsolatedScenarioFailureException(
+                        "The UIA live-region callback did not settle safely after unregistration."));
             }
             catch (Exception error)
             {
-                failure = ExceptionDispatchInfo.Capture(error);
+                diagnosticFailure ??= ExceptionDispatchInfo.Capture(error);
             }
             finally
             {
@@ -438,12 +899,589 @@ public sealed class WpfApprovalAccessibilityTests
         client.SetApartmentState(ApartmentState.MTA);
         client.Start();
         Dispatcher.PushFrame(frame);
-        Assert.True(client.Join(TimeSpan.FromSeconds(2)), "The UIA failure-announcement client did not settle.");
-        Assert.NotNull(stopOperation);
-        Assert.Equal(DispatcherOperationStatus.Completed, stopOperation.Status);
-        stopOperation.Task.GetAwaiter().GetResult();
-        failure?.Throw();
+        var clientJoined = client.Join(TimeSpan.FromSeconds(2));
+        var stopCompleted = false;
+        if (clientJoined && stopOperation is not null)
+        {
+            try
+            {
+                stopOperation.Task.GetAwaiter().GetResult();
+                stopCompleted = stopOperation.Status == DispatcherOperationStatus.Completed;
+            }
+            catch (Exception error)
+            {
+                diagnosticFailure ??= ExceptionDispatchInfo.Capture(error);
+            }
+        }
+        if (!clientJoined && diagnosticFailure is null)
+            diagnosticFailure = ExceptionDispatchInfo.Capture(new IsolatedScenarioFailureException(
+                "The UIA failure-announcement client did not settle."));
+        diagnostics.Record("settlement-live",
+            payload: $"removalSucceeded={removalSucceeded}; callbackIdleSettled={callbackIdleSettled}; "
+                + $"acceptedCallbacksZero={acceptedCallbacksZero}; "
+                + $"clientJoined={clientJoined}; stopCompleted={stopCompleted}");
+        return new(originalFailure, diagnosticFailure, removalSucceeded, callbackIdleSettled,
+            acceptedCallbacksZero, clientJoined, stopCompleted);
     }
+
+    private static UiaDiagnosticSettlement VerifyFailurePropertyAnnouncementsOnMta(
+        nint handle,
+        string[] expectedPayloads,
+        UiaDiagnosticLedger diagnostics,
+        Func<Task> publish)
+    {
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        var frame = new DispatcherFrame();
+        ExceptionDispatchInfo? originalFailure = null;
+        ExceptionDispatchInfo? diagnosticFailure = null;
+        DispatcherOperation? stopOperation = null;
+        var removalSucceeded = false;
+        var callbackIdleSettled = false;
+        var acceptedCallbacksZero = false;
+        var client = new Thread(() =>
+        {
+            try
+            {
+                var root = AutomationElement.FromHandle(handle);
+                var element = root.FindFirst(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.NameProperty, "Review command status"));
+                Assert.NotNull(element);
+                var nativeRuntimeId = CaptureRuntimeId(element);
+                diagnostics.Record("setup-native", sender: element, runtimeId: nativeRuntimeId);
+                var statuses = new BlockingCollection<PropertyNativeDelivery>(boundedCapacity: 256);
+                var callbackIdle = new ManualResetEventSlim(initialState: true);
+                ExceptionDispatchInfo? callbackFailure = null;
+                var callbackGate = new object();
+                var acceptingCallbacks = true;
+                var activeCallbacks = 0;
+                var handlerRegistered = false;
+                AutomationPropertyChangedEventHandler handler = (sender, eventArgs) =>
+                {
+                    var entryTimestamp = Stopwatch.GetTimestamp();
+                    lock (callbackGate)
+                    {
+                        if (!acceptingCallbacks) return;
+                        activeCallbacks++;
+                        callbackIdle.Reset();
+                    }
+                    try
+                    {
+                        var runtimeId = CaptureCachedRuntimeId(sender, out var cacheFailure);
+                        diagnostics.Record("uia-callback-property", sender: sender,
+                            runtimeId: runtimeId, propertyId: eventArgs.Property.Id,
+                            oldValue: eventArgs.OldValue, newValue: eventArgs.NewValue,
+                            timestamp: entryTimestamp);
+                        if (cacheFailure is not null)
+                        {
+                            diagnostics.Invalidate();
+                            diagnostics.Record("uia-callback-property-runtime-cache-missing",
+                                payload: cacheFailure, sender: sender, propertyId: eventArgs.Property.Id,
+                                oldValue: eventArgs.OldValue, newValue: eventArgs.NewValue);
+                        }
+                        if (!statuses.TryAdd(new(runtimeId, eventArgs.Property.Id,
+                                eventArgs.OldValue, eventArgs.NewValue)))
+                            diagnostics.InvalidateOverflow();
+                    }
+                    catch (Exception error)
+                    {
+                        Interlocked.CompareExchange(ref callbackFailure,
+                            ExceptionDispatchInfo.Capture(error), null);
+                    }
+                    finally
+                    {
+                        lock (callbackGate)
+                        {
+                            activeCallbacks--;
+                            if (activeCallbacks == 0) callbackIdle.Set();
+                        }
+                    }
+                };
+                ExceptionDispatchInfo? operationFailure = null;
+                ExceptionDispatchInfo? removalFailure = null;
+                try
+                {
+                    diagnostics.Record("registration-property-begin", sender: element, runtimeId: nativeRuntimeId);
+                    var cacheRequest = CreateRuntimeIdCacheRequest();
+                    using (cacheRequest.Activate())
+                        Automation.AddAutomationPropertyChangedEventHandler(element, TreeScope.Element,
+                            handler, AutomationElement.ItemStatusProperty);
+                    handlerRegistered = true;
+                    diagnostics.Record("registration-property-return", sender: element, runtimeId: nativeRuntimeId);
+                    Task? published = null;
+                    diagnostics.Record("publication-dispatch-begin");
+                    var publication = dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        diagnostics.Record("publication-sta-begin");
+                        published = publish();
+                        diagnostics.Record("publication-sta-return");
+                    }));
+                    diagnostics.Record("publication-dispatch-return");
+                    publication.Task.WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+                    Assert.NotNull(published);
+                    diagnostics.Record("command-task-await-begin");
+                    published.WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+                    diagnostics.Record("command-task-await-return");
+                    var diagnosticStarted = Stopwatch.GetTimestamp();
+                    var diagnosticLimit = TimeSpan.FromMilliseconds(8250);
+                    var normalizedCount = 0;
+                    PropertyNativeDelivery? previous = null;
+                    ExceptionDispatchInfo? firstAssertionFailure = null;
+                    while (Stopwatch.GetElapsedTime(diagnosticStarted) < diagnosticLimit)
+                    {
+                        var remaining = diagnosticLimit - Stopwatch.GetElapsedTime(diagnosticStarted);
+                        if (remaining <= TimeSpan.Zero || !statuses.TryTake(out var delivery, remaining)) break;
+                        if (previous is { } prior && SamePropertyDelivery(prior, delivery)) continue;
+                        previous = delivery;
+                        var observedIndex = normalizedCount++;
+                        if (observedIndex < expectedPayloads.Length)
+                        {
+                            var expectedPayload = expectedPayloads[observedIndex];
+                            var expectedPrevious = observedIndex == 0 ? string.Empty : expectedPayloads[observedIndex - 1];
+                            if (delivery.PropertyId != AutomationElement.ItemStatusProperty.Id
+                                || delivery.OldValue is not string oldValue
+                                || !string.Equals(oldValue, expectedPrevious, StringComparison.Ordinal)
+                                || delivery.NewValue is not string newValue
+                                || !string.Equals(newValue, expectedPayload, StringComparison.Ordinal))
+                                firstAssertionFailure ??= ExceptionDispatchInfo.Capture(
+                                    new IsolatedScenarioFailureException(
+                                        $"Expected ItemStatus transition '{expectedPrevious}' -> '{expectedPayload}', "
+                                        + $"but received '{delivery.OldValue}' -> '{delivery.NewValue}'."));
+                        }
+                        else
+                        {
+                            firstAssertionFailure ??= ExceptionDispatchInfo.Capture(
+                                new IsolatedScenarioFailureException(
+                                    $"Unexpected normalized ItemStatus transition: "
+                                    + $"'{delivery.OldValue}' -> '{delivery.NewValue}'."));
+                        }
+                    }
+                    for (var index = normalizedCount; index < expectedPayloads.Length; index++)
+                        firstAssertionFailure ??= ExceptionDispatchInfo.Capture(
+                            new IsolatedScenarioFailureException(
+                                $"The '{expectedPayloads[index]}' ItemStatus event was never raised."));
+                    operationFailure = firstAssertionFailure;
+                }
+                catch (Exception error)
+                {
+                    operationFailure ??= ExceptionDispatchInfo.Capture(error);
+                }
+                finally
+                {
+                    lock (callbackGate) acceptingCallbacks = false;
+                    try
+                    {
+                        diagnostics.Record("removal-property-begin", sender: element, runtimeId: nativeRuntimeId);
+                        if (handlerRegistered)
+                            Automation.RemoveAutomationPropertyChangedEventHandler(element, handler);
+                        removalSucceeded = handlerRegistered;
+                        diagnostics.Record("removal-property-return", sender: element, runtimeId: nativeRuntimeId);
+                    }
+                    catch (Exception error)
+                    {
+                        removalFailure = ExceptionDispatchInfo.Capture(error);
+                    }
+                    diagnostics.Record("quiescence-property-begin");
+                    callbackIdleSettled = callbackIdle.Wait(TimeSpan.FromSeconds(2));
+                    lock (callbackGate) acceptedCallbacksZero = activeCallbacks == 0;
+                    diagnostics.Record("quiescence-property-return",
+                        payload: $"idle={callbackIdleSettled}; acceptedCallbacksZero={acceptedCallbacksZero}");
+                    if (callbackIdleSettled && acceptedCallbacksZero)
+                    {
+                        statuses.Dispose();
+                        callbackIdle.Dispose();
+                    }
+                }
+                originalFailure = operationFailure;
+                diagnosticFailure = callbackFailure ?? removalFailure;
+                if ((!callbackIdleSettled || !acceptedCallbacksZero || !removalSucceeded)
+                    && diagnosticFailure is null)
+                    diagnosticFailure = ExceptionDispatchInfo.Capture(new IsolatedScenarioFailureException(
+                        "The UIA ItemStatus callback did not settle safely after unregistration."));
+            }
+            catch (Exception error)
+            {
+                diagnosticFailure ??= ExceptionDispatchInfo.Capture(error);
+            }
+            finally
+            {
+                stopOperation = dispatcher.BeginInvoke(new Action(() => frame.Continue = false));
+            }
+        }) { IsBackground = true };
+        client.SetApartmentState(ApartmentState.MTA);
+        client.Start();
+        Dispatcher.PushFrame(frame);
+        var clientJoined = client.Join(TimeSpan.FromSeconds(2));
+        var stopCompleted = false;
+        if (clientJoined && stopOperation is not null)
+        {
+            try
+            {
+                stopOperation.Task.GetAwaiter().GetResult();
+                stopCompleted = stopOperation.Status == DispatcherOperationStatus.Completed;
+            }
+            catch (Exception error)
+            {
+                diagnosticFailure ??= ExceptionDispatchInfo.Capture(error);
+            }
+        }
+        if (!clientJoined && diagnosticFailure is null)
+            diagnosticFailure = ExceptionDispatchInfo.Capture(new IsolatedScenarioFailureException(
+                "The UIA property-announcement client did not settle."));
+        diagnostics.Record("settlement-property",
+            payload: $"removalSucceeded={removalSucceeded}; callbackIdleSettled={callbackIdleSettled}; "
+                + $"acceptedCallbacksZero={acceptedCallbacksZero}; "
+                + $"clientJoined={clientJoined}; stopCompleted={stopCompleted}");
+        return new(originalFailure, diagnosticFailure, removalSucceeded, callbackIdleSettled,
+            acceptedCallbacksZero, clientJoined, stopCompleted);
+    }
+
+    private static void EnableProductionDiagnostics(ReviewAnnouncementTextBlock status) =>
+        GetDiagnosticMethod(nameof(EnableProductionDiagnostics), "EnableDiagnosticCapture").Invoke(status, null);
+
+    private static object StopProductionDiagnostics(ReviewAnnouncementTextBlock status) =>
+        GetDiagnosticMethod(nameof(StopProductionDiagnostics), "StopDiagnosticCapture").Invoke(status, null)
+        ?? throw new InvalidOperationException("The production diagnostic snapshot was unavailable.");
+
+    private static MethodInfo GetDiagnosticMethod(string caller, string methodName) =>
+        typeof(ReviewAnnouncementTextBlock).GetMethod(methodName,
+            BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException($"{caller} could not find {methodName}.");
+
+    private static void RecordSetupPeer(
+        ReviewAnnouncementTextBlock status,
+        UiaDiagnosticLedger diagnostics)
+    {
+        var peer = UIElementAutomationPeer.FromElement(status)
+            ?? UIElementAutomationPeer.CreatePeerForElement(status);
+        diagnostics.Record("setup-peer", sender: peer);
+    }
+
+    private static int[]? CaptureRuntimeId(object? sender) =>
+        sender is AutomationElement element ? element.GetRuntimeId() : null;
+
+    private static CacheRequest CreateRuntimeIdCacheRequest()
+    {
+        var request = new CacheRequest { AutomationElementMode = AutomationElementMode.Full };
+        request.Add(AutomationElement.RuntimeIdProperty);
+        return request;
+    }
+
+    private static int[]? CaptureCachedRuntimeId(object? sender, out string? failure)
+    {
+        try
+        {
+            if (sender is not AutomationElement element)
+                throw new InvalidOperationException("The UIA callback sender was not an AutomationElement.");
+            var cached = element.GetCachedPropertyValue(AutomationElement.RuntimeIdProperty);
+            if (cached is not int[] runtimeId)
+                throw new InvalidOperationException(
+                    $"The cached RuntimeId value had type {cached?.GetType().FullName ?? "<null>"}.");
+            failure = null;
+            return runtimeId;
+        }
+        catch (Exception error)
+        {
+            failure = error.GetType().FullName + ": " + error.Message;
+            return null;
+        }
+    }
+
+    private static bool SameLiveDelivery(LiveNativeDelivery left, LiveNativeDelivery right) =>
+        SameRuntimeId(left.RuntimeId, right.RuntimeId)
+        && left.EventId == right.EventId
+        && string.Equals(left.Payload, right.Payload, StringComparison.Ordinal);
+
+    private static bool SamePropertyDelivery(PropertyNativeDelivery left, PropertyNativeDelivery right) =>
+        SameRuntimeId(left.RuntimeId, right.RuntimeId)
+        && left.PropertyId == right.PropertyId
+        && Equals(left.OldValue, right.OldValue)
+        && Equals(left.NewValue, right.NewValue);
+
+    private static bool SameRuntimeId(int[]? left, int[]? right) =>
+        left is null ? right is null : right is not null && left.AsSpan().SequenceEqual(right);
+
+    private static bool ProductionDiagnosticsInvalid(object? snapshot)
+    {
+        if (snapshot is null) return true;
+        var snapshotType = snapshot.GetType();
+        var capacityOverflow = (bool)(snapshotType.GetProperty("CapacityOverflow")?.GetValue(snapshot)
+            ?? throw new InvalidOperationException("The production diagnostic capacity flag was unavailable."));
+        var wrongThread = (bool)(snapshotType.GetProperty("WrongThread")?.GetValue(snapshot)
+            ?? throw new InvalidOperationException("The production diagnostic thread flag was unavailable."));
+        return capacityOverflow || wrongThread;
+    }
+
+    private static void AssertProductAnnouncementCapture(
+        object? productionSnapshot,
+        UiaDiagnosticLedger diagnostics,
+        string[] expectedPayloads)
+    {
+        if (productionSnapshot is null)
+            throw new InvalidOperationException("The production diagnostic snapshot was unavailable.");
+        var viewModelNotifications = diagnostics.Snapshot()
+            .Where(record => record.Stage == "vm-notification")
+            .ToArray();
+        Assert.Equal(expectedPayloads.Length, viewModelNotifications.Length);
+        for (var index = 0; index < expectedPayloads.Length; index++)
+            Assert.Equal(expectedPayloads[index],
+                Assert.IsType<string>(viewModelNotifications[index].Payload));
+
+        var snapshotType = productionSnapshot.GetType();
+        var rawRecords = snapshotType.GetProperty("Records")?.GetValue(productionSnapshot) as Array
+            ?? throw new InvalidOperationException("The production diagnostic records were unavailable.");
+        var productionRecords = new ProductionCaptureRecord[rawRecords.Length];
+        for (var index = 0; index < rawRecords.Length; index++)
+        {
+            var record = rawRecords.GetValue(index)
+                ?? throw new InvalidOperationException("A production diagnostic record was unavailable.");
+            var recordType = record.GetType();
+            productionRecords[index] = new(
+                index,
+                GetDiagnosticValue(recordType, record, "Stage")?.ToString()
+                    ?? throw new InvalidOperationException("A production diagnostic stage was unavailable."),
+                (long)(GetDiagnosticValue(recordType, record, "NotificationSequence")
+                    ?? throw new InvalidOperationException("A production notification sequence was unavailable.")),
+                GetDiagnosticValue(recordType, record, "Payload") as string);
+        }
+
+        var queued = productionRecords.Where(record => record.Stage == "Queue").ToArray();
+        var executed = productionRecords.Where(record => record.Stage == "Execute").ToArray();
+        var propertyReturned = productionRecords
+            .Where(record => record.Stage == "PropertyRaiseReturn").ToArray();
+        var liveReturned = productionRecords.Where(record => record.Stage == "LiveRaiseReturn").ToArray();
+        Assert.DoesNotContain(productionRecords, record => record.Stage == "Skip");
+        Assert.Equal(viewModelNotifications.Length, queued.Length);
+        Assert.Equal(viewModelNotifications.Length, executed.Length);
+        Assert.Equal(viewModelNotifications.Length, propertyReturned.Length);
+        Assert.Equal(viewModelNotifications.Length, liveReturned.Length);
+
+        long previousSequence = 0;
+        for (var index = 0; index < viewModelNotifications.Length; index++)
+        {
+            var notification = viewModelNotifications[index];
+            var payload = Assert.IsType<string>(notification.Payload);
+            var sequence = notification.NotificationSequence;
+            Assert.True(sequence > previousSequence, "View-model notification sequence was not FIFO.");
+            Assert.Equal(sequence, queued[index].NotificationSequence);
+            Assert.Equal(sequence, executed[index].NotificationSequence);
+            Assert.Equal(sequence, propertyReturned[index].NotificationSequence);
+            Assert.Equal(sequence, liveReturned[index].NotificationSequence);
+            Assert.Equal(payload, queued[index].Payload);
+            Assert.Equal(payload, executed[index].Payload);
+            Assert.Equal(payload, propertyReturned[index].Payload);
+            Assert.Equal(payload, liveReturned[index].Payload);
+            Assert.True(queued[index].Index < executed[index].Index
+                && executed[index].Index < propertyReturned[index].Index
+                && propertyReturned[index].Index < liveReturned[index].Index,
+                $"Production announcement {sequence} did not complete in queue/property/live order.");
+            previousSequence = sequence;
+        }
+    }
+
+    private static string FormatDiagnostics(
+        Exception? error,
+        Exception? diagnosticError,
+        object? productionSnapshot,
+        UiaDiagnosticLedger diagnostics)
+    {
+        var text = new StringBuilder();
+        text.AppendLine(error is null
+            ? "diagnostic-inconclusive: original assertion did not reproduce"
+            : "original assertion failure: " + error);
+        text.Append("diagnosticFailure=").AppendLine(
+            diagnosticError is null ? "<null>" : diagnosticError.ToString());
+        text.Append("diagnosticInvalid=")
+            .AppendLine((diagnostics.Invalid || ProductionDiagnosticsInvalid(productionSnapshot)).ToString());
+        text.AppendLine("PRODUCTION DIAGNOSTICS:");
+        if (productionSnapshot is null)
+        {
+            text.AppendLine("<snapshot unavailable>");
+        }
+        else
+        {
+            var snapshotType = productionSnapshot.GetType();
+            text.Append("capacityOverflow=")
+                .Append(snapshotType.GetProperty("CapacityOverflow")?.GetValue(productionSnapshot))
+                .Append(" wrongThread=")
+                .Append(snapshotType.GetProperty("WrongThread")?.GetValue(productionSnapshot))
+                .Append(" ownerThread=").AppendLine(
+                    snapshotType.GetProperty("OwnerThreadId")?.GetValue(productionSnapshot)?.ToString());
+            var records = snapshotType.GetProperty("Records")?.GetValue(productionSnapshot) as Array
+                ?? throw new InvalidOperationException("The production diagnostic records were unavailable.");
+            foreach (var record in records)
+            {
+                Assert.NotNull(record);
+                var recordType = record.GetType();
+                text.Append("stage=").Append(GetDiagnosticValue(recordType, record, "Stage"))
+                    .Append(" notification=").Append(GetDiagnosticValue(recordType, record, "NotificationSequence"))
+                    .Append(" ticks=").Append(GetDiagnosticValue(recordType, record, "Timestamp"))
+                    .Append(" thread=").Append(GetDiagnosticValue(recordType, record, "ThreadId"))
+                    .Append(" payload=").Append(FormatDiagnosticValue(GetDiagnosticValue(recordType, record, "Payload")))
+                    .Append(" dataContextGeneration=").Append(GetDiagnosticValue(recordType, record, "DataContextGeneration"))
+                    .Append(" previous=").Append(FormatDiagnosticValue(GetDiagnosticValue(recordType, record, "Previous")))
+                    .Append(" current=").Append(FormatDiagnosticValue(GetDiagnosticValue(recordType, record, "Current")))
+                    .Append(" skipReason=").Append(FormatDiagnosticValue(GetDiagnosticValue(recordType, record, "SkipReason")))
+                    .Append(" peerType=").Append(FormatDiagnosticType(GetDiagnosticValue(recordType, record, "PeerType")))
+                    .Append('#').Append(GetDiagnosticValue(recordType, record, "PeerIdentity"))
+                    .Append(" expectedPeerType=").Append(FormatDiagnosticType(
+                        GetDiagnosticValue(recordType, record, "ExpectedPeerType")))
+                    .Append('#').AppendLine(GetDiagnosticValue(recordType, record, "ExpectedPeerIdentity")?.ToString());
+            }
+        }
+        text.AppendLine("TEST DIAGNOSTICS:");
+        diagnostics.FormatInto(text);
+        return text.ToString();
+    }
+
+    private static object? GetDiagnosticValue(Type type, object instance, string propertyName) =>
+        type.GetProperty(propertyName)?.GetValue(instance)
+        ?? (type.GetProperty(propertyName) is null
+            ? throw new InvalidOperationException($"The production diagnostic {propertyName} value was unavailable.")
+            : null);
+
+    private static string FormatDiagnosticType(object? value) => value switch
+    {
+        null => "<null>",
+        Type type => type.FullName ?? type.Name,
+        _ => throw new InvalidOperationException("The production diagnostic peer type was invalid."),
+    };
+
+    private sealed class UiaDiagnosticLedger
+    {
+        private const int Capacity = 256;
+        private readonly UiaDiagnosticRecord[] records = new UiaDiagnosticRecord[Capacity];
+        private int writeIndex;
+        private int overflow;
+        private int invalid;
+
+        internal bool Overflow => Volatile.Read(ref overflow) != 0;
+        internal bool Invalid => Overflow || Volatile.Read(ref invalid) != 0;
+
+        internal void InvalidateOverflow() => Volatile.Write(ref overflow, 1);
+        internal void Invalidate() => Volatile.Write(ref invalid, 1);
+
+        internal UiaDiagnosticRecord[] Snapshot()
+        {
+            var count = Math.Min(Volatile.Read(ref writeIndex), records.Length);
+            var captured = new UiaDiagnosticRecord[count];
+            Array.Copy(records, captured, count);
+            return captured;
+        }
+
+        internal void Record(
+            string stage,
+            long notificationSequence = 0,
+            string? payload = null,
+            object? sender = null,
+            int[]? runtimeId = null,
+            int eventId = 0,
+            int propertyId = 0,
+            object? oldValue = null,
+            object? newValue = null,
+            long? timestamp = null)
+        {
+            var slot = Interlocked.Increment(ref writeIndex) - 1;
+            if (slot >= records.Length)
+            {
+                Volatile.Write(ref overflow, 1);
+                return;
+            }
+            records[slot] = new(
+                slot + 1L,
+                timestamp ?? Stopwatch.GetTimestamp(),
+                stage,
+                Environment.CurrentManagedThreadId,
+                notificationSequence,
+                payload,
+                sender?.GetType(),
+                sender is null ? 0 : RuntimeHelpers.GetHashCode(sender),
+                runtimeId,
+                eventId,
+                propertyId,
+                oldValue,
+                newValue);
+        }
+
+        internal void FormatInto(StringBuilder text)
+        {
+            var count = Math.Min(Volatile.Read(ref writeIndex), records.Length);
+            text.Append("overflow=").Append(Overflow).Append(" invalid=").Append(Invalid)
+                .Append(" count=").AppendLine(count.ToString(CultureInfo.InvariantCulture));
+            for (var index = 0; index < count; index++)
+            {
+                var record = records[index];
+                text.Append("seq=").Append(record.Sequence.ToString(CultureInfo.InvariantCulture))
+                    .Append(" ticks=").Append(record.Timestamp.ToString(CultureInfo.InvariantCulture))
+                    .Append(" stage=").Append(record.Stage)
+                    .Append(" thread=").Append(record.ThreadId.ToString(CultureInfo.InvariantCulture))
+                    .Append(" notification=").Append(record.NotificationSequence.ToString(CultureInfo.InvariantCulture))
+                    .Append(" payload=").Append(FormatDiagnosticValue(record.Payload))
+                    .Append(" runtime=").Append(record.RuntimeType?.FullName ?? "<null>")
+                    .Append('#').Append(record.RuntimeIdentity.ToString(CultureInfo.InvariantCulture))
+                    .Append(" runtimeId=").Append(record.RuntimeId is null
+                        ? "<null>" : "[" + string.Join(",", record.RuntimeId) + "]")
+                    .Append(" eventId=").Append(record.EventId.ToString(CultureInfo.InvariantCulture))
+                    .Append(" propertyId=").Append(record.PropertyId.ToString(CultureInfo.InvariantCulture))
+                    .Append(" old=").Append(FormatDiagnosticValue(record.OldValue))
+                    .Append(" new=").AppendLine(FormatDiagnosticValue(record.NewValue));
+            }
+        }
+    }
+
+    private readonly record struct UiaDiagnosticRecord(
+        long Sequence,
+        long Timestamp,
+        string Stage,
+        int ThreadId,
+        long NotificationSequence,
+        string? Payload,
+        Type? RuntimeType,
+        int RuntimeIdentity,
+        int[]? RuntimeId,
+        int EventId,
+        int PropertyId,
+        object? OldValue,
+        object? NewValue);
+
+    private readonly record struct ProductionCaptureRecord(
+        int Index,
+        string Stage,
+        long NotificationSequence,
+        string? Payload);
+
+    private readonly record struct LiveNativeDelivery(
+        int[]? RuntimeId,
+        int EventId,
+        string Payload);
+
+    private readonly record struct PropertyNativeDelivery(
+        int[]? RuntimeId,
+        int PropertyId,
+        object? OldValue,
+        object? NewValue);
+
+    private sealed record UiaDiagnosticSettlement(
+        ExceptionDispatchInfo? OriginalFailure,
+        ExceptionDispatchInfo? DiagnosticFailure,
+        bool RemovalSucceeded,
+        bool CallbackIdleSettled,
+        bool AcceptedCallbacksZero,
+        bool ClientJoined,
+        bool StopOperationCompleted)
+    {
+        internal bool SnapshotSafe =>
+            RemovalSucceeded && CallbackIdleSettled && AcceptedCallbacksZero && ClientJoined;
+    }
+
+    private static string FormatDiagnosticValue(object? value) => value switch
+    {
+        null => "<null>",
+        string { Length: 0 } => "<empty>",
+        string text => '"' + text.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal) + '"',
+        _ => value.ToString() ?? "<null-string>",
+    };
 
     private static void PumpUntil(Func<bool> condition)
     {
@@ -451,5 +1489,250 @@ public sealed class WpfApprovalAccessibilityTests
         while (!condition() && Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2))
             WpfReviewSelectionTests.Drain();
         Assert.True(condition(), "The window lifetime did not settle before the two-second deadline.");
+    }
+
+    private static Exception? ObserveLifetime(ShellViewModel viewModel)
+    {
+        var lifetime = viewModel.DisposeAsync().AsTask();
+        PumpUntil(() => lifetime.IsCompleted);
+        try
+        {
+            lifetime.GetAwaiter().GetResult();
+            return null;
+        }
+        catch (Exception error)
+        {
+            return error;
+        }
+    }
+
+    private static async Task RunIsolatedAsync(
+        string kind,
+        string methodName,
+        Action<IsolationStageWriter> childBody)
+    {
+        const string kindEnvironment = "PHOTOSIFT_SCENARIO_ISOLATION_KIND";
+        const string nonceEnvironment = "PHOTOSIFT_SCENARIO_ISOLATION_NONCE";
+        const string parentIdEnvironment = "PHOTOSIFT_SCENARIO_ISOLATION_PARENT_ID";
+        const string parentStartEnvironment = "PHOTOSIFT_SCENARIO_ISOLATION_PARENT_START";
+        var childKind = Environment.GetEnvironmentVariable(kindEnvironment);
+        var nonceText = Environment.GetEnvironmentVariable(nonceEnvironment);
+        var parentIdText = Environment.GetEnvironmentVariable(parentIdEnvironment);
+        var parentStartText = Environment.GetEnvironmentVariable(parentStartEnvironment);
+        if (childKind is not null)
+        {
+            Assert.Equal(kind, childKind);
+            Assert.True(Guid.TryParseExact(nonceText, "N", out var childNonce) && childNonce != Guid.Empty,
+                "The isolated child nonce was missing or invalid.");
+            Assert.True(int.TryParse(parentIdText, NumberStyles.None, CultureInfo.InvariantCulture,
+                    out var parentId) && parentId > 0
+                && parentId != Environment.ProcessId, "The isolated child parent process ID was invalid.");
+            Assert.True(long.TryParse(parentStartText, NumberStyles.None, CultureInfo.InvariantCulture,
+                    out var parentStart),
+                "The isolated child parent start time was invalid.");
+            using (var parent = Process.GetProcessById(parentId))
+            {
+                Assert.False(parent.HasExited, "The isolated child's parent process was no longer alive.");
+                Assert.Equal(parentStart, parent.StartTime.ToUniversalTime().Ticks);
+            }
+            using var stage = new IsolationStageWriter(kind, childNonce);
+            stage.Entered();
+            childBody(stage);
+            return;
+        }
+
+        Assert.Null(nonceText);
+        Assert.Null(parentIdText);
+        Assert.Null(parentStartText);
+        var expectedKind = methodName switch
+        {
+            nameof(QueuedSelectionSummaryCannotCancelTheOnlyFailureLiveAnnouncement) => "live-duplicate",
+            nameof(QueuedFailureAnnouncementsPreserveTheirOriginatingPayloadsOnceAndInOrder) => "item-status",
+            nameof(FaultedLifetimeCloseUnwindsBeforeItsFinalCloseAndObservesTheFailure) => "faulted-close",
+            _ => throw new InvalidOperationException($"Unknown isolated scenario method: {methodName}"),
+        };
+        Assert.Equal(expectedKind, kind);
+        var assemblyPath = typeof(WpfApprovalAccessibilityTests).Assembly.Location;
+        var assemblyDirectory = Path.GetDirectoryName(assemblyPath);
+        Assert.NotNull(assemblyDirectory);
+        var executablePath = Path.ChangeExtension(assemblyPath, ".exe");
+        Assert.NotNull(executablePath);
+        Assert.Equal("PhotoSift.Scenarios.Tests.exe", Path.GetFileName(executablePath));
+        Assert.Equal(assemblyDirectory, Path.GetDirectoryName(executablePath));
+        Assert.True(File.Exists(executablePath),
+            $"The xUnit v3 scenario apphost was not found beside its assembly: {executablePath}");
+        var nonce = Guid.NewGuid();
+        using var current = Process.GetCurrentProcess();
+        var start = new ProcessStartInfo
+        {
+            FileName = executablePath,
+            WorkingDirectory = assemblyDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        start.ArgumentList.Add("-automated");
+        start.ArgumentList.Add("async");
+        start.ArgumentList.Add("-parallel");
+        start.ArgumentList.Add("none");
+        start.ArgumentList.Add("-noLogo");
+        start.ArgumentList.Add("-noColor");
+        start.ArgumentList.Add("-method");
+        start.ArgumentList.Add($"{typeof(WpfApprovalAccessibilityTests).FullName}.{methodName}");
+        start.Environment[kindEnvironment] = kind;
+        start.Environment[nonceEnvironment] = nonce.ToString("N");
+        start.Environment[parentIdEnvironment] = Environment.ProcessId.ToString(CultureInfo.InvariantCulture);
+        start.Environment[parentStartEnvironment] =
+            current.StartTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture);
+
+        using var child = new Process { StartInfo = start };
+        Assert.True(child.Start(), "The isolated xUnit child process did not start.");
+        var childId = child.Id;
+        var lifecycleStage = "launched";
+        try
+        {
+            lifecycleStage = "draining-output";
+            var standardOutput = child.StandardOutput.ReadToEndAsync();
+            var standardError = child.StandardError.ReadToEndAsync();
+            var exit = child.WaitForExitAsync();
+            var timedOut = false;
+            lifecycleStage = "waiting-for-exit";
+            try
+            {
+                await exit.WaitAsync(TimeSpan.FromSeconds(25));
+            }
+            catch (TimeoutException)
+            {
+                timedOut = true;
+                await ContainIsolatedChildOrFailFastAsync(child, childId, kind, "deadline");
+            }
+
+            lifecycleStage = "collecting-output";
+            ExceptionDispatchInfo? drainFailure = null;
+            string? output = null;
+            string? errorOutput = null;
+            try
+            {
+                await Task.WhenAll(standardOutput, standardError).WaitAsync(TimeSpan.FromSeconds(5));
+                output = await standardOutput;
+                errorOutput = await standardError;
+            }
+            catch (Exception error)
+            {
+                drainFailure = ExceptionDispatchInfo.Capture(error);
+            }
+            output ??= "<standard output did not drain>";
+            errorOutput ??= "<standard error did not drain>";
+            var hasExited = child.HasExited;
+            var diagnostic = $"Isolated child kind={kind}; pid={childId}; timedOut={timedOut}; "
+                + $"hasExited={hasExited}; exitCode={(hasExited ? child.ExitCode : -1)}."
+                + Environment.NewLine + "STDOUT:" + Environment.NewLine + output
+                + Environment.NewLine + "STDERR:" + Environment.NewLine + errorOutput;
+            if (drainFailure is not null)
+                throw new InvalidOperationException(diagnostic, drainFailure.SourceException);
+            Assert.True(child.HasExited, diagnostic);
+            Assert.False(timedOut, diagnostic);
+            var entered = IsolationStageWriter.Format(kind, nonce, "entered");
+            var cleanup = IsolationStageWriter.Format(kind, nonce, "cleanup-ok");
+            var stageLines = output.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.StartsWith(IsolationStageWriter.Prefix, StringComparison.Ordinal)).ToArray();
+            Assert.Equal(new[] { entered, cleanup }, stageLines);
+            Assert.True(child.ExitCode == 0, diagnostic);
+            lifecycleStage = "complete";
+        }
+        finally
+        {
+            await ContainIsolatedChildOrFailFastAsync(child, childId, kind, lifecycleStage);
+        }
+    }
+
+    private static async Task ContainIsolatedChildOrFailFastAsync(
+        Process child,
+        int childId,
+        string kind,
+        string stage)
+    {
+        Exception? containmentFailure = null;
+        var exited = false;
+        try
+        {
+            exited = child.HasExited;
+        }
+        catch (Exception error)
+        {
+            containmentFailure = error;
+        }
+
+        if (!exited)
+        {
+            try
+            {
+                child.Kill(entireProcessTree: true);
+            }
+            catch (Exception error)
+            {
+                containmentFailure ??= error;
+            }
+
+            try
+            {
+                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                exited = child.HasExited;
+            }
+            catch (Exception error)
+            {
+                containmentFailure ??= error;
+                exited = false;
+            }
+        }
+
+        if (!exited)
+        {
+            var message = $"PhotoSift isolated child containment failed; kind={kind}; "
+                + $"pid={childId}; stage={stage}.";
+            Environment.FailFast(message, containmentFailure);
+        }
+    }
+
+    private sealed class IsolationStageWriter(string kind, Guid nonce) : IDisposable
+    {
+        internal const string Prefix = "PHOTOSIFT_SCENARIO_CHILD ";
+        private readonly TextWriter output = new StreamWriter(
+            Console.OpenStandardOutput(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            bufferSize: 1024, leaveOpen: true) { AutoFlush = true };
+        private int cleanupWritten;
+
+        internal static string Format(string kind, Guid nonce, string stage) =>
+            $"{Prefix}kind={kind} nonce={nonce:N} stage={stage}";
+
+        internal void Entered() => Write("entered");
+
+        internal void CleanupSucceeded()
+        {
+            Assert.Equal(0, Interlocked.Exchange(ref cleanupWritten, 1));
+            Write("cleanup-ok");
+        }
+
+        private void Write(string stage)
+        {
+            output.WriteLine(Format(kind, nonce, stage));
+            output.Flush();
+        }
+
+        public void Dispose() => output.Dispose();
+    }
+
+    private sealed class IsolatedScenarioFailureException(string message) : Exception(message);
+
+    private sealed class MarkerTraceListener(string marker) : TraceListener
+    {
+        private readonly ConcurrentQueue<string> messages = new();
+        public bool SawMarker => messages.Any(message => message.Contains(marker, StringComparison.Ordinal));
+        public override void Write(string? message)
+        {
+            if (message is not null) messages.Enqueue(message);
+        }
+        public override void WriteLine(string? message) => Write(message);
     }
 }

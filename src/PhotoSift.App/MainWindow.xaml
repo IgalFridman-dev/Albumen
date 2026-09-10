@@ -396,9 +396,9 @@
                                AutomationProperties.Name="Selection summary"
                                AutomationProperties.ItemStatus="{Binding SelectionSummary}"
                                AutomationProperties.LiveSetting="Polite" />
-                    <TextBlock x:Name="ReviewAnnouncementText" Text="{Binding ReviewAnnouncement}" TextWrapping="Wrap"
+                    <app:ReviewAnnouncementTextBlock x:Name="ReviewAnnouncementText"
+                               Text="{Binding ReviewAnnouncement}" TextWrapping="Wrap"
                                AutomationProperties.Name="Review command status"
-                               AutomationProperties.ItemStatus="{Binding ReviewAnnouncement}"
                                AutomationProperties.LiveSetting="Polite" />
                 </StackPanel>
                 <TextBlock Grid.Row="1" Text="Exact groups" FontWeight="SemiBold" Margin="0,10,0,4" />
