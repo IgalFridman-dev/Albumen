@@ -11,6 +11,19 @@ namespace PhotoSift.Application.Tests.Review;
 public sealed class ReviewApprovalAuthorityTests
 {
     [Fact]
+    public async Task FormerRequestCannotClaimAnUnsealedReplacementReview()
+    {
+        var reader = ApprovedActionAuthorityTests.Reader();
+        await using var fixture = new ApprovalFixture(new(), actionSafety: new(reader, new ScanTestAnalyzer()));
+        var request = await ApprovedActionAuthorityTests.ApproveAsync(fixture);
+        await fixture.OpenAsync();
+        var result = await ApprovedActionAuthorityTests.ClaimAsync(fixture, request);
+        Assert.Equal(ApprovedActionClaimOutcome.Stale, result.Outcome);
+        Assert.Empty(reader.Leases);
+        Assert.False(fixture.Owner.Current.Sealed);
+    }
+
+    [Fact]
     public async Task EmptySelectionCannotCreateAnActionRequest()
     {
         await using var fixture = new ApprovalFixture(new ApprovalEvidenceStore());

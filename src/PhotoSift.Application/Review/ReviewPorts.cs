@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using PhotoSift.Application.Scan;
+using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Scan;
 
@@ -43,4 +44,13 @@ public interface IOverrideEvidenceStore
 {
     ValueTask<OverridePersistResult> PersistAsync(DeliberateOverrideEvidence evidence, CancellationToken cancellationToken);
     ValueTask<OverrideReadResult> ReadAsync(OverrideEvidenceId evidenceId, CancellationToken cancellationToken);
+}
+
+public interface IApprovedActionAuthority
+{
+    Task<ApprovedActionClaimResult> ClaimAsync(ApprovedActionRequest request,
+        ImmutableArray<OverrideReadResult> overrideReads, CancellationToken cancellationToken);
+    Task<ActionSafetyRefreshResult> RefreshSafetyAsync(ApprovedActionClaim claim,
+        ApprovedActionItem item, ImmutableArray<PriorActionOutcome> precedingOutcomes,
+        CancellationToken cancellationToken);
 }

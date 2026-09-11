@@ -7,7 +7,7 @@ using PhotoSift.Domain.Scope;
 
 namespace PhotoSift.Application.Review;
 
-public sealed class ReviewCoordinator : IReviewCoordinator, IReviewResultSink
+public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResultSink, IApprovedActionAuthority
 {
     private readonly ReviewOwnerInbox inbox;
     private readonly IReviewRevalidationExecutor revalidation;
@@ -24,12 +24,14 @@ public sealed class ReviewCoordinator : IReviewCoordinator, IReviewResultSink
     private Operation? active;
     private ReviewSnapshot current = ReviewSnapshot.Closed;
     public ReviewCoordinator(IWorkflowScheduler scheduler, IReviewRevalidationExecutor revalidation,
-        IOverrideEvidenceStore evidenceStore, int resultCapacity = 16)
+        IOverrideEvidenceStore evidenceStore, int resultCapacity = 16,
+        ProtectedActionSafetyValidator? actionSafety = null)
     {
         inbox = new(scheduler, resultCapacity);
         inbox.DeliverAfterTurn = DeliverPublications;
         this.revalidation = revalidation ?? throw new ArgumentNullException(nameof(revalidation));
         this.evidenceStore = evidenceStore ?? throw new ArgumentNullException(nameof(evidenceStore));
+        this.actionSafety = actionSafety;
     }
     public ReviewSnapshot Current => Volatile.Read(ref current);
     public event EventHandler<ReviewSnapshot>? SnapshotChanged;
@@ -454,10 +456,11 @@ public sealed class ReviewCoordinator : IReviewCoordinator, IReviewResultSink
         {
             disposed = true;
             foreach (var operation in operations) operation.Invalidated = true;
-            return operations.ToArray();
+            return (Operations: operations.ToArray(), ActionEffects: actionEffects.ToArray());
         }).ConfigureAwait(false);
-        foreach (var operation in pending) _ = operation.RequestCancellation();
-        await Task.WhenAll(pending.Select(operation => operation.Settled.Task)).ConfigureAwait(false);
+        foreach (var operation in pending.Operations) _ = operation.RequestCancellation();
+        await Task.WhenAll(pending.Operations.Select(operation => operation.Settled.Task)
+            .Concat(pending.ActionEffects)).ConfigureAwait(false);
         GC.SuppressFinalize(this);
     }
 
@@ -472,6 +475,8 @@ public sealed class ReviewCoordinator : IReviewCoordinator, IReviewResultSink
         internal ReviewStore Store { get; } = new(session, request);
         internal bool Invalidated { get; set; }
         internal bool Finished { get; set; }
+        internal ActionClaimAttempt? ClaimAttempt { get; set; }
+        internal ApprovedActionClaim? Claim { get; set; }
         internal TaskCompletionSource<IReviewRun?> RunReady { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource Settled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task RequestCancellation()
