@@ -102,6 +102,41 @@ public sealed class ActionSafetyPolicyTests
     }
 
     [Fact]
+    public void ZeroAllocationCannotReachTheOrdinarySurvivorAllowBranch()
+    {
+        var approved = ActionGroups.OneKey(
+            [@"C:\scope\selected.jpg", @"C:\scope\witness.jpg"],
+            linkCount: 2,
+            allocatedBytes: 0);
+        var input = ActionGroups.Input(approved, approved.Members, remainingApproved: [1]);
+
+        var result = ActionSafetyPolicy.Evaluate(input);
+
+        Assert.Equal(ActionSafetyDecisionKind.UnsafeCurrentFacts, result.Kind);
+        Assert.Equal(ActionSafetyReason.InconsistentLinks, result.Reason);
+    }
+
+    [Fact]
+    public void ZeroAllocationCannotReachTheExactOverrideAllowBranch()
+    {
+        var approved = ActionGroups.OneKey(
+            [@"C:\scope\selected.jpg"],
+            linkCount: 1,
+            allocatedBytes: 0);
+        var input = ActionGroups.Input(
+            approved,
+            approved.Members,
+            remainingApproved: [1],
+            overrideApproved: [1],
+            overrideExact: true);
+
+        var result = ActionSafetyPolicy.Evaluate(input);
+
+        Assert.Equal(ActionSafetyDecisionKind.UnsafeCurrentFacts, result.Kind);
+        Assert.Equal(ActionSafetyReason.InconsistentLinks, result.Reason);
+    }
+
+    [Fact]
     public void MissingCurrentRemainingOccurrenceFailsClosed()
     {
         var approved = ActionGroups.OneKey([@"C:\scope\a.jpg"], linkCount: 1);
@@ -146,6 +181,20 @@ public sealed class ActionSafetyPolicyTests
         var survivor = Assert.Single(result.Survivor.ExternalSurvivors);
         Assert.Equal(1, survivor.KnownPathCount);
         Assert.Equal((uint)2, survivor.LinkCount);
+    }
+
+    [Fact]
+    public void OneCanonicalCurrentPathCannotClaimTwoPhysicalIdentities()
+    {
+        var approved = ActionGroups.Group(
+            ActionGroups.Occurrence(1, ActionGroups.Key(1), @"C:\scope\a.jpg", linkCount: 1),
+            ActionGroups.Occurrence(2, ActionGroups.Key(2), @"c:\SCOPE\A.JPG", linkCount: 1));
+        var input = ActionGroups.Input(approved, approved.Members, remainingApproved: [1]);
+
+        var result = ActionSafetyPolicy.Evaluate(input);
+
+        Assert.Equal(ActionSafetyDecisionKind.UnsafeCurrentFacts, result.Kind);
+        Assert.Equal(ActionSafetyReason.InconsistentLinks, result.Reason);
     }
 
     [Fact]
@@ -266,12 +315,27 @@ public sealed class ActionSafetyPolicyTests
     }
 
     [Fact]
-    public void InconsistentSameKeyAllocationAndLinksPrecedeAKnownWitness()
+    public void InconsistentSameKeyAllocationPrecedesAKnownWitness()
     {
         var key = ActionGroups.Key(1);
         var approved = ActionGroups.Group(
             ActionGroups.Occurrence(1, key, @"C:\scope\a.jpg", allocatedBytes: 4096, linkCount: 2),
-            ActionGroups.Occurrence(2, key, @"C:\scope\b.jpg", allocatedBytes: 8192, linkCount: 3));
+            ActionGroups.Occurrence(2, key, @"C:\scope\b.jpg", allocatedBytes: 8192, linkCount: 2));
+        var input = ActionGroups.Input(approved, approved.Members, remainingApproved: [1]);
+
+        var result = ActionSafetyPolicy.Evaluate(input);
+
+        Assert.Equal(ActionSafetyDecisionKind.UnsafeCurrentFacts, result.Kind);
+        Assert.Equal(ActionSafetyReason.InconsistentLinks, result.Reason);
+    }
+
+    [Fact]
+    public void InconsistentSameKeyLinkCountPrecedesAKnownWitness()
+    {
+        var key = ActionGroups.Key(1);
+        var approved = ActionGroups.Group(
+            ActionGroups.Occurrence(1, key, @"C:\scope\a.jpg", allocatedBytes: 4096, linkCount: 2),
+            ActionGroups.Occurrence(2, key, @"C:\scope\b.jpg", allocatedBytes: 4096, linkCount: 3));
         var input = ActionGroups.Input(approved, approved.Members, remainingApproved: [1]);
 
         var result = ActionSafetyPolicy.Evaluate(input);

@@ -194,8 +194,22 @@ internal static class ActionCurrentFactGuard
         foreach (var occurrence in currentOccurrences)
         {
             if (!occurrence.Allocation.Stable
-                || occurrence.Allocation.AllocatedBytes is null or < 0
+                || occurrence.Allocation.AllocatedBytes is null or <= 0
                 || occurrence.Allocation.LinkCount is null or 0)
+            {
+                return Unsafe();
+            }
+        }
+
+        foreach (var pathGroup in currentOccurrences.GroupBy(
+                     occurrence => occurrence.ResolvedPath,
+                     StringComparer.OrdinalIgnoreCase))
+        {
+            if (pathGroup
+                .Select(occurrence => occurrence.PhysicalFileKey!.Value)
+                .Distinct()
+                .Skip(1)
+                .Any())
             {
                 return Unsafe();
             }
