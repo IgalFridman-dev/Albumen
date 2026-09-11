@@ -788,7 +788,7 @@ public sealed class PhotoSiftWorkflowTests
             return Task.FromResult(result);
         }
     }
-    private sealed class PostedScheduler : IWorkflowScheduler { public void Post(Action action) => ThreadPool.QueueUserWorkItem(_ => action()); }
+    private sealed class PostedScheduler : IWorkflowScheduler { public void Post(System.Action action) => ThreadPool.QueueUserWorkItem(_ => action()); }
     private static Task PumpCaptured(ManualScanScheduler scheduler, Task completion, CapturedAsyncExceptions capture) =>
         ScanTestData.Bound(PumpCore(scheduler, completion, capture));
 
@@ -911,8 +911,8 @@ public sealed class PhotoSiftWorkflowTests
     }
     private sealed class ManualScheduler : IWorkflowScheduler
     {
-        private readonly System.Collections.Concurrent.ConcurrentQueue<Action> queue = new();
-        public void Post(Action action) => queue.Enqueue(action);
+        private readonly System.Collections.Concurrent.ConcurrentQueue<System.Action> queue = new();
+        public void Post(System.Action action) => queue.Enqueue(action);
         public void Drain() { while (queue.TryDequeue(out var action)) action(); }
         public async Task Finish(Task task) { Drain(); await task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken); Drain(); }
     }

@@ -14,7 +14,7 @@ internal sealed class ScopeRequest(CancellationToken callerCancellation) : IDisp
 
     public CancellationToken CallerCancellation { get; } = callerCancellation;
 
-    public void RegisterCallerCancellation(Action requestCancellation) =>
+    public void RegisterCallerCancellation(System.Action requestCancellation) =>
         callerRegistration = CallerCancellation.UnsafeRegister(
             _ => requestCancellation(), null);
 

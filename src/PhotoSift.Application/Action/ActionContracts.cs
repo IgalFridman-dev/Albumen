@@ -1,0 +1,40 @@
+using System.Collections.Immutable;
+using PhotoSift.Application.Review;
+using PhotoSift.Domain.Action;
+using PhotoSift.Domain.Review;
+
+namespace PhotoSift.Application.Action;
+
+public enum ActionStatus { Idle, Claiming, Running, Complete, Incomplete, Faulted }
+public enum ActionItemState
+{
+    Waiting, NotRequested, Requested, InterruptedBeforeExecution,
+    Executing, Recycled, NotRemoved, UnknownPendingRevalidation,
+}
+public sealed record ActionItemSnapshot(ApprovedActionItem Item, Guid? ActionItemId,
+    ActionItemState State, ActionSafetyReason Reason);
+public sealed record ActionSnapshot(Guid? RequestId, ActionStatus Status,
+    ImmutableArray<ActionItemSnapshot> Items, long DurableRequestedCount, long DurableExecutingCount,
+    long RecycledCount, long NotRemovedCount, long UnknownCount, ActionSafetyReason FaultReason)
+{
+    public static ActionSnapshot Idle { get; } = new(null, ActionStatus.Idle, [], 0, 0, 0, 0, 0, ActionSafetyReason.None);
+}
+public enum ActionCommandOutcome { Started, Existing, Rejected, Completed, Incomplete, Faulted }
+public sealed record ActionCommandResult(ActionCommandOutcome Outcome, ActionSnapshot Snapshot);
+
+public enum ActionJournalWriteOutcome { Persisted, ExactRetry, Conflict, InvalidPredecessor, Unavailable }
+public sealed record ActionJournalWriteResult(ActionJournalWriteOutcome Outcome);
+public sealed record ActionRequestedFact(Guid ActionItemId, DateTimeOffset RequestedUtc,
+    ActionSafetyEnvelope Safety, string RequestPayloadSha256, DeliberateOverrideEvidence? OverrideEvidence);
+public sealed record ActionExecutingFact(Guid ActionItemId, DateTimeOffset ExecutingUtc);
+public enum ActionTerminalKind { Recycled, NotRemoved, UnknownPendingRevalidation }
+public sealed record ActionTerminalFact(Guid ActionItemId, DateTimeOffset RecordedUtc,
+    ActionTerminalKind Kind, ActionSafetyReason Reason, RecycleBinEvidence Evidence);
+
+public enum RecycleBinOutcomeKind { Recycled, NotRemoved, UnknownPendingRevalidation }
+public sealed record RecycleBinEvidence(int ValidPreDeleteCount, int UnexpectedPreDeleteCount,
+    bool PermissionGranted, int? PerformOperationsHResult, bool? OperationsAborted,
+    int MatchingPostDeleteCount, int UnexpectedPostDeleteCount, int? DeleteHResult,
+    bool NewlyCreatedItemPresent, bool CallbackException, bool OriginalObjectProvenUnchanged);
+public sealed record RecycleBinRequest(Guid ActionItemId, ActionSafetyEnvelope Safety);
+public sealed record RecycleBinResult(RecycleBinOutcomeKind Outcome, ActionSafetyReason Reason, RecycleBinEvidence Evidence);

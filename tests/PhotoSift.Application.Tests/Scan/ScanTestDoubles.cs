@@ -35,8 +35,8 @@ internal static class ScanTestData
 
 internal sealed class ManualScanScheduler : IWorkflowScheduler
 {
-    private readonly ConcurrentQueue<Action> callbacks = new();
-    public void Post(Action callback) => callbacks.Enqueue(callback);
+    private readonly ConcurrentQueue<System.Action> callbacks = new();
+    public void Post(System.Action callback) => callbacks.Enqueue(callback);
     public bool TryRunOne()
     {
         if (!callbacks.TryDequeue(out var callback)) return false;
@@ -106,7 +106,7 @@ internal sealed class ScanTestLease(ProtectedOpenRequest request) : IProtectedFi
     public ProtectedFileFacts OpenedFacts { get; set; } = new(request.ExpectedPhysicalFileKey, 1,
         request.ResolvedPath, DateTimeOffset.UnixEpoch, new AllocationEvidence(4096, 1, true));
     public Func<CancellationToken, ValueTask<ProtectedFileFacts>>? Refresh { get; set; }
-    public Action? OnDispose { get; set; }
+    public System.Action? OnDispose { get; set; }
     public bool Disposed { get; private set; }
     public ValueTask<ProtectedFileFacts> RefreshAsync(CancellationToken cancellationToken) =>
         Refresh?.Invoke(cancellationToken) ?? ValueTask.FromResult(OpenedFacts);

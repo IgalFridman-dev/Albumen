@@ -417,7 +417,7 @@ internal sealed class GatedAcceptanceEvidenceStore : IOverrideEvidenceStore
 internal sealed class AcceptanceOwnerScheduler : IWorkflowScheduler, IAsyncDisposable
 {
     private readonly object sync = new();
-    private readonly Queue<Action> callbacks = new();
+    private readonly Queue<System.Action> callbacks = new();
     private readonly SemaphoreSlim permits = new(0);
     private readonly SemaphoreSlim completed = new(0);
     private readonly CancellationTokenSource lifetime = new();
@@ -430,7 +430,7 @@ internal sealed class AcceptanceOwnerScheduler : IWorkflowScheduler, IAsyncDispo
         pump = Task.Run(PumpAsync, CancellationToken.None);
     }
 
-    public void Post(Action callback)
+    public void Post(System.Action callback)
     {
         ArgumentNullException.ThrowIfNull(callback);
         lock (sync)
@@ -554,7 +554,7 @@ internal sealed class AcceptanceOwnerScheduler : IWorkflowScheduler, IAsyncDispo
             while (true)
             {
                 await permits.WaitAsync(lifetime.Token);
-                Action callback;
+                System.Action callback;
                 lock (sync)
                 {
                     if (callbacks.Count == 0)
