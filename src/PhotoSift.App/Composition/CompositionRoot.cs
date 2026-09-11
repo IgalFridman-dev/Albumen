@@ -3,7 +3,7 @@ using PhotoSift.App.Shell;
 using PhotoSift.Analysis.Exact;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Review;
-using PhotoSift.Infrastructure.Sqlite.Review;
+using PhotoSift.Infrastructure.Sqlite;
 using PhotoSift.Infrastructure.Windows.Scan;
 using PhotoSift.Application.Scope;
 using PhotoSift.Application.Shell;
@@ -32,13 +32,13 @@ public static class CompositionRoot
         var databasePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "PhotoSift", "photosift.db");
-        var evidenceStore = new SqliteOverrideEvidenceStore(databasePath);
+        var stores = new SqlitePhotoSiftStores(databasePath);
         var review = new ReviewCoordinator(scheduler,
-            new BoundedReviewRevalidator(reader, analyzer), evidenceStore);
+            new BoundedReviewRevalidator(reader, analyzer), stores.OverrideEvidence);
         var photoWorkflow = new OwnedPhotoSiftWorkflow(
             new PhotoSiftWorkflow(workflow, scan, scheduler, review),
             review,
-            evidenceStore);
+            stores);
         var dialog = new WpfReviewDialogService(() => System.Windows.Application.Current?.MainWindow);
         return new ShellViewModel(workflow, photoWorkflow, dialog);
     }

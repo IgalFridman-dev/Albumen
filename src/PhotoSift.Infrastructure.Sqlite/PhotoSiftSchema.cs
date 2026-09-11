@@ -1,0 +1,93 @@
+using Microsoft.Data.Sqlite;
+using PhotoSift.Infrastructure.Sqlite.Action;
+using PhotoSift.Infrastructure.Sqlite.Review;
+
+namespace PhotoSift.Infrastructure.Sqlite;
+
+internal static class PhotoSiftSchema
+{
+    internal const int Version = 2;
+
+    internal static async Task ValidateAsync(SqliteConnection connection, int expectedVersion,
+        CancellationToken token, SqliteTransaction? transaction = null)
+    {
+        if (await SqliteDatabaseOwner.ScalarAsync(connection, "PRAGMA user_version;", token, transaction).ConfigureAwait(false)
+            is not long version || version != expectedVersion || expectedVersion is < 0 or > Version)
+            throw new InvalidDataException("Unsupported SQLite version.");
+        var expected = new Dictionary<string, (string Type, string Table, string? Sql)>(StringComparer.Ordinal);
+        if (expectedVersion > 0)
+        {
+            expected.Add("override_evidence", ("table", "override_evidence", OverrideEvidenceSchema.CreateTableSql));
+            expected.Add("sqlite_autoindex_override_evidence_1", ("index", "override_evidence", null));
+        }
+        if (expectedVersion == Version)
+        {
+            expected.Add("action_items", ("table", "action_items", ActionJournalSchema.CreateItemsSql));
+            expected.Add("action_transitions", ("table", "action_transitions", ActionJournalSchema.CreateTransitionsSql));
+            expected.Add("sqlite_autoindex_action_items_1", ("index", "action_items", null));
+            expected.Add("sqlite_autoindex_action_items_2", ("index", "action_items", null));
+            expected.Add("sqlite_autoindex_action_transitions_1", ("index", "action_transitions", null));
+        }
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT type, name, tbl_name, sql FROM sqlite_schema;";
+        await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+        while (await reader.ReadAsync(token).ConfigureAwait(false))
+        {
+            if (!expected.Remove(reader.GetString(1), out var definition)
+                || reader.GetString(0) != definition.Type || reader.GetString(2) != definition.Table
+                || (definition.Sql is null ? !reader.IsDBNull(3)
+                    : reader.IsDBNull(3) || Normalize(reader.GetString(3)) != Normalize(definition.Sql)))
+                throw new InvalidDataException("Unexpected SQLite schema object or definition.");
+        }
+        if (expected.Count != 0) throw new InvalidDataException("Missing SQLite schema object.");
+    }
+
+    internal static async Task InitializeAsync(SqliteConnection connection, SqliteDatabaseObserver? observer, CancellationToken token)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA integrity_check;";
+            await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+            if (!await reader.ReadAsync(token).ConfigureAwait(false) || reader.GetString(0) != "ok"
+                || await reader.ReadAsync(token).ConfigureAwait(false))
+                throw new InvalidDataException("SQLite integrity validation failed.");
+        }
+        var version = await SqliteDatabaseOwner.ScalarAsync(connection, "PRAGMA user_version;", token).ConfigureAwait(false);
+        if (version is not long source || source is < 0 or > Version)
+            throw new InvalidDataException("Unsupported SQLite version.");
+        await ValidateAsync(connection, (int)source, token).ConfigureAwait(false);
+        if (source == Version) return;
+        await SqliteDatabaseOwner.ExecuteAsync(connection, "BEGIN EXCLUSIVE;", token).ConfigureAwait(false);
+        try
+        {
+            await ValidateAsync(connection, (int)source, token).ConfigureAwait(false);
+            var step = 0;
+            if (source == 0)
+            {
+                await SqliteDatabaseOwner.ExecuteAsync(connection, OverrideEvidenceSchema.CreateTableSql, token).ConfigureAwait(false);
+                await ObserveAsync(++step).ConfigureAwait(false);
+            }
+            await SqliteDatabaseOwner.ExecuteAsync(connection, ActionJournalSchema.CreateItemsSql, token).ConfigureAwait(false);
+            await ObserveAsync(++step).ConfigureAwait(false);
+            await SqliteDatabaseOwner.ExecuteAsync(connection, ActionJournalSchema.CreateTransitionsSql, token).ConfigureAwait(false);
+            await ObserveAsync(++step).ConfigureAwait(false);
+            await SqliteDatabaseOwner.ExecuteAsync(connection, "PRAGMA user_version=2;", token).ConfigureAwait(false);
+            await ObserveAsync(++step).ConfigureAwait(false);
+            await ValidateAsync(connection, Version, token).ConfigureAwait(false);
+            await ObserveAsync(++step).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            await SqliteDatabaseOwner.ExecuteAsync(connection, "COMMIT;", token).ConfigureAwait(false);
+        }
+        catch
+        {
+            try { await SqliteDatabaseOwner.ExecuteAsync(connection, "ROLLBACK;", CancellationToken.None).ConfigureAwait(false); }
+            catch (SqliteException) { /* Keep the original failure. */ }
+            throw;
+        }
+        ValueTask ObserveAsync(int step) => observer?.MigrationStep?.Invoke(step, connection, token) ?? ValueTask.CompletedTask;
+    }
+
+    private static string Normalize(string sql) => string.Join(' ', sql.Trim().TrimEnd(';')
+        .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+}

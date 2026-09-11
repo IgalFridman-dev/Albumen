@@ -13,7 +13,7 @@ namespace PhotoSift.Infrastructure.Tests.Sqlite;
 public sealed class SqliteOverrideEvidenceStoreTests
 {
     [Fact]
-    public async Task EmptyDatabaseMigratesAtomicallyToVersionOneAndUsesWal()
+    public async Task EmptyDatabaseMigratesAtomicallyToVersionTwoAndUsesWal()
     {
         await using var fixture = new SqliteOverrideFixture();
         await using var store = fixture.CreateStore();
@@ -22,10 +22,10 @@ public sealed class SqliteOverrideEvidenceStoreTests
             (await store.PersistAsync(OverrideEvidenceData.Create(), TestContext.Current.CancellationToken)).Outcome);
 
         await using var connection = await fixture.OpenRawAsync();
-        Assert.Equal(1L, await ScalarLongAsync(connection, "PRAGMA user_version;"));
+        Assert.Equal(2L, await ScalarLongAsync(connection, "PRAGMA user_version;"));
         Assert.Equal("wal", Assert.IsType<string>(await ScalarAsync(connection, "PRAGMA journal_mode;")),
             ignoreCase: true);
-        Assert.Equal(["override_evidence"], await ReadStringsAsync(connection,
+        Assert.Equal(["action_items", "action_transitions", "override_evidence"], await ReadStringsAsync(connection,
             "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 7) <> 'sqlite_' ORDER BY name;"));
         Assert.Equal(OverrideEvidenceData.ExpectedColumns, await ReadStringsAsync(connection,
             "SELECT name FROM pragma_table_info('override_evidence') ORDER BY cid;"));
@@ -131,7 +131,7 @@ public sealed class SqliteOverrideEvidenceStoreTests
         SqliteConnection.ClearAllPools();
         Assert.Equal(before, await File.ReadAllBytesAsync(fixture.DatabasePath, TestContext.Current.CancellationToken));
         await using var unchanged = await fixture.OpenRawAsync();
-        Assert.Equal(1L, await ScalarLongAsync(unchanged, "PRAGMA user_version;"));
+        Assert.Equal(2L, await ScalarLongAsync(unchanged, "PRAGMA user_version;"));
         Assert.Equal("delete", Assert.IsType<string>(await ScalarAsync(unchanged,
             "PRAGMA journal_mode;")), ignoreCase: true);
         Assert.Equal(1L, await ScalarLongAsync(unchanged, "SELECT COUNT(*) FROM override_evidence;"));
@@ -373,7 +373,7 @@ public sealed class SqliteOverrideEvidenceStoreTests
                 (await blocked.ReadAsync(OverrideEvidenceData.KnownEvidenceId, TestContext.Current.CancellationToken)).Outcome);
         }
 
-        await using var directoryStore = new SqliteOverrideEvidenceStore(fixture.RootPath);
+        await using var directoryStore = SqliteOverrideEvidenceStore.CreateForTesting(fixture.RootPath);
         Assert.Equal(OverridePersistOutcome.Unavailable,
             (await directoryStore.PersistAsync(OverrideEvidenceData.Create(), TestContext.Current.CancellationToken)).Outcome);
     }
@@ -660,9 +660,9 @@ internal sealed class SqliteOverrideFixture : IAsyncDisposable
 
     internal string RootPath { get; }
     internal string DatabasePath { get; }
-    internal SqliteOverrideEvidenceStore CreateStore() => new(DatabasePath);
+    internal SqliteOverrideEvidenceStore CreateStore() => SqliteOverrideEvidenceStore.CreateForTesting(DatabasePath);
     internal SqliteOverrideEvidenceStore CreateStore(SqliteOverrideEvidenceStoreObserver observer) =>
-        new(DatabasePath, observer);
+        SqliteOverrideEvidenceStore.CreateForTesting(DatabasePath, observer);
 
     internal async Task<SqliteConnection> OpenRawAsync()
     {
