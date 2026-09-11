@@ -61,6 +61,7 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
             if (old is not null)
             {
                 old.Invalidated = true;
+                QueueActionCancellation(old);
                 if (old.Request.Scan.Pin != pin) revoked.Add(old.Request.Scan.Pin!);
                 foreach (var group in old.Request.Scan.Groups)
                     if (!request.Scan.Groups.Any(g => g.GroupId == group.GroupId)) retiredGroups.Add(group.GroupId);
@@ -275,6 +276,7 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
             if (previous is not null)
             {
                 previous.Invalidated = true;
+                QueueActionCancellation(previous);
                 revoked.Add(previous.Request.Scan.Pin!);
                 active = null;
                 Publish(ReviewSnapshot.Closed);
@@ -401,6 +403,7 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
         await inbox.CommandAsync(() =>
         {
             operation.Invalidated = true;
+            QueueActionCancellation(operation);
             if (ReferenceEquals(active, operation))
             {
                 operation.Store.Finish(ReviewUnavailableReason.Canceled);
@@ -415,6 +418,7 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
     {
         Volatile.Write(ref current, snapshot);
         publications.Enqueue((snapshot, active));
+        if (snapshot.Status == ReviewStatus.Faulted && active is { } operation) QueueActionCancellation(operation);
     }
 
     private void DeliverPublications()
@@ -433,6 +437,7 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
                 else if (failed) _ = ObserveObserverFaultAsync(operation);
             }
         }
+        DeliverActionCancellations();
     }
 
     private async Task ObserveObserverFaultAsync(Operation operation)
@@ -456,7 +461,8 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
         {
             disposed = true;
             foreach (var operation in operations) operation.Invalidated = true;
-            return (Operations: operations.ToArray(), ActionEffects: actionEffects.ToArray());
+            foreach (var effect in actionEffects.Values) actionCancellations.Enqueue(effect);
+            return (Operations: operations.ToArray(), ActionEffects: actionEffects.Keys.ToArray());
         }).ConfigureAwait(false);
         foreach (var operation in pending.Operations) _ = operation.RequestCancellation();
         await Task.WhenAll(pending.Operations.Select(operation => operation.Settled.Task)

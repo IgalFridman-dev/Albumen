@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.ExceptionServices;
 using PhotoSift.Application.Scan;
 using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Review;
@@ -11,7 +12,8 @@ namespace PhotoSift.Application.Review;
 public sealed partial class ReviewCoordinator
 {
     private readonly ProtectedActionSafetyValidator? actionSafety;
-    private readonly HashSet<Task> actionEffects = [];
+    private readonly Dictionary<Task, ActionEffect> actionEffects = [];
+    private readonly Queue<ActionEffect> actionCancellations = [];
     private readonly HashSet<Guid> safetyRefreshes = [];
 
     public async Task<ApprovedActionClaimResult> ClaimAsync(ApprovedActionRequest request,
@@ -39,26 +41,29 @@ public sealed partial class ReviewCoordinator
                 new(approved.Scan, approved.Scope), operation.Store.CaptureActionGroups(), overrideReads,
                 new(TaskCreationOptions.RunContinuationsAsynchronously));
             operation.ClaimAttempt = attempt;
-            actionEffects.Add(attempt.Completion.Task);
-            return new ClaimStart(attempt.Completion.Task, operation, attempt);
+            var effect = new ActionEffect(operation);
+            actionEffects.Add(attempt.Completion.Task, effect);
+            return new ClaimStart(attempt.Completion.Task, operation, attempt, effect);
         }).ConfigureAwait(false);
         if (start.Operation is { } operation && start.Attempt is { } attempt)
-            _ = Task.Run(() => RunClaimAsync(operation, attempt, cancellationToken), CancellationToken.None);
+            _ = Task.Run(() => RunClaimAsync(operation, attempt, start.Effect!, cancellationToken), CancellationToken.None);
         return await start.Completion.ConfigureAwait(false);
     }
 
-    private async Task RunClaimAsync(Operation operation, ActionClaimAttempt attempt, CancellationToken token)
+    private async Task RunClaimAsync(Operation operation, ActionClaimAttempt attempt, ActionEffect effect, CancellationToken caller)
     {
         ApprovedActionClaimResult result;
         try
         {
-            var reads = await ReadActionEvidenceAsync(attempt.Reads.Select(read => read.Evidence!).ToImmutableArray(), token).ConfigureAwait(false);
-            if (actionSafety is null)
-                result = await inbox.ResultAsync(() => ActionRejection(operation, attempt.Request)
-                    ?? ClaimFailure(ApprovedActionClaimOutcome.UnsafeCurrentFacts, ActionSafetyReason.Unavailable)).ConfigureAwait(false);
-            else
-                result = await actionSafety.ProbeAsync(attempt.Context, attempt.Groups, [],
+            result = await RunActionEffectAsync(effect, async token =>
+            {
+                var reads = await ReadActionEvidenceAsync(attempt.Reads.Select(read => read.Evidence!).ToImmutableArray(), token).ConfigureAwait(false);
+                if (actionSafety is null)
+                    return await inbox.ResultAsync(() => ActionRejection(operation, attempt.Request)
+                        ?? ClaimFailure(ApprovedActionClaimOutcome.UnsafeCurrentFacts, ActionSafetyReason.Unavailable)).ConfigureAwait(false);
+                return await actionSafety.ProbeAsync(attempt.Context, attempt.Groups, [],
                     (groups, reason) => inbox.ResultAsync(() => CompleteActionClaim(operation, attempt, reads, groups, reason)), token).ConfigureAwait(false);
+            }, caller).ConfigureAwait(false);
         }
         catch (Exception)
         {
@@ -122,47 +127,51 @@ public sealed partial class ReviewCoordinator
                 new(accepted.Request.Scan, accepted.Request.Scope), group, precedingOutcomes,
                 operation.Store.ActionEvidence, new(TaskCreationOptions.RunContinuationsAsynchronously));
             safetyRefreshes.Add(attempt.AttemptId);
-            actionEffects.Add(attempt.Settled.Task);
-            return new RefreshStart(null, operation, attempt);
+            var effect = new ActionEffect(operation);
+            actionEffects.Add(attempt.Settled.Task, effect);
+            return new RefreshStart(null, operation, attempt, effect);
         }).ConfigureAwait(false);
         if (start.Attempt is not { } attempt || start.Operation is not { } operation) return start.Result!;
         // Synchronous opens/analyzer entry points must never run on an owner or
         // observer callback, including when every await completes immediately.
-        return await Task.Run(() => RunSafetyRefreshAsync(operation, attempt, cancellationToken), CancellationToken.None).ConfigureAwait(false);
+        return await Task.Run(() => RunSafetyRefreshAsync(operation, attempt, start.Effect!, cancellationToken), CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task<ActionSafetyRefreshResult> RunSafetyRefreshAsync(Operation operation,
-        ActionSafetyRefreshAttempt attempt, CancellationToken token)
+        ActionSafetyRefreshAttempt attempt, ActionEffect effect, CancellationToken caller)
     {
         try
         {
-            var reads = await ReadActionEvidenceAsync(attempt.ExpectedEvidence, token).ConfigureAwait(false);
-            var recycled = attempt.PrecedingOutcomes.Where(outcome => outcome.GroupId == attempt.Group.GroupId
-                && outcome.Disposition == PriorActionDisposition.Recycled).Select(outcome => outcome.OccurrenceId).ToImmutableHashSet();
-            if (actionSafety is null)
-                return new(ApprovedActionClaimOutcome.UnsafeCurrentFacts, null, ActionSafetyReason.Unavailable);
-            return await actionSafety.ProbeAsync(attempt.Context, [attempt.Group], recycled,
-                (groups, reason) => inbox.ResultAsync(() =>
-                {
-                    var rejection = ActionRejection(operation, attempt.Claim.Request);
-                    if (rejection is not null) return new ActionSafetyRefreshResult(rejection.Outcome, null, rejection.Reason);
-                    if (!safetyRefreshes.Contains(attempt.AttemptId) || !ReferenceEquals(operation.Claim, attempt.Claim))
-                        return new(ApprovedActionClaimOutcome.Stale, null, ActionSafetyReason.StalePin);
-                    if (!operation.Store.MatchesActionEvidence(reads))
-                        return new(ApprovedActionClaimOutcome.EvidenceUnavailable, null, ActionSafetyReason.OverrideMismatch);
-                    if (reason != ActionSafetyReason.None)
+            return await RunActionEffectAsync(effect, async token =>
+            {
+                var reads = await ReadActionEvidenceAsync(attempt.ExpectedEvidence, token).ConfigureAwait(false);
+                var recycled = attempt.PrecedingOutcomes.Where(outcome => outcome.GroupId == attempt.Group.GroupId
+                    && outcome.Disposition == PriorActionDisposition.Recycled).Select(outcome => outcome.OccurrenceId).ToImmutableHashSet();
+                if (actionSafety is null)
+                    return new ActionSafetyRefreshResult(ApprovedActionClaimOutcome.UnsafeCurrentFacts, null, ActionSafetyReason.Unavailable);
+                return await actionSafety.ProbeAsync(attempt.Context, [attempt.Group], recycled,
+                    (groups, reason) => inbox.ResultAsync(() =>
                     {
-                        var failed = ProbeFailure(operation, reason);
-                        return new(failed.Outcome, null, failed.Reason);
-                    }
-                    var probe = groups.Single();
-                    var input = SafetyInput(attempt.Claim.Request, attempt.Group, probe, attempt.PrecedingOutcomes);
-                    var decision = ActionSafetyPolicy.Evaluate(input);
-                    if (decision.Kind != ActionSafetyDecisionKind.Allowed)
-                        return new(ApprovedActionClaimOutcome.UnsafeCurrentFacts, null, decision.Reason);
-                    return new(ApprovedActionClaimOutcome.Claimed,
-                        new(attempt.Claim, attempt.Item, input, decision, probe.Observations, attempt.PrecedingOutcomes), ActionSafetyReason.None);
-                }), token).ConfigureAwait(false);
+                        var rejection = ActionRejection(operation, attempt.Claim.Request);
+                        if (rejection is not null) return new ActionSafetyRefreshResult(rejection.Outcome, null, rejection.Reason);
+                        if (!safetyRefreshes.Contains(attempt.AttemptId) || !ReferenceEquals(operation.Claim, attempt.Claim))
+                            return new(ApprovedActionClaimOutcome.Stale, null, ActionSafetyReason.StalePin);
+                        if (!operation.Store.MatchesActionEvidence(reads))
+                            return new(ApprovedActionClaimOutcome.EvidenceUnavailable, null, ActionSafetyReason.OverrideMismatch);
+                        if (reason != ActionSafetyReason.None)
+                        {
+                            var failed = ProbeFailure(operation, reason);
+                            return new(failed.Outcome, null, failed.Reason);
+                        }
+                        var probe = groups.Single();
+                        var input = SafetyInput(attempt.Claim.Request, attempt.Group, probe, attempt.PrecedingOutcomes);
+                        var decision = ActionSafetyPolicy.Evaluate(input);
+                        if (decision.Kind != ActionSafetyDecisionKind.Allowed)
+                            return new(ApprovedActionClaimOutcome.UnsafeCurrentFacts, null, decision.Reason);
+                        return new(ApprovedActionClaimOutcome.Claimed,
+                            new(attempt.Claim, attempt.Item, input, decision, probe.Observations, attempt.PrecedingOutcomes), ActionSafetyReason.None);
+                    }), token).ConfigureAwait(false);
+            }, caller).ConfigureAwait(false);
         }
         catch (Exception)
         {
@@ -258,6 +267,76 @@ public sealed partial class ReviewCoordinator
             dependent.Any(outcome => outcome.Disposition is PriorActionDisposition.Unknown or PriorActionDisposition.Pending));
     }
 
-    private sealed record ClaimStart(Task<ApprovedActionClaimResult> Completion, Operation? Operation, ActionClaimAttempt? Attempt);
-    private sealed record RefreshStart(ActionSafetyRefreshResult? Result, Operation? Operation, ActionSafetyRefreshAttempt? Attempt);
+    // Owner turns only enqueue immutable effect references. The after-turn
+    // delivery schedules callbacks; no cancellation callback runs on the owner.
+    private void QueueActionCancellation(Operation operation)
+    {
+        foreach (var effect in actionEffects.Values)
+            if (ReferenceEquals(effect.Operation, operation)) actionCancellations.Enqueue(effect);
+    }
+
+    private void DeliverActionCancellations()
+    {
+        while (actionCancellations.TryDequeue(out var effect)) _ = effect.RequestCancellation();
+    }
+
+    private static async Task<T> RunActionEffectAsync<T>(ActionEffect effect,
+        Func<CancellationToken, Task<T>> work, CancellationToken caller)
+    {
+        var registration = caller.Register(() => _ = effect.RequestCancellation());
+        ExceptionDispatchInfo? fault = null;
+        T result = default!;
+        try { result = await work(effect.Token).ConfigureAwait(false); }
+        catch (Exception exception) { fault = ExceptionDispatchInfo.Capture(exception); }
+        try
+        {
+            // The caller callback schedules onto the effect's tracked lane.
+            // Unregister it before closing that lane, then drain all callbacks.
+            await registration.DisposeAsync().ConfigureAwait(false);
+            await effect.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception cleanupFault) when (fault is not null)
+        {
+            throw new AggregateException(fault.SourceException, cleanupFault);
+        }
+        fault?.Throw();
+        return result;
+    }
+
+    // This lock serializes cancellation-task/disposal identity only. Review
+    // authority and the registry remain exclusively owned by inbox turns.
+    private sealed class ActionEffect(Operation operation) : IAsyncDisposable
+    {
+        private readonly object lifecycle = new();
+        private readonly CancellationTokenSource cancellation = new();
+        private Task? cancelTask;
+        private bool closed;
+        internal Operation Operation { get; } = operation;
+        internal CancellationToken Token => cancellation.Token;
+
+        internal Task RequestCancellation()
+        {
+            lock (lifecycle)
+                return cancelTask ??= closed ? Task.CompletedTask
+                    : Task.Run(() => cancellation.CancelAsync(), CancellationToken.None);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Task pending;
+            lock (lifecycle)
+            {
+                closed = true;
+                pending = cancelTask ?? Task.CompletedTask;
+            }
+            try { await pending.ConfigureAwait(false); }
+            finally { cancellation.Dispose(); }
+            GC.SuppressFinalize(this);
+        }
+    }
+
+    private sealed record ClaimStart(Task<ApprovedActionClaimResult> Completion, Operation? Operation,
+        ActionClaimAttempt? Attempt, ActionEffect? Effect = null);
+    private sealed record RefreshStart(ActionSafetyRefreshResult? Result, Operation? Operation,
+        ActionSafetyRefreshAttempt? Attempt, ActionEffect? Effect = null);
 }

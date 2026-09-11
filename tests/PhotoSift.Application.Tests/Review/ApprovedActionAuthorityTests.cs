@@ -3,6 +3,7 @@ using PhotoSift.Application.Review;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Tests.Scan;
 using PhotoSift.Domain.Action;
+using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Scan;
 using Xunit;
 
@@ -10,6 +11,199 @@ namespace PhotoSift.Application.Tests.Review;
 
 public sealed class ApprovedActionAuthorityTests
 {
+    [Fact]
+    public async Task ActionCancellationCallbacksRunOutsideOwnerAndDrainBeforeEffectSettlement()
+    {
+        var reader = Reader();
+        var analyzer = new ScanTestAnalyzer();
+        await using var fixture = new ApprovalFixture(new(), actionSafety: new(reader, analyzer));
+        var request = await ApproveAsync(fixture);
+        var entered = ScanTestData.Signal<bool>();
+        var callbackEntered = ScanTestData.Signal<bool>();
+        using var releaseCallback = new ManualResetEventSlim();
+        var registration = default(CancellationTokenRegistration);
+        analyzer.Hash = async (_, token) =>
+        {
+            registration = token.Register(() =>
+            {
+                callbackEntered.TrySetResult(true);
+                releaseCallback.Wait(TimeSpan.FromSeconds(5));
+            });
+            entered.TrySetResult(true);
+            return await new TaskCompletionSource<StreamDigest>(TaskCreationOptions.RunContinuationsAsynchronously)
+                .Task.WaitAsync(TimeSpan.FromSeconds(3), token);
+        };
+        var pending = ClaimOutcomeAsync(fixture.Owner, request);
+        await fixture.PumpAsync(entered.Task);
+        var dispose = fixture.Owner.DisposeAsync().AsTask();
+        try
+        {
+            await fixture.PumpAsync(Task.WhenAny(callbackEntered.Task, pending));
+            Assert.True(callbackEntered.Task.IsCompletedSuccessfully, "Owner cancellation callback was never invoked.");
+            var command = fixture.Owner.ChangeSelectionAsync(fixture.SelectionCommand(0,
+                SelectionCommandKind.ReplaceFocusedGroup, 1, 2), TestContext.Current.CancellationToken);
+            await fixture.PumpAsync(command);
+            Assert.Equal(ReviewCommandOutcome.Stale, (await command).Outcome);
+            Assert.False(dispose.IsCompleted);
+            Assert.False(pending.IsCompleted);
+        }
+        finally
+        {
+            releaseCallback.Set();
+            await fixture.PumpAsync(Task.WhenAll(pending, dispose));
+            await registration.DisposeAsync();
+        }
+        Assert.Equal(ApprovedActionClaimOutcome.Stale, await pending);
+        Assert.Equal(0, reader.Live);
+    }
+
+    [Theory]
+    [InlineData(false, "replace")]
+    [InlineData(false, "fault")]
+    [InlineData(false, "dispose")]
+    [InlineData(true, "replace")]
+    [InlineData(true, "fault")]
+    [InlineData(true, "dispose")]
+    public async Task OwnerCancelsCooperativeActionHashAfterReviewRunAlreadyFinished(bool refresh, string transition)
+    {
+        var reader = Reader();
+        var analyzer = new ScanTestAnalyzer();
+        await using var fixture = new ApprovalFixture(new(), actionSafety: new(reader, analyzer));
+        var request = await ApproveAsync(fixture);
+        var claim = refresh ? (await ClaimAsync(fixture, request)).Claim : null;
+        var finished = ScanTestData.Signal<bool>();
+        fixture.Owner.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.Sealed) finished.TrySetResult(true);
+        };
+        fixture.Executor.Runs.Single().Done.TrySetResult();
+        await fixture.PumpAsync(finished.Task);
+        var entered = ScanTestData.Signal<bool>();
+        var canceled = ScanTestData.Signal<ReviewSnapshot>();
+        var registration = default(CancellationTokenRegistration);
+        analyzer.Hash = async (_, token) =>
+        {
+            // Retain this observer until effect settlement. Hash completion can
+            // otherwise unregister it while CancelAsync is still dispatching.
+            registration = token.Register(() => canceled.TrySetResult(fixture.Owner.Current));
+            entered.TrySetResult(true);
+            // Deadline only bounds a broken implementation's test failure. No
+            // test path manually completes or releases this cooperative worker.
+            return await new TaskCompletionSource<StreamDigest>(TaskCreationOptions.RunContinuationsAsynchronously)
+                .Task.WaitAsync(TimeSpan.FromSeconds(3), token);
+        };
+        var pending = refresh
+            ? RefreshOutcomeAsync(fixture.Owner, claim!, request.Items[0])
+            : ClaimOutcomeAsync(fixture.Owner, request);
+        await fixture.PumpAsync(entered.Task);
+        Assert.Equal(1, reader.Live);
+        var oldPin = fixture.Owner.Current.Pin;
+        Task change = transition switch
+        {
+            "replace" => fixture.Owner.OpenAsync(fixture.Request, TestContext.Current.CancellationToken),
+            "fault" => fixture.Owner.ReportObserverFaultAsync(oldPin!),
+            _ => fixture.Owner.DisposeAsync().AsTask(),
+        };
+        await fixture.PumpAsync(Task.WhenAll(pending, change));
+        await registration.DisposeAsync();
+        Assert.True(canceled.Task.IsCompletedSuccessfully, "The owner did not cancel the cooperative Action hash.");
+        var snapshotAtCancellation = await canceled.Task;
+        if (transition == "replace") Assert.NotEqual(oldPin, snapshotAtCancellation.Pin);
+        if (transition == "fault") Assert.Equal(ReviewStatus.Faulted, snapshotAtCancellation.Status);
+        Assert.Equal(transition == "fault" ? ApprovedActionClaimOutcome.Faulted : ApprovedActionClaimOutcome.Stale, await pending);
+        Assert.Equal(0, reader.Live);
+        Assert.All(reader.Leases, lease => Assert.True(lease.Disposed));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisappearingExternalSurvivorBlocksClaimAndRefresh(bool refresh)
+    {
+        var reader = new ScanTestReader();
+        uint currentLinks = 3;
+        reader.Create = (_, open) => new ScanTestLease(open)
+        {
+            OpenedFacts = new(open.ExpectedPhysicalFileKey, 1, open.ResolvedPath, null, new(4096, currentLinks, true)),
+        };
+        await using var fixture = new ApprovalFixture(new(), actionSafety: new(reader, new ScanTestAnalyzer()));
+        var members = fixture.Request.Scan.Groups[0].Members.Take(2)
+            .Select(member => ReviewFixture.Copy(member, allocation: new(4096, 3, true))).ToImmutableArray();
+        var group = fixture.Request.Scan.Groups[0] with { Members = members };
+        fixture.ReplaceRequest(fixture.Request with
+        {
+            Scan = fixture.Request.Scan with { Groups = [group], Occurrences = members, Counts = new(2, 2, 0, 0, 0, 0) },
+        });
+        await fixture.OpenAsync();
+        await fixture.PumpAsync(fixture.Executor.Arrived.Task);
+        await fixture.RevalidateAsync(1, 2);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await fixture.ChangeAsync(fixture.SelectionCommand(0,
+            SelectionCommandKind.ReplaceFocusedGroup, 1, 2))).Outcome);
+        var request = (await fixture.ApproveAsync(fixture.ApprovalCommand())).ApprovedRequest!;
+        var claim = refresh ? (await ClaimAsync(fixture, request)).Claim : null;
+        currentLinks = 2;
+        if (refresh)
+        {
+            var pending = fixture.Owner.RefreshSafetyAsync(claim!, request.Items[0], [], TestContext.Current.CancellationToken);
+            await fixture.PumpAsync(pending);
+            Assert.Equal(ApprovedActionClaimOutcome.UnsafeCurrentFacts, (await pending).Outcome);
+            Assert.Equal(ActionSafetyReason.NoCurrentSurvivor, (await pending).Reason);
+        }
+        else
+        {
+            var result = await ClaimAsync(fixture, request);
+            Assert.Equal(ApprovedActionClaimOutcome.UnsafeCurrentFacts, result.Outcome);
+            Assert.Equal(ActionSafetyReason.NoCurrentSurvivor, result.Reason);
+        }
+        Assert.Equal(refresh ? 4 : 2, reader.Leases.Count);
+        Assert.Equal(0, reader.Live);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task OpenedFinalLinkOrAllocationDisagreementBlocksAuthorityDespiteKnownWitness(bool refresh, bool allocation)
+    {
+        var reader = Reader();
+        await using var fixture = new ApprovalFixture(new(), actionSafety: new(reader, new ScanTestAnalyzer()));
+        var request = await ApproveAsync(fixture);
+        var claim = refresh ? (await ClaimAsync(fixture, request)).Claim : null;
+        var normal = reader.Create!;
+        reader.Create = (index, open) =>
+        {
+            var lease = normal(index, open);
+            if (open.ExpectedPhysicalFileKey.FileId.Low == 1)
+                lease.Refresh = _ => ValueTask.FromResult(lease.OpenedFacts with
+                {
+                    Allocation = allocation ? new(8192, 2, true) : new(4096, 3, true),
+                });
+            return lease;
+        };
+        if (refresh)
+        {
+            var pending = fixture.Owner.RefreshSafetyAsync(claim!, request.Items[0], [], TestContext.Current.CancellationToken);
+            await fixture.PumpAsync(pending);
+            Assert.Equal(ApprovedActionClaimOutcome.UnsafeCurrentFacts, (await pending).Outcome);
+            Assert.Equal(ActionSafetyReason.InconsistentLinks, (await pending).Reason);
+        }
+        else
+        {
+            var result = await ClaimAsync(fixture, request);
+            Assert.Equal(ApprovedActionClaimOutcome.UnsafeCurrentFacts, result.Outcome);
+            Assert.Equal(ActionSafetyReason.InconsistentLinks, result.Reason);
+        }
+        Assert.Equal(0, reader.Live);
+    }
+
+    private static async Task<ApprovedActionClaimOutcome> ClaimOutcomeAsync(ReviewCoordinator owner, ApprovedActionRequest request) =>
+        (await owner.ClaimAsync(request, [], CancellationToken.None)).Outcome;
+
+    private static async Task<ApprovedActionClaimOutcome> RefreshOutcomeAsync(ReviewCoordinator owner,
+        ApprovedActionClaim claim, ApprovedActionItem item) =>
+        (await owner.RefreshSafetyAsync(claim, item, [], CancellationToken.None)).Outcome;
+
     [Theory]
     [InlineData("id")]
     [InlineData("time")]
