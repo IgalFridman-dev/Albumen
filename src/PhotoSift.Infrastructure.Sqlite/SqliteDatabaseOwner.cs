@@ -62,9 +62,29 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
         token.ThrowIfCancellationRequested();
         var parent = Path.GetDirectoryName(databasePath);
         if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+        RefuseRetainedSidecars();
+        var existing = File.Exists(databasePath);
+        if (existing)
+        {
+            // Ordinary read-only SQLite opens can create WAL/SHM files. First
+            // exclude every sidecar and hold the main file against writers;
+            // only this proven sidecar-free snapshot may use immutable mode.
+            // It is never used to inspect or ignore retained WAL/journal data.
+            await using var admissionGuard = new FileStream(databasePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            RefuseRetainedSidecars();
+            await using var admission = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = new Uri(databasePath).AbsoluteUri + "?immutable=1",
+                Mode = SqliteOpenMode.ReadOnly, Pooling = false, DefaultTimeout = 1,
+            }.ToString());
+            await admission.OpenAsync(token).ConfigureAwait(false);
+            await PhotoSiftSchema.ValidateSourceAsync(admission, token).ConfigureAwait(false);
+        }
+        RefuseRetainedSidecars();
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            DataSource = databasePath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false, DefaultTimeout = 1,
+            DataSource = databasePath, Mode = existing ? SqliteOpenMode.ReadWrite : SqliteOpenMode.ReadWriteCreate,
+            Pooling = false, DefaultTimeout = 1,
         }.ToString());
         try
         {
@@ -85,6 +105,14 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
             return connection;
         }
         catch { await connection.DisposeAsync().ConfigureAwait(false); throw; }
+    }
+
+    private void RefuseRetainedSidecars()
+    {
+        // Recovery/checkpointing is outside this journal's authority, including
+        // cleanup of empty or stale sidecars. Refuse before any SQLite open.
+        if (Path.Exists(databasePath + "-wal") || Path.Exists(databasePath + "-shm") || Path.Exists(databasePath + "-journal"))
+            throw new InvalidDataException("Retained SQLite journal state requires separate recovery authority.");
     }
 
     internal ValueTask AfterActionInsertAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken token) =>

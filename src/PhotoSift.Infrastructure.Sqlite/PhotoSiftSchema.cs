@@ -43,7 +43,7 @@ internal static class PhotoSiftSchema
         if (expected.Count != 0) throw new InvalidDataException("Missing SQLite schema object.");
     }
 
-    internal static async Task InitializeAsync(SqliteConnection connection, SqliteDatabaseObserver? observer, CancellationToken token)
+    internal static async Task<int> ValidateSourceAsync(SqliteConnection connection, CancellationToken token)
     {
         await using (var command = connection.CreateCommand())
         {
@@ -57,11 +57,17 @@ internal static class PhotoSiftSchema
         if (version is not long source || source is < 0 or > Version)
             throw new InvalidDataException("Unsupported SQLite version.");
         await ValidateAsync(connection, (int)source, token).ConfigureAwait(false);
+        return (int)source;
+    }
+
+    internal static async Task InitializeAsync(SqliteConnection connection, SqliteDatabaseObserver? observer, CancellationToken token)
+    {
+        var source = await ValidateSourceAsync(connection, token).ConfigureAwait(false);
         if (source == Version) return;
         await SqliteDatabaseOwner.ExecuteAsync(connection, "BEGIN EXCLUSIVE;", token).ConfigureAwait(false);
         try
         {
-            await ValidateAsync(connection, (int)source, token).ConfigureAwait(false);
+            await ValidateAsync(connection, source, token).ConfigureAwait(false);
             var step = 0;
             if (source == 0)
             {

@@ -23,16 +23,19 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
             var payload = RequestedPayload.Create(fact);
             var proposed = ItemRow.Create(payload);
             var rows = await ReadItemsAsync(connection, transaction, proposed.ActionItemId, proposed.RequestId, token).ConfigureAwait(false);
+            ItemRow? existing = null;
             foreach (var row in rows)
             {
                 var decoded = DecodeItem(row);
                 if (row.RequestId == proposed.RequestId && (row.RequestPayloadSha256 != proposed.RequestPayloadSha256
                     || decoded.RequestIdentityPayload != payload.RequestIdentityPayload)) return ActionJournalWriteOutcome.Conflict;
                 if (row.ActionItemId == proposed.ActionItemId)
-                    return row == proposed ? ActionJournalWriteOutcome.ExactRetry : ActionJournalWriteOutcome.Conflict;
-                if (row.RequestId == proposed.RequestId && row.OccurrenceId == proposed.OccurrenceId)
+                    existing = row;
+                else if (row.RequestId == proposed.RequestId && row.OccurrenceId == proposed.OccurrenceId)
                     return ActionJournalWriteOutcome.Conflict;
             }
+            if (existing is not null)
+                return existing == proposed ? ActionJournalWriteOutcome.ExactRetry : ActionJournalWriteOutcome.Conflict;
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
@@ -77,7 +80,15 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
             var proposed = new TransitionRow(GuidText(id), sequence, kind, Utc(utc), payload, Hash(payload));
             var items = await ReadItemsAsync(connection, transaction, proposed.ActionItemId, null, token).ConfigureAwait(false);
             if (items.Count != 1) return ActionJournalWriteOutcome.InvalidPredecessor;
-            _ = DecodeItem(items[0]);
+            var target = DecodeItem(items[0]);
+            var siblings = await ReadItemsAsync(connection, transaction, proposed.ActionItemId, items[0].RequestId, token).ConfigureAwait(false);
+            foreach (var sibling in siblings)
+            {
+                var decoded = DecodeItem(sibling);
+                if (sibling.RequestPayloadSha256 != items[0].RequestPayloadSha256
+                    || decoded.RequestIdentityPayload != target.RequestIdentityPayload)
+                    return ActionJournalWriteOutcome.Conflict;
+            }
             var transitions = await ReadTransitionsAsync(connection, transaction, proposed.ActionItemId, token).ConfigureAwait(false);
             foreach (var row in transitions) ValidateTransition(row);
             if (transitions.Any(row => row.Sequence == 3) && !transitions.Any(row => row.Sequence == 2))
@@ -135,6 +146,7 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
 
     private static bool ValidRequested(ActionRequestedFact fact)
     {
+        if (!ActionJournalPayloadValidator.IsComplete(fact)) return false;
         var safety = fact.Safety;
         if (fact.ActionItemId == Guid.Empty || safety?.Claim?.Request is not { } request || safety.Item is not { } item
             || safety.Claim.ClaimId.Value == Guid.Empty || request.RequestId == Guid.Empty
@@ -154,8 +166,7 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
     private static RequestedPayload DecodeItem(ItemRow row)
     {
         var decoded = CanonicalJson.Decode<RequestedPayload>(row.Payload);
-        if (decoded.Fact?.Safety?.Claim?.Request is null || decoded.Fact.Safety.Item?.Occurrence is null
-            || decoded.Fact.Safety.Input?.ApprovedGroup is null)
+        if (!ActionJournalPayloadValidator.IsComplete(decoded.Fact))
             throw new InvalidDataException("Incomplete Requested payload.");
         if (decoded.ActionSafetyPolicyVersion != ActionSafetyPolicy.Version || decoded.ClaimVersion != "review-action-claim-v1"
             || Hash(row.Payload) != row.PayloadSha256 || ItemRow.Create(decoded) != row
