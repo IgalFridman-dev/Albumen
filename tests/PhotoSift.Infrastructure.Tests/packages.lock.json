@@ -199,6 +199,16 @@
           "PhotoSift.Domain": "[1.0.0, )"
         }
       },
+      "photosift.app": {
+        "type": "Project",
+        "dependencies": {
+          "PhotoSift.Analysis": "[1.0.0, )",
+          "PhotoSift.Application": "[1.0.0, )",
+          "PhotoSift.Domain": "[1.0.0, )",
+          "PhotoSift.Infrastructure.Sqlite": "[1.0.0, )",
+          "PhotoSift.Infrastructure.Windows": "[1.0.0, )"
+        }
+      },
       "photosift.application": {
         "type": "Project",
         "dependencies": {

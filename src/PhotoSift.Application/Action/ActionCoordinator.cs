@@ -101,16 +101,25 @@ public sealed class ActionCoordinator : IActionCoordinator
             operation.Store.Finish(operation.Store.Current.FaultReason is ActionSafetyReason.None
                 ? ActionSafetyReason.Interrupted : operation.Store.Current.FaultReason);
             Publish(operation);
+            return true;
+        }).ConfigureAwait(false);
+        // The publish-turn acknowledgment follows synchronous observer delivery.
+        // Any observer-fault command is already queued before this FIFO barrier;
+        // its Faulted publication must drain before the final snapshot is read.
+        var result = await inbox.CommandAsync(() =>
+        {
             operation.Finished = true;
             var snapshot = operation.Store.Current;
-            operation.Completion.TrySetResult(new(snapshot.Status switch
+            return new ActionCommandResult(snapshot.Status switch
             {
                 ActionStatus.Complete => ActionCommandOutcome.Completed,
                 ActionStatus.Faulted => ActionCommandOutcome.Faulted,
                 _ => ActionCommandOutcome.Incomplete,
-            }, snapshot));
-            return true;
+            }, snapshot);
         }).ConfigureAwait(false);
+        // Completion is also the disposal drain. Resolve it only outside the
+        // acknowledged final turn, when no final observer/fault work remains.
+        operation.Completion.TrySetResult(result);
     }
 
     private async Task ClaimAndRunAsync(Operation operation)

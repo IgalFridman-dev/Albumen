@@ -7,6 +7,63 @@ namespace PhotoSift.Application.Tests.ActionExecution;
 
 public sealed class ActionCoordinatorConcurrencyTests
 {
+    [Fact]
+    public async Task FinalPublicationAndItsFaultAcknowledgmentDrainBeforeCompletionAndDisposal()
+    {
+        await using var fixture = new ActionFixture(1) { GateAt = "execute:1" };
+        var finalEntered = ScanTestData.Signal<bool>();
+        var releaseFinal = ScanTestData.Signal<bool>();
+        var faultEntered = ScanTestData.Signal<bool>();
+        var releaseFault = ScanTestData.Signal<bool>();
+        var faultPublished = ScanTestData.Signal<bool>();
+        fixture.Owner.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.Status == ActionStatus.Complete)
+            {
+                finalEntered.TrySetResult(true);
+                releaseFinal.Task.GetAwaiter().GetResult();
+                throw new InvalidOperationException("final-only observer failure");
+            }
+            if (snapshot.Status == ActionStatus.Faulted)
+            {
+                faultEntered.TrySetResult(true);
+                releaseFault.Task.GetAwaiter().GetResult();
+                faultPublished.TrySetResult(true);
+            }
+        };
+        var approval = fixture.Owner.ApproveAsync(fixture.Request, TestContext.Current.CancellationToken);
+        await fixture.PumpAsync(fixture.Entered.Task);
+        var disposal = fixture.Owner.DisposeAsync().AsTask();
+        await fixture.PumpAsync(fixture.CancellationObserved.Task);
+        fixture.Release.TrySetResult(true);
+        // An independent scheduler pump lets the test hold each synchronous
+        // observer open without sleeping or blocking the assertion thread.
+        var pump = Task.Run(() => fixture.PumpAsync(faultPublished.Task), CancellationToken.None);
+        bool prematureFinalCompletion;
+        bool prematureFaultCompletion;
+        try
+        {
+            await ScanTestData.Bound(finalEntered.Task);
+            prematureFinalCompletion = approval.IsCompleted || disposal.IsCompleted;
+            releaseFinal.TrySetResult(true);
+            await ScanTestData.Bound(faultEntered.Task);
+            prematureFaultCompletion = approval.IsCompleted || disposal.IsCompleted;
+        }
+        finally
+        {
+            releaseFinal.TrySetResult(true);
+            releaseFault.TrySetResult(true);
+        }
+        await ScanTestData.Bound(pump);
+        await fixture.PumpAsync(Task.WhenAll(approval, disposal));
+        Assert.Equal(ActionCommandOutcome.Faulted, (await approval).Outcome);
+        Assert.False(prematureFinalCompletion);
+        Assert.False(prematureFaultCompletion);
+        Assert.Same(fixture.Owner.Current, (await approval).Snapshot);
+        Assert.Equal(ActionItemState.Recycled, (await approval).Snapshot.Items[0].State);
+        Assert.False(fixture.Scheduler.TryRunOne());
+    }
+
     [Theory]
     [InlineData("claim", ActionItemState.NotRequested, 0, 0)]
     [InlineData("refresh:1", ActionItemState.NotRequested, 0, 0)]
