@@ -68,7 +68,7 @@ public sealed class ActionCoordinatorConcurrencyTests
     [InlineData("claim", ActionItemState.NotRequested, 0, 0)]
     [InlineData("refresh:1", ActionItemState.NotRequested, 0, 0)]
     [InlineData("requested:1", ActionItemState.InterruptedBeforeExecution, 1, 0)]
-    [InlineData("executing:1", ActionItemState.NotRemoved, 1, 1)]
+    [InlineData("executing:1", ActionItemState.UnknownPendingRevalidation, 1, 1)]
     [InlineData("execute:1", ActionItemState.Recycled, 1, 1)]
     [InlineData("terminal:1", ActionItemState.Recycled, 1, 1)]
     public async Task CancellationSettlesAdmittedEvidenceAndNeverStartsTheNextItem(string phase,

@@ -222,23 +222,18 @@ public sealed class ActionCoordinator : IActionCoordinator
             await FaultAsync(operation, JournalReason(written)).ConfigureAwait(false);
             return false;
         }
+        // Without an executor acknowledgment there is no terminal evidence.
+        // Retain the exact Executing predecessor for reconciliation; Finish
+        // projects its uncertainty without inventing a terminal journal row.
+        if (await StoppedAsync(operation).ConfigureAwait(false)) return false;
         RecycleBinResult result;
-        if (await StoppedAsync(operation).ConfigureAwait(false))
+        try { result = await executor.ExecuteAsync(new(id, safety), operation.Token).ConfigureAwait(false); }
+        catch (Exception)
         {
-            // Newly persisted Executing, but no executor invocation occurred.
-            result = new(RecycleBinOutcomeKind.NotRemoved, ActionSafetyReason.Interrupted,
-                new(0, 0, false, null, null, 0, 0, null, false, false, false));
-        }
-        else
-        {
-            try { result = await executor.ExecuteAsync(new(id, safety), operation.Token).ConfigureAwait(false); }
-            catch (Exception)
-            {
-                // A thrown/canceled adapter acknowledgment cannot prove that
-                // permission was withheld. Persist uncertainty without replay.
-                result = new(RecycleBinOutcomeKind.UnknownPendingRevalidation, ActionSafetyReason.ProgrammingFault,
-                    new(0, 0, false, null, null, 0, 0, null, false, true, false));
-            }
+            // A thrown/canceled adapter acknowledgment cannot prove that
+            // permission was withheld. Persist uncertainty without replay.
+            result = new(RecycleBinOutcomeKind.UnknownPendingRevalidation, ActionSafetyReason.ProgrammingFault,
+                new(0, 0, false, null, null, 0, 0, null, false, true, false));
         }
         var terminal = new ActionTerminalFact(id, DateTimeOffset.UtcNow, result.Outcome switch
         {
@@ -254,6 +249,13 @@ public sealed class ActionCoordinator : IActionCoordinator
             return false;
         }
         await UpdateAsync(operation, store => store.Terminal(index, terminal.Kind, terminal.Reason)).ConfigureAwait(false);
+        if (written.Outcome == ActionJournalWriteOutcome.ExactRetry)
+        {
+            // An exact receipt confirms the immutable terminal truth, but an
+            // unexpected existing fact never grants permission for later work.
+            await FaultAsync(operation, JournalReason(written)).ConfigureAwait(false);
+            return false;
+        }
         return true;
     }
 

@@ -150,6 +150,11 @@ internal sealed class ActionFixture : IAsyncDisposable, IApprovedActionAuthority
     internal ApprovedActionRequest? ClaimedRequest { get; private set; }
     internal List<string> Calls { get; } = [];
     internal List<ActionRequestedFact> RequestedFacts { get; } = [];
+    internal List<ActionExecutingFact> ExecutingFacts { get; } = [];
+    internal List<ActionTerminalFact> TerminalFacts { get; } = [];
+    internal ActionSafetyEnvelope? LastSafety { get; private set; }
+    internal OverrideReadResult EvidenceRead { get; set; } = new(OverrideReadOutcome.Missing, null);
+    internal ImmutableArray<OverrideReadResult> ClaimedReads { get; private set; } = [];
     internal ImmutableArray<PriorActionOutcome> LastPreceding { get; private set; } = [];
     internal TaskCompletionSource<bool> Entered { get; } = ScanTestData.Signal<bool>();
     internal TaskCompletionSource<bool> Release { get; } = ScanTestData.Signal<bool>();
@@ -209,6 +214,7 @@ internal sealed class ActionFixture : IAsyncDisposable, IApprovedActionAuthority
         ImmutableArray<OverrideReadResult> overrideReads, CancellationToken cancellationToken)
     {
         ClaimedRequest = request;
+        ClaimedReads = overrideReads;
         await CallAsync("claim", cancellationToken);
         return RejectAt == "claim" ? new(ApprovedActionClaimOutcome.Stale, null, ActionSafetyReason.StalePin)
             : new(ApprovedActionClaimOutcome.Claimed, new(new(Guid.NewGuid()), request), ActionSafetyReason.None);
@@ -241,8 +247,8 @@ internal sealed class ActionFixture : IAsyncDisposable, IApprovedActionAuthority
         var observations = current.Select(value => new ActionProbeObservation(value,
             new(value.PhysicalFileKey!.Value, 1, value.ResolvedPath, null, value.Allocation),
             new(value.PhysicalFileKey!.Value, 1, value.ResolvedPath, null, value.Allocation), new(1, ScanTestData.Digest))).ToImmutableArray();
-        return new(ApprovedActionClaimOutcome.Claimed,
-            new(claim, item, input, ActionSafetyPolicy.Evaluate(input), observations, precedingOutcomes), ActionSafetyReason.None);
+        LastSafety = new(claim, item, input, ActionSafetyPolicy.Evaluate(input), observations, precedingOutcomes);
+        return new(ApprovedActionClaimOutcome.Claimed, LastSafety, ActionSafetyReason.None);
     }
     private static ScanFileOccurrence Occurrence(ApprovedActionItem item) => new(item.Occurrence,
         item.DiscoveredPath, item.ResolvedPath, item.PhysicalFileKey, ScanTestData.Success,
@@ -252,10 +258,16 @@ internal sealed class ActionFixture : IAsyncDisposable, IApprovedActionAuthority
         RequestedFacts.Add(fact);
         return await WriteAsync($"requested:{fact.Safety.Item.Occurrence.OccurrenceId}", cancellationToken);
     }
-    public ValueTask<ActionJournalWriteResult> PersistExecutingAsync(ActionExecutingFact fact, CancellationToken cancellationToken) =>
-        WriteAsync($"executing:{ItemId(fact.ActionItemId)}", cancellationToken);
-    public ValueTask<ActionJournalWriteResult> PersistTerminalAsync(ActionTerminalFact fact, CancellationToken cancellationToken) =>
-        WriteAsync($"terminal:{ItemId(fact.ActionItemId)}", cancellationToken);
+    public ValueTask<ActionJournalWriteResult> PersistExecutingAsync(ActionExecutingFact fact, CancellationToken cancellationToken)
+    {
+        ExecutingFacts.Add(fact);
+        return WriteAsync($"executing:{ItemId(fact.ActionItemId)}", cancellationToken);
+    }
+    public ValueTask<ActionJournalWriteResult> PersistTerminalAsync(ActionTerminalFact fact, CancellationToken cancellationToken)
+    {
+        TerminalFacts.Add(fact);
+        return WriteAsync($"terminal:{ItemId(fact.ActionItemId)}", cancellationToken);
+    }
     private long ItemId(Guid actionItemId) => RequestedFacts.Single(fact => fact.ActionItemId == actionItemId).Safety.Item.Occurrence.OccurrenceId;
     private async ValueTask<ActionJournalWriteResult> WriteAsync(string phase, CancellationToken cancellationToken)
     {
@@ -272,6 +284,6 @@ internal sealed class ActionFixture : IAsyncDisposable, IApprovedActionAuthority
     public ValueTask<OverrideReadResult> ReadAsync(OverrideEvidenceId evidenceId, CancellationToken cancellationToken)
     {
         Calls.Add("override");
-        return ValueTask.FromResult(new OverrideReadResult(OverrideReadOutcome.Missing, null));
+        return ValueTask.FromResult(EvidenceRead);
     }
 }
