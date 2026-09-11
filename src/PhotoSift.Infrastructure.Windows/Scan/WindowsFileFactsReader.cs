@@ -12,7 +12,8 @@ internal sealed class WindowsFileFactsReader(IWindowsFileFactsSource source)
     private const uint DirectoryAttribute = 0x10;
 
     internal WindowsScopeReadGuard ValidateScope(ProtectedOpenRequest request,
-        ImmutableDictionary<string, WindowsDirectoryProof>? openedChain, CancellationToken cancellationToken)
+        ImmutableDictionary<string, WindowsDirectoryProof>? openedChain, CancellationToken cancellationToken,
+        bool retainDirectoryGuards = false)
     {
         var scope = request.Context.Scope;
         var selectedRoot = NormalizePath(scope.Selection.SelectedPath);
@@ -29,12 +30,13 @@ internal sealed class WindowsFileFactsReader(IWindowsFileFactsSource source)
 
         Require(SamePath(Path.GetFileName(discovered), Path.GetFileName(resolved)), ScanReason.Changed);
         return ValidateDirectory(scope, Path.GetDirectoryName(discovered)!, Path.GetDirectoryName(resolved)!,
-            expectedIdentity: null, openedChain, cancellationToken);
+            expectedIdentity: null, openedChain, cancellationToken, retainDirectoryGuards);
     }
 
     internal WindowsScopeReadGuard ValidateDirectory(ResolvedScope scope, string discoveredDirectory,
         string resolvedDirectory, DirectoryIdentity? expectedIdentity,
-        ImmutableDictionary<string, WindowsDirectoryProof>? openedChain, CancellationToken cancellationToken)
+        ImmutableDictionary<string, WindowsDirectoryProof>? openedChain, CancellationToken cancellationToken,
+        bool retainDirectoryGuards = false)
     {
         var selectedRoot = NormalizePath(scope.Selection.SelectedPath);
         var resolvedRoot = NormalizePath(scope.ResolvedPath);
@@ -121,7 +123,7 @@ internal sealed class WindowsFileFactsReader(IWindowsFileFactsSource source)
 
             WindowsFileObservation ReadDirectory(string path, bool follow)
             {
-                var handle = expectedIdentity is not null
+                var handle = expectedIdentity is not null || retainDirectoryGuards
                     ? WindowsFileNative.OpenDirectoryGuard(path, follow)
                     : WindowsFileNative.OpenMetadata(path, follow);
                 guard.Handles.Add(handle);
