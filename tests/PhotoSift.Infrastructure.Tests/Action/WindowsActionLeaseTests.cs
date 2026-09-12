@@ -97,18 +97,36 @@ public sealed class WindowsActionLeaseTests
     }
 
     [Fact]
-    public async Task ChangedSelectedHashAndEscapedApprovedScopeFailClosed()
+    public async Task PreparationRehashRejectsSelectedWithUnchangedApprovedMetadata()
+    {
+        using var fixture = new ActionFileFixture();
+        var selected = fixture.Create("selected.jpg");
+        var witness = fixture.Create("witness.jpg");
+        var envelope = fixture.Envelope(selected, witness);
+        var approved = envelope.Observations[0];
+        fixture.WritePreservingApprovedTimestamp(selected, "changed", approved);
+        fixture.AssertOnlyDigestChanged(selected, approved);
+        var failure = await Assert.ThrowsAsync<WindowsActionLeaseException>(async () =>
+        {
+            using var unexpected = await WindowsActionLease.OpenAsync(envelope, CancellationToken.None);
+        });
+        Assert.Equal(ActionSafetyReason.Changed, failure.Reason);
+        Assert.True(File.Exists(selected));
+        Assert.True(File.Exists(witness));
+        fixture.AssertOnlyDigestChanged(selected, approved);
+        fixture.AssertWritable(selected);
+        fixture.AssertWritable(witness);
+    }
+
+    [Fact]
+    public async Task EscapedApprovedScopeFailsClosed()
     {
         using var fixture = new ActionFileFixture();
         var selected = fixture.Create("selected.jpg");
         var envelope = fixture.Envelope(selected, fixture.Create("witness.jpg"));
-        fixture.Write(selected, "changed");
-        var failure = await Assert.ThrowsAsync<WindowsActionLeaseException>(() => WindowsActionLease.OpenAsync(envelope, CancellationToken.None));
-        Assert.Equal(ActionSafetyReason.Changed, failure.Reason);
-        fixture.Write(selected, "fixture");
         var request = envelope.Claim.Request with { Scope = envelope.Claim.Request.Scope with { Selection = new ScopeSelection(fixture.PathFor("other"), ScopeRecursion.IncludeSubfolders) } };
         envelope = envelope with { Claim = envelope.Claim with { Request = request } };
-        failure = await Assert.ThrowsAsync<WindowsActionLeaseException>(() => WindowsActionLease.OpenAsync(envelope, CancellationToken.None));
+        var failure = await Assert.ThrowsAsync<WindowsActionLeaseException>(() => WindowsActionLease.OpenAsync(envelope, CancellationToken.None));
         Assert.Equal(ActionSafetyReason.UnsafeLocation, failure.Reason);
         fixture.AssertWritable(selected);
     }

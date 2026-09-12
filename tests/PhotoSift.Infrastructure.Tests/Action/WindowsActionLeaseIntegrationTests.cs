@@ -44,16 +44,26 @@ public sealed class WindowsActionLeaseIntegrationTests
     }
 
     [Fact]
-    public async Task PreparationRehashRejectsSameLengthChangedWitnessAndCleansSelected()
+    public async Task PreparationRehashRejectsDistinctWitnessWithUnchangedApprovedMetadata()
     {
         using var fixture = new ActionFileFixture();
         var selected = fixture.Create("selected.jpg");
         var witness = fixture.Create("witness.jpg");
         var envelope = fixture.Envelope(selected, witness);
-        fixture.Write(witness, "changed");
-        var failure = await Assert.ThrowsAsync<WindowsActionLeaseException>(() => WindowsActionLease.OpenAsync(envelope, CancellationToken.None));
+        var approved = envelope.Observations[1];
+        Assert.NotEqual(envelope.Item.PhysicalFileKey, approved.Final.PhysicalFileKey);
+        fixture.WritePreservingApprovedTimestamp(witness, "changed", approved);
+        fixture.AssertOnlyDigestChanged(witness, approved);
+        var failure = await Assert.ThrowsAsync<WindowsActionLeaseException>(async () =>
+        {
+            // Unexpected successful preparation is disposed even if the assertion
+            // fails; no callback or shell permission is attempted for changed bytes.
+            using var unexpected = await WindowsActionLease.OpenAsync(envelope, CancellationToken.None);
+        });
         Assert.Equal(ActionSafetyReason.Changed, failure.Reason);
         Assert.True(File.Exists(selected));
+        Assert.True(File.Exists(witness));
+        fixture.AssertOnlyDigestChanged(witness, approved);
         fixture.AssertWritable(selected);
         fixture.AssertWritable(witness);
     }
@@ -134,6 +144,27 @@ internal sealed class ActionFileFixture : IDisposable
         var path = PathFor(relative); Check(path); Directory.CreateDirectory(Path.GetDirectoryName(path)!); Write(path, text); return path;
     }
     internal void Write(string path, string text) { Check(path); File.WriteAllText(path, text); }
+    internal void WritePreservingApprovedTimestamp(string path, string text, ActionProbeObservation approved)
+    {
+        Assert.NotNull(approved.Final.LastWriteUtc);
+        Write(path, text);
+        Check(path);
+        File.SetLastWriteTimeUtc(path, approved.Final.LastWriteUtc.Value.UtcDateTime);
+    }
+    internal void AssertOnlyDigestChanged(string path, ActionProbeObservation approved)
+    {
+        Check(path);
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var current = native.Read(stream.SafeFileHandle, path);
+        Assert.Equal(approved.Final.PhysicalFileKey, current.PhysicalFileKey);
+        Assert.Equal(approved.Final.ResolvedPath, current.ResolvedPath);
+        Assert.Equal(approved.Final.ByteLength, current.ByteLength);
+        Assert.Equal(approved.Final.Allocation, current.Allocation);
+        Assert.NotNull(approved.Final.LastWriteUtc);
+        Assert.Equal(approved.Final.LastWriteUtc, current.LastWriteUtc);
+        Assert.NotEqual(approved.Digest.Sha256, Convert.ToHexString(SHA256.HashData(stream)));
+        TestContext.Current.TestOutputHelper?.WriteLine("Hash isolation proof: approved identity/path/length/allocation/link count/last-write timestamp match; SHA-256 differs.");
+    }
     internal void Attributes(string path, FileAttributes attributes) { Check(path); File.SetAttributes(path, attributes); }
     internal FileStream Writer(string path) { Check(path); return new(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete); }
     internal void AssertWriteDenied(string path) => Assert.Throws<IOException>(() => { using var writer = Writer(path); });
