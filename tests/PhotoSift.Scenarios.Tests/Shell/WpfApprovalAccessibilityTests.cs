@@ -1023,42 +1023,25 @@ public sealed class WpfApprovalAccessibilityTests
                     diagnostics.Record("command-task-await-return");
                     var diagnosticStarted = Stopwatch.GetTimestamp();
                     var diagnosticLimit = TimeSpan.FromMilliseconds(8250);
-                    var normalizedCount = 0;
-                    PropertyNativeDelivery? previous = null;
+                    var capture = new ItemStatusTransitionCapture(
+                        nativeRuntimeId ?? throw new InvalidOperationException("Expected native runtime ID is missing."),
+                        AutomationElement.ItemStatusProperty.Id, expectedPayloads);
                     ExceptionDispatchInfo? firstAssertionFailure = null;
                     while (Stopwatch.GetElapsedTime(diagnosticStarted) < diagnosticLimit)
                     {
                         var remaining = diagnosticLimit - Stopwatch.GetElapsedTime(diagnosticStarted);
                         if (remaining <= TimeSpan.Zero || !statuses.TryTake(out var delivery, remaining)) break;
-                        if (previous is { } prior && SamePropertyDelivery(prior, delivery)) continue;
-                        previous = delivery;
-                        var observedIndex = normalizedCount++;
-                        if (observedIndex < expectedPayloads.Length)
+                        try
                         {
-                            var expectedPayload = expectedPayloads[observedIndex];
-                            var expectedPrevious = observedIndex == 0 ? string.Empty : expectedPayloads[observedIndex - 1];
-                            if (delivery.PropertyId != AutomationElement.ItemStatusProperty.Id
-                                || delivery.OldValue is not string oldValue
-                                || !string.Equals(oldValue, expectedPrevious, StringComparison.Ordinal)
-                                || delivery.NewValue is not string newValue
-                                || !string.Equals(newValue, expectedPayload, StringComparison.Ordinal))
-                                firstAssertionFailure ??= ExceptionDispatchInfo.Capture(
-                                    new IsolatedScenarioFailureException(
-                                        $"Expected ItemStatus transition '{expectedPrevious}' -> '{expectedPayload}', "
-                                        + $"but received '{delivery.OldValue}' -> '{delivery.NewValue}'."));
+                            capture.Record(delivery.RuntimeId, delivery.PropertyId, delivery.OldValue, delivery.NewValue);
                         }
-                        else
+                        catch (Exception error)
                         {
-                            firstAssertionFailure ??= ExceptionDispatchInfo.Capture(
-                                new IsolatedScenarioFailureException(
-                                    $"Unexpected normalized ItemStatus transition: "
-                                    + $"'{delivery.OldValue}' -> '{delivery.NewValue}'."));
+                            firstAssertionFailure ??= ExceptionDispatchInfo.Capture(error);
                         }
                     }
-                    for (var index = normalizedCount; index < expectedPayloads.Length; index++)
-                        firstAssertionFailure ??= ExceptionDispatchInfo.Capture(
-                            new IsolatedScenarioFailureException(
-                                $"The '{expectedPayloads[index]}' ItemStatus event was never raised."));
+                    try { capture.Complete(); }
+                    catch (Exception error) { firstAssertionFailure ??= ExceptionDispatchInfo.Capture(error); }
                     operationFailure = firstAssertionFailure;
                 }
                 catch (Exception error)
@@ -1191,12 +1174,6 @@ public sealed class WpfApprovalAccessibilityTests
         && left.EventId == right.EventId
         && string.Equals(left.Payload, right.Payload, StringComparison.Ordinal);
 
-    private static bool SamePropertyDelivery(PropertyNativeDelivery left, PropertyNativeDelivery right) =>
-        SameRuntimeId(left.RuntimeId, right.RuntimeId)
-        && left.PropertyId == right.PropertyId
-        && Equals(left.OldValue, right.OldValue)
-        && Equals(left.NewValue, right.NewValue);
-
     private static bool SameRuntimeId(int[]? left, int[]? right) =>
         left is null ? right is null : right is not null && left.AsSpan().SequenceEqual(right);
 
@@ -1210,6 +1187,36 @@ public sealed class WpfApprovalAccessibilityTests
             ?? throw new InvalidOperationException("The production diagnostic thread flag was unavailable."));
         return capacityOverflow || wrongThread;
     }
+
+    [Theory]
+    [InlineData("Queue", false)]
+    [InlineData("Execute", false)]
+    [InlineData("PropertyRaiseReturn", false)]
+    [InlineData("LiveRaiseReturn", false)]
+    [InlineData("Queue", true)]
+    [InlineData("Execute", true)]
+    [InlineData("PropertyRaiseReturn", true)]
+    [InlineData("LiveRaiseReturn", true)]
+    public void ProductProofRejectsDuplicatedOrMissingStages(string stage, bool remove)
+    {
+        var diagnostics = new UiaDiagnosticLedger();
+        diagnostics.Record("vm-notification", 1, "first");
+        diagnostics.Record("vm-notification", 2, "second");
+        var records = new List<ProductionProofFixtureRecord>();
+        foreach (var (sequence, payload) in new[] { (1L, "first"), (2L, "second") })
+            foreach (var kind in new[] { "Queue", "Execute", "PropertyRaiseReturn", "LiveRaiseReturn" })
+                records.Add(new(kind, sequence, payload));
+
+        // Validate the unmodified fixture first so an unrelated fixture error cannot satisfy the negative case.
+        AssertProductAnnouncementCapture(new { Records = records.ToArray() }, diagnostics, ["first", "second"]);
+        var index = records.FindIndex(record => record.Stage == stage);
+        if (remove) records.RemoveAt(index);
+        else records.Insert(index, records[index]);
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() =>
+            AssertProductAnnouncementCapture(new { Records = records.ToArray() }, diagnostics, ["first", "second"]));
+    }
+
+    private sealed record ProductionProofFixtureRecord(string Stage, long NotificationSequence, string Payload);
 
     private static void AssertProductAnnouncementCapture(
         object? productionSnapshot,
