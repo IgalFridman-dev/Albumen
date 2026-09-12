@@ -1,8 +1,10 @@
 using Microsoft.Win32.SafeHandles;
+using System.Runtime.InteropServices;
 using PhotoSift.Application.Scan;
 using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Scope;
 using PhotoSift.Infrastructure.Windows.Scan;
+using PhotoSift.Infrastructure.Windows.Scope;
 
 namespace PhotoSift.Infrastructure.Windows.Action;
 
@@ -10,6 +12,19 @@ namespace PhotoSift.Infrastructure.Windows.Action;
 // No Scan lease or asynchronous callback operation is used.
 internal sealed class WindowsActionFileNative(IWindowsFileFactsSource source) : IWindowsFileFactsSource
 {
+    // Action-only handoff: preserve content write denial while allowing the
+    // Shell's preparation access. Shared Scan/directory guard semantics do not change.
+    internal static SafeFileHandle OpenSelectedHandoff(string path)
+    {
+        var original = WindowsFileFactsReader.NormalizePath(path);
+        var handle = NativeMethods.CreateFile(WindowsScopeNative.ToExtendedLengthPath(original), 0x80000000,
+            FileShare.Read | FileShare.Delete, 0, FileMode.Open, 0x08300000, 0);
+        if (!handle.IsInvalid) return handle;
+        var error = Marshal.GetLastPInvokeError();
+        handle.Dispose();
+        throw WindowsFileNative.Failure(error, original);
+    }
+
     public WindowsFileObservation Read(SafeFileHandle handle, string path)
     {
         var observation = source.Read(handle, path);

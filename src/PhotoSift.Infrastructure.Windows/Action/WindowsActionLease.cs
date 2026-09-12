@@ -17,8 +17,12 @@ internal sealed class WindowsActionLease : IDisposable
     private readonly List<PathProof> paths = [];
     private readonly Dictionary<PhysicalFileKey, ContentProof> contents = [];
     private ContentProof? selected;
+    private FileStream? handoff;
+    private FileStream? reacquired;
+    private bool handoffAttempted;
     private bool consumed;
     private bool disposed;
+    internal bool NamespaceHandoffOccurred { get; private set; }
 
     private WindowsActionLease(ActionSafetyEnvelope safety, IWindowsFileFactsSource source)
     {
@@ -81,6 +85,37 @@ internal sealed class WindowsActionLease : IDisposable
         }
     }
 
+    // Explicit Action-only preparation. A direct Task 6 caller keeps the original
+    // strict lease unless it requests this one-shot namespace handoff.
+    internal ActionSafetyReason PrepareForPerformOperations()
+    {
+        if (disposed || consumed || handoffAttempted) return ActionSafetyReason.Changed;
+        handoffAttempted = true;
+        try
+        {
+            ValidateCurrent();
+            var content = selected!;
+            var handle = WindowsActionFileNative.OpenSelectedHandoff(content.Request.DiscoveredPath);
+            try { handoff = new FileStream(handle, FileAccess.Read, 64 * 1024, isAsync: false); }
+            catch { handle.Dispose(); throw; }
+            RequireSame(facts.ReadContent(handoff.SafeFileHandle, content.Request, content.Opened), content.Opened);
+            var originalStrictHandle = content.Stream.SafeFileHandle;
+            try { content.Stream.Dispose(); }
+            finally
+            {
+                // Preserve the transition even if disposal reports a failure after
+                // closing the strict handle. It is never reset by denial/cleanup.
+                NamespaceHandoffOccurred = originalStrictHandle.IsClosed;
+            }
+            return ActionSafetyReason.None;
+        }
+        catch (Exception exception)
+        {
+            consumed = true;
+            return WindowsActionFileNative.Reason(exception);
+        }
+    }
+
     // This entire boundary is synchronous: retained hashes are protected by
     // share denial. Never add hashing, awaits, UI/owner or persistence here.
     internal ActionSafetyReason ValidateAndReleaseForPreDelete()
@@ -89,14 +124,36 @@ internal sealed class WindowsActionLease : IDisposable
         consumed = true; // A denied/repeated callback can never retry this lease.
         try
         {
+            if (NamespaceHandoffOccurred)
+            {
+                var previous = selected!;
+                // Acquire strict protection BEFORE any latest facts read, including
+                // selected identity. No weak-handle or alternate-path fallback exists.
+                var handle = WindowsFileNative.OpenContent(WindowsFileFactsReader.NormalizePath(previous.Request.DiscoveredPath));
+                try { reacquired = new FileStream(handle, FileAccess.Read, 64 * 1024, isAsync: false); }
+                catch { handle.Dispose(); throw; }
+                RequireSame(facts.ReadContent(reacquired.SafeFileHandle, previous.Request, previous.Opened), previous.Opened);
+                RequireSame(facts.ReadContent(handoff!.SafeFileHandle, previous.Request, previous.Opened), previous.Opened);
+                selected = previous with { Stream = reacquired };
+                contents[previous.Opened.PhysicalFileKey] = selected;
+            }
             ValidateCurrent();
             // All temporary metadata handles are now gone; distinct witnesses
             // and directory guards remain until deterministic executor cleanup.
-            // AD-25 begins only here: no public atomic recycle-by-handle exists.
+            // Close permissive first; the final strict release immediately precedes
+            // S_OK. Namespace handoff was separately observed, never permission.
+            handoff?.Dispose();
             selected!.Stream.Dispose();
             return ActionSafetyReason.None;
         }
-        catch (Exception exception) { return WindowsActionFileNative.Reason(exception); }
+        catch (Exception exception) when (!NamespaceHandoffOccurred
+            || exception is WindowsActionLeaseException or ScanReadException)
+        {
+            // Preserve direct Task 6 behavior and expected native/safety denials.
+            // An unexpected exception after handoff reaches the real progress sink
+            // as CallbackException, so an unchanged-object proof cannot hide it.
+            return WindowsActionFileNative.Reason(exception);
+        }
     }
 
     private void ValidateCurrent()
@@ -173,8 +230,16 @@ internal sealed class WindowsActionLease : IDisposable
     {
         if (disposed) return;
         disposed = true;
-        foreach (var content in contents.Values) content.Stream.Dispose();
-        for (var index = paths.Count - 1; index >= 0; index--) paths[index].Guard.Dispose();
+        try { handoff?.Dispose(); }
+        finally
+        {
+            try { reacquired?.Dispose(); }
+            finally
+            {
+                try { foreach (var content in contents.Values) content.Stream.Dispose(); }
+                finally { for (var index = paths.Count - 1; index >= 0; index--) paths[index].Guard.Dispose(); }
+            }
+        }
     }
 
     private sealed record PathProof(ScanFileOccurrence Occurrence, ProtectedOpenRequest Request,

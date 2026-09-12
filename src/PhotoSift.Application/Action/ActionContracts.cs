@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 using PhotoSift.Application.Review;
 using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Review;
@@ -35,6 +36,26 @@ public enum RecycleBinOutcomeKind { Recycled, NotRemoved, UnknownPendingRevalida
 public sealed record RecycleBinEvidence(int ValidPreDeleteCount, int UnexpectedPreDeleteCount,
     bool PermissionGranted, int? PerformOperationsHResult, bool? OperationsAborted,
     int MatchingPostDeleteCount, int UnexpectedPostDeleteCount, int? DeleteHResult,
-    bool NewlyCreatedItemPresent, bool CallbackException, bool OriginalObjectProvenUnchanged);
+    bool NewlyCreatedItemPresent, bool CallbackException, bool OriginalObjectProvenUnchanged)
+{
+    // Absent fields preserve the canonical eleven-field journal payload. Nullable
+    // values distinguish unobserved facts from observed zero/success/false.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int? PreparationHResult { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ActionSafetyReason? ValidationReason { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool? SelectedHandleReleased { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int? GetAbortedHResult { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool? RunnerInterrupted { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int? FinishOperationsHResult { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool? NamespaceHandoffOccurred { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool? PerformOperationsEntered { get; init; }
+}
 public sealed record RecycleBinRequest(Guid ActionItemId, ActionSafetyEnvelope Safety);
 public sealed record RecycleBinResult(RecycleBinOutcomeKind Outcome, ActionSafetyReason Reason, RecycleBinEvidence Evidence);
