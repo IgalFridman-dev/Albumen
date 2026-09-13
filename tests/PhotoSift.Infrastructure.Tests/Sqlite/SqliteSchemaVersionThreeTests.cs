@@ -102,6 +102,25 @@ public sealed class SqliteSchemaVersionThreeTests
         Assert.Equal("delete", await ScalarAsync(verify, "PRAGMA journal_mode;"));
     }
 
+    [Fact]
+    public async Task LoadRejectsAnOrphanTransitionInsteadOfOmittingIt()
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var requested = JournalData.Requested();
+        await using (var stores = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await stores.ActionJournal.PersistRequestedAsync(requested, TestContext.Current.CancellationToken);
+            await stores.ActionJournal.PersistExecutingAsync(JournalData.Executing(requested), TestContext.Current.CancellationToken);
+        }
+        await using (var connection = await fixture.OpenRawAsync())
+            await ExecuteAsync(connection,
+                "PRAGMA foreign_keys=OFF; UPDATE action_transitions SET action_item_id='99999999-9999-9999-9999-999999999999';");
+
+        await using var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        Assert.Equal(ActionRecordLoadOutcome.Unavailable,
+            (await reopened.ActionRecords.LoadAsync(TestContext.Current.CancellationToken)).Outcome);
+    }
+
     private static async Task<string> RowAsync(SqliteConnection connection, string table)
     {
         await using var command = connection.CreateCommand();

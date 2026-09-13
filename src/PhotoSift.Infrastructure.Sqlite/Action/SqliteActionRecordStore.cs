@@ -18,10 +18,9 @@ internal sealed class SqliteActionRecordStore(SqliteDatabaseOwner owner) : IActi
                 var journal = await SqliteActionJournalStore.LoadJournalAsync(connection, transaction, token).ConfigureAwait(false);
                 var rows = await ReadRowsAsync(connection, transaction, token).ConfigureAwait(false);
                 var facts = ValidateRows(rows);
+                ValidateReferences(journal, facts);
                 var byItem = facts.GroupBy(value => value.ActionItemId).ToDictionary(group => group.Key,
                     group => group.ToImmutableArray());
-                if (byItem.Keys.Any(id => journal.All(item => item.Requested.ActionItemId != id)))
-                    throw new InvalidDataException("Revalidation references a missing Action item.");
                 var items = journal.Select(item =>
                 {
                     byItem.TryGetValue(item.Requested.ActionItemId, out var observations);
@@ -59,6 +58,7 @@ internal sealed class SqliteActionRecordStore(SqliteDatabaseOwner owner) : IActi
                 var journal = await SqliteActionJournalStore.LoadJournalAsync(connection, transaction, token).ConfigureAwait(false);
                 var rows = await ReadRowsAsync(connection, transaction, token).ConfigureAwait(false);
                 var facts = ValidateRows(rows);
+                ValidateReferences(journal, facts);
                 var canonical = CanonicalFact(fact);
                 var existingIndex = rows.FindIndex(row => row.RevalidationId == SqliteActionJournalStore.GuidText(fact.RevalidationId));
                 if (existingIndex >= 0)
@@ -66,6 +66,7 @@ internal sealed class SqliteActionRecordStore(SqliteDatabaseOwner owner) : IActi
                         ? ActionRevalidationWriteOutcome.ExactRetry : ActionRevalidationWriteOutcome.Conflict);
                 var item = journal.SingleOrDefault(value => value.Requested.ActionItemId == fact.ActionItemId);
                 if (item is null) return new(ActionRevalidationWriteOutcome.Conflict);
+                if (!MatchesReviewed(item, canonical)) return new(ActionRevalidationWriteOutcome.Conflict);
                 var itemFacts = facts.Where(value => value.ActionItemId == fact.ActionItemId).ToImmutableArray();
                 ValidateResolution(item.Terminal, itemFacts);
                 if (IsResolved(item.Terminal, itemFacts)) return new(ActionRevalidationWriteOutcome.Resolved);
@@ -136,6 +137,28 @@ internal sealed class SqliteActionRecordStore(SqliteDatabaseOwner owner) : IActi
     private static ActionRevalidationFact CanonicalFact(ActionRevalidationFact fact) =>
         SqliteActionJournalStore.CanonicalJson.Decode<ActionRevalidationFact>(
             SqliteActionJournalStore.CanonicalJson.Encode(fact));
+
+    private static void ValidateReferences(ImmutableArray<PersistedActionItem> journal,
+        List<ActionRevalidationFact> facts)
+    {
+        var items = journal.ToDictionary(item => item.Requested.ActionItemId);
+        foreach (var fact in facts)
+        {
+            if (!items.TryGetValue(fact.ActionItemId, out var item))
+                throw new InvalidDataException("Revalidation references a missing Action item.");
+            if (!MatchesReviewed(item, fact))
+                throw new InvalidDataException("Confirmed revalidation does not match reviewed evidence.");
+        }
+    }
+
+    private static bool MatchesReviewed(PersistedActionItem item, ActionRevalidationFact fact)
+    {
+        if (fact.Kind != ActionRevalidationKind.ConfirmedPresent) return true;
+        var reviewed = item.Requested.Safety.Item;
+        return fact.Observation.ObservedKey == reviewed.PhysicalFileKey
+            && fact.Observation.ObservedLength == reviewed.Content.ByteLength
+            && string.Equals(fact.Observation.ObservedSha256, reviewed.Content.Sha256, StringComparison.Ordinal);
+    }
 
     private static bool Valid(ActionRevalidationFact fact)
     {

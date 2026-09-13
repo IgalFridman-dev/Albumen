@@ -16,23 +16,7 @@ public sealed class SqliteActionRecordStoreTests
     {
         await using var fixture = new SqliteOverrideFixture();
         var first = JournalData.Requested();
-        var second = JournalData.Requested() with
-        {
-            ActionItemId = Guid.Parse("24242424-2424-2424-2424-242424242424"),
-            Safety = first.Safety with
-            {
-                Item = first.Safety.Item with
-                {
-                    Occurrence = first.Safety.Item.Occurrence with { OccurrenceId = 18 },
-                },
-            },
-        };
-        var request = first.Safety.Claim.Request with { RequestId = Guid.Parse("22222222-2222-2222-2222-222222222222"), Items = [second.Safety.Item] };
-        second = second with
-        {
-            Safety = second.Safety with { Claim = second.Safety.Claim with { Request = request } },
-            RequestPayloadSha256 = JournalData.RequestHash(request),
-        };
+        var second = SecondRequested(first);
         await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
         Assert.Equal(ActionJournalWriteOutcome.Persisted,
             (await stores.ActionJournal.PersistRequestedAsync(first, TestContext.Current.CancellationToken)).Outcome);
@@ -138,6 +122,123 @@ public sealed class SqliteActionRecordStoreTests
         Assert.Equal(TimeSpan.Zero, stored.ObservedUtc.Offset);
     }
 
+    [Theory]
+    [InlineData("key")]
+    [InlineData("length")]
+    [InlineData("digest")]
+    public async Task ConfirmedPresentMustMatchTheDurableReviewedIdentityOnAppend(string mismatch)
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var requested = JournalData.Requested();
+        var reviewed = requested.Safety.Item;
+        var observation = new ActionRevalidationObservation(true, reviewed.PhysicalFileKey,
+            reviewed.Content.ByteLength, reviewed.Content.Sha256);
+        observation = mismatch switch
+        {
+            "key" => observation with { ObservedKey = new PhysicalFileKey(20, new(23, 29)) },
+            "length" => observation with { ObservedLength = observation.ObservedLength + 1 },
+            _ => observation with { ObservedSha256 = new string('B', 64) },
+        };
+        var fact = new ActionRevalidationFact(Guid.NewGuid(), requested.ActionItemId,
+            requested.RequestedUtc.AddMinutes(1), ActionRevalidationKind.ConfirmedPresent,
+            ActionRevalidationReason.OriginalFileConfirmed, observation);
+        await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        await stores.ActionJournal.PersistRequestedAsync(requested, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ActionRevalidationWriteOutcome.Conflict,
+            (await stores.ActionRecords.AppendRevalidationAsync(fact, TestContext.Current.CancellationToken)).Outcome);
+    }
+
+    [Theory]
+    [InlineData("\"volumeSerial\":19", "\"volumeSerial\":20")]
+    [InlineData("\"observedLength\":101", "\"observedLength\":102")]
+    [InlineData(
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")]
+    public async Task LoadRejectsConfirmedPresentThatDoesNotMatchDurableReviewedIdentity(
+        string original, string replacement)
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var requested = JournalData.Requested();
+        var reviewed = requested.Safety.Item;
+        var fact = new ActionRevalidationFact(Guid.NewGuid(), requested.ActionItemId,
+            requested.RequestedUtc.AddMinutes(1), ActionRevalidationKind.ConfirmedPresent,
+            ActionRevalidationReason.OriginalFileConfirmed,
+            new(true, reviewed.PhysicalFileKey, reviewed.Content.ByteLength, reviewed.Content.Sha256));
+        await using (var stores = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await stores.ActionJournal.PersistRequestedAsync(requested, TestContext.Current.CancellationToken);
+            Assert.Equal(ActionRevalidationWriteOutcome.Persisted,
+                (await stores.ActionRecords.AppendRevalidationAsync(fact, TestContext.Current.CancellationToken)).Outcome);
+        }
+        await using (var connection = await fixture.OpenRawAsync())
+        await using (var read = connection.CreateCommand())
+        {
+            read.CommandText = "SELECT observation_payload FROM action_revalidations;";
+            var payload = Assert.IsType<string>(await read.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+            Assert.Contains(original, payload, StringComparison.Ordinal);
+            payload = payload.Replace(original, replacement, StringComparison.Ordinal);
+            await using var update = connection.CreateCommand();
+            update.CommandText = "UPDATE action_revalidations SET observation_payload=$payload, observation_payload_sha256=$hash;";
+            update.Parameters.AddWithValue("$payload", payload);
+            update.Parameters.AddWithValue("$hash", Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))));
+            Assert.Equal(1, await update.ExecuteNonQueryAsync(TestContext.Current.CancellationToken));
+        }
+
+        await using var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        Assert.Equal(ActionRecordLoadOutcome.Unavailable,
+            (await reopened.ActionRecords.LoadAsync(TestContext.Current.CancellationToken)).Outcome);
+    }
+
+    [Fact]
+    public async Task OrphanRevalidationCannotReceiveAnExactRetryReceipt()
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var requested = JournalData.Requested();
+        var fact = Revalidation(requested.ActionItemId, Guid.NewGuid());
+        await using (var stores = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await stores.ActionJournal.PersistRequestedAsync(requested, TestContext.Current.CancellationToken);
+            await stores.ActionRecords.AppendRevalidationAsync(fact, TestContext.Current.CancellationToken);
+        }
+        await using (var connection = await fixture.OpenRawAsync())
+            await ExecuteAsync(connection, "PRAGMA foreign_keys=OFF; DELETE FROM action_items;");
+
+        await using var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        Assert.Equal(ActionRevalidationWriteOutcome.Unavailable,
+            (await reopened.ActionRecords.AppendRevalidationAsync(fact, TestContext.Current.CancellationToken)).Outcome);
+    }
+
+    [Fact]
+    public async Task UnrelatedOrphanRevalidationPreventsAnotherItemMutation()
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var first = JournalData.Requested();
+        var second = SecondRequested(first);
+        var orphan = Revalidation(first.ActionItemId, Guid.NewGuid());
+        await using (var stores = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await stores.ActionJournal.PersistRequestedAsync(first, TestContext.Current.CancellationToken);
+            await stores.ActionJournal.PersistRequestedAsync(second, TestContext.Current.CancellationToken);
+            await stores.ActionRecords.AppendRevalidationAsync(orphan, TestContext.Current.CancellationToken);
+        }
+        await using (var connection = await fixture.OpenRawAsync())
+        {
+            await ExecuteAsync(connection, "PRAGMA foreign_keys=OFF;");
+            await using var delete = connection.CreateCommand();
+            delete.CommandText = "DELETE FROM action_items WHERE action_item_id=$id;";
+            delete.Parameters.AddWithValue("$id", first.ActionItemId.ToString("D"));
+            Assert.Equal(1, await delete.ExecuteNonQueryAsync(TestContext.Current.CancellationToken));
+        }
+
+        await using var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        Assert.Equal(ActionRevalidationWriteOutcome.Unavailable,
+            (await reopened.ActionRecords.AppendRevalidationAsync(
+                Revalidation(second.ActionItemId, Guid.NewGuid()), TestContext.Current.CancellationToken)).Outcome);
+        await using var verify = await fixture.OpenRawAsync();
+        Assert.Equal(1L, await ScalarAsync(verify, "SELECT COUNT(*) FROM action_revalidations;"));
+    }
+
     [Fact]
     public async Task LoadRejectsChangedRevalidationPayloadOrHashWithoutRepair()
     {
@@ -189,4 +290,29 @@ public sealed class SqliteActionRecordStoreTests
         new(revalidationId, actionItemId, new DateTimeOffset(2026, 9, 10, 10, 12, 12, TimeSpan.Zero),
             ActionRevalidationKind.StillUnknown, ActionRevalidationReason.OriginalPathMissing,
             new(false, null, null, null));
+
+    private static ActionRequestedFact SecondRequested(ActionRequestedFact first)
+    {
+        var second = first with
+        {
+            ActionItemId = Guid.Parse("24242424-2424-2424-2424-242424242424"),
+            Safety = first.Safety with
+            {
+                Item = first.Safety.Item with
+                {
+                    Occurrence = first.Safety.Item.Occurrence with { OccurrenceId = 18 },
+                },
+            },
+        };
+        var request = first.Safety.Claim.Request with
+        {
+            RequestId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            Items = [second.Safety.Item],
+        };
+        return second with
+        {
+            Safety = second.Safety with { Claim = second.Safety.Claim with { Request = request } },
+            RequestPayloadSha256 = JournalData.RequestHash(request),
+        };
+    }
 }

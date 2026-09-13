@@ -209,6 +209,7 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
     internal static async Task<ImmutableArray<PersistedActionItem>> LoadJournalAsync(SqliteConnection connection,
         SqliteTransaction transaction, CancellationToken token)
     {
+        await ValidateForeignKeysAsync(connection, transaction, token).ConfigureAwait(false);
         var rows = await ReadAllItemsAsync(connection, transaction, token).ConfigureAwait(false);
         var decoded = rows.Select(row => (Row: row, Payload: DecodeItem(row))).ToArray();
         foreach (var request in decoded.GroupBy(value => value.Row.RequestId))
@@ -236,6 +237,17 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
             result.Add(new(Guid.Parse(item.Row.RequestId), item.Payload.Fact, executing, terminal, []));
         }
         return result.MoveToImmutable();
+    }
+
+    private static async Task ValidateForeignKeysAsync(SqliteConnection connection, SqliteTransaction transaction,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "PRAGMA foreign_key_check;";
+        await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+        if (await reader.ReadAsync(token).ConfigureAwait(false))
+            throw new InvalidDataException("SQLite foreign key validation failed.");
     }
 
     private static async Task<List<ItemRow>> ReadAllItemsAsync(SqliteConnection connection, SqliteTransaction transaction,
