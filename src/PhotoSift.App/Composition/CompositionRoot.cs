@@ -3,6 +3,8 @@ using PhotoSift.App.Shell;
 using PhotoSift.Analysis.Exact;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Review;
+using PhotoSift.Application.Action;
+using PhotoSift.Infrastructure.Windows.Action;
 using PhotoSift.Infrastructure.Sqlite;
 using PhotoSift.Infrastructure.Windows.Scan;
 using PhotoSift.Application.Scope;
@@ -34,9 +36,13 @@ public static class CompositionRoot
             "PhotoSift", "photosift.db");
         var stores = new SqlitePhotoSiftStores(databasePath);
         var review = new ReviewCoordinator(scheduler,
-            new BoundedReviewRevalidator(reader, analyzer), stores.OverrideEvidence);
+            new BoundedReviewRevalidator(reader, analyzer), stores.OverrideEvidence,
+            actionSafety: new ProtectedActionSafetyValidator(reader, analyzer));
+        var action = new ActionCoordinator(scheduler, review, stores.OverrideEvidence,
+            stores.ActionJournal, new WindowsRecycleBinExecutor());
         var photoWorkflow = new OwnedPhotoSiftWorkflow(
-            new PhotoSiftWorkflow(workflow, scan, scheduler, review),
+            new PhotoSiftWorkflow(workflow, scan, scheduler, review, action),
+            action,
             review,
             stores);
         var dialog = new WpfReviewDialogService(() => System.Windows.Application.Current?.MainWindow);
@@ -45,6 +51,7 @@ public static class CompositionRoot
 
     private sealed class OwnedPhotoSiftWorkflow(
         IPhotoSiftWorkflow workflow,
+        IAsyncDisposable action,
         IAsyncDisposable review,
         IAsyncDisposable evidenceStore) : IPhotoSiftWorkflow, IAsyncDisposable
     {
@@ -87,6 +94,16 @@ public static class CompositionRoot
         private async Task DisposeCoreAsync()
         {
             List<Exception>? failures = null;
+            try
+            {
+                // Action disposal includes admitted acknowledgments, Windows STA
+                // settlement and retained leases. The dispatcher is still alive.
+                await action.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
             try
             {
                 await review.DisposeAsync().ConfigureAwait(false);

@@ -1,4 +1,7 @@
 using System.Collections.Immutable;
+using PhotoSift.Application.Action;
+using PhotoSift.Application.Tests.ActionExecution;
+using PhotoSift.Domain.Action;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Review;
 using PhotoSift.Application.Tests.Review;
@@ -14,6 +17,221 @@ namespace PhotoSift.Application.Tests.Shell;
 
 public sealed class PhotoSiftWorkflowTests
 {
+    [Fact]
+    public async Task ExplicitApprovalForwardsTheOwnersExactSealedRequestAndWaitsForActionAdmissionToNavigate()
+    {
+        await using var f = new ReviewFixture();
+        var scan = new ScanOwner();
+        var action = new DeferredAction();
+        var scope = new ScopeOwner(f.Request.Scope);
+        var workflow = CreateActionWorkflow(scope, scan, f.Scheduler, f.Owner, action);
+        await f.Pump(workflow.ContinueAsync());
+        await f.Pump(workflow.ConfirmExactRulesAsync());
+        scan.Publish(f.Request.Scan);
+        await f.Pump(workflow.OpenReviewAsync());
+        await f.Eligible(1, 2, 3);
+        await f.Change(f.Command(SelectionCommandKind.Toggle, 1));
+        var command = new ApproveSelectionCommand(f.Owner.Current.Pin!, f.Owner.Current.SelectionRevision,
+            Guid.NewGuid(), DateTimeOffset.UnixEpoch);
+        var approving = workflow.ApproveReviewAsync(command, TestContext.Current.CancellationToken);
+        try
+        {
+            await f.Pump(action.Entered.Task);
+            var request = Assert.Single(action.Requests);
+            Assert.Same(f.Owner.Current.ApprovedRequest, request);
+            Assert.Equal(command.IdempotencyKey, request.RequestId);
+            // Review's accepted seal advances the Selection revision once.
+            // Forward the sealed revision, never the pre-seal button revision.
+            Assert.Equal(command.SelectionRevision + 1, request.SelectionRevision);
+            Assert.Equal(f.Owner.Current.SelectionRevision, request.SelectionRevision);
+            Assert.Equal([1L], request.SelectedOccurrenceIds);
+            Assert.Equal(WorkflowPhase.Review, workflow.Current.CurrentPhase);
+            Assert.Equal(ActionStatus.Idle, ProjectedAction(workflow).Status);
+            Assert.Same(ReviewSnapshot.Closed, ProjectedActionReview(workflow));
+            var sealedReview = f.Owner.Current;
+            var admitted = new ActionSnapshot(request.RequestId, ActionStatus.Claiming,
+                [new(request.Items[0], null, ActionItemState.Waiting, ActionSafetyReason.None)], 0, 0, 0, 0, 0, ActionSafetyReason.None);
+            action.Publish(admitted);
+            // No inline ViewModel/workflow publication is permitted on the Action callback.
+            Assert.Equal(WorkflowPhase.Review, workflow.Current.CurrentPhase);
+            await f.Pump(workflow.NavigateAsync(WorkflowPhase.ApproveCleanup));
+            Assert.Equal(WorkflowPhase.ApproveCleanup, workflow.Current.CurrentPhase);
+            Assert.Same(admitted, ProjectedAction(workflow));
+            Assert.Same(sealedReview, ProjectedActionReview(workflow));
+            Assert.Equal(admitted.RequestId, ProjectedActionReview(workflow).ApprovedRequest!.RequestId);
+            Assert.True(workflow.Current.Review.Sealed);
+            Assert.Same(request, workflow.Current.Review.ApprovedRequest);
+            Assert.False(approving.IsCompleted);
+            action.Completion.TrySetResult(new(ActionCommandOutcome.Completed, admitted));
+            await f.Pump(approving);
+            Assert.Same(request, (await approving).ApprovedRequest);
+            scope.Publish(f.Request.Scope with { Revision = 2 });
+            await f.Pump(workflow.ContinueAsync());
+            Assert.Null(workflow.Current.Review.Pin);
+            Assert.Same(sealedReview, ProjectedActionReview(workflow));
+            Assert.Same(request, ProjectedActionReview(workflow).ApprovedRequest);
+            Assert.True(ProjectedActionReview(workflow).Sealed);
+        }
+        finally
+        {
+            action.Completion.TrySetResult(new(ActionCommandOutcome.Incomplete, action.Current));
+            await f.Pump(approving);
+        }
+    }
+
+    [Fact]
+    public async Task NavigationScanRefreshAndReopenedReviewCannotCreateAction()
+    {
+        await using var f = new ReviewFixture();
+        var scan = new ScanOwner();
+        var action = new DeferredAction();
+        var workflow = CreateActionWorkflow(new ScopeOwner(f.Request.Scope), scan, f.Scheduler, f.Owner, action);
+        await f.Pump(workflow.ContinueAsync());
+        await f.Pump(workflow.ConfirmExactRulesAsync());
+        scan.Publish(f.Request.Scan);
+        await f.Pump(workflow.OpenReviewAsync());
+        await f.Eligible(1, 2, 3);
+        await f.Change(f.Command(SelectionCommandKind.Toggle, 1));
+        foreach (var phase in new[] { WorkflowPhase.ApproveCleanup, WorkflowPhase.Scan, WorkflowPhase.Review })
+            await f.Pump(workflow.NavigateAsync(phase));
+        scan.Publish(f.Request.Scan with { Occurrences = [.. f.Request.Scan.Occurrences] });
+        await f.Pump(workflow.OpenReviewAsync());
+        Assert.Empty(action.Requests);
+        Assert.Null(f.Owner.Current.ApprovedRequest);
+        Assert.Equal(ActionStatus.Idle, ProjectedAction(workflow).Status);
+    }
+
+    [Fact]
+    public async Task RepeatedWorkflowApprovalReusesActionWhileExecutingAndAfterSettlementWithoutExecutorReplay()
+    {
+        await using var f = new ActionFixture(1) { GateAt = "execute:1" };
+        var review = new SealedRequestReview(f.Request);
+        var workflow = CreateActionWorkflow(new ScopeOwner(Ready(1)), new ScanOwner(), f.Scheduler, review, f.Owner);
+        var command = new ApproveSelectionCommand(new(f.Request.ReviewSessionId, f.Request.Scan),
+            f.Request.SelectionRevision, f.Request.RequestId, f.Request.ApprovedUtc);
+        var first = workflow.ApproveReviewAsync(command, TestContext.Current.CancellationToken);
+        try
+        {
+            await f.PumpAsync(f.Entered.Task);
+            await f.PumpAsync(workflow.ApproveReviewAsync(command, TestContext.Current.CancellationToken));
+            Assert.Equal(ActionItemState.Executing, Assert.Single(ProjectedAction(workflow).Items).State);
+            Assert.Single(f.Calls, call => call == "execute:1");
+            f.Release.TrySetResult(true);
+            await f.PumpAsync(first);
+            await f.PumpAsync(workflow.ApproveReviewAsync(command, TestContext.Current.CancellationToken));
+            Assert.Equal(ActionItemState.Recycled, Assert.Single(ProjectedAction(workflow).Items).State);
+            Assert.Single(f.Calls, call => call == "execute:1");
+            Assert.Same(f.Request, f.ClaimedRequest);
+        }
+        finally { f.Release.TrySetResult(true); await f.PumpAsync(first); }
+    }
+
+    [Fact]
+    public async Task ActionPublicationFaultReportsItsRequestAndDoesNotFaultReview()
+    {
+        var scheduler = new ManualScanScheduler();
+        var request = ActionFixture.RequestFor(1);
+        var review = new SealedRequestReview(request);
+        var action = new DeferredAction();
+        var workflow = CreateActionWorkflow(new ScopeOwner(Ready(1)), new ScanOwner(), scheduler, review, action);
+        var failure = new InvalidOperationException("Action projection failed");
+        var healthy = new List<PhotoSiftSnapshot>();
+        workflow.SnapshotChanged += (_, snapshot) =>
+        {
+            if (ProjectedAction(snapshot).RequestId == request.RequestId) throw failure;
+        };
+        workflow.SnapshotChanged += (_, snapshot) => healthy.Add(snapshot);
+        action.Publish(new(request.RequestId, ActionStatus.Running, [], 0, 0, 0, 0, 0, ActionSafetyReason.None));
+        await ScanTestData.Bound(scheduler.PumpUntilAsync(action.FaultReported.Task));
+        Assert.Equal(request.RequestId, Assert.Single(action.ReportedFaults));
+        Assert.Empty(review.ReportedFaults);
+        Assert.Contains(healthy, snapshot => ProjectedAction(snapshot).RequestId == request.RequestId);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ScanTestData.Bound(scheduler.PumpUntilAsync(workflow.CancelScanAsync())));
+        Assert.Same(failure, error);
+    }
+
+    private static PhotoSiftWorkflow CreateActionWorkflow(IChooseScopeWorkflow scope, IScanCoordinator scan,
+        IWorkflowScheduler scheduler, IReviewCoordinator review, IActionCoordinator action)
+    {
+        var constructor = typeof(PhotoSiftWorkflow).GetConstructor(
+            [typeof(IChooseScopeWorkflow), typeof(IScanCoordinator), typeof(IWorkflowScheduler), typeof(IReviewCoordinator), typeof(IActionCoordinator)]);
+        Assert.NotNull(constructor);
+        return Assert.IsType<PhotoSiftWorkflow>(constructor.Invoke([scope, scan, scheduler, review, action]));
+    }
+
+    [Fact]
+    public async Task ScopeRefreshAndStaleActionNotificationCannotEraseTheCurrentApprovedOperation()
+    {
+        var scheduler = new ManualScanScheduler();
+        var scope = new ScopeOwner(Ready(1));
+        var action = new DeferredAction();
+        var request = ActionFixture.RequestFor(1);
+        var workflow = CreateActionWorkflow(scope, new ScanOwner(), scheduler, new SealedRequestReview(request), action);
+        var previous = new ActionSnapshot(Guid.NewGuid(), ActionStatus.Complete, [], 0, 0, 0, 0, 0, ActionSafetyReason.None);
+        var current = new ActionSnapshot(request.RequestId, ActionStatus.Incomplete,
+            [new(request.Items[0], Guid.NewGuid(), ActionItemState.UnknownPendingRevalidation, ActionSafetyReason.Interrupted)],
+            1, 1, 0, 0, 1, ActionSafetyReason.Interrupted);
+        action.Publish(previous);
+        await ScanTestData.Bound(scheduler.PumpUntilAsync(workflow.NavigateAsync(WorkflowPhase.ChooseScope)));
+        action.Publish(current);
+        await ScanTestData.Bound(scheduler.PumpUntilAsync(workflow.NavigateAsync(WorkflowPhase.ChooseScope)));
+        scope.Publish(Ready(2));
+        action.Replay(previous);
+        await ScanTestData.Bound(scheduler.PumpUntilAsync(workflow.ContinueAsync()));
+        Assert.Same(current, ProjectedAction(workflow));
+        Assert.Equal(1, ProjectedAction(workflow).UnknownCount);
+        Assert.Empty(action.Requests);
+    }
+
+    private static ActionSnapshot ProjectedAction(PhotoSiftWorkflow workflow) => ProjectedAction(workflow.Current);
+    private static ReviewSnapshot ProjectedActionReview(PhotoSiftWorkflow workflow)
+    {
+        var property = typeof(PhotoSiftSnapshot).GetProperty("ActionReview");
+        Assert.NotNull(property);
+        return Assert.IsType<ReviewSnapshot>(property.GetValue(workflow.Current));
+    }
+    private static ActionSnapshot ProjectedAction(PhotoSiftSnapshot snapshot)
+    {
+        var property = typeof(PhotoSiftSnapshot).GetProperty("Action");
+        Assert.NotNull(property);
+        return Assert.IsType<ActionSnapshot>(property.GetValue(snapshot));
+    }
+
+    private sealed class DeferredAction : IActionCoordinator
+    {
+        public ActionSnapshot Current { get; private set; } = ActionSnapshot.Idle;
+        public event EventHandler<ActionSnapshot>? SnapshotChanged;
+        internal List<ApprovedActionRequest> Requests { get; } = [];
+        internal List<Guid> ReportedFaults { get; } = [];
+        internal TaskCompletionSource<bool> Entered { get; } = ScanTestData.Signal<bool>();
+        internal TaskCompletionSource<bool> FaultReported { get; } = ScanTestData.Signal<bool>();
+        internal TaskCompletionSource<ActionCommandResult> Completion { get; } = ScanTestData.Signal<ActionCommandResult>();
+        public Task<ActionCommandResult> ApproveAsync(ApprovedActionRequest request, CancellationToken cancellationToken)
+        { Requests.Add(request); Entered.TrySetResult(true); return Completion.Task; }
+        internal void Publish(ActionSnapshot snapshot) { Current = snapshot; SnapshotChanged?.Invoke(this, snapshot); }
+        internal void Replay(ActionSnapshot snapshot) => SnapshotChanged?.Invoke(this, snapshot);
+        public Task ReportObserverFaultAsync(Guid requestId)
+        { ReportedFaults.Add(requestId); FaultReported.TrySetResult(true); return Task.CompletedTask; }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class SealedRequestReview(ApprovedActionRequest request) : IReviewCoordinator
+    {
+        public ReviewSnapshot Current { get; } = ReviewSnapshot.Closed with
+        { Pin = new(request.ReviewSessionId, request.Scan), Sealed = true, ApprovedRequest = request };
+        public event EventHandler<ReviewSnapshot>? SnapshotChanged { add { } remove { } }
+        internal List<ReviewSessionPin> ReportedFaults { get; } = [];
+        public Task<ReviewCommandResult> ApproveAsync(ApproveSelectionCommand command, CancellationToken cancellationToken) =>
+            Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Approved, Current, ApprovedRequest: request));
+        public Task<ReviewCommandResult> OpenAsync(ReviewOpenRequest request, CancellationToken token) => Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Committed, Current));
+        public Task<ReviewCommandResult> ChangeSelectionAsync(SelectionCommand command, CancellationToken token) => throw new NotSupportedException();
+        public Task<ReviewCommandResult> AffirmOverrideAsync(OverrideAffirmationCommand command, CancellationToken token) => throw new NotSupportedException();
+        public Task InvalidateAsync(ScanPin? scan) => Task.CompletedTask;
+        public Task ReportObserverFaultAsync(ReviewSessionPin session) { ReportedFaults.Add(session); return Task.CompletedTask; }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     [Fact]
     public async Task NeutralRebuildDuringOpenAdmissionDoesNotReplaceTheAcceptedSession()
     {

@@ -7,6 +7,7 @@ public interface IActionCoordinator : IAsyncDisposable
     ActionSnapshot Current { get; }
     event EventHandler<ActionSnapshot>? SnapshotChanged;
     Task<ActionCommandResult> ApproveAsync(ApprovedActionRequest request, CancellationToken cancellationToken);
+    Task ReportObserverFaultAsync(Guid requestId);
 }
 public interface IActionJournalStore
 {

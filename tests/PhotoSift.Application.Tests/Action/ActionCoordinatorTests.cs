@@ -12,6 +12,54 @@ namespace PhotoSift.Application.Tests.ActionExecution;
 
 public sealed class ActionCoordinatorTests
 {
+    [Fact]
+    public async Task RequestBoundObserverFaultCannotStopANewerAdmittedAction()
+    {
+        await using var fixture = new ActionFixture(1);
+        await fixture.ApproveAsync();
+        var earlierRequest = fixture.Request.RequestId;
+        var next = fixture.Request with { RequestId = Guid.NewGuid() };
+        fixture.GateAt = "claim";
+        var pending = fixture.Owner.ApproveAsync(next, TestContext.Current.CancellationToken);
+        try
+        {
+            await fixture.PumpAsync(fixture.Entered.Task);
+            var report = typeof(IActionCoordinator).GetMethod("ReportObserverFaultAsync", [typeof(Guid)]);
+            Assert.NotNull(report);
+            var stale = Assert.IsAssignableFrom<Task>(report.Invoke(fixture.Owner, [earlierRequest]));
+            await fixture.PumpAsync(stale);
+            Assert.Equal(next.RequestId, fixture.Owner.Current.RequestId);
+            Assert.Equal(ActionStatus.Claiming, fixture.Owner.Current.Status);
+            Assert.Equal(ActionSafetyReason.None, fixture.Owner.Current.FaultReason);
+            fixture.Release.TrySetResult(true);
+            await fixture.PumpAsync(pending);
+            Assert.Equal(ActionCommandOutcome.Completed, (await pending).Outcome);
+        }
+        finally { fixture.Release.TrySetResult(true); await fixture.PumpAsync(pending); }
+    }
+
+    [Fact]
+    public async Task RequestBoundObserverFaultStopsItsOriginatingActionBeforeAnyIntent()
+    {
+        await using var fixture = new ActionFixture(1) { GateAt = "claim" };
+        var pending = fixture.Owner.ApproveAsync(fixture.Request, TestContext.Current.CancellationToken);
+        try
+        {
+            await fixture.PumpAsync(fixture.Entered.Task);
+            var report = typeof(IActionCoordinator).GetMethod("ReportObserverFaultAsync", [typeof(Guid)]);
+            Assert.NotNull(report);
+            var fault = Assert.IsAssignableFrom<Task>(report.Invoke(fixture.Owner, [fixture.Request.RequestId]));
+            await fixture.PumpAsync(fault);
+            Assert.Equal(ActionStatus.Faulted, fixture.Owner.Current.Status);
+            Assert.Equal(ActionSafetyReason.ProgrammingFault, fixture.Owner.Current.FaultReason);
+            fixture.Release.TrySetResult(true);
+            await fixture.PumpAsync(pending);
+            Assert.Empty(fixture.RequestedFacts);
+            Assert.DoesNotContain("execute:1", fixture.Calls);
+        }
+        finally { fixture.Release.TrySetResult(true); await fixture.PumpAsync(pending); }
+    }
+
     [Theory]
     [InlineData("empty")]
     [InlineData("default")]

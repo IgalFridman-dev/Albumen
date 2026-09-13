@@ -70,6 +70,16 @@ public sealed class ActionCoordinator : IActionCoordinator
         return true;
     }).ConfigureAwait(false);
 
+    public async Task ReportObserverFaultAsync(Guid requestId) => await inbox.CommandAsync(() =>
+    {
+        // A delayed projection failure belongs only to its originating request.
+        // It cannot stop a subsequently admitted operation or republish old work.
+        if (active is { } operation && operation.Request.RequestId == requestId
+            && operation.Store.Current.Status != ActionStatus.Faulted)
+            Fault(operation, ActionSafetyReason.ProgrammingFault);
+        return true;
+    }).ConfigureAwait(false);
+
     private async Task RunAsync(Operation operation)
     {
         var registration = operation.Caller.Register(() => _ = operation.RequestCancellation());

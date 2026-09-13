@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private int dataContextGeneration;
     private bool isClosed;
     private int selectionSummaryAnnouncementGeneration;
+    private int actionAnnouncementGeneration;
     private long reviewFailureAnnouncementSequence;
     private ReviewFocusIdentity? reviewFocusIdentity;
     private long reviewFocusGeneration;
@@ -70,6 +71,7 @@ public partial class MainWindow : Window
         {
             FocusBlockingNotice();
         }
+        if (shellViewModel?.IsActionPhase is true) QueuePhaseFocus();
     }
 
     private void OnViewModelPropertyChanged(
@@ -98,6 +100,10 @@ public partial class MainWindow : Window
         if (eventArgs.PropertyName == nameof(ShellViewModel.SelectionSummary))
         {
             QueueSelectionSummaryAnnouncement();
+        }
+        if (eventArgs.PropertyName == nameof(ShellViewModel.ActionAnnouncement))
+        {
+            QueueActionAnnouncement();
         }
         if (eventArgs.PropertyName == nameof(ShellViewModel.ReviewAnnouncement))
         {
@@ -233,6 +239,7 @@ public partial class MainWindow : Window
                 WorkflowPhase.ConfirmRules => expected.CanConfirmExactRules ? ConfirmExactRulesButton : StartScanButton,
                 WorkflowPhase.Scan => expected.IsScanBusy ? CancelScanButton : null,
                 WorkflowPhase.Review => ReviewHeading,
+                WorkflowPhase.ApproveCleanup => ActionHeading,
                 _ => null,
             };
             if (target is not null && target.IsVisible && target.IsEnabled)
@@ -276,6 +283,21 @@ public partial class MainWindow : Window
             var peer = UIElementAutomationPeer.FromElement(SelectionSummaryText)
                 ?? UIElementAutomationPeer.CreatePeerForElement(SelectionSummaryText);
             peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        }, DispatcherPriority.Background);
+    }
+
+    private void QueueActionAnnouncement()
+    {
+        var generation = dataContextGeneration;
+        var expected = shellViewModel;
+        var sequence = ++actionAnnouncementGeneration;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || generation != dataContextGeneration || sequence != actionAnnouncementGeneration
+                || !ReferenceEquals(expected, shellViewModel) || expected?.IsActionPhase is not true
+                || !ActionAnnouncementText.IsVisible) return;
+            // Coalesce transient progress; all item reasons remain inspectable.
+            ActionAnnouncementText.Announce(sequence, expected.ActionAnnouncement);
         }, DispatcherPriority.Background);
     }
 

@@ -20,6 +20,35 @@
     </Window.CommandBindings>
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <Style x:Key="ActionFocusVisual" TargetType="Control">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate>
+                        <Rectangle Margin="2" StrokeThickness="2" StrokeDashArray="1,1"
+                                   Stroke="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <DataTemplate x:Key="ActionItemTemplate">
+            <app:ReviewAutomationBorder Margin="4,6" Padding="8" BorderThickness="1"
+                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    AutomationProperties.AutomationId="action-item"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.ItemStatus="{Binding ItemStatus}">
+                <StackPanel>
+                    <TextBlock Text="Windows Recycle Bin — original path" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBox Text="{Binding OriginalPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                             AutomationProperties.Name="{Binding AutomationName}"
+                             AutomationProperties.ItemStatus="{Binding ItemStatus}" />
+                    <TextBlock Text="{Binding StateText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ReasonText}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding CertaintyText}" TextWrapping="Wrap" />
+                </StackPanel>
+            </app:ReviewAutomationBorder>
+        </DataTemplate>
         <Style x:Key="ReviewListStyle" TargetType="ListBox">
             <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
@@ -467,12 +496,51 @@
                     </WrapPanel>
                 </StackPanel>
             </Grid>
+            <app:ReviewAutomationBorder x:Name="ActionPanel" Grid.Column="2"
+                    Visibility="{Binding IsActionPhase, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    AutomationProperties.AutomationId="action-panel"
+                    AutomationProperties.Name="Approved Recycle Bin Action"
+                    AutomationProperties.ItemStatus="{Binding ActionStatusText}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="ActionHeading" Text="Recycle Bin progress" FontSize="24" FontWeight="SemiBold"
+                               Focusable="True" FocusVisualStyle="{StaticResource ActionFocusVisual}" TextWrapping="Wrap"
+                               AutomationProperties.Name="Recycle Bin progress" />
+                    <ScrollViewer Grid.Row="1" MaxHeight="160" Margin="0,8,0,8"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                      <StackPanel>
+                        <TextBlock Text="{Binding ActionSelectionText}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ActionStatusText}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ActionCountsText}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ActionCertaintyText}" TextWrapping="Wrap" />
+                        <app:ReviewAnnouncementTextBlock x:Name="ActionAnnouncementText" Text="{Binding ActionAnnouncement}"
+                                TextWrapping="Wrap" AutomationProperties.AutomationId="action-announcement"
+                                AutomationProperties.Name="Recycle Bin progress announcement"
+                                AutomationProperties.LiveSetting="Polite" />
+                      </StackPanel>
+                    </ScrollViewer>
+                    <ListBox x:Name="ActionItemsList" Grid.Row="2" ItemsSource="{Binding ActionItems}"
+                             Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ActionItemTemplate}"
+                             AutomationProperties.Name="Approved original paths and Recycle Bin results"
+                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                    <StackPanel Grid.Row="3" Margin="0,8,0,0">
+                        <TextBlock Text="{Binding ActionReplayNotice}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ActionRecoveryNotice}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+            </app:ReviewAutomationBorder>
         </Grid>
 
-        <TextBlock Grid.Row="2"
+        <TextBlock x:Name="SourceMutationNoticeText" Grid.Row="2"
                    Margin="0,16,0,0"
                    TextWrapping="Wrap"
-                   Text="No account or network connection is required. Your source photos remain unchanged." />
+                   Text="{Binding SourceMutationNotice}" />
     </Grid>
 </Window>
 
