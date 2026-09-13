@@ -4,12 +4,15 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
+Development status: **5 of 26 stories complete; 21 remain. E1-S6 is next.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1). GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for the accepted development progress.
+
 Planning is complete and validated. E1-S1 through E1-S5 are implemented, reviewed, verified by their complete offline Full gates, and done. E1-S5 adds one-item Windows Recycle Bin execution behind fresh safety checks and separate durable Requested/Executing barriers. Final reviewed Full passed 1,337/1,337 tests plus runtime-boundary and offline WPF smoke. The execution policy remains pinned to E1-S5: E1-S6 reconciliation and the Epic 1 safety gate require separate authorization; E1-S6 and Epics 2–5 remain backlog.
 
 - Latest completed story: **E1-S5 — Execute one-item Recycle Bin operations behind a durable barrier (done)**
 - Current implementation authorization: **E1-S5 remains the policy lock; E1-S6 and later work are not authorized**
 - E1-S5 acceptance and closing observations (committed as `0bc0155`): [`docs/evidence/e1-s5/verification.md`](docs/evidence/e1-s5/verification.md)
 - Current tracking: [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)
+- Fresh original-host verification: Core **847/847**, Architecture **490/490**, Full **1,337/1,337** — [evidence](docs/evidence/e1-s5/return-host-verification.md)
 - Story contracts: [`_bmad-output/specs/`](_bmad-output/specs/)
 - Documentation map: [`docs/README.md`](docs/README.md)
 - E1-S1 verification: [`docs/evidence/e1-s1/verification.md`](docs/evidence/e1-s1/verification.md)
