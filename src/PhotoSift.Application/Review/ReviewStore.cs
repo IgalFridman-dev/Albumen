@@ -36,6 +36,42 @@ internal sealed class ReviewStore
     }
     internal ReviewSnapshot Current { get; private set; }
 
+    internal bool MatchesApprovedAction(ApprovedActionRequest request) =>
+        Current.Sealed && Current.Status != ReviewStatus.Faulted
+        && Current.ApprovedRequest is { } approved && Current.Pin is { } pin
+        && approved.ReviewSessionId == pin.ReviewSessionId && approved.Scan == pin.Scan
+        && approved.SelectionRevision == Current.SelectionRevision
+        && SameActionRequest(approved, request);
+
+    internal static bool SameActionRequest(ApprovedActionRequest left, ApprovedActionRequest right) =>
+        left.RequestId == right.RequestId && left.ApprovedUtc.EqualsExact(right.ApprovedUtc)
+        && left.ReviewSessionId == right.ReviewSessionId && left.SelectionRevision == right.SelectionRevision
+        && left.Scan == right.Scan && left.Scope == right.Scope && left.Disclosure == right.Disclosure
+        && !right.Items.IsDefault && !right.SelectedOccurrenceIds.IsDefault
+        && left.Items.SequenceEqual(right.Items) && left.SelectedOccurrenceIds.SequenceEqual(right.SelectedOccurrenceIds);
+
+    internal ImmutableArray<CandidateGroup> CaptureActionGroups() => Current.Groups
+        .Where(group => group.SelectedOccurrenceIds.Count > 0).Select(ForPolicy).ToImmutableArray();
+
+    internal ImmutableArray<DeliberateOverrideEvidence> ActionEvidence => attachedOverrideEvidence.Values
+        .OrderBy(evidence => evidence.EvidenceId.Value).ToImmutableArray();
+
+    internal bool MatchesActionEvidence(ImmutableArray<OverrideReadResult> reads)
+    {
+        var expected = ActionEvidence;
+        if (reads.IsDefault || reads.Length != expected.Length || Current.Pin is not { } session) return false;
+        for (var index = 0; index < expected.Length; index++)
+        {
+            var evidence = expected[index];
+            var group = Current.Groups.Single(value => value.Candidate.GroupId == evidence.Pin.GroupId);
+            if (group.OverrideEvidenceId != evidence.EvidenceId
+                || !EvidenceMatchesSelection(evidence, session, group, group.SelectedOccurrenceIds)
+                || reads[index] is not { Outcome: OverrideReadOutcome.Found, Evidence: { } actual }
+                || !SameEvidence(evidence, actual)) return false;
+        }
+        return true;
+    }
+
     internal bool Accept(ReviewRevalidationEvidence evidence)
     {
         if (!Matches(evidence.Request)) return false;

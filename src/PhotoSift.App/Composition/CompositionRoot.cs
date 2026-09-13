@@ -3,7 +3,9 @@ using PhotoSift.App.Shell;
 using PhotoSift.Analysis.Exact;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Review;
-using PhotoSift.Infrastructure.Sqlite.Review;
+using PhotoSift.Application.Action;
+using PhotoSift.Infrastructure.Windows.Action;
+using PhotoSift.Infrastructure.Sqlite;
 using PhotoSift.Infrastructure.Windows.Scan;
 using PhotoSift.Application.Scope;
 using PhotoSift.Application.Shell;
@@ -32,19 +34,24 @@ public static class CompositionRoot
         var databasePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "PhotoSift", "photosift.db");
-        var evidenceStore = new SqliteOverrideEvidenceStore(databasePath);
+        var stores = new SqlitePhotoSiftStores(databasePath);
         var review = new ReviewCoordinator(scheduler,
-            new BoundedReviewRevalidator(reader, analyzer), evidenceStore);
+            new BoundedReviewRevalidator(reader, analyzer), stores.OverrideEvidence,
+            actionSafety: new ProtectedActionSafetyValidator(reader, analyzer));
+        var action = new ActionCoordinator(scheduler, review, stores.OverrideEvidence,
+            stores.ActionJournal, new WindowsRecycleBinExecutor());
         var photoWorkflow = new OwnedPhotoSiftWorkflow(
-            new PhotoSiftWorkflow(workflow, scan, scheduler, review),
+            new PhotoSiftWorkflow(workflow, scan, scheduler, review, action),
+            action,
             review,
-            evidenceStore);
+            stores);
         var dialog = new WpfReviewDialogService(() => System.Windows.Application.Current?.MainWindow);
         return new ShellViewModel(workflow, photoWorkflow, dialog);
     }
 
     private sealed class OwnedPhotoSiftWorkflow(
         IPhotoSiftWorkflow workflow,
+        IAsyncDisposable action,
         IAsyncDisposable review,
         IAsyncDisposable evidenceStore) : IPhotoSiftWorkflow, IAsyncDisposable
     {
@@ -87,6 +94,16 @@ public static class CompositionRoot
         private async Task DisposeCoreAsync()
         {
             List<Exception>? failures = null;
+            try
+            {
+                // Action disposal includes admitted acknowledgments, Windows STA
+                // settlement and retained leases. The dispatcher is still alive.
+                await action.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
             try
             {
                 await review.DisposeAsync().ConfigureAwait(false);

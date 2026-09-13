@@ -7,5 +7,5 @@ internal sealed class SynchronizationContextWorkflowScheduler : IWorkflowSchedul
     private readonly SynchronizationContext context =
         SynchronizationContext.Current ?? new SynchronizationContext();
 
-    public void Post(Action callback) => context.Post(_ => callback(), null);
+    public void Post(System.Action callback) => context.Post(_ => callback(), null);
 }

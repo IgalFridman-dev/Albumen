@@ -5,6 +5,7 @@ using PhotoSift.Application.Review;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Shell;
 using PhotoSift.Application.Tests.Scan;
+using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
@@ -14,6 +15,98 @@ namespace PhotoSift.Application.Tests.Review;
 
 public sealed class E1S4ConcurrencyAcceptanceTests
 {
+    [Fact]
+    public async Task FullActionReceiptLaneStillAdmitsReviewCommandsAndRetainsAllProbeLeases()
+    {
+        var reader = ApprovedActionAuthorityTests.Reader();
+        var analyzer = new ScanTestAnalyzer();
+        await using var fixture = new ApprovalFixture(new(), actionSafety: new(reader, analyzer));
+        var request = await ApprovedActionAuthorityTests.ApproveAsync(fixture);
+        var claim = (await ApprovedActionAuthorityTests.ClaimAsync(fixture, request)).Claim!;
+        var initialLeases = reader.Leases.Count;
+        var entered = ScanTestData.Signal<bool>();
+        var release = ScanTestData.Signal<StreamDigest>();
+        var allRefreshed = ScanTestData.Signal<bool>();
+        var hashes = 0;
+        var completedGroups = 0;
+        analyzer.Hash = (_, _) =>
+        {
+            if (Interlocked.Increment(ref hashes) == 2) entered.TrySetResult(true);
+            return new(release.Task);
+        };
+        var normal = reader.Create!;
+        reader.Create = (index, open) =>
+        {
+            var lease = normal(index, open);
+            lease.Refresh = _ =>
+            {
+                if (open.ResolvedPath.EndsWith("3.jpg", StringComparison.Ordinal)
+                    && Interlocked.Increment(ref completedGroups) == 2) allRefreshed.TrySetResult(true);
+                return ValueTask.FromResult(lease.OpenedFacts);
+            };
+            return lease;
+        };
+        var first = fixture.Owner.RefreshSafetyAsync(claim, request.Items[0], [], TestContext.Current.CancellationToken);
+        var second = fixture.Owner.RefreshSafetyAsync(claim, request.Items[0], [], TestContext.Current.CancellationToken);
+        await fixture.PumpAsync(entered.Task);
+        var occupied = fixture.Owner.FailRevalidationAsync(fixture.Evidence(1).Request, ReviewUnavailableReason.Stale).AsTask();
+        release.TrySetResult(new(1, ScanTestData.Digest));
+        await ScanTestData.Bound(allRefreshed.Task);
+        var command = fixture.Owner.ChangeSelectionAsync(fixture.SelectionCommand(0,
+            SelectionCommandKind.ReplaceFocusedGroup, 1, 2), TestContext.Current.CancellationToken);
+        await fixture.PumpAsync(command);
+        Assert.Equal(ReviewCommandOutcome.Sealed, (await command).Outcome);
+        Assert.False(first.IsCompleted);
+        Assert.False(second.IsCompleted);
+        Assert.All(reader.Leases.Skip(initialLeases), lease => Assert.False(lease.Disposed));
+        await fixture.PumpAsync(Task.WhenAll(first, second, occupied));
+        Assert.Equal(ApprovedActionClaimOutcome.Claimed, (await first).Outcome);
+        Assert.Equal(ApprovedActionClaimOutcome.Claimed, (await second).Outcome);
+        Assert.All(reader.Leases, lease => Assert.True(lease.Disposed));
+    }
+
+    [Fact]
+    public async Task HashingMayAwaitAReviewCommandWithoutHoldingTheOwnerTurn()
+    {
+        var analyzer = new ScanTestAnalyzer();
+        await using var fixture = new ApprovalFixture(new(), actionSafety: new(ApprovedActionAuthorityTests.Reader(), analyzer));
+        var request = await ApprovedActionAuthorityTests.ApproveAsync(fixture);
+        analyzer.Hash = async (_, token) =>
+        {
+            var command = await fixture.Owner.ChangeSelectionAsync(fixture.SelectionCommand(0,
+                SelectionCommandKind.ReplaceFocusedGroup, 1, 2), token);
+            Assert.Equal(ReviewCommandOutcome.Sealed, command.Outcome);
+            return new(1, ScanTestData.Digest);
+        };
+        Assert.Equal(ApprovedActionClaimOutcome.Claimed,
+            (await ApprovedActionAuthorityTests.ClaimAsync(fixture, request)).Outcome);
+    }
+
+    [Fact]
+    public async Task ThrowingObserverCanQueueClaimWithoutInlineDeliveryOrLosingFaultProjection()
+    {
+        await using var fixture = new ApprovalFixture(new(), actionSafety: new(ApprovedActionAuthorityTests.Reader(), new ScanTestAnalyzer()));
+        await fixture.OpenSelectedAsync();
+        Task<ApprovedActionClaimResult>? claim = null;
+        var faulted = ScanTestData.Signal<bool>();
+        fixture.Owner.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.Status == ReviewStatus.Faulted) faulted.TrySetResult(true);
+            if (snapshot.ApprovedRequest is { } request && claim is null)
+            {
+                claim = fixture.Owner.ClaimAsync(request, [], TestContext.Current.CancellationToken);
+                Assert.False(claim.IsCompleted);
+                throw new InvalidOperationException("observer failure");
+            }
+        };
+        await fixture.ApproveAsync(fixture.ApprovalCommand());
+        await fixture.PumpAsync(faulted.Task);
+        Assert.Equal(ReviewStatus.Faulted, fixture.Owner.Current.Status);
+        Assert.NotNull(claim);
+        await fixture.PumpAsync(claim);
+        Assert.Equal(ApprovedActionClaimOutcome.Faulted, (await claim).Outcome);
+    }
+
     [Fact]
     public async Task ReplacementRejectsBlockedWorkerReceiptBeforeLeaseDisposalAndSuccessfulPersistedEvidenceRereadSealsApproval()
     {
@@ -324,7 +417,7 @@ internal sealed class GatedAcceptanceEvidenceStore : IOverrideEvidenceStore
 internal sealed class AcceptanceOwnerScheduler : IWorkflowScheduler, IAsyncDisposable
 {
     private readonly object sync = new();
-    private readonly Queue<Action> callbacks = new();
+    private readonly Queue<System.Action> callbacks = new();
     private readonly SemaphoreSlim permits = new(0);
     private readonly SemaphoreSlim completed = new(0);
     private readonly CancellationTokenSource lifetime = new();
@@ -337,7 +430,7 @@ internal sealed class AcceptanceOwnerScheduler : IWorkflowScheduler, IAsyncDispo
         pump = Task.Run(PumpAsync, CancellationToken.None);
     }
 
-    public void Post(Action callback)
+    public void Post(System.Action callback)
     {
         ArgumentNullException.ThrowIfNull(callback);
         lock (sync)
@@ -461,7 +554,7 @@ internal sealed class AcceptanceOwnerScheduler : IWorkflowScheduler, IAsyncDispo
             while (true)
             {
                 await permits.WaitAsync(lifetime.Token);
-                Action callback;
+                System.Action callback;
                 lock (sync)
                 {
                     if (callbacks.Count == 0)

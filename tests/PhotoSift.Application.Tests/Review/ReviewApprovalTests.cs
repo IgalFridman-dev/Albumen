@@ -133,7 +133,8 @@ internal sealed class ApprovalFixture : IAsyncDisposable
         new(2026, 9, 9, 20, 15, 30, TimeSpan.FromHours(3));
     private readonly ApprovalEvidenceStore evidenceStore;
 
-    internal ApprovalFixture(ApprovalEvidenceStore evidenceStore, ScanStatus coverage = ScanStatus.Complete)
+    internal ApprovalFixture(ApprovalEvidenceStore evidenceStore, ScanStatus coverage = ScanStatus.Complete,
+        ProtectedActionSafetyValidator? actionSafety = null)
     {
         this.evidenceStore = evidenceStore;
         var context = ScanTestData.Context();
@@ -166,7 +167,7 @@ internal sealed class ApprovalFixture : IAsyncDisposable
             : new ScanCounts(5, 5, 0, 0, 0, 0);
         Request = new(scope, new(1, 1), new(context.Pin, coverage, enumeration,
             [.. first, .. second], [firstGroup, secondGroup], counts));
-        Owner = new(Scheduler, Executor, evidenceStore, resultCapacity: 1);
+        Owner = new(Scheduler, Executor, evidenceStore, resultCapacity: 1, actionSafety: actionSafety);
     }
 
     internal ManualScanScheduler Scheduler { get; } = new();

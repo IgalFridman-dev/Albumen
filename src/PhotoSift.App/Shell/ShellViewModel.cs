@@ -1,9 +1,12 @@
 using System.Collections.Immutable;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using PhotoSift.Application.Review;
+using PhotoSift.Application.Action;
+using PhotoSift.Domain.Action;
 using PhotoSift.Application.Shell;
 using ScanSessionStatus = PhotoSift.Application.Scan.ScanStatus;
 using PhotoSift.Domain.Review;
@@ -51,11 +54,14 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private long approvalIdentityRevision;
     private Guid approvalIdentityKey;
     private string approvalAutomationStatus = string.Empty;
+    private string actionAnnouncement = string.Empty;
+    private readonly ObservableCollection<ActionItemViewModel> actionRows = [];
     private readonly object lifetime = new();
     private Task? disposalTask;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
+        ActionRows = new(actionRows);
         this.chooseScopeWorkflow = chooseScopeWorkflow
             ?? throw new ArgumentNullException(nameof(chooseScopeWorkflow));
         ChooseScopeCommand = new AsyncCommand(
@@ -105,6 +111,29 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public bool IsConfirmRulesPhase => CurrentPhase == WorkflowPhase.ConfirmRules;
     public bool IsScanPhase => CurrentPhase == WorkflowPhase.Scan;
     public bool IsReviewPhase => CurrentPhase == WorkflowPhase.Review;
+    public bool IsActionPhase => CurrentPhase == WorkflowPhase.ApproveCleanup;
+    public ImmutableArray<ActionItemViewModel> ActionItems { get; private set; } = [];
+    public ReadOnlyObservableCollection<ActionItemViewModel> ActionRows { get; }
+    private ActionSnapshot CurrentAction => photoSnapshot?.Action ?? ActionSnapshot.Idle;
+    public string SourceMutationNotice => CurrentAction.RequestId is null
+        ? "No source change has occurred. No account or network connection is required."
+        : "Only explicitly approved items are sent one at a time to Windows Recycle Bin after current checks and durable recording. No account or network connection is required.";
+    public string ActionStatusText => CurrentAction.FaultReason == ActionSafetyReason.None
+        ? $"Action: {CurrentAction.Status}"
+        : $"Action: {CurrentAction.Status}; {ActionItemViewModel.DescribeReason(CurrentAction.FaultReason)}";
+    public string ActionCountsText => string.Create(CultureInfo.InvariantCulture,
+        $"{CurrentAction.Items.Length} approved items; {CurrentAction.DurableRequestedCount} requested records; {CurrentAction.DurableExecutingCount} executing records; {CurrentAction.RecycledCount} recycled; {CurrentAction.NotRemovedCount} not removed; {CurrentAction.UnknownCount} unknown.");
+    public string ActionCertaintyText => CurrentAction.Items.Any(item => item.State is ActionItemState.Executing or ActionItemState.UnknownPendingRevalidation)
+        ? "Some outcomes are uncertain. Inspect each original path and its recorded reason. A later safe review is required for uncertain items."
+        : "Per-item states and reasons show what was recorded; an overall result does not replace them.";
+    public string ActionReplayNotice { get; } = "No automatic replay or retry is performed. Interrupted or uncertain items require a later safe review.";
+    public string ActionRecoveryNotice { get; } = "Actual recovered space is not measured. A Recycle Bin result does not establish physical-file deletion or freed disk space.";
+    public string ActionSelectionText => photoSnapshot?.ActionReview.ApprovedRequest is { } approved
+        && approved.RequestId == CurrentAction.RequestId
+        ? string.Create(CultureInfo.InvariantCulture,
+            $"Selection is sealed: {approved.Disclosure.SelectedOccurrenceCount} selected occurrences; {approved.Disclosure.SelectedOccurrenceCount} selected paths; {approved.Disclosure.DistinctPhysicalKeyCount} distinct physical files. {approved.Disclosure.Coverage} Scan coverage at approval.")
+        : string.Create(CultureInfo.InvariantCulture, $"Selection is sealed for this Action: {CurrentAction.Items.Length} explicitly approved occurrences.");
+    public string ActionAnnouncement => actionAnnouncement;
     public bool CanContinue => photoSnapshot?.Scope.ScopeState == ScopeSessionState.Ready;
     public bool CanConfirmExactRules => CanContinue && IsConfirmRulesPhase && photoSnapshot?.Rules is null;
     public bool CanStartScan => photoSnapshot is { } snapshot && ShellPhasePolicy.CanStart(snapshot.Scope, snapshot.Rules) && !IsScanBusy;
@@ -192,9 +221,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         private set => SetField(ref approvalUnselectedSurvivorsText, value);
     }
 
-    public string ApprovalDestinationText { get; } = "Future destination: Windows Recycle Bin.";
+    public string ApprovalDestinationText { get; } = "Destination: Windows Recycle Bin.";
     public string ApprovalRevalidationText { get; } =
-        "Only the listed, revalidated selected occurrences are included. E1-S5 will revalidate Scope, identity, content, and override evidence again before any Action.";
+        "Only the listed, revalidated selected occurrences are included. Each original path is sent one at a time after current checks of Scope, identity, content, remaining copies and override evidence, and durable recording.";
     public string ApprovalAutomationStatus
     {
         get => approvalAutomationStatus;
@@ -325,6 +354,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void ApplyCombined(PhotoSiftSnapshot snapshot)
     {
+        var previousAction = photoSnapshot?.Action;
+        var previousActionReview = photoSnapshot?.ActionReview;
         var previousReview = photoSnapshot?.Review;
         var previousReviewStatusText = ReviewStatusText;
         var preserveReviewProjection = ReviewProjectionUnchanged(photoSnapshot?.Review, snapshot.Review)
@@ -335,6 +366,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var previousCanConfirm = CanConfirmExactRules;
         Apply(snapshot.Scope);
         photoSnapshot = snapshot;
+        ProjectAction(previousAction, previousActionReview, snapshot);
         Phases = Project(snapshot.Phases);
         RuleSetStatus = snapshot.Rules is null ? "Not configured" : "Exact duplicates only — confirmed";
         if (!preserveReviewProjection)
@@ -359,7 +391,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (previousReview?.Status != snapshot.Review.Status) OnPropertyChanged(nameof(ReviewState));
         if (previousReview?.FaultReason != snapshot.Review.FaultReason) OnPropertyChanged(nameof(ReviewFaultReason));
         if (previousReviewStatusText != ReviewStatusText) OnPropertyChanged(nameof(ReviewStatusText));
-        foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsScanPhase), nameof(IsReviewPhase),
+        foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsScanPhase), nameof(IsReviewPhase), nameof(IsActionPhase),
             nameof(CanContinue), nameof(CanStartScan), nameof(CanOpenReview),
             nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze) })
             OnPropertyChanged(name);
@@ -368,6 +400,48 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (previousCanConfirm != CanConfirmExactRules) OnPropertyChanged(nameof(CanConfirmExactRules));
         if (previousStatus != ScanStatus) OnPropertyChanged(nameof(ScanStatus));
         if (previousPhase != CurrentPhase) OnPropertyChanged(nameof(CurrentPhase));
+    }
+
+    private void ProjectAction(ActionSnapshot? previous, ReviewSnapshot? previousReview, PhotoSiftSnapshot snapshot)
+    {
+        if (ReferenceEquals(previous, snapshot.Action) || previous == snapshot.Action)
+        {
+            if (previousReview != snapshot.ActionReview) OnPropertyChanged(nameof(ActionSelectionText));
+            return;
+        }
+        var previousRows = ActionItems;
+        var retainRows = previous is { RequestId: not null } && previous.RequestId == snapshot.Action.RequestId
+            && previous.Items.Length == snapshot.Action.Items.Length
+            && previousRows.Length == snapshot.Action.Items.Length;
+        ActionItems = snapshot.Action.Items.Select((item, index) =>
+            retainRows && previous!.Items[index] == item ? previousRows[index]
+                : new ActionItemViewModel(item, index + 1, snapshot.Action.Items.Length)).ToImmutableArray();
+        // Preserve unchanged WPF containers (and path focus/selection) during
+        // progress. Both the public snapshot and each displayed row stay immutable;
+        // this read-only rendering collection never carries Action authority.
+        if (retainRows)
+        {
+            for (var index = 0; index < ActionItems.Length; index++)
+                if (!ReferenceEquals(actionRows[index], ActionItems[index])) actionRows[index] = ActionItems[index];
+        }
+        else
+        {
+            actionRows.Clear();
+            foreach (var row in ActionItems) actionRows.Add(row);
+        }
+        foreach (var property in new[] { nameof(ActionItems), nameof(ActionStatusText), nameof(ActionCountsText),
+            nameof(ActionCertaintyText), nameof(ActionSelectionText), nameof(SourceMutationNotice) })
+            OnPropertyChanged(property);
+        if (snapshot.Action.RequestId is null) return;
+        var changedIndex = -1;
+        for (var index = 0; index < snapshot.Action.Items.Length; index++)
+        {
+            if (previous is null || index >= previous.Items.Length || previous.Items[index] != snapshot.Action.Items[index])
+                changedIndex = index;
+        }
+        actionAnnouncement = $"{ActionStatusText}. {ActionCountsText}"
+            + (changedIndex < 0 ? string.Empty : $" Item {changedIndex + 1}: {ActionItems[changedIndex].ItemStatus}");
+        OnPropertyChanged(nameof(ActionAnnouncement));
     }
 
     private async Task ChangeReviewSelectionAsync(
@@ -651,8 +725,3 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             await disposable.DisposeAsync().ConfigureAwait(false);
     }
 }
-
-
-
-
-

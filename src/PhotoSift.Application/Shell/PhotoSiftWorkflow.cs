@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using PhotoSift.Application.Action;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Review;
 using PhotoSift.Domain.Review;
@@ -8,13 +9,14 @@ using PhotoSift.Domain.Workflow;
 
 namespace PhotoSift.Application.Shell;
 
-// Navigation and rule confirmation only. Scope and Scan remain owned by their
-// existing workflows; every observer/command transition enters a non-inline inbox.
+// Commands and immutable projections only. Scope, Scan, Review and Action retain
+// their sole owners; every presentation transition enters a non-inline inbox.
 public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
 {
     private readonly IChooseScopeWorkflow scope;
     private readonly IScanCoordinator scan;
     private readonly IReviewCoordinator? review;
+    private readonly IActionCoordinator? action;
     private readonly WorkflowInbox inbox;
     private PhotoSiftSnapshot current;
     private long nextRuleRevision;
@@ -22,6 +24,9 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     private int scanRefreshScheduled;
     private ReviewSnapshot? pendingReview;
     private int reviewRefreshScheduled;
+    private ActionSnapshot? pendingAction;
+    private int actionRefreshScheduled;
+    private ReviewSnapshot? approvedReviewProjection;
     private readonly object adapterLifecycle = new();
     private readonly List<Task> adapterTasks = [];
     private readonly ConcurrentQueue<Task> adapterFailures = new();
@@ -32,16 +37,18 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         EqualityComparer<CandidateGroup>.Create(SameCandidate, group => group.GroupId.GetHashCode());
 
     public PhotoSiftWorkflow(IChooseScopeWorkflow scope, IScanCoordinator scan, IWorkflowScheduler scheduler,
-        IReviewCoordinator? review = null)
+        IReviewCoordinator? review = null, IActionCoordinator? action = null)
     {
         this.scope = scope ?? throw new ArgumentNullException(nameof(scope));
         this.scan = scan ?? throw new ArgumentNullException(nameof(scan));
         this.review = review;
+        this.action = action;
         inbox = new(scheduler ?? throw new ArgumentNullException(nameof(scheduler)));
         current = new(scope.Current, null, EmptyScan(), WorkflowPhase.ChooseScope, InitialWorkflow.Create());
         scope.SnapshotChanged += OnScopeChanged;
         scan.SnapshotChanged += OnScanChanged;
         if (review is not null) review.SnapshotChanged += OnReviewChanged;
+        if (action is not null) action.SnapshotChanged += OnActionChanged;
     }
 
     public PhotoSiftSnapshot Current => Volatile.Read(ref current);
@@ -138,7 +145,26 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
 
     public Task<ReviewCommandResult> ApproveReviewAsync(
         ApproveSelectionCommand command, CancellationToken cancellationToken) =>
-        ObserveReviewCommandAsync(coordinator => coordinator.ApproveAsync(command, cancellationToken));
+        ObserveReviewCommandAsync(async coordinator =>
+        {
+            var result = await coordinator.ApproveAsync(command, cancellationToken).ConfigureAwait(false);
+            if (result.Outcome == ReviewCommandOutcome.Approved
+                && result.ApprovedRequest is { } request && action is not null)
+            {
+                await inbox.InvokeAsync(() =>
+                {
+                    // Capture disclosure only; approval is not admission or
+                    // durable intent. Forward the owner's exact returned object.
+                    if (result.Snapshot.Sealed && ReferenceEquals(result.Snapshot.ApprovedRequest, request))
+                        approvedReviewProjection = result.Snapshot;
+                }).ConfigureAwait(false);
+                await action.ApproveAsync(request, cancellationToken).ConfigureAwait(false);
+                // Completion can race the coalesced presentation notification.
+                // Read the sole owner's current snapshot through the same inbox.
+                await inbox.InvokeAsync(RefreshAction).ConfigureAwait(false);
+            }
+            return result;
+        });
 
     private async Task CancelScanCoreAsync()
     {
@@ -214,6 +240,53 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         if (!ReferenceEquals(snapshot, review?.Current)) return;
         Interlocked.Exchange(ref pendingReview, snapshot);
         ScheduleReviewRefresh();
+    }
+
+    private void OnActionChanged(object? sender, ActionSnapshot snapshot)
+    {
+        if (!ReferenceEquals(snapshot, action?.Current)) return;
+        Interlocked.Exchange(ref pendingAction, snapshot);
+        ScheduleActionRefresh();
+    }
+
+    private void ScheduleActionRefresh()
+    {
+        if (Interlocked.CompareExchange(ref actionRefreshScheduled, 1, 0) == 0)
+            ObserveActionAdapter(ApplyActionAsync, action?.Current.RequestId);
+    }
+
+    private async Task ApplyActionAsync()
+    {
+        await inbox.InvokeAsync(() =>
+        {
+            try
+            {
+                Interlocked.Exchange(ref pendingAction, null);
+                RefreshAction();
+            }
+            finally
+            {
+                Volatile.Write(ref actionRefreshScheduled, 0);
+                if (Volatile.Read(ref pendingAction) is not null) ScheduleActionRefresh();
+            }
+        }).ConfigureAwait(false);
+    }
+
+    private void RefreshAction()
+    {
+        var snapshot = action?.Current;
+        if (snapshot is null || ReferenceEquals(snapshot, current.Action)) return;
+        var disclosure = current.ActionReview;
+        if (disclosure.ApprovedRequest?.RequestId != snapshot.RequestId)
+        {
+            disclosure = approvedReviewProjection is { Sealed: true, ApprovedRequest: { } approved }
+                && approved.RequestId == snapshot.RequestId ? approvedReviewProjection
+                : review?.Current is { Sealed: true, ApprovedRequest: { } liveApproved } live
+                    && liveApproved.RequestId == snapshot.RequestId ? live : ReviewSnapshot.Closed;
+        }
+        var newlyAdmitted = snapshot.RequestId is not null && snapshot.RequestId != current.Action.RequestId;
+        Publish(current with { Action = snapshot, ActionReview = disclosure,
+            CurrentPhase = newlyAdmitted ? WorkflowPhase.ApproveCleanup : current.CurrentPhase }, snapshot.RequestId);
     }
 
     private void ScheduleReviewRefresh()
@@ -338,12 +411,36 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     private void ObserveAdapter(Func<Task> work, ReviewSessionPin? origin)
     {
         var observation = ObserveAdapterAsync(work, origin);
+        RetainAdapterTask(observation);
+    }
+
+    private void ObserveActionAdapter(Func<Task> work, Guid? origin)
+    {
+        RetainAdapterTask(ObserveActionAdapterAsync(work, origin));
+    }
+
+    private void RetainAdapterTask(Task observation)
+    {
         // This lock retains asynchronous supervision only. It never owns or
         // gates Review data, and commands do not wait for pending adapter work.
         lock (adapterLifecycle)
         {
             adapterTasks.RemoveAll(task => task.IsCompleted);
             adapterTasks.Add(observation);
+        }
+    }
+
+    private async Task ObserveActionAdapterAsync(Func<Task> work, Guid? origin)
+    {
+        try { await work().ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            RetainAdapterFailure(exception);
+            if (origin is not null && action is not null)
+            {
+                try { await action.ReportObserverFaultAsync(origin.Value).ConfigureAwait(false); }
+                catch (Exception reportingFailure) { RetainAdapterFailure(reportingFailure); }
+            }
         }
     }
 
@@ -380,10 +477,11 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         WorkflowPhase.Scan => ShellPhasePolicy.CanStart(snapshot.Scope, snapshot.Rules),
         WorkflowPhase.Review => snapshot.Scan.Pin is { } pin && snapshot.Rules is { } rules
             && pin.ScopeRevision == snapshot.Scope.Revision && pin.RuleSetRevision == rules.RuleSetRevision,
+        WorkflowPhase.ApproveCleanup => snapshot.Action.RequestId is not null,
         _ => false,
     };
 
-    private void Publish(PhotoSiftSnapshot snapshot)
+    private void Publish(PhotoSiftSnapshot snapshot, Guid? actionOrigin = null)
     {
         var phases = InitialWorkflow.Create().Select(phase => phase with
         {
@@ -399,7 +497,10 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
             {
                 // The exact published session is the failure's origin, even if
                 // a subscriber synchronously queues a replacement before throwing.
-                ObserveAdapter(() => Task.FromException(exception), published.Review.Pin);
+                if (actionOrigin is { } requestId)
+                    ObserveActionAdapter(() => Task.FromException(exception), requestId);
+                else
+                    ObserveAdapter(() => Task.FromException(exception), published.Review.Pin);
             }
         }
     }

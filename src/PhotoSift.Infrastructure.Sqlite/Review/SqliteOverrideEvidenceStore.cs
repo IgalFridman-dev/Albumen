@@ -9,70 +9,40 @@ using PhotoSift.Domain.Scan;
 
 namespace PhotoSift.Infrastructure.Sqlite.Review;
 
-public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsyncDisposable
+internal sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
-
-    private readonly string databasePath;
-    private readonly SemaphoreSlim lane = new(1, 1);
-    private readonly object lifecycle = new();
+    private readonly SqliteDatabaseOwner owner;
     private readonly SqliteOverrideEvidenceStoreObserver? observer;
-    private Task? disposalTask;
-    private TaskCompletionSource? drainCompletion;
-    private int admittedOperations;
 
-    public SqliteOverrideEvidenceStore(string databasePath)
-        : this(databasePath, null)
+    internal SqliteOverrideEvidenceStore(SqliteDatabaseOwner owner,
+        SqliteOverrideEvidenceStoreObserver? observer = null)
     {
-    }
-
-    internal SqliteOverrideEvidenceStore(
-        string databasePath,
-        SqliteOverrideEvidenceStoreObserver? observer)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
-        this.databasePath = Path.GetFullPath(databasePath);
+        this.owner = owner;
         this.observer = observer;
     }
 
+    internal static SqliteOverrideEvidenceStore CreateForTesting(string path,
+        SqliteOverrideEvidenceStoreObserver? observer = null) => new(new(path), observer);
+
     public async ValueTask<OverridePersistResult> PersistAsync(
-        DeliberateOverrideEvidence evidence,
-        CancellationToken cancellationToken)
+        DeliberateOverrideEvidence evidence, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(evidence);
-        AdmitOperation();
         try
         {
-            var row = Canonicalize(evidence);
-            var wait = lane.WaitAsync(cancellationToken);
-            observer?.LaneWaitStarted(wait.IsCompleted);
-            await wait.ConfigureAwait(false);
-            try
+            return await owner.RunAsync(false, async (connection, token) =>
             {
-                if (observer is not null)
-                {
-                    await observer.LaneEntered(cancellationToken).ConfigureAwait(false);
-                }
-
-                await using var connection = await OpenInitializedAsync(cancellationToken).ConfigureAwait(false);
+                var row = Canonicalize(evidence);
                 await using var transaction = connection.BeginTransaction(deferred: false);
-                if (!await SchemaIsExactAsync(connection, cancellationToken, transaction).ConfigureAwait(false))
-                {
-                    throw new InvalidDataException("The SQLite override evidence schema changed before writing.");
-                }
-                var existing = await ReadRowAsync(connection, transaction, row.EvidenceId, cancellationToken)
-                    .ConfigureAwait(false);
+                await PhotoSiftSchema.ValidateAsync(connection, PhotoSiftSchema.Version, token, transaction).ConfigureAwait(false);
+                var existing = await ReadRowAsync(connection, transaction, row.EvidenceId, token).ConfigureAwait(false);
                 if (existing is not null)
-                {
-                    return new(TryReadEvidence(existing, out var existingEvidence)
-                        && Canonicalize(existingEvidence) == row
-                            ? OverridePersistOutcome.ExactRetry
-                            : OverridePersistOutcome.Conflict);
-                }
-
+                    return new OverridePersistResult(TryReadEvidence(existing, out var decoded) && Canonicalize(decoded) == row
+                        ? OverridePersistOutcome.ExactRetry : OverridePersistOutcome.Conflict);
                 await using var command = connection.CreateCommand();
                 command.Transaction = transaction;
                 command.CommandText = """
@@ -92,322 +62,46 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
                         $deliberately_affirmed, $payload_sha256);
                     """;
                 Bind(command, row);
-                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-                if (observer?.AfterInsert is { } afterInsert)
-                {
-                    await afterInsert(connection, transaction, cancellationToken).ConfigureAwait(false);
-                }
-
-                var inserted = await ReadRowAsync(connection, transaction, row.EvidenceId, cancellationToken)
-                    .ConfigureAwait(false);
+                await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                if (observer?.AfterInsert is { } after) await after(connection, transaction, token).ConfigureAwait(false);
+                var inserted = await ReadRowAsync(connection, transaction, row.EvidenceId, token).ConfigureAwait(false);
                 if (inserted is null || inserted != row || !TryReadEvidence(inserted, out _))
-                {
                     throw new InvalidDataException("SQLite did not retain the exact canonical override evidence.");
-                }
-                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-                return new(OverridePersistOutcome.Persisted);
-            }
-            catch (Exception exception) when (IsUnavailable(exception))
-            {
-                return new(OverridePersistOutcome.Unavailable);
-            }
-            finally
-            {
-                lane.Release();
-            }
+                token.ThrowIfCancellationRequested();
+                await transaction.CommitAsync(token).ConfigureAwait(false);
+                return new OverridePersistResult(OverridePersistOutcome.Persisted);
+            }, cancellationToken, observer).ConfigureAwait(false);
         }
-        finally
+        catch (Exception exception) when (SqliteDatabaseOwner.IsUnavailable(exception))
         {
-            CompleteOperation();
+            return new(OverridePersistOutcome.Unavailable);
         }
     }
 
-    public async ValueTask<OverrideReadResult> ReadAsync(
-        OverrideEvidenceId evidenceId,
-        CancellationToken cancellationToken)
+    public async ValueTask<OverrideReadResult> ReadAsync(OverrideEvidenceId evidenceId, CancellationToken cancellationToken)
     {
-        AdmitOperation();
         try
         {
-            var wait = lane.WaitAsync(cancellationToken);
-            observer?.LaneWaitStarted(wait.IsCompleted);
-            await wait.ConfigureAwait(false);
-            try
+            return await owner.RunAsync(false, async (connection, token) =>
             {
-                if (observer is not null)
-                {
-                    await observer.LaneEntered(cancellationToken).ConfigureAwait(false);
-                }
-
-                await using var connection = await OpenInitializedAsync(cancellationToken).ConfigureAwait(false);
-                var row = await ReadRowAsync(connection, null, GuidText(evidenceId.Value), cancellationToken)
-                    .ConfigureAwait(false);
-                if (row is null)
-                {
-                    return new(OverrideReadOutcome.Missing, null);
-                }
-
+                var row = await ReadRowAsync(connection, null, GuidText(evidenceId.Value), token).ConfigureAwait(false);
+                if (row is null) return new OverrideReadResult(OverrideReadOutcome.Missing, null);
                 return TryReadEvidence(row, out var evidence)
-                    ? new(OverrideReadOutcome.Found, evidence)
-                    : new(OverrideReadOutcome.Corrupt, null);
-            }
-            catch (Exception exception) when (IsUnavailable(exception))
-            {
-                return new(OverrideReadOutcome.Unavailable, null);
-            }
-            finally
-            {
-                lane.Release();
-            }
+                    ? new OverrideReadResult(OverrideReadOutcome.Found, evidence)
+                    : new OverrideReadResult(OverrideReadOutcome.Corrupt, null);
+            }, cancellationToken, observer).ConfigureAwait(false);
         }
-        finally
+        catch (Exception exception) when (SqliteDatabaseOwner.IsUnavailable(exception))
         {
-            CompleteOperation();
+            return new(OverrideReadOutcome.Unavailable, null);
         }
     }
 
-    public ValueTask DisposeAsync()
-    {
-        Task dispose;
-        lock (lifecycle)
-        {
-            dispose = disposalTask ??= BeginDisposal();
-        }
+    public ValueTask DisposeAsync() => owner.DisposeAsync();
 
-        return new(dispose);
-    }
-
-    private void AdmitOperation()
-    {
-        lock (lifecycle)
-        {
-            ObjectDisposedException.ThrowIf(disposalTask is not null, this);
-            admittedOperations++;
-        }
-    }
-
-    private void CompleteOperation()
-    {
-        TaskCompletionSource? drained = null;
-        lock (lifecycle)
-        {
-            admittedOperations--;
-            if (admittedOperations == 0)
-            {
-                drained = drainCompletion;
-            }
-        }
-
-        drained?.TrySetResult();
-    }
-
-    private Task BeginDisposal()
-    {
-        Task drain;
-        if (admittedOperations == 0)
-        {
-            drain = Task.CompletedTask;
-        }
-        else
-        {
-            drainCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            drain = drainCompletion.Task;
-        }
-
-        return DisposeAfterDrainAsync(drain);
-    }
-
-    private async Task DisposeAfterDrainAsync(Task drain)
-    {
-        await drain.ConfigureAwait(false);
-        lane.Dispose();
-    }
-
-    private async Task<SqliteConnection> OpenInitializedAsync(CancellationToken cancellationToken)
-    {
-        var parent = Path.GetDirectoryName(databasePath);
-        if (!string.IsNullOrEmpty(parent))
-        {
-            Directory.CreateDirectory(parent);
-        }
-
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Pooling = false,
-            DefaultTimeout = 1,
-        }.ToString());
-
-        try
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken).ConfigureAwait(false);
-            if (!await IntegrityIsValidAsync(connection, cancellationToken).ConfigureAwait(false))
-            {
-                throw new InvalidDataException("SQLite integrity validation failed.");
-            }
-
-            var version = await ScalarLongAsync(connection, "PRAGMA user_version;", cancellationToken)
-                .ConfigureAwait(false);
-            if (version == 0)
-            {
-                await MigrateVersionZeroAsync(connection, cancellationToken).ConfigureAwait(false);
-            }
-            else if (version != OverrideEvidenceSchema.Version)
-            {
-                throw new InvalidDataException("The SQLite schema version is unsupported.");
-            }
-
-            if (!await SchemaIsExactAsync(connection, cancellationToken).ConfigureAwait(false))
-            {
-                throw new InvalidDataException("The SQLite override evidence schema is invalid.");
-            }
-
-            var journalMode = await ScalarStringAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken)
-                .ConfigureAwait(false);
-            if (!journalMode.Equals("wal", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException("SQLite WAL mode could not be enabled.");
-            }
-
-            if (observer?.ConnectionInitialized is { } initialized)
-            {
-                await initialized(connection, cancellationToken).ConfigureAwait(false);
-            }
-
-            return connection;
-        }
-        catch
-        {
-            await connection.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-    }
-
-    private static async Task MigrateVersionZeroAsync(
-        SqliteConnection connection,
-        CancellationToken cancellationToken)
-    {
-        await ExecuteAsync(connection, "BEGIN EXCLUSIVE;", cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var version = await ScalarLongAsync(connection, "PRAGMA user_version;", cancellationToken)
-                .ConfigureAwait(false);
-            if (version != 0)
-            {
-                throw new InvalidDataException("The SQLite schema version changed during migration.");
-            }
-
-            if (!await DatabaseHasNoUserSchemaAsync(connection, cancellationToken).ConfigureAwait(false))
-            {
-                throw new InvalidDataException("The version-zero SQLite database contains unsupported schema objects.");
-            }
-
-            await ExecuteAsync(connection, OverrideEvidenceSchema.CreateTableSql, cancellationToken)
-                .ConfigureAwait(false);
-            await ExecuteAsync(connection,
-                $"PRAGMA user_version = {OverrideEvidenceSchema.Version};", cancellationToken).ConfigureAwait(false);
-
-            if (await ScalarLongAsync(connection, "PRAGMA user_version;", cancellationToken).ConfigureAwait(false)
-                    != OverrideEvidenceSchema.Version
-                || !await SchemaIsExactAsync(connection, cancellationToken).ConfigureAwait(false))
-            {
-                throw new InvalidDataException("The migrated SQLite override evidence schema is invalid.");
-            }
-
-            await ExecuteAsync(connection, "COMMIT;", cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            try
-            {
-                await ExecuteAsync(connection, "ROLLBACK;", CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (SqliteException)
-            {
-                // Preserve the original migration failure.
-            }
-
-            throw;
-        }
-    }
-
-    private static async Task<bool> DatabaseHasNoUserSchemaAsync(
-        SqliteConnection connection,
-        CancellationToken cancellationToken)
-    {
-        var count = await ScalarLongAsync(connection,
-            "SELECT COUNT(*) FROM sqlite_master WHERE substr(name, 1, 7) <> 'sqlite_';", cancellationToken)
-            .ConfigureAwait(false);
-        return count == 0;
-    }
-
-    private static async Task<bool> IntegrityIsValidAsync(
-        SqliteConnection connection,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = "PRAGMA integrity_check;";
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-            && reader.GetString(0).Equals("ok", StringComparison.OrdinalIgnoreCase)
-            && !await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async Task<bool> SchemaIsExactAsync(
-        SqliteConnection connection,
-        CancellationToken cancellationToken,
-        SqliteTransaction? transaction = null)
-    {
-        await using (var objects = connection.CreateCommand())
-        {
-            objects.Transaction = transaction;
-            objects.CommandText = "SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name;";
-            await using var reader = await objects.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-                || !reader.GetString(0).Equals("table", StringComparison.Ordinal)
-                || !reader.GetString(1).Equals("override_evidence", StringComparison.Ordinal)
-                || !reader.GetString(2).Equals("override_evidence", StringComparison.Ordinal)
-                || reader.IsDBNull(3)
-                || !NormalizeSql(reader.GetString(3)).Equals(NormalizeSql(OverrideEvidenceSchema.CreateTableSql),
-                    StringComparison.OrdinalIgnoreCase)
-                || !await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-                || !reader.GetString(0).Equals("index", StringComparison.Ordinal)
-                || !reader.GetString(1).Equals("sqlite_autoindex_override_evidence_1", StringComparison.Ordinal)
-                || !reader.GetString(2).Equals("override_evidence", StringComparison.Ordinal)
-                || !reader.IsDBNull(3)
-                || await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                return false;
-            }
-        }
-
-        await using (var columns = connection.CreateCommand())
-        {
-            columns.Transaction = transaction;
-            columns.CommandText = "PRAGMA table_info('override_evidence');";
-            await using var reader = await columns.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            foreach (var expected in OverrideEvidenceSchema.Columns)
-            {
-                if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-                    || !reader.GetString(1).Equals(expected.Name, StringComparison.Ordinal)
-                    || !reader.GetString(2).Equals(expected.Type, StringComparison.OrdinalIgnoreCase)
-                    || (reader.GetInt64(3) != 0) != expected.NotNull
-                    || (reader.GetInt64(5) != 0) != expected.PrimaryKey)
-                {
-                    return false;
-                }
-            }
-
-            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    internal static string CanonicalPayload(DeliberateOverrideEvidence evidence) =>
+        JsonSerializer.Serialize(Canonicalize(evidence), JsonOptions);
+    internal static string PayloadHash(DeliberateOverrideEvidence evidence) => Canonicalize(evidence).PayloadSha256;
 
     private static async Task<StoredRow?> ReadRowAsync(
         SqliteConnection connection,
@@ -581,67 +275,11 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
         return Convert.ToHexString(SHA256.HashData(stream.ToArray())).ToLowerInvariant();
     }
 
-    private static async Task ExecuteAsync(
-        SqliteConnection connection,
-        string sql,
-        CancellationToken cancellationToken) =>
-        await ExecuteAsync(connection, null, sql, cancellationToken).ConfigureAwait(false);
-
-    private static async Task ExecuteAsync(
-        SqliteConnection connection,
-        SqliteTransaction? transaction,
-        string sql,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async Task<long> ScalarLongAsync(
-        SqliteConnection connection,
-        string sql,
-        CancellationToken cancellationToken) =>
-        await ScalarLongAsync(connection, null, sql, cancellationToken).ConfigureAwait(false);
-
-    private static async Task<long> ScalarLongAsync(
-        SqliteConnection connection,
-        SqliteTransaction? transaction,
-        string sql,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
-            CultureInfo.InvariantCulture);
-    }
-
-    private static async Task<string> ScalarStringAsync(
-        SqliteConnection connection,
-        string sql,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        return Convert.ToString(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
-            CultureInfo.InvariantCulture) ?? string.Empty;
-    }
-
     private static bool TryGuid(string text, out Guid value) =>
         Guid.TryParseExact(text, "D", out value)
         && GuidText(value).Equals(text, StringComparison.Ordinal);
 
     private static string GuidText(Guid value) => value.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant();
-
-    private static string NormalizeSql(string sql) => string.Join(' ',
-        sql.Trim().TrimEnd(';').Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-
-    private static bool IsUnavailable(Exception exception) => exception is SqliteException
-        or IOException
-        or UnauthorizedAccessException
-        or InvalidDataException;
 
     private sealed record StoredRow(
         string EvidenceId,
@@ -673,7 +311,7 @@ public sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsync
 }
 
 internal sealed record SqliteOverrideEvidenceStoreObserver(
-    Action<bool> LaneWaitStarted,
+    System.Action<bool> LaneWaitStarted,
     Func<CancellationToken, ValueTask> LaneEntered,
     Func<SqliteConnection, CancellationToken, ValueTask>? ConnectionInitialized = null,
     Func<SqliteConnection, SqliteTransaction, CancellationToken, ValueTask>? AfterInsert = null);

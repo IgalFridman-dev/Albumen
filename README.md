@@ -4,10 +4,11 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Planning is complete and validated. E1-S1 through E1-S4 are implemented, reviewed, verified by their complete offline Full gates, and done. E1-S4 delivers survivor-safe Review Selection, protected revalidation, narrow durable override evidence, and an explicit immutable approval handoff. The execution policy remains pinned to E1-S4: E1-S5, E1-S6, and Epics 2–5 remain backlog until a separate authorized lifecycle decision.
+Planning is complete and validated. E1-S1 through E1-S5 are implemented, reviewed, verified by their complete offline Full gates, and done. E1-S5 adds one-item Windows Recycle Bin execution behind fresh safety checks and separate durable Requested/Executing barriers. Final reviewed Full passed 1,337/1,337 tests plus runtime-boundary and offline WPF smoke. The execution policy remains pinned to E1-S5: E1-S6 reconciliation and the Epic 1 safety gate require separate authorization; E1-S6 and Epics 2–5 remain backlog.
 
-- Latest completed story: **E1-S4 — Review Exact groups with survivor-safe Selection and approval (done)**
-- Current implementation authorization: **E1-S4 remains the policy lock; no later story is authorized**
+- Latest completed story: **E1-S5 — Execute one-item Recycle Bin operations behind a durable barrier (done)**
+- Current implementation authorization: **E1-S5 remains the policy lock; E1-S6 and later work are not authorized**
+- E1-S5 acceptance and closing observations (committed as `0bc0155`): [`docs/evidence/e1-s5/verification.md`](docs/evidence/e1-s5/verification.md)
 - Current tracking: [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)
 - Story contracts: [`_bmad-output/specs/`](_bmad-output/specs/)
 - Documentation map: [`docs/README.md`](docs/README.md)
@@ -46,7 +47,7 @@ The project deliberately excludes cloud inference, accounts, telemetry, automati
 5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
 6. Stop at E1-S6 until the safety gate is explicitly recorded as `PASS`.
 
-The repository contains the .NET 10/C# 14/WPF `win-x64` application with exact local Scope selection/preflight, accepted Exact duplicate detection, survivor-safe Review Selection, narrow durable override evidence, and an immutable approved handoff, plus five test projects and a NIC-free Golden Hyper-V VM verification gate. Action execution and later-story behavior remain intentionally absent. E1-S4 approval does not authorize filesystem mutation; E1-S5 requires a separate lifecycle authorization.
+The repository contains the .NET 10/C# 14/WPF `win-x64` application with exact local Scope selection/preflight, Exact duplicate detection, survivor-safe Review Selection, durable override evidence, and one-item Recycle Bin execution through the sole Action owner, plus five test projects and a NIC-free Golden Hyper-V VM verification gate. Review approval supplies an exact sealed request; fresh authority/survivor checks and durable Requested/Executing commits must still precede every shell call. Uncertain or interrupted work is never automatically replayed. Reconciliation and later-story behavior remain outside the accepted implementation.
 
 ## Repository layout
 

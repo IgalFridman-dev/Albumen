@@ -9,9 +9,9 @@ public sealed class ReviewOwnerInbox
 {
     private readonly IWorkflowScheduler scheduler;
     private readonly SemaphoreSlim resultSlots;
-    private readonly ConcurrentQueue<Action> pending = new();
+    private readonly ConcurrentQueue<System.Action> pending = new();
     private int scheduled;
-    internal Action? DeliverAfterTurn { get; set; }
+    internal System.Action? DeliverAfterTurn { get; set; }
 
     public ReviewOwnerInbox(IWorkflowScheduler scheduler, int resultCapacity = 16)
     {

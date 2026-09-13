@@ -6,7 +6,7 @@ namespace PhotoSift.Application.Shell;
 // command during publication cannot start a nested turn through a modal UI pump.
 internal sealed class WorkflowInbox(IWorkflowScheduler scheduler)
 {
-    private readonly ConcurrentQueue<Action> pending = new();
+    private readonly ConcurrentQueue<System.Action> pending = new();
     private int scheduled;
 
     public Task<T> InvokeAsync<T>(Func<T> callback)
@@ -28,7 +28,7 @@ internal sealed class WorkflowInbox(IWorkflowScheduler scheduler)
         return completion.Task;
     }
 
-    public Task InvokeAsync(Action callback) => InvokeAsync(() =>
+    public Task InvokeAsync(System.Action callback) => InvokeAsync(() =>
     {
         callback();
         return true;
