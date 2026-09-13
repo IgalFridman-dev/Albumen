@@ -8,7 +8,7 @@ Planning is complete and validated. E1-S1 through E1-S5 are implemented, reviewe
 
 - Latest completed story: **E1-S5 — Execute one-item Recycle Bin operations behind a durable barrier (done)**
 - Current implementation authorization: **E1-S5 remains the policy lock; E1-S6 and later work are not authorized**
-- E1-S5 acceptance, closing observations and pending local commit: [`docs/evidence/e1-s5/verification.md`](docs/evidence/e1-s5/verification.md)
+- E1-S5 acceptance and closing observations (committed as `0bc0155`): [`docs/evidence/e1-s5/verification.md`](docs/evidence/e1-s5/verification.md)
 - Current tracking: [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)
 - Story contracts: [`_bmad-output/specs/`](_bmad-output/specs/)
 - Documentation map: [`docs/README.md`](docs/README.md)
