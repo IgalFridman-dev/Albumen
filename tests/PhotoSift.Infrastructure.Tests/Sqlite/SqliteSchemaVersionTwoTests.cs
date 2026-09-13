@@ -12,7 +12,7 @@ public sealed class SqliteSchemaVersionTwoTests
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
-    public async Task EmptyAndCanonicalVersionOneMigrateToOnlyTheExactVersionTwoExtension(int version)
+    public async Task EmptyAndCanonicalVersionOneMigrateThroughTheExactVersionTwoExtension(int version)
     {
         await using var fixture = new SqliteOverrideFixture();
         await SeedAsync(fixture, version);
@@ -20,8 +20,8 @@ public sealed class SqliteSchemaVersionTwoTests
         Assert.Equal(OverrideReadOutcome.Missing,
             (await stores.OverrideEvidence.ReadAsync(OverrideEvidenceData.KnownEvidenceId, TestContext.Current.CancellationToken)).Outcome);
         await using var connection = await fixture.OpenRawAsync();
-        Assert.Equal(2L, await ScalarAsync(connection, "PRAGMA user_version;"));
-        Assert.Equal("action_items,action_transitions,override_evidence,sqlite_autoindex_action_items_1,sqlite_autoindex_action_items_2,sqlite_autoindex_action_transitions_1,sqlite_autoindex_override_evidence_1",
+        Assert.Equal(3L, await ScalarAsync(connection, "PRAGMA user_version;"));
+        Assert.Equal("action_items,action_revalidations,action_transitions,override_evidence,sqlite_autoindex_action_items_1,sqlite_autoindex_action_items_2,sqlite_autoindex_action_revalidations_1,sqlite_autoindex_action_revalidations_2,sqlite_autoindex_action_transitions_1,sqlite_autoindex_override_evidence_1",
             await ScalarAsync(connection, "SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_schema ORDER BY name);"));
         Assert.Equal("wal", await ScalarAsync(connection, "PRAGMA journal_mode;"));
     }
@@ -39,7 +39,7 @@ public sealed class SqliteSchemaVersionTwoTests
         string before;
         await using (var connection = await fixture.OpenRawAsync())
         {
-            await ExecuteAsync(connection, "DROP TABLE IF EXISTS action_transitions; DROP TABLE IF EXISTS action_items; PRAGMA user_version=1; PRAGMA journal_mode=DELETE;");
+            await ExecuteAsync(connection, "DROP TABLE IF EXISTS action_revalidations; DROP TABLE IF EXISTS action_transitions; DROP TABLE IF EXISTS action_items; PRAGMA user_version=1; PRAGMA journal_mode=DELETE;");
             before = await OverrideRowAsync(connection);
         }
         await using (var stores = new SqlitePhotoSiftStores(fixture.DatabasePath))
@@ -50,12 +50,12 @@ public sealed class SqliteSchemaVersionTwoTests
         }
         await using var verify = await fixture.OpenRawAsync();
         Assert.Equal(before, await OverrideRowAsync(verify));
-        Assert.Equal(2L, await ScalarAsync(verify, "PRAGMA user_version;"));
+        Assert.Equal(3L, await ScalarAsync(verify, "PRAGMA user_version;"));
     }
 
     [Theory]
-    [InlineData(0, 1)] [InlineData(0, 2)] [InlineData(0, 3)] [InlineData(0, 4)] [InlineData(0, 5)]
-    [InlineData(1, 1)] [InlineData(1, 2)] [InlineData(1, 3)] [InlineData(1, 4)]
+    [InlineData(0, 1)] [InlineData(0, 2)] [InlineData(0, 3)] [InlineData(0, 4)] [InlineData(0, 5)] [InlineData(0, 6)]
+    [InlineData(1, 1)] [InlineData(1, 2)] [InlineData(1, 3)] [InlineData(1, 4)] [InlineData(1, 5)]
     public async Task EveryMigrationCreateVersionAndTargetValidationFaultRollsBackBytesAndJournalMode(int version, int faultStep)
     {
         await using var fixture = new SqliteOverrideFixture();
@@ -100,6 +100,10 @@ public sealed class SqliteSchemaVersionTwoTests
             await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
             Assert.Equal(OverrideReadOutcome.Missing,
                 (await stores.OverrideEvidence.ReadAsync(OverrideEvidenceData.KnownEvidenceId, TestContext.Current.CancellationToken)).Outcome);
+            await stores.DisposeAsync();
+            await using var exactV2 = await fixture.OpenRawAsync();
+            await ExecuteAsync(exactV2, "DROP TABLE action_revalidations; PRAGMA user_version=2; PRAGMA journal_mode=DELETE;");
+            return;
         }
         await using var connection = await fixture.OpenRawAsync();
         if (version == 1) await ExecuteAsync(connection, OverrideEvidenceSchema.CreateTableSql);

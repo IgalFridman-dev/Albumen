@@ -15,6 +15,11 @@ public interface IActionJournalStore
     ValueTask<ActionJournalWriteResult> PersistExecutingAsync(ActionExecutingFact fact, CancellationToken cancellationToken);
     ValueTask<ActionJournalWriteResult> PersistTerminalAsync(ActionTerminalFact fact, CancellationToken cancellationToken);
 }
+public interface IActionRecordStore
+{
+    ValueTask<ActionRecordLoadResult> LoadAsync(CancellationToken cancellationToken);
+    ValueTask<ActionRevalidationWriteResult> AppendRevalidationAsync(ActionRevalidationFact fact, CancellationToken cancellationToken);
+}
 public interface IRecycleBinExecutor
 {
     // Cancellation can deny permission. Once permission is granted the adapter

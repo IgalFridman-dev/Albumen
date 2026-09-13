@@ -14,8 +14,10 @@ public sealed class SqlitePhotoSiftStores : IAsyncDisposable
         owner = new(databasePath, observer);
         OverrideEvidence = new SqliteOverrideEvidenceStore(owner);
         ActionJournal = new SqliteActionJournalStore(owner);
+        ActionRecords = new SqliteActionRecordStore(owner);
     }
     public IOverrideEvidenceStore OverrideEvidence { get; }
     public IActionJournalStore ActionJournal { get; }
+    public IActionRecordStore ActionRecords { get; }
     public ValueTask DisposeAsync() => owner.DisposeAsync();
 }

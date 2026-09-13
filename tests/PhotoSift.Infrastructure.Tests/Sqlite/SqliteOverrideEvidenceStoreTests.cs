@@ -13,7 +13,7 @@ namespace PhotoSift.Infrastructure.Tests.Sqlite;
 public sealed class SqliteOverrideEvidenceStoreTests
 {
     [Fact]
-    public async Task EmptyDatabaseMigratesAtomicallyToVersionTwoAndUsesWal()
+    public async Task EmptyDatabaseMigratesAtomicallyToCurrentVersionAndUsesWal()
     {
         await using var fixture = new SqliteOverrideFixture();
         await using var store = fixture.CreateStore();
@@ -22,10 +22,10 @@ public sealed class SqliteOverrideEvidenceStoreTests
             (await store.PersistAsync(OverrideEvidenceData.Create(), TestContext.Current.CancellationToken)).Outcome);
 
         await using var connection = await fixture.OpenRawAsync();
-        Assert.Equal(2L, await ScalarLongAsync(connection, "PRAGMA user_version;"));
+        Assert.Equal(3L, await ScalarLongAsync(connection, "PRAGMA user_version;"));
         Assert.Equal("wal", Assert.IsType<string>(await ScalarAsync(connection, "PRAGMA journal_mode;")),
             ignoreCase: true);
-        Assert.Equal(["action_items", "action_transitions", "override_evidence"], await ReadStringsAsync(connection,
+        Assert.Equal(["action_items", "action_revalidations", "action_transitions", "override_evidence"], await ReadStringsAsync(connection,
             "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 7) <> 'sqlite_' ORDER BY name;"));
         Assert.Equal(OverrideEvidenceData.ExpectedColumns, await ReadStringsAsync(connection,
             "SELECT name FROM pragma_table_info('override_evidence') ORDER BY cid;"));
@@ -131,7 +131,7 @@ public sealed class SqliteOverrideEvidenceStoreTests
         SqliteConnection.ClearAllPools();
         Assert.Equal(before, await File.ReadAllBytesAsync(fixture.DatabasePath, TestContext.Current.CancellationToken));
         await using var unchanged = await fixture.OpenRawAsync();
-        Assert.Equal(2L, await ScalarLongAsync(unchanged, "PRAGMA user_version;"));
+        Assert.Equal(3L, await ScalarLongAsync(unchanged, "PRAGMA user_version;"));
         Assert.Equal("delete", Assert.IsType<string>(await ScalarAsync(unchanged,
             "PRAGMA journal_mode;")), ignoreCase: true);
         Assert.Equal(1L, await ScalarLongAsync(unchanged, "SELECT COUNT(*) FROM override_evidence;"));

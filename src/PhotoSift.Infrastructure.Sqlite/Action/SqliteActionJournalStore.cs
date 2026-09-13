@@ -182,7 +182,9 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
         return decoded;
     }
 
-    private static void ValidateTransition(TransitionRow row)
+    private static void ValidateTransition(TransitionRow row) => _ = DecodeTransition(row);
+
+    private static object DecodeTransition(TransitionRow row)
     {
         if (Hash(row.Payload) != row.PayloadSha256) throw new InvalidDataException("Transition hash mismatch.");
         if (row.Sequence == 2)
@@ -191,6 +193,7 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
             if (fact.ActionItemId == Guid.Empty || row.ActionItemId != GuidText(fact.ActionItemId)
                 || row.Kind != "executing" || row.RecordedUtc != Utc(fact.ExecutingUtc))
                 throw new InvalidDataException("Invalid Executing row.");
+            return fact;
         }
         else
         {
@@ -199,7 +202,61 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
                 || fact.ActionItemId == Guid.Empty || row.ActionItemId != GuidText(fact.ActionItemId)
                 || row.Kind != KindText(fact.Kind) || row.RecordedUtc != Utc(fact.RecordedUtc))
                 throw new InvalidDataException("Invalid terminal row.");
+            return fact;
         }
+    }
+
+    internal static async Task<ImmutableArray<PersistedActionItem>> LoadJournalAsync(SqliteConnection connection,
+        SqliteTransaction transaction, CancellationToken token)
+    {
+        var rows = await ReadAllItemsAsync(connection, transaction, token).ConfigureAwait(false);
+        var decoded = rows.Select(row => (Row: row, Payload: DecodeItem(row))).ToArray();
+        foreach (var request in decoded.GroupBy(value => value.Row.RequestId))
+        {
+            var identity = request.First();
+            if (request.Any(value => value.Row.RequestPayloadSha256 != identity.Row.RequestPayloadSha256
+                || value.Payload.RequestIdentityPayload != identity.Payload.RequestIdentityPayload))
+                throw new InvalidDataException("Inconsistent request identity.");
+        }
+        var result = ImmutableArray.CreateBuilder<PersistedActionItem>(decoded.Length);
+        foreach (var item in decoded)
+        {
+            var transitions = await ReadTransitionsAsync(connection, transaction, item.Row.ActionItemId, token).ConfigureAwait(false);
+            if (transitions.Count > 2 || transitions.Count >= 1 && transitions[0].Sequence != 2
+                || transitions.Count == 2 && transitions[1].Sequence != 3)
+                throw new InvalidDataException("Invalid Action transition order.");
+            ActionExecutingFact? executing = null;
+            ActionTerminalFact? terminal = null;
+            foreach (var transition in transitions)
+            {
+                var fact = DecodeTransition(transition);
+                if (fact is ActionExecutingFact executingFact) executing = executingFact;
+                else terminal = (ActionTerminalFact)fact;
+            }
+            result.Add(new(Guid.Parse(item.Row.RequestId), item.Payload.Fact, executing, terminal, []));
+        }
+        return result.MoveToImmutable();
+    }
+
+    private static async Task<List<ItemRow>> ReadAllItemsAsync(SqliteConnection connection, SqliteTransaction transaction,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT action_item_id, request_id, request_payload_sha256, occurrence_id,
+              occurrence_revision, requested_utc, requested_payload, requested_payload_sha256
+            FROM action_items ORDER BY requested_utc, action_item_id;
+            """;
+        await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+        var result = new List<ItemRow>();
+        while (await reader.ReadAsync(token).ConfigureAwait(false))
+        {
+            RequireStorageTypes(reader, 3, 4);
+            result.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3), reader.GetInt64(4),
+                reader.GetString(5), reader.GetString(6), reader.GetString(7)));
+        }
+        return result;
     }
 
     private static async Task<List<ItemRow>> ReadItemsAsync(SqliteConnection connection, SqliteTransaction transaction,
@@ -244,7 +301,7 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
         return result;
     }
 
-    private static void RequireStorageTypes(SqliteDataReader reader, params int[] integerColumns)
+    internal static void RequireStorageTypes(SqliteDataReader reader, params int[] integerColumns)
     {
         // SQLite affinity permits REAL values in INTEGER columns. Typed getters
         // coerce those values, which must not erase a changed revision or ID.
@@ -253,9 +310,9 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
                 throw new InvalidDataException("Noncanonical SQLite storage type.");
     }
 
-    private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
-    private static string GuidText(Guid id) => id.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant();
-    private static string Utc(DateTimeOffset value) => value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+    internal static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+    internal static string GuidText(Guid id) => id.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant();
+    internal static string Utc(DateTimeOffset value) => value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
     private static string KindText(ActionTerminalKind kind) => kind switch
     {
         ActionTerminalKind.Recycled => "recycled",
@@ -285,7 +342,7 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
     }
     private sealed record TransitionRow(string ActionItemId, int Sequence, string Kind, string RecordedUtc, string Payload, string PayloadSha256);
 
-    private static class CanonicalJson
+    internal static class CanonicalJson
     {
         private static readonly JsonSerializerOptions Options = new()
         {
@@ -316,7 +373,8 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
                 foreach (var property in element.EnumerateObject().OrderBy(property => property.Name, StringComparer.Ordinal))
                 {
                     writer.WritePropertyName(property.Name);
-                    if (property.Name == "sha256" && property.Value.ValueKind == JsonValueKind.String)
+                    if ((property.Name == "sha256" || property.Name == "observedSha256")
+                        && property.Value.ValueKind == JsonValueKind.String)
                     {
                         var digest = property.Value.GetString()!;
                         if (digest.Length != 64 || !digest.All(Uri.IsHexDigit)) throw new InvalidDataException("Invalid content digest.");
