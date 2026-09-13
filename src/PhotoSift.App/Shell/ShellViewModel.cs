@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -54,11 +55,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private Guid approvalIdentityKey;
     private string approvalAutomationStatus = string.Empty;
     private string actionAnnouncement = string.Empty;
+    private readonly ObservableCollection<ActionItemViewModel> actionRows = [];
     private readonly object lifetime = new();
     private Task? disposalTask;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
+        ActionRows = new(actionRows);
         this.chooseScopeWorkflow = chooseScopeWorkflow
             ?? throw new ArgumentNullException(nameof(chooseScopeWorkflow));
         ChooseScopeCommand = new AsyncCommand(
@@ -110,6 +113,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public bool IsReviewPhase => CurrentPhase == WorkflowPhase.Review;
     public bool IsActionPhase => CurrentPhase == WorkflowPhase.ApproveCleanup;
     public ImmutableArray<ActionItemViewModel> ActionItems { get; private set; } = [];
+    public ReadOnlyObservableCollection<ActionItemViewModel> ActionRows { get; }
     private ActionSnapshot CurrentAction => photoSnapshot?.Action ?? ActionSnapshot.Idle;
     public string SourceMutationNotice => CurrentAction.RequestId is null
         ? "No source change has occurred. No account or network connection is required."
@@ -405,7 +409,26 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             if (previousReview != snapshot.ActionReview) OnPropertyChanged(nameof(ActionSelectionText));
             return;
         }
-        ActionItems = snapshot.Action.Items.Select((item, index) => new ActionItemViewModel(item, index + 1, snapshot.Action.Items.Length)).ToImmutableArray();
+        var previousRows = ActionItems;
+        var retainRows = previous is { RequestId: not null } && previous.RequestId == snapshot.Action.RequestId
+            && previous.Items.Length == snapshot.Action.Items.Length
+            && previousRows.Length == snapshot.Action.Items.Length;
+        ActionItems = snapshot.Action.Items.Select((item, index) =>
+            retainRows && previous!.Items[index] == item ? previousRows[index]
+                : new ActionItemViewModel(item, index + 1, snapshot.Action.Items.Length)).ToImmutableArray();
+        // Preserve unchanged WPF containers (and path focus/selection) during
+        // progress. Both the public snapshot and each displayed row stay immutable;
+        // this read-only rendering collection never carries Action authority.
+        if (retainRows)
+        {
+            for (var index = 0; index < ActionItems.Length; index++)
+                if (!ReferenceEquals(actionRows[index], ActionItems[index])) actionRows[index] = ActionItems[index];
+        }
+        else
+        {
+            actionRows.Clear();
+            foreach (var row in ActionItems) actionRows.Add(row);
+        }
         foreach (var property in new[] { nameof(ActionItems), nameof(ActionStatusText), nameof(ActionCountsText),
             nameof(ActionCertaintyText), nameof(ActionSelectionText), nameof(SourceMutationNotice) })
             OnPropertyChanged(property);
@@ -702,8 +725,3 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             await disposable.DisposeAsync().ConfigureAwait(false);
     }
 }
-
-
-
-
-

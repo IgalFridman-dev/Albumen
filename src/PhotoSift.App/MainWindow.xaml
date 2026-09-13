@@ -524,7 +524,7 @@
                                 AutomationProperties.LiveSetting="Polite" />
                       </StackPanel>
                     </ScrollViewer>
-                    <ListBox x:Name="ActionItemsList" Grid.Row="2" ItemsSource="{Binding ActionItems}"
+                    <ListBox x:Name="ActionItemsList" Grid.Row="2" ItemsSource="{Binding ActionRows}"
                              Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ActionItemTemplate}"
                              AutomationProperties.Name="Approved original paths and Recycle Bin results"
                              Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
@@ -543,5 +543,3 @@
                    Text="{Binding SourceMutationNotice}" />
     </Grid>
 </Window>
-
-
