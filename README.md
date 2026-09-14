@@ -4,12 +4,13 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Development status: **6 of 26 stories complete; 20 remain. Epic 1 is complete.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); the E1-S6 branch still requires its separate integration decision. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
+Development status: **6 of 26 stories complete; 20 remain. Epic 1 is complete and E2-S1 is in progress.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); E1-S6 and E2-S1 are currently stacked local branches awaiting later integration decisions. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
 
 Planning is complete and validated. E1-S1 through E1-S6 are done. E1-S6 adds restart-only Action Records, explicit read-only revalidation, accessible progress, and conservative unknown outcomes. Its user-facing safety behavior passed explicit manual verification after the approved two-attempt VM/timing cap stopped the real COM callback crash harness. The deferred automated edge coverage is [PM-001](docs/backlog/post-mvp.md#pm-001--harden-e1-s6-real-process-crash-boundary-automation).
 
 - Latest completed story: **E1-S6 — Reconcile interrupted Actions and retain truthful records (done)**
-- Next eligible story: **E2-S1 — Establish forward-only SQLite schema and serialized ownership (ready for development)**
+- Current story: **E2-S1 — Lean SQLite ownership and Scan identity foundation (in progress)**
+- Approved design: [`docs/superpowers/specs/2026-09-14-e2-s1-lean-sqlite-foundation-design.md`](docs/superpowers/specs/2026-09-14-e2-s1-lean-sqlite-foundation-design.md)
 - E1-S6 final evidence and manual acceptance: [`docs/evidence/e1-s6/verification.md`](docs/evidence/e1-s6/verification.md)
 - Historical E1-S6 candidate gates: Core **888/888**, Architecture **536/536**, Full **1,424/1,424** plus runtime-boundary and offline WPF smoke; the later real callback-boundary limitation is recorded separately and is not represented as an automated pass.
 - E1-S5 acceptance and closing observations (committed as `0bc0155`): [`docs/evidence/e1-s5/verification.md`](docs/evidence/e1-s5/verification.md)
