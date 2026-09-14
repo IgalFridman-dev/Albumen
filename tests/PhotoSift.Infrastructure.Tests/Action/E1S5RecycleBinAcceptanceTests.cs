@@ -120,7 +120,8 @@ internal sealed class RealActionAcceptanceFixture : IAsyncDisposable
     private readonly ReviewOpenRequest reviewRequest;
 
     internal RealActionAcceptanceFixture(SqliteDatabaseObserver? observer = null, bool hardLink = false,
-        IRecycleBinExecutor? executor = null)
+        IRecycleBinExecutor? executor = null, IActionExecutionBoundaryObserver? boundaryObserver = null,
+        IFileOperationCallbackObserver? callbackObserver = null)
     {
         Selected = Files.Create("selected-תצלום-" + Guid.NewGuid().ToString("N") + ".jpg");
         Other = hardLink ? Files.Link("retained-alias.jpg", Selected) : Files.Create("second.jpg");
@@ -140,8 +141,11 @@ internal sealed class RealActionAcceptanceFixture : IAsyncDisposable
         var analyzer = new StreamingExactContentAnalyzer();
         Review = new(Scheduler, new BoundedReviewRevalidator(reader, analyzer), Stores.OverrideEvidence,
             actionSafety: new ProtectedActionSafetyValidator(reader, analyzer));
-        Executor = new(this, executor ?? new WindowsRecycleBinExecutor());
-        Action = new(Scheduler, Review, Stores.OverrideEvidence, Stores.ActionJournal, Executor);
+        Executor = new(this, executor ?? (callbackObserver is null
+            ? new WindowsRecycleBinExecutor() : new WindowsRecycleBinExecutor(callbackObserver)));
+        Action = boundaryObserver is null
+            ? new(Scheduler, Review, Stores.OverrideEvidence, Stores.ActionJournal, Executor)
+            : new(Scheduler, Review, Stores.OverrideEvidence, Stores.ActionJournal, Executor, boundaryObserver);
     }
 
     internal async Task<ApprovedActionRequest> ApproveReviewAsync(params long[] selected)

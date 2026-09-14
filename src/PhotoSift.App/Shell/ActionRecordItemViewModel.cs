@@ -8,30 +8,47 @@ namespace PhotoSift.App.Shell;
 
 // Display values only. Historical evidence remains owned by the immutable
 // ActionRecoverySnapshot and is never reused as cleanup authority.
-public sealed class ActionRecordItemViewModel
+public sealed class ActionRecordItemViewModel : INotifyPropertyChanged
 {
+    private ActionRecordItemSnapshot snapshot;
+    private bool isVerifying;
+    private readonly int position;
+    private readonly int total;
+
     public ActionRecordItemViewModel(ActionRecordItemSnapshot snapshot, bool isVerifying, int position, int total)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        this.snapshot = snapshot;
+        this.isVerifying = isVerifying;
+        this.position = position;
+        this.total = total;
         ActionItemId = snapshot.Requested.ActionItemId;
         OriginalPath = snapshot.Requested.Safety.Item.DiscoveredPath;
-        State = snapshot.State;
-        ResultText = Result(snapshot.State);
-        ReasonText = Reason(snapshot);
-        IsVerifying = isVerifying;
-        StatusText = isVerifying ? "Verifying current file state…" : $"{ResultText}; {ReasonText}";
-        AutomationName = string.Create(CultureInfo.InvariantCulture,
-            $"Action record item {position} of {total}; {OriginalPath}; {StatusText}");
     }
 
+    public event PropertyChangedEventHandler? PropertyChanged;
     public Guid ActionItemId { get; }
     public string OriginalPath { get; }
-    public ActionRecordEvidenceState State { get; }
-    public string ResultText { get; }
-    public string ReasonText { get; }
-    public bool IsVerifying { get; }
-    public string StatusText { get; }
-    public string AutomationName { get; }
+    public ActionRecordEvidenceState State => snapshot.State;
+    public string ResultText => Result(snapshot.State);
+    public string ReasonText => Reason(snapshot);
+    public bool IsVerifying => isVerifying;
+    public string StatusText => isVerifying ? "Verifying current file state…" : $"{ResultText}; {ReasonText}";
+    public string AutomationName => string.Create(CultureInfo.InvariantCulture,
+        $"Action record item {position} of {total}; {OriginalPath}; {StatusText}");
+
+    internal void Update(ActionRecordItemSnapshot next, bool verifying)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+        if (next.Requested.ActionItemId != ActionItemId)
+            throw new InvalidOperationException("A historical action row cannot change identity.");
+        if (snapshot == next && isVerifying == verifying) return;
+        snapshot = next;
+        isVerifying = verifying;
+        foreach (var property in new[] { nameof(State), nameof(ResultText), nameof(ReasonText),
+            nameof(IsVerifying), nameof(StatusText), nameof(AutomationName) })
+            PropertyChanged?.Invoke(this, new(property));
+    }
 
     private static string Result(ActionRecordEvidenceState state) => state switch
     {
@@ -87,6 +104,8 @@ public sealed class ActionRecordViewModel : INotifyPropertyChanged
     public string RecoveredBytesText => string.Create(CultureInfo.InvariantCulture,
         $"Recovered bytes: {snapshot.Summary.RecoveredBytes}");
     public bool HasUnknown => snapshot.Summary.Certainty == ActionRecordCertainty.HasUnknown;
+    public int UnknownCount => snapshot.Items.Count(item => item.State is ActionRecordEvidenceState.Requested
+        or ActionRecordEvidenceState.Executing or ActionRecordEvidenceState.Unknown);
 
     internal void Update(ActionRecordSnapshot next, Guid? activeActionItemId)
     {
@@ -94,7 +113,7 @@ public sealed class ActionRecordViewModel : INotifyPropertyChanged
         snapshot = next;
         ProjectRows(next, activeActionItemId, previous);
         foreach (var property in new[] { nameof(RequestedUtc), nameof(CertaintyText), nameof(OutcomeMixText),
-            nameof(RecoveredBytesText), nameof(HasUnknown) })
+            nameof(RecoveredBytesText), nameof(HasUnknown), nameof(UnknownCount) })
             PropertyChanged?.Invoke(this, new(property));
     }
 
@@ -110,8 +129,14 @@ public sealed class ActionRecordViewModel : INotifyPropertyChanged
         for (var index = 0; index < next.Items.Length; index++)
         {
             var verifying = activeActionItemId == next.Items[index].Requested.ActionItemId;
-            if (previous.Items[index] != next.Items[index] || items[index].IsVerifying != verifying)
-                items[index] = Row(next, activeActionItemId, index);
+            if (items[index].ActionItemId != next.Items[index].Requested.ActionItemId)
+            {
+                items.Clear();
+                for (var rebuild = 0; rebuild < next.Items.Length; rebuild++)
+                    items.Add(Row(next, activeActionItemId, rebuild));
+                return;
+            }
+            items[index].Update(next.Items[index], verifying);
         }
     }
 

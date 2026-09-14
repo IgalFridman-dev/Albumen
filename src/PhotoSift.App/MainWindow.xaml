@@ -584,6 +584,7 @@
                                         <TextBlock Text="{Binding CertaintyText}" />
                                         <TextBlock Text="{Binding OutcomeMixText}" />
                                         <TextBlock Text="{Binding RecoveredBytesText}" />
+                                        <TextBlock Text="{Binding UnknownCount, StringFormat='Unknown items: {0}'}" />
                                         <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource ActionRecordItemTemplate}" />
                                     </StackPanel>
                                 </DataTemplate>

@@ -10,6 +10,7 @@ namespace PhotoSift.Application.Action;
 
 public sealed class ActionCoordinator : IActionCoordinator
 {
+    private readonly IActionExecutionBoundaryObserver? boundaryObserver;
     private readonly ActionOwnerInbox inbox;
     private readonly IApprovedActionAuthority authority;
     private readonly IOverrideEvidenceStore evidenceStore;
@@ -33,6 +34,11 @@ public sealed class ActionCoordinator : IActionCoordinator
         this.journal = journal ?? throw new ArgumentNullException(nameof(journal));
         this.executor = executor ?? throw new ArgumentNullException(nameof(executor));
     }
+    internal ActionCoordinator(IWorkflowScheduler scheduler, IApprovedActionAuthority authority,
+        IOverrideEvidenceStore evidenceStore, IActionJournalStore journal, IRecycleBinExecutor executor,
+        IActionExecutionBoundaryObserver boundaryObserver, int resultCapacity = 16)
+        : this(scheduler, authority, evidenceStore, journal, executor, resultCapacity) =>
+        this.boundaryObserver = boundaryObserver ?? throw new ArgumentNullException(nameof(boundaryObserver));
     public ActionSnapshot Current => Volatile.Read(ref current);
     public event EventHandler<ActionSnapshot>? SnapshotChanged;
 
@@ -204,6 +210,7 @@ public sealed class ActionCoordinator : IActionCoordinator
         DeliberateOverrideEvidence? evidence)
     {
         if (await StoppedAsync(operation).ConfigureAwait(false)) return false;
+        boundaryObserver?.Observe(ActionExecutionBoundary.BeforeRequestedCommit, index);
         var id = Guid.NewGuid();
         var requested = new ActionRequestedFact(id, DateTimeOffset.UtcNow, safety, operation.PayloadHash, evidence);
         // Once a write is admitted, its acknowledgment is never canceled. The
@@ -219,6 +226,7 @@ public sealed class ActionCoordinator : IActionCoordinator
             await FaultAsync(operation, JournalReason(written)).ConfigureAwait(false);
             return false;
         }
+        boundaryObserver?.Observe(ActionExecutionBoundary.AfterRequestedCommitBeforeExecuting, index);
         if (await StoppedAsync(operation).ConfigureAwait(false)) return false;
         var executing = new ActionExecutingFact(id, DateTimeOffset.UtcNow);
         written = await WriteAsync(() => journal.PersistExecutingAsync(executing, CancellationToken.None)).ConfigureAwait(false);
@@ -236,6 +244,7 @@ public sealed class ActionCoordinator : IActionCoordinator
         // Retain the exact Executing predecessor for reconciliation; Finish
         // projects its uncertainty without inventing a terminal journal row.
         if (await StoppedAsync(operation).ConfigureAwait(false)) return false;
+        boundaryObserver?.Observe(ActionExecutionBoundary.AfterExecutingCommitBeforeAdapter, index);
         RecycleBinResult result;
         try { result = await executor.ExecuteAsync(new(id, safety), operation.Token).ConfigureAwait(false); }
         catch (Exception)
@@ -245,6 +254,7 @@ public sealed class ActionCoordinator : IActionCoordinator
             result = new(RecycleBinOutcomeKind.UnknownPendingRevalidation, ActionSafetyReason.ProgrammingFault,
                 new(0, 0, false, null, null, 0, 0, null, false, true, false));
         }
+        boundaryObserver?.Observe(ActionExecutionBoundary.AfterAdapterReturnBeforeTerminalCommit, index);
         var terminal = new ActionTerminalFact(id, DateTimeOffset.UtcNow, result.Outcome switch
         {
             RecycleBinOutcomeKind.Recycled => ActionTerminalKind.Recycled,
@@ -258,6 +268,7 @@ public sealed class ActionCoordinator : IActionCoordinator
             await FaultAsync(operation, JournalReason(written)).ConfigureAwait(false);
             return false;
         }
+        boundaryObserver?.Observe(ActionExecutionBoundary.AfterTerminalCommitBeforePublication, index);
         await UpdateAsync(operation, store => store.Terminal(index, terminal.Kind, terminal.Reason)).ConfigureAwait(false);
         if (written.Outcome == ActionJournalWriteOutcome.ExactRetry)
         {
@@ -420,4 +431,18 @@ public sealed class ActionCoordinator : IActionCoordinator
             GC.SuppressFinalize(this);
         }
     }
+}
+
+internal enum ActionExecutionBoundary
+{
+    BeforeRequestedCommit,
+    AfterRequestedCommitBeforeExecuting,
+    AfterExecutingCommitBeforeAdapter,
+    AfterAdapterReturnBeforeTerminalCommit,
+    AfterTerminalCommitBeforePublication,
+}
+
+internal interface IActionExecutionBoundaryObserver
+{
+    void Observe(ActionExecutionBoundary boundary, int itemIndex);
 }

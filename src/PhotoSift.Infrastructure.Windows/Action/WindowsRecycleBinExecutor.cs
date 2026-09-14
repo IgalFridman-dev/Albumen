@@ -6,6 +6,12 @@ namespace PhotoSift.Infrastructure.Windows.Action;
 
 public sealed class WindowsRecycleBinExecutor : IRecycleBinExecutor
 {
+    private readonly IFileOperationCallbackObserver? callbackObserver;
+
+    public WindowsRecycleBinExecutor() { }
+    internal WindowsRecycleBinExecutor(IFileOperationCallbackObserver callbackObserver) =>
+        this.callbackObserver = callbackObserver ?? throw new ArgumentNullException(nameof(callbackObserver));
+
     public ValueTask<RecycleBinResult> ExecuteAsync(RecycleBinRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -13,7 +19,7 @@ public sealed class WindowsRecycleBinExecutor : IRecycleBinExecutor
         // acknowledged Executing transaction. No replacement path is resolved.
         return new(StaFileOperationRunner.RunAsync(request.Safety.Item.DiscoveredPath,
             () => new NativeFileOperationDriver(),
-            () => new ActionRecycleLease(request.Safety, cancellationToken), cancellationToken));
+            () => new ActionRecycleLease(request.Safety, cancellationToken), callbackObserver, cancellationToken));
     }
 
     private sealed class ActionRecycleLease : IRecycleBinLease

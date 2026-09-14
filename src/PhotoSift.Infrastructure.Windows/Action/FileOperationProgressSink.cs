@@ -8,7 +8,8 @@ namespace PhotoSift.Infrastructure.Windows.Action;
 internal sealed partial class FileOperationProgressSink(
     Func<nint, bool> isExpectedItem,
     Func<ActionSafetyReason> validateAndRelease,
-    CancellationToken cancellationToken) : IFileOperationProgressSink
+    CancellationToken cancellationToken,
+    IFileOperationCallbackObserver? callbackObserver = null) : IFileOperationProgressSink
 {
     private const int Denied = unchecked((int)0x80004004); // E_ABORT
     private int preAttempts;
@@ -24,6 +25,7 @@ internal sealed partial class FileOperationProgressSink(
 
     public int PreDeleteItem(uint flags, nint item)
     {
+        callbackObserver?.Observe(FileOperationCallbackBoundary.PreDeleteItem);
         try
         {
             preAttempts++;
@@ -115,6 +117,12 @@ internal sealed partial class FileOperationProgressSink(
         Reason = ActionSafetyReason.CallbackContradiction;
         return Denied;
     }
+}
+
+internal enum FileOperationCallbackBoundary { PreDeleteItem }
+internal interface IFileOperationCallbackObserver
+{
+    void Observe(FileOperationCallbackBoundary boundary);
 }
 
 internal static class RecycleBinClassifier

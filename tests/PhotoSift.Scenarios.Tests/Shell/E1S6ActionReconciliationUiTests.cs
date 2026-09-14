@@ -39,6 +39,7 @@ public sealed class E1S6ActionReconciliationUiTests
         Assert.Equal("Has unknown", ActionShellFixture.Read<string>(projected, "CertaintyText"));
         Assert.Equal("Partial", ActionShellFixture.Read<string>(projected, "OutcomeMixText"));
         Assert.Equal("Recovered bytes: 8192", ActionShellFixture.Read<string>(projected, "RecoveredBytesText"));
+        Assert.Equal(1, ActionShellFixture.Read<int>(projected, "UnknownCount"));
         var rows = ActionShellFixture.Read<IEnumerable>(projected, "Items").Cast<object>().ToArray();
         Assert.Equal(3, rows.Length);
         Assert.Equal(ExpectedResults,
@@ -74,9 +75,20 @@ public sealed class E1S6ActionReconciliationUiTests
         fixture.PublishRecovery(new(ActionRecoveryStatus.Ready, [record], record.Items[0].Requested.ActionItemId, true));
 
         var during = RecoveryRows(fixture);
-        Assert.NotSame(before[0], during[0]);
+        Assert.Same(before[0], during[0]);
         Assert.Same(before[1], during[1]);
         Assert.Contains("Verifying current file state…", ActionShellFixture.Read<string>(fixture.ViewModel, "ActionRecoveryAnnouncement"));
+
+        var resolved = Record(Row(1, ActionRecordEvidenceState.ConfirmedPresent), record.Items[1]);
+        fixture.PublishRecovery(new(ActionRecoveryStatus.Ready, [resolved], null, false));
+
+        var after = RecoveryRows(fixture);
+        Assert.Same(before[0], after[0]);
+        Assert.Equal("not removed", after[0].ResultText);
+        Assert.False(after[0].IsVerifying);
+        Assert.Equal(0, ActionShellFixture.Read<int>(
+            Assert.Single(ActionShellFixture.Read<IEnumerable>(fixture.ViewModel, "ActionRecoveryRecords").Cast<object>()),
+            "UnknownCount"));
     }
 
     private static dynamic ActiveRow(ActionShellFixture fixture) => RecoveryRows(fixture)[0];
@@ -132,20 +144,20 @@ public sealed class E1S6ActionReconciliationAccessibilityTests
                     window.Show();
                     window.Activate();
                     WpfReviewSelectionTests.Drain();
-                    var firstPath = WpfReviewSelectionTests.Descendants<TextBox>(window)
-                        .Single(control => control.Text == record.Items[0].Requested.Safety.Item.DiscoveredPath);
-                    firstPath.Focus();
-                    Keyboard.Focus(firstPath);
-                    firstPath.Select(3, 8);
-                    var selected = firstPath.SelectedText;
+                    var activePath = WpfReviewSelectionTests.Descendants<TextBox>(window)
+                        .Single(control => control.Text == record.Items[1].Requested.Safety.Item.DiscoveredPath);
+                    activePath.Focus();
+                    Keyboard.Focus(activePath);
+                    activePath.Select(3, 8);
+                    var selected = activePath.SelectedText;
 
                     fixture.PublishRecovery(new(ActionRecoveryStatus.Ready, [record],
                         record.Items[1].Requested.ActionItemId, true));
                     window.UpdateLayout();
                     WpfReviewSelectionTests.Drain();
 
-                    Assert.Same(firstPath, Keyboard.FocusedElement);
-                    Assert.Equal(selected, firstPath.SelectedText);
+                    Assert.Same(activePath, Keyboard.FocusedElement);
+                    Assert.Equal(selected, activePath.SelectedText);
                     var progress = Assert.Single(WpfReviewSelectionTests.Descendants<ProgressBar>(window),
                         control => control.IsVisible);
                     Assert.True(progress.IsIndeterminate);

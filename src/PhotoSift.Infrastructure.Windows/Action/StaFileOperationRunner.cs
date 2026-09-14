@@ -14,10 +14,15 @@ internal interface IRecycleBinLease : IDisposable
 internal static class StaFileOperationRunner
 {
     internal static Task<RecycleBinResult> RunAsync(string originalPath, Func<IFileOperationDriver> createDriver,
-        Func<IRecycleBinLease> openLease, CancellationToken cancellationToken)
+        Func<IRecycleBinLease> openLease, CancellationToken cancellationToken) =>
+        RunAsync(originalPath, createDriver, openLease, null, cancellationToken);
+
+    internal static Task<RecycleBinResult> RunAsync(string originalPath, Func<IFileOperationDriver> createDriver,
+        Func<IRecycleBinLease> openLease, IFileOperationCallbackObserver? callbackObserver,
+        CancellationToken cancellationToken)
     {
         var completion = new TaskCompletionSource<RecycleBinResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() => completion.SetResult(Run(originalPath, createDriver, openLease, cancellationToken)))
+        var thread = new Thread(() => completion.SetResult(Run(originalPath, createDriver, openLease, callbackObserver, cancellationToken)))
         {
             IsBackground = true,
             Name = "PhotoSift one-item Recycle Bin STA",
@@ -38,7 +43,7 @@ internal static class StaFileOperationRunner
     }
 
     private static RecycleBinResult Run(string originalPath, Func<IFileOperationDriver> createDriver,
-        Func<IRecycleBinLease> openLease, CancellationToken cancellationToken)
+        Func<IRecycleBinLease> openLease, IFileOperationCallbackObserver? callbackObserver, CancellationToken cancellationToken)
     {
         IFileOperationDriver? driver = null;
         IRecycleBinLease? lease = null;
@@ -57,7 +62,7 @@ internal static class StaFileOperationRunner
             cancellationToken.ThrowIfCancellationRequested();
             Prepare(driver.CreateOperation());
             Prepare(driver.CreateItem(originalPath));
-            sink = new(driver.IsExpectedItem, lease.ValidateAndReleaseForPreDelete, cancellationToken);
+            sink = new(driver.IsExpectedItem, lease.ValidateAndReleaseForPreDelete, cancellationToken, callbackObserver);
             Prepare(driver.Advise(sink));
             advised = true;
             Prepare(driver.SetOperationFlags(NativeFileOperationDriver.RecycleOnlyFlags));
