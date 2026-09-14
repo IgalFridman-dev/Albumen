@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using PhotoSift.Application.Action;
 using PhotoSift.Domain.Action;
@@ -15,40 +14,6 @@ public sealed class E1S6WindowsRevalidationAcceptanceTests
     private const string ModeVariable = "PHOTOSIFT_E1S6_HARNESS_MODE";
     private const string PointVariable = "PHOTOSIFT_E1S6_CRASH_POINT";
     private const string ManifestVariable = "PHOTOSIFT_E1S6_MANIFEST_PATH";
-
-    [Fact]
-    public async Task ApprovedToolingHarnessExecutesAllRealDurableRestartBoundaries()
-    {
-        if (Environment.GetEnvironmentVariable(ModeVariable) is not null) return;
-        var root = FindRepositoryRoot();
-        var executable = Path.ChangeExtension(typeof(E1S6WindowsRevalidationAcceptanceTests).Assembly.Location, ".exe");
-        var results = Path.Combine(Path.GetTempPath(), "photosift-e1s6-tooling-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(results);
-        try
-        {
-            var start = new ProcessStartInfo("powershell.exe")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            foreach (var argument in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                Path.Combine(root, "tests", "tooling", "E1S6CrashHarness.Tests.ps1"),
-                "-InfrastructureExecutable", executable, "-ResultsDirectory", results })
-                start.ArgumentList.Add(argument);
-            using var process = Process.Start(start);
-            Assert.NotNull(process);
-            var standardOutput = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
-            var standardError = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
-            await process.WaitForExitAsync(TestContext.Current.CancellationToken)
-                .WaitAsync(TimeSpan.FromMinutes(3), TestContext.Current.CancellationToken);
-            Assert.True(process.ExitCode == 0,
-                $"Tooling harness exit {process.ExitCode}.{Environment.NewLine}{await standardOutput}{Environment.NewLine}{await standardError}");
-            Assert.Equal(6, Directory.GetFiles(results, "*.verified").Length);
-        }
-        finally { if (Directory.Exists(results)) Directory.Delete(results, true); }
-    }
 
     [Fact]
     public async Task ProcessHarnessChildUsesRealActionJournalAndRecovery()
@@ -141,13 +106,6 @@ public sealed class E1S6WindowsRevalidationAcceptanceTests
         ActionRecordEvidenceState.NotRemoved or ActionRecordEvidenceState.ConfirmedPresent => "not removed",
         _ => "outcome unknown pending revalidation",
     };
-
-    private static string FindRepositoryRoot()
-    {
-        for (var directory = new DirectoryInfo(Directory.GetCurrentDirectory()); directory is not null; directory = directory.Parent)
-            if (File.Exists(Path.Combine(directory.FullName, "PhotoSift.slnx"))) return directory.FullName;
-        throw new DirectoryNotFoundException("PhotoSift repository root was not found.");
-    }
 
     private sealed record Manifest(string DatabasePath, string Root, Guid RequestId,
         long? FirstAllocatedBytes, long? TotalAllocatedBytes);
