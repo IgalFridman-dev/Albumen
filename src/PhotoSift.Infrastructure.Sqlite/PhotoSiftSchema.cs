@@ -1,12 +1,13 @@
 using Microsoft.Data.Sqlite;
 using PhotoSift.Infrastructure.Sqlite.Action;
 using PhotoSift.Infrastructure.Sqlite.Review;
+using PhotoSift.Infrastructure.Sqlite.Scan;
 
 namespace PhotoSift.Infrastructure.Sqlite;
 
 internal static class PhotoSiftSchema
 {
-    internal const int Version = 3;
+    internal const int Version = 4;
 
     internal static async Task ValidateAsync(SqliteConnection connection, int expectedVersion,
         CancellationToken token, SqliteTransaction? transaction = null)
@@ -33,6 +34,13 @@ internal static class PhotoSiftSchema
             expected.Add("action_revalidations", ("table", "action_revalidations", ActionRevalidationSchema.CreateTableSql));
             expected.Add("sqlite_autoindex_action_revalidations_1", ("index", "action_revalidations", null));
             expected.Add("sqlite_autoindex_action_revalidations_2", ("index", "action_revalidations", null));
+        }
+        if (expectedVersion >= 4)
+        {
+            expected.Add("scans", ("table", "scans", ScanIdentitySchema.CreateScansSql));
+            expected.Add("scan_file_occurrences", ("table", "scan_file_occurrences", ScanIdentitySchema.CreateOccurrencesSql));
+            expected.Add("sqlite_autoindex_scans_1", ("index", "scans", null));
+            expected.Add("sqlite_autoindex_scan_file_occurrences_1", ("index", "scan_file_occurrences", null));
         }
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -87,9 +95,19 @@ internal static class PhotoSiftSchema
                 await SqliteDatabaseOwner.ExecuteAsync(connection, ActionJournalSchema.CreateTransitionsSql, token).ConfigureAwait(false);
                 await ObserveAsync(++step).ConfigureAwait(false);
             }
-            await SqliteDatabaseOwner.ExecuteAsync(connection, ActionRevalidationSchema.CreateTableSql, token).ConfigureAwait(false);
-            await ObserveAsync(++step).ConfigureAwait(false);
-            await SqliteDatabaseOwner.ExecuteAsync(connection, "PRAGMA user_version=3;", token).ConfigureAwait(false);
+            if (source < 3)
+            {
+                await SqliteDatabaseOwner.ExecuteAsync(connection, ActionRevalidationSchema.CreateTableSql, token).ConfigureAwait(false);
+                await ObserveAsync(++step).ConfigureAwait(false);
+            }
+            if (source < 4)
+            {
+                await SqliteDatabaseOwner.ExecuteAsync(connection, ScanIdentitySchema.CreateScansSql, token).ConfigureAwait(false);
+                await ObserveAsync(++step).ConfigureAwait(false);
+                await SqliteDatabaseOwner.ExecuteAsync(connection, ScanIdentitySchema.CreateOccurrencesSql, token).ConfigureAwait(false);
+                await ObserveAsync(++step).ConfigureAwait(false);
+            }
+            await SqliteDatabaseOwner.ExecuteAsync(connection, "PRAGMA user_version=4;", token).ConfigureAwait(false);
             await ObserveAsync(++step).ConfigureAwait(false);
             await ValidateAsync(connection, Version, token).ConfigureAwait(false);
             await ObserveAsync(++step).ConfigureAwait(false);
