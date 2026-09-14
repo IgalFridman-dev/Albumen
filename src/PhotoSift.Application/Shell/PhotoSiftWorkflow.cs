@@ -17,6 +17,7 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     private readonly IScanCoordinator scan;
     private readonly IReviewCoordinator? review;
     private readonly IActionCoordinator? action;
+    private readonly IActionRecoveryCoordinator? recovery;
     private readonly WorkflowInbox inbox;
     private PhotoSiftSnapshot current;
     private long nextRuleRevision;
@@ -26,6 +27,8 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     private int reviewRefreshScheduled;
     private ActionSnapshot? pendingAction;
     private int actionRefreshScheduled;
+    private ActionRecoverySnapshot? pendingRecovery;
+    private int recoveryRefreshScheduled;
     private ReviewSnapshot? approvedReviewProjection;
     private readonly object adapterLifecycle = new();
     private readonly List<Task> adapterTasks = [];
@@ -38,17 +41,29 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
 
     public PhotoSiftWorkflow(IChooseScopeWorkflow scope, IScanCoordinator scan, IWorkflowScheduler scheduler,
         IReviewCoordinator? review = null, IActionCoordinator? action = null)
+        : this(scope, scan, scheduler, review, action, null)
+    {
+    }
+
+    public PhotoSiftWorkflow(IChooseScopeWorkflow scope, IScanCoordinator scan, IWorkflowScheduler scheduler,
+        IReviewCoordinator? review, IActionCoordinator? action, IActionRecoveryCoordinator? recovery)
     {
         this.scope = scope ?? throw new ArgumentNullException(nameof(scope));
         this.scan = scan ?? throw new ArgumentNullException(nameof(scan));
         this.review = review;
         this.action = action;
+        this.recovery = recovery;
         inbox = new(scheduler ?? throw new ArgumentNullException(nameof(scheduler)));
         current = new(scope.Current, null, EmptyScan(), WorkflowPhase.ChooseScope, InitialWorkflow.Create());
         scope.SnapshotChanged += OnScopeChanged;
         scan.SnapshotChanged += OnScanChanged;
         if (review is not null) review.SnapshotChanged += OnReviewChanged;
         if (action is not null) action.SnapshotChanged += OnActionChanged;
+        if (recovery is not null)
+        {
+            recovery.SnapshotChanged += OnRecoveryChanged;
+            RetainAdapterTask(ObserveRecoveryAdapterAsync(() => recovery.LoadAsync(CancellationToken.None)));
+        }
     }
 
     public PhotoSiftSnapshot Current => Volatile.Read(ref current);
@@ -166,6 +181,10 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
             return result;
         });
 
+    public Task RevalidateUnknownAsync(Guid requestId, CancellationToken cancellationToken) =>
+        ObserveCommandAsync(() => recovery?.RevalidateUnknownAsync(requestId, cancellationToken)
+            ?? Task.CompletedTask);
+
     private async Task CancelScanCoreAsync()
     {
         await inbox.InvokeAsync(RefreshScope).ConfigureAwait(false);
@@ -247,6 +266,35 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         if (!ReferenceEquals(snapshot, action?.Current)) return;
         Interlocked.Exchange(ref pendingAction, snapshot);
         ScheduleActionRefresh();
+    }
+
+    private void OnRecoveryChanged(object? sender, ActionRecoverySnapshot snapshot)
+    {
+        if (!ReferenceEquals(snapshot, recovery?.Current)) return;
+        Interlocked.Exchange(ref pendingRecovery, snapshot);
+        if (Interlocked.CompareExchange(ref recoveryRefreshScheduled, 1, 0) == 0)
+            RetainAdapterTask(ObserveRecoveryAdapterAsync(ApplyRecoveryAsync));
+    }
+
+    private async Task ApplyRecoveryAsync()
+    {
+        await inbox.InvokeAsync(() =>
+        {
+            try
+            {
+                Interlocked.Exchange(ref pendingRecovery, null);
+                var snapshot = recovery?.Current;
+                if (snapshot is not null && !ReferenceEquals(snapshot, current.ActionRecovery))
+                    Publish(current with { ActionRecovery = snapshot });
+            }
+            finally
+            {
+                Volatile.Write(ref recoveryRefreshScheduled, 0);
+                if (Volatile.Read(ref pendingRecovery) is not null
+                    && Interlocked.CompareExchange(ref recoveryRefreshScheduled, 1, 0) == 0)
+                    RetainAdapterTask(ObserveRecoveryAdapterAsync(ApplyRecoveryAsync));
+            }
+        }).ConfigureAwait(false);
     }
 
     private void ScheduleActionRefresh()
@@ -444,6 +492,12 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         }
     }
 
+    private async Task ObserveRecoveryAdapterAsync(Func<Task> work)
+    {
+        try { await work().ConfigureAwait(false); }
+        catch (Exception exception) { RetainAdapterFailure(exception); }
+    }
+
     private async Task ObserveAdapterAsync(Func<Task> work, ReviewSessionPin? origin)
     {
         try { await work().ConfigureAwait(false); }
@@ -508,4 +562,3 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     private static ScanSnapshot EmptyScan() => new(null, ScanStatus.Idle,
         new(ScanStageState.Pending, ScanReason.None), [], [], new(0, 0, 0, 0, 0, 0));
 }
-

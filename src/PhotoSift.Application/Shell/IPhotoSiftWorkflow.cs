@@ -19,5 +19,6 @@ public interface IPhotoSiftWorkflow
         OverrideAffirmationCommand command, CancellationToken cancellationToken);
     Task<ReviewCommandResult> ApproveReviewAsync(
         ApproveSelectionCommand command, CancellationToken cancellationToken);
+    Task RevalidateUnknownAsync(Guid requestId, CancellationToken cancellationToken);
     Task NavigateAsync(WorkflowPhase phase);
 }

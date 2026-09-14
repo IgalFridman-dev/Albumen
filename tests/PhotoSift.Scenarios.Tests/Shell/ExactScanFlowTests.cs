@@ -219,6 +219,7 @@ internal sealed class ExactShellFixture
             Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current.Review));
         public Task<ReviewCommandResult> ApproveReviewAsync(ApproveSelectionCommand command, CancellationToken token) =>
             Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current.Review));
+        public Task RevalidateUnknownAsync(Guid requestId, CancellationToken token) => Task.CompletedTask;
         public Task NavigateAsync(WorkflowPhase phase) => Act(phase.ToString());
         public async ValueTask DisposeAsync()
         {
@@ -315,7 +316,6 @@ internal sealed class OpeningReviewOwner : IReviewCoordinator
     public Task InvalidateAsync(ScanPin? currentScan) => Task.CompletedTask;
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
-
 
 
 

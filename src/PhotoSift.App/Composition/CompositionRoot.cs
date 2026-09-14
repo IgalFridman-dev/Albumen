@@ -40,8 +40,11 @@ public static class CompositionRoot
             actionSafety: new ProtectedActionSafetyValidator(reader, analyzer));
         var action = new ActionCoordinator(scheduler, review, stores.OverrideEvidence,
             stores.ActionJournal, new WindowsRecycleBinExecutor());
+        var recovery = new ActionRecoveryCoordinator(scheduler, stores.ActionRecords,
+            new WindowsActionRevalidationProbe());
         var photoWorkflow = new OwnedPhotoSiftWorkflow(
-            new PhotoSiftWorkflow(workflow, scan, scheduler, review, action),
+            new PhotoSiftWorkflow(workflow, scan, scheduler, review, action, recovery),
+            recovery,
             action,
             review,
             stores);
@@ -51,10 +54,17 @@ public static class CompositionRoot
 
     private sealed class OwnedPhotoSiftWorkflow(
         IPhotoSiftWorkflow workflow,
+        IAsyncDisposable? recovery,
         IAsyncDisposable action,
         IAsyncDisposable review,
         IAsyncDisposable evidenceStore) : IPhotoSiftWorkflow, IAsyncDisposable
     {
+        private OwnedPhotoSiftWorkflow(IPhotoSiftWorkflow workflow, IAsyncDisposable action,
+            IAsyncDisposable review, IAsyncDisposable evidenceStore)
+            : this(workflow, null, action, review, evidenceStore)
+        {
+        }
+
         private readonly object lifetime = new();
         private Task? disposalTask;
 
@@ -83,6 +93,8 @@ public static class CompositionRoot
             ApproveSelectionCommand command,
             CancellationToken cancellationToken) =>
             workflow.ApproveReviewAsync(command, cancellationToken);
+        public Task RevalidateUnknownAsync(Guid requestId, CancellationToken cancellationToken) =>
+            workflow.RevalidateUnknownAsync(requestId, cancellationToken);
         public Task NavigateAsync(WorkflowPhase phase) => workflow.NavigateAsync(phase);
 
         public ValueTask DisposeAsync()
@@ -94,6 +106,14 @@ public static class CompositionRoot
         private async Task DisposeCoreAsync()
         {
             List<Exception>? failures = null;
+            try
+            {
+                if (recovery is not null) await recovery.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
             try
             {
                 // Action disposal includes admitted acknowledgments, Windows STA
@@ -129,4 +149,3 @@ public static class CompositionRoot
         }
     }
 }
-

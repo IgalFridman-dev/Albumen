@@ -16,6 +16,7 @@ public sealed record PhotoSiftSnapshot(
 {
     public ReviewSnapshot Review { get; init; } = ReviewSnapshot.Closed;
     public ActionSnapshot Action { get; init; } = ActionSnapshot.Idle;
+    public ActionRecoverySnapshot ActionRecovery { get; init; } = ActionRecoverySnapshot.NotLoaded;
     // Historical disclosure for Action.RequestId. Never used as live Review
     // authority, Selection input, a claim or an approval command source.
     public ReviewSnapshot ActionReview { get; init; } = ReviewSnapshot.Closed;

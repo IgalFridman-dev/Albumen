@@ -957,6 +957,50 @@ public sealed class PhotoSiftWorkflowTests
         Assert.False(ShellPhasePolicy.CanStart(scope with { ScopeState = ScopeSessionState.Checking }, new(4, 1)));
     }
 
+    [Fact]
+    public void ConstructionStartsHistoricalRecordLoadWithoutUsingLiveActionAuthority()
+    {
+        var recovery = new RecoveryOwner();
+        _ = new PhotoSiftWorkflow(new ScopeOwner(Ready(1)), new ScanOwner(), new ManualScheduler(),
+            null, null, recovery);
+
+        Assert.Equal(1, recovery.Loads);
+        Assert.Empty(recovery.Revalidations);
+    }
+
+    [Fact]
+    public void HistoricalRecoveryPublicationIsProjectedIndependently()
+    {
+        var scheduler = new ManualScheduler();
+        var recovery = new RecoveryOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(Ready(1)), new ScanOwner(), scheduler,
+            null, null, recovery);
+        var snapshot = new ActionRecoverySnapshot(ActionRecoveryStatus.Ready, [], null, false);
+
+        recovery.Publish(snapshot);
+        scheduler.Drain();
+
+        Assert.Same(snapshot, workflow.Current.ActionRecovery);
+        Assert.Equal(ActionStatus.Idle, workflow.Current.Action.Status);
+        Assert.Equal(ReviewSnapshot.Closed, workflow.Current.Review);
+    }
+
+    [Fact]
+    public async Task ExplicitHistoricalRevalidationForwardsExactRequestAndCancellation()
+    {
+        var recovery = new RecoveryOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(Ready(1)), new ScanOwner(), new ManualScheduler(),
+            null, null, recovery);
+        var requestId = Guid.NewGuid();
+        using var cancellation = new CancellationTokenSource();
+
+        await workflow.RevalidateUnknownAsync(requestId, cancellation.Token);
+
+        var command = Assert.Single(recovery.Revalidations);
+        Assert.Equal(requestId, command.RequestId);
+        Assert.Equal(cancellation.Token, command.Token);
+    }
+
     private static ShellSnapshot Ready(long revision) => new(InitialWorkflow.Create(), "Ready", ScopeSessionState.Ready, Revision: revision);
     private static ScanSnapshot RebuildScan(ScanSnapshot original) => original with
     {
@@ -1158,6 +1202,30 @@ public sealed class PhotoSiftWorkflowTests
         public Task CancelAsync() { Cancellations++; CancellationEntered.TrySetResult(true); return Cancellation?.Task ?? Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
+
+    private sealed class RecoveryOwner : IActionRecoveryCoordinator
+    {
+        public ActionRecoverySnapshot Current { get; private set; } = ActionRecoverySnapshot.NotLoaded;
+        public event EventHandler<ActionRecoverySnapshot>? SnapshotChanged;
+        internal int Loads { get; private set; }
+        internal List<(Guid RequestId, CancellationToken Token)> Revalidations { get; } = [];
+        internal void Publish(ActionRecoverySnapshot snapshot)
+        {
+            Current = snapshot;
+            SnapshotChanged?.Invoke(this, snapshot);
+        }
+        public Task LoadAsync(CancellationToken cancellationToken)
+        {
+            Loads++;
+            return Task.CompletedTask;
+        }
+        public Task RevalidateUnknownAsync(Guid requestId, CancellationToken cancellationToken)
+        {
+            Revalidations.Add((requestId, cancellationToken));
+            return Task.CompletedTask;
+        }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
 }
 
 public enum WorkflowNonApprovalEvent
@@ -1169,8 +1237,6 @@ public enum WorkflowNonApprovalEvent
     Navigate,
     OpenReview,
 }
-
-
 
 
 
