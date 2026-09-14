@@ -161,12 +161,15 @@ public sealed class ActionRecoveryCoordinator : IActionRecoveryCoordinator
             {
                 result = Unknown(ActionRevalidationReason.Failed);
             }
-            if (caller.IsCancellationRequested)
-                result = Unknown(ActionRevalidationReason.Failed);
-            if (!await inbox.CommandAsync(() => !disposed && ReferenceEquals(outstanding, attempt)
-                    && !attempt.Expired && attempt.Generation == generation).ConfigureAwait(false))
+            var accepted = await inbox.CommandAsync<ActionRevalidationProbeResult?>(() =>
+            {
+                if (disposed || !ReferenceEquals(outstanding, attempt)
+                    || attempt.Expired || attempt.Generation != generation) return null;
+                return caller.IsCancellationRequested ? Unknown(ActionRevalidationReason.Failed) : result;
+            }).ConfigureAwait(false);
+            if (accepted is null)
                 return false;
-            return await CompleteAsync(attempt, result, probeSettled: true).ConfigureAwait(false);
+            return await CompleteAsync(attempt, accepted, probeSettled: true).ConfigureAwait(false);
         }
 
         var reason = winner == deadlineTask ? ActionRevalidationReason.TimedOut : ActionRevalidationReason.Failed;

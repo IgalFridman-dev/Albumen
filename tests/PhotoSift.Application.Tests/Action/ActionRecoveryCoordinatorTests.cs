@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using PhotoSift.Application.Action;
+using PhotoSift.Application.Shell;
 using PhotoSift.Application.Tests.Scan;
 using PhotoSift.Domain.Action;
 using Xunit;
@@ -136,6 +137,29 @@ public sealed class ActionRecoveryCoordinatorTests
     }
 
     [Fact]
+    public async Task CancellationQueuedBeforeProbeSettlementAcceptanceCannotPersistSuccess()
+    {
+        var item = await ItemAsync(RecycleBinOutcomeKind.UnknownPendingRevalidation);
+        var fixture = new RecoveryFixture([item]);
+        await fixture.PumpAsync(fixture.Owner.LoadAsync(TestContext.Current.CancellationToken));
+        using var caller = new CancellationTokenSource();
+        var pending = fixture.Owner.RevalidateUnknownAsync(item.RequestId, caller.Token);
+        await fixture.PumpUntilAsync(fixture.Probe.Entered.Task);
+        var acceptancePost = fixture.Scheduler.PostCount + 1;
+
+        fixture.Probe.Result.TrySetResult(Confirmed(item));
+        await ScanTestData.Bound(fixture.Scheduler.WaitForPostAsync(acceptancePost));
+        caller.Cancel();
+        await fixture.PumpAsync(pending);
+
+        var fact = Assert.Single(fixture.Store.Facts);
+        Assert.Equal(ActionRevalidationKind.StillUnknown, fact.Kind);
+        Assert.Equal(ActionRecordEvidenceState.Unknown,
+            Assert.Single(Assert.Single(fixture.Owner.Current.Records).Items).State);
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
     public async Task ResolvedStateIsPublishedOnlyAfterAppendSucceeds()
     {
         var item = await ItemAsync(RecycleBinOutcomeKind.UnknownPendingRevalidation);
@@ -224,7 +248,7 @@ public sealed class ActionRecoveryCoordinatorTests
 
     private sealed class RecoveryFixture
     {
-        internal ManualScanScheduler Scheduler { get; } = new();
+        internal TrackingScheduler Scheduler { get; } = new();
         internal RecordStore Store { get; }
         internal Probe Probe { get; } = new();
         internal TaskCompletionSource<bool> Deadline { get; } = ScanTestData.Signal<bool>();
@@ -253,6 +277,24 @@ public sealed class ActionRecoveryCoordinatorTests
         {
             while (!predicate())
                 if (!Scheduler.TryRunOne()) await Task.Yield();
+        }
+    }
+
+    private sealed class TrackingScheduler : IWorkflowScheduler
+    {
+        private readonly ManualScanScheduler inner = new();
+        private int postCount;
+        internal int PostCount => Volatile.Read(ref postCount);
+        public void Post(System.Action action)
+        {
+            Interlocked.Increment(ref postCount);
+            inner.Post(action);
+        }
+        internal bool TryRunOne() => inner.TryRunOne();
+        internal Task PumpUntilAsync(Task completion) => inner.PumpUntilAsync(completion);
+        internal async Task WaitForPostAsync(int expected)
+        {
+            while (PostCount < expected) await Task.Yield();
         }
     }
 
