@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private bool isClosed;
     private int selectionSummaryAnnouncementGeneration;
     private int actionAnnouncementGeneration;
+    private int actionRecoveryAnnouncementGeneration;
     private long reviewFailureAnnouncementSequence;
     private ReviewFocusIdentity? reviewFocusIdentity;
     private long reviewFocusGeneration;
@@ -104,6 +105,10 @@ public partial class MainWindow : Window
         if (eventArgs.PropertyName == nameof(ShellViewModel.ActionAnnouncement))
         {
             QueueActionAnnouncement();
+        }
+        if (eventArgs.PropertyName == nameof(ShellViewModel.ActionRecoveryAnnouncement))
+        {
+            QueueActionRecoveryAnnouncement();
         }
         if (eventArgs.PropertyName == nameof(ShellViewModel.ReviewAnnouncement))
         {
@@ -298,6 +303,20 @@ public partial class MainWindow : Window
                 || !ActionAnnouncementText.IsVisible) return;
             // Coalesce transient progress; all item reasons remain inspectable.
             ActionAnnouncementText.Announce(sequence, expected.ActionAnnouncement);
+        }, DispatcherPriority.Background);
+    }
+
+    private void QueueActionRecoveryAnnouncement()
+    {
+        var generation = dataContextGeneration;
+        var expected = shellViewModel;
+        var sequence = ++actionRecoveryAnnouncementGeneration;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || generation != dataContextGeneration || sequence != actionRecoveryAnnouncementGeneration
+                || !ReferenceEquals(expected, shellViewModel) || expected?.IsActionPhase is not true
+                || !ActionRecoveryAnnouncementText.IsVisible) return;
+            ActionRecoveryAnnouncementText.Announce(sequence, expected.ActionRecoveryAnnouncement);
         }, DispatcherPriority.Background);
     }
 
@@ -737,6 +756,5 @@ internal sealed class ReviewSelectionCheckBoxAutomationPeer(ReviewSelectionCheck
         null => ToggleState.Indeterminate,
     };
 }
-
 
 

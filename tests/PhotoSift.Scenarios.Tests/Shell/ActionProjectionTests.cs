@@ -130,6 +130,7 @@ internal sealed class ActionShellFixture : IPhotoSiftWorkflow
     public PhotoSiftSnapshot Current { get; private set; }
     public event EventHandler<PhotoSiftSnapshot>? SnapshotChanged;
     internal List<ApproveSelectionCommand> Approvals { get; } = [];
+    internal List<Guid> Revalidations { get; } = [];
     internal static Guid RequestId { get; } = Guid.Parse("95000000-0000-0000-0000-000000000005");
     internal void Publish(ActionSnapshot action, WorkflowPhase phase = WorkflowPhase.ApproveCleanup, bool freshScope = false)
     {
@@ -138,6 +139,11 @@ internal sealed class ActionShellFixture : IPhotoSiftWorkflow
         Current = Current with { CurrentPhase = phase, Review = Current.Review with { Sealed = true },
             Scope = freshScope ? Current.Scope with { Revision = 8 } : Current.Scope };
         property.SetValue(Current, action);
+        SnapshotChanged?.Invoke(this, Current);
+    }
+    internal void PublishRecovery(ActionRecoverySnapshot recovery)
+    {
+        Current = Current with { CurrentPhase = WorkflowPhase.ApproveCleanup, ActionRecovery = recovery };
         SnapshotChanged?.Invoke(this, Current);
     }
     internal static T Read<T>(object instance, string name)
@@ -161,7 +167,8 @@ internal sealed class ActionShellFixture : IPhotoSiftWorkflow
     public Task StartScanAsync() => Task.CompletedTask;
     public Task CancelScanAsync() => Task.CompletedTask;
     public Task OpenReviewAsync() => Task.CompletedTask;
-    public Task RevalidateUnknownAsync(Guid requestId, CancellationToken token) => Task.CompletedTask;
+    public Task RevalidateUnknownAsync(Guid requestId, CancellationToken token)
+    { Revalidations.Add(requestId); return Task.CompletedTask; }
     public Task NavigateAsync(WorkflowPhase phase) => Task.CompletedTask;
     public Task<ReviewCommandResult> ChangeReviewSelectionAsync(SelectionCommand command, CancellationToken token) => throw new NotSupportedException();
     public Task<ReviewCommandResult> AffirmReviewOverrideAsync(OverrideAffirmationCommand command, CancellationToken token) => throw new NotSupportedException();

@@ -49,6 +49,29 @@
                 </StackPanel>
             </app:ReviewAutomationBorder>
         </DataTemplate>
+        <DataTemplate x:Key="ActionRecordItemTemplate">
+            <app:ReviewAutomationBorder Margin="4,6" Padding="8" BorderThickness="1"
+                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    AutomationProperties.AutomationId="action-record-item"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.ItemStatus="{Binding StatusText}">
+                <StackPanel>
+                    <TextBox Text="{Binding OriginalPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                             AutomationProperties.Name="Action record original path"
+                             AutomationProperties.ItemStatus="{Binding StatusText}" />
+                    <TextBlock Text="{Binding ResultText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ReasonText}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap"
+                               Visibility="{Binding IsVerifying, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <ProgressBar Height="8" Margin="0,5,0,0" IsIndeterminate="{Binding IsVerifying}"
+                                 Visibility="{Binding IsVerifying, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                 AutomationProperties.Name="Current file state verification progress"
+                                 AutomationProperties.ItemStatus="{Binding StatusText}" />
+                </StackPanel>
+            </app:ReviewAutomationBorder>
+        </DataTemplate>
         <Style x:Key="ReviewListStyle" TargetType="ListBox">
             <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
@@ -529,10 +552,45 @@
                              AutomationProperties.Name="Approved original paths and Recycle Bin results"
                              Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                              Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                    <StackPanel Grid.Row="3" Margin="0,8,0,0">
+                    <ScrollViewer Grid.Row="3" MaxHeight="300" Margin="0,8,0,0"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                      <StackPanel>
                         <TextBlock Text="{Binding ActionReplayNotice}" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding ActionRecoveryNotice}" TextWrapping="Wrap" />
-                    </StackPanel>
+                        <Separator Margin="0,10,0,8" Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <TextBlock Text="Action Records" FontSize="18" FontWeight="SemiBold"
+                                   Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <TextBlock Text="{Binding ActionRecoveryStatusText}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ActionRecoveryDisclosure}" TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="action-recovery-disclosure"
+                                   Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <Button x:Name="RevalidateUnknownItemsButton" Content="Revalidate unknown items"
+                                MinHeight="38" Margin="0,8,0,0" Padding="14,7" HorizontalAlignment="Left"
+                                AutomationProperties.Name="Revalidate unknown items"
+                                Command="{Binding RevalidateUnknownCommand}"
+                                IsEnabled="{Binding CanRevalidateUnknownItems}"
+                                Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <app:ReviewAnnouncementTextBlock x:Name="ActionRecoveryAnnouncementText"
+                                Text="{Binding ActionRecoveryAnnouncement}" TextWrapping="Wrap"
+                                AutomationProperties.AutomationId="action-recovery-announcement"
+                                AutomationProperties.Name="Action record status announcement"
+                                AutomationProperties.LiveSetting="Polite" />
+                        <ItemsControl ItemsSource="{Binding ActionRecoveryRecords}"
+                                      Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,8,0,4">
+                                        <TextBlock Text="{Binding RequestedUtc, StringFormat='Requested: {0:u}'}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding CertaintyText}" />
+                                        <TextBlock Text="{Binding OutcomeMixText}" />
+                                        <TextBlock Text="{Binding RecoveredBytesText}" />
+                                        <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource ActionRecordItemTemplate}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </ScrollViewer>
                 </Grid>
             </app:ReviewAutomationBorder>
         </Grid>

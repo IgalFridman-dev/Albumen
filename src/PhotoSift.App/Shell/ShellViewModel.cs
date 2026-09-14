@@ -55,13 +55,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private Guid approvalIdentityKey;
     private string approvalAutomationStatus = string.Empty;
     private string actionAnnouncement = string.Empty;
+    private string actionRecoveryAnnouncement = string.Empty;
     private readonly ObservableCollection<ActionItemViewModel> actionRows = [];
+    private readonly ObservableCollection<ActionRecordViewModel> actionRecoveryRecords = [];
     private readonly object lifetime = new();
     private Task? disposalTask;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
         ActionRows = new(actionRows);
+        ActionRecoveryRecords = new(actionRecoveryRecords);
         this.chooseScopeWorkflow = chooseScopeWorkflow
             ?? throw new ArgumentNullException(nameof(chooseScopeWorkflow));
         ChooseScopeCommand = new AsyncCommand(
@@ -82,6 +85,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         CancelScanCommand = new AsyncCommand(() => photoWorkflow?.CancelScanAsync() ?? Task.CompletedTask);
         OpenReviewCommand = new AsyncCommand(() => photoWorkflow?.OpenReviewAsync() ?? Task.CompletedTask);
         ApproveReviewCommand = new AsyncCommand(ApproveReviewAsync);
+        RevalidateUnknownCommand = new AsyncCommand(RevalidateUnknownAsync,
+            canExecute: () => CanRevalidateUnknownItems);
         NavigateCommand = new AsyncCommand(parameter => photoWorkflow is not null && parameter is WorkflowPhase phase
             ? photoWorkflow.NavigateAsync(phase) : parameter is WorkflowPhase.ChooseScope
                 ? this.chooseScopeWorkflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None) : Task.CompletedTask);
@@ -104,6 +109,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand CancelScanCommand { get; }
     public AsyncCommand OpenReviewCommand { get; }
     public AsyncCommand ApproveReviewCommand { get; }
+    public AsyncCommand RevalidateUnknownCommand { get; }
     public AsyncCommand NavigateCommand { get; }
     public WorkflowPhase CurrentPhase => photoSnapshot?.CurrentPhase ?? WorkflowPhase.ChooseScope;
     internal ReviewSessionPin? ReviewSession => photoSnapshot?.Review.Pin;
@@ -134,6 +140,21 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             $"Selection is sealed: {approved.Disclosure.SelectedOccurrenceCount} selected occurrences; {approved.Disclosure.SelectedOccurrenceCount} selected paths; {approved.Disclosure.DistinctPhysicalKeyCount} distinct physical files. {approved.Disclosure.Coverage} Scan coverage at approval.")
         : string.Create(CultureInfo.InvariantCulture, $"Selection is sealed for this Action: {CurrentAction.Items.Length} explicitly approved occurrences.");
     public string ActionAnnouncement => actionAnnouncement;
+    public ReadOnlyObservableCollection<ActionRecordViewModel> ActionRecoveryRecords { get; }
+    public bool HasActionRecoveryRecords => ActionRecoveryRecords.Count != 0;
+    public bool HasActionRecoveryDisclosure => photoSnapshot?.ActionRecovery.Records.Any(record =>
+        record.Summary.Certainty == ActionRecordCertainty.HasUnknown) is true;
+    public string ActionRecoveryDisclosure { get; } = "PhotoSift found an unfinished cleanup from a previous session. The outcome of one or more items is unknown. Revalidate their current file state. Revalidation will not remove files.";
+    public string ActionRecoveryAnnouncement => actionRecoveryAnnouncement;
+    public string ActionRecoveryStatusText => photoSnapshot?.ActionRecovery.Status switch
+    {
+        ActionRecoveryStatus.Loading => "Loading Action records…",
+        ActionRecoveryStatus.Faulted => "Action records could not be safely loaded. Revalidation is unavailable.",
+        _ => string.Empty,
+    };
+    public bool CanRevalidateUnknownItems => photoSnapshot?.ActionRecovery is
+        { Status: ActionRecoveryStatus.Ready, ProbeOutstanding: false }
+        && HasActionRecoveryDisclosure;
     public bool CanContinue => photoSnapshot?.Scope.ScopeState == ScopeSessionState.Ready;
     public bool CanConfirmExactRules => CanContinue && IsConfirmRulesPhase && photoSnapshot?.Rules is null;
     public bool CanStartScan => photoSnapshot is { } snapshot && ShellPhasePolicy.CanStart(snapshot.Scope, snapshot.Rules) && !IsScanBusy;
@@ -355,6 +376,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private void ApplyCombined(PhotoSiftSnapshot snapshot)
     {
         var previousAction = photoSnapshot?.Action;
+        var previousRecovery = photoSnapshot?.ActionRecovery;
         var previousActionReview = photoSnapshot?.ActionReview;
         var previousReview = photoSnapshot?.Review;
         var previousReviewStatusText = ReviewStatusText;
@@ -367,6 +389,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         Apply(snapshot.Scope);
         photoSnapshot = snapshot;
         ProjectAction(previousAction, previousActionReview, snapshot);
+        ProjectActionRecovery(previousRecovery, snapshot.ActionRecovery);
         Phases = Project(snapshot.Phases);
         RuleSetStatus = snapshot.Rules is null ? "Not configured" : "Exact duplicates only — confirmed";
         if (!preserveReviewProjection)
@@ -442,6 +465,51 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         actionAnnouncement = $"{ActionStatusText}. {ActionCountsText}"
             + (changedIndex < 0 ? string.Empty : $" Item {changedIndex + 1}: {ActionItems[changedIndex].ItemStatus}");
         OnPropertyChanged(nameof(ActionAnnouncement));
+    }
+
+    private void ProjectActionRecovery(ActionRecoverySnapshot? previous, ActionRecoverySnapshot recovery)
+    {
+        if (ReferenceEquals(previous, recovery) || previous == recovery) return;
+        var projected = recovery.Records.Select(record =>
+        {
+            var oldRecord = actionRecoveryRecords.FirstOrDefault(candidate => candidate.RequestId == record.RequestId);
+            if (oldRecord is null) return new ActionRecordViewModel(record,
+                recovery.ProbeOutstanding ? recovery.ActiveActionItemId : null);
+            oldRecord.Update(record, recovery.ProbeOutstanding ? recovery.ActiveActionItemId : null);
+            return oldRecord;
+        }).ToImmutableArray();
+        if (projected.Length == actionRecoveryRecords.Count)
+        {
+            for (var index = 0; index < projected.Length; index++)
+                if (!ReferenceEquals(actionRecoveryRecords[index], projected[index]))
+                    actionRecoveryRecords[index] = projected[index];
+        }
+        else
+        {
+            actionRecoveryRecords.Clear();
+            foreach (var record in projected) actionRecoveryRecords.Add(record);
+        }
+        foreach (var property in new[] { nameof(ActionRecoveryRecords), nameof(HasActionRecoveryRecords),
+            nameof(HasActionRecoveryDisclosure), nameof(ActionRecoveryStatusText), nameof(CanRevalidateUnknownItems) })
+            OnPropertyChanged(property);
+        var active = ActionRecoveryRecords.SelectMany(record => record.Items).FirstOrDefault(item => item.IsVerifying);
+        actionRecoveryAnnouncement = active is not null
+            ? $"{active.OriginalPath}. {active.StatusText}"
+            : HasActionRecoveryDisclosure
+                ? "Action record updated. One or more outcomes remain unknown pending revalidation."
+                : HasActionRecoveryRecords ? "Action record updated." : string.Empty;
+        OnPropertyChanged(nameof(ActionRecoveryAnnouncement));
+    }
+
+    private Task RevalidateUnknownAsync(object? parameter)
+    {
+        if (photoWorkflow is null || !CanRevalidateUnknownItems) return Task.CompletedTask;
+        var requestId = parameter is Guid requested && requested != Guid.Empty
+            ? requested
+            : ActionRecoveryRecords.FirstOrDefault(record => record.HasUnknown)?.RequestId;
+        return requestId is { } value
+            ? photoWorkflow.RevalidateUnknownAsync(value, CancellationToken.None)
+            : Task.CompletedTask;
     }
 
     private async Task ChangeReviewSelectionAsync(
