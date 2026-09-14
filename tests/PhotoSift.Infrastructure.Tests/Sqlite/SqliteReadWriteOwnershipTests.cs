@@ -2,12 +2,47 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using PhotoSift.Infrastructure.Sqlite;
+using PhotoSift.Infrastructure.Sqlite.Review;
 using Xunit;
 
 namespace PhotoSift.Infrastructure.Tests.Sqlite;
 
 public sealed class SqliteReadWriteOwnershipTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SynchronousAdmissionObserverFailureSkipsWriteAndBalancesDisposal(bool databaseObserver)
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        var expected = new InvalidOperationException("injected admission observer failure");
+        Action<bool> fail = _ => throw expected;
+        var ownerObserver = databaseObserver ? new SqliteDatabaseObserver(LaneWaitStarted: fail) : null;
+        var overrideObserver = databaseObserver ? null
+            : new SqliteOverrideEvidenceStoreObserver(fail, _ => ValueTask.CompletedTask);
+        var owner = new SqliteDatabaseOwner(fixture.DatabasePath, ownerObserver);
+        var callbackEntries = 0;
+
+        var actual = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            owner.RunWriteAsync(SqliteWriteDurability.Normal, async (connection, token) =>
+            {
+                Interlocked.Increment(ref callbackEntries);
+                await using var transaction = connection.BeginTransaction(deferred: false);
+                await SqliteDatabaseOwner.ExecuteAsync(connection,
+                    "CREATE TABLE observer_probe(value INTEGER NOT NULL);", token, transaction);
+                await transaction.CommitAsync(token);
+                return 0;
+            }, TestContext.Current.CancellationToken, overrideObserver));
+
+        Assert.Same(expected, actual);
+        await owner.DisposeAsync().AsTask().WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, callbackEntries);
+        await using var verify = await fixture.OpenRawAsync();
+        Assert.Equal(0, Convert.ToInt64(await SqliteDatabaseOwner.ScalarAsync(verify,
+            "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='observer_probe';",
+            TestContext.Current.CancellationToken), CultureInfo.InvariantCulture));
+    }
+
     [Fact]
     public async Task ThreeAdmittedWritesEnterInExactFifoOrderWhileFirstIsBlocked()
     {

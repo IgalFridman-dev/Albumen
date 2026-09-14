@@ -88,9 +88,18 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
                 throw new ObjectDisposedException(nameof(SqliteDatabaseOwner));
             }
         }
-        observer?.LaneWaitStarted?.Invoke(laneWasFree);
-        overrideObserver?.LaneWaitStarted(laneWasFree);
-        return command.Completion;
+        try
+        {
+            observer?.LaneWaitStarted?.Invoke(laneWasFree);
+            overrideObserver?.LaneWaitStarted(laneWasFree);
+            command.AcceptAdmission();
+            return command.Completion;
+        }
+        catch (Exception exception)
+        {
+            command.RejectAdmission(exception);
+            throw;
+        }
     }
 
     private void EnsurePumpStarted() => pump ??= Task.Run(PumpAsync);
@@ -305,13 +314,23 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
     {
         private readonly TaskCompletionSource<T> completion =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> admission =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         internal Task<T> Completion => completion.Task;
+        internal void AcceptAdmission() => admission.TrySetResult(true);
+        internal void RejectAdmission(Exception exception)
+        {
+            completion.TrySetException(exception);
+            _ = completion.Task.Exception;
+            admission.TrySetResult(false);
+        }
 
         public async ValueTask ExecuteAsync(SqliteConnection connection)
         {
             try
             {
+                if (!await admission.Task.ConfigureAwait(false)) return;
                 token.ThrowIfCancellationRequested();
                 if (owner.observer?.LaneEntered is { } entered)
                     await entered(token).ConfigureAwait(false);
