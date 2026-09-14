@@ -442,6 +442,10 @@
                     <TextBlock x:Name="ReviewStatusText" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
                                AutomationProperties.Name="Review status" AutomationProperties.ItemStatus="{Binding ReviewStatusText}"
                                AutomationProperties.LiveSetting="Polite" />
+                    <TextBlock x:Name="LocalDataStatusText" Text="{Binding ActionRecoveryStatusText}" TextWrapping="Wrap"
+                               AutomationProperties.Name="Local data status"
+                               AutomationProperties.ItemStatus="{Binding ActionRecoveryStatusText}"
+                               AutomationProperties.LiveSetting="Polite" />
                     <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" Margin="0,8" />
                     <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
                     <TextBlock x:Name="SelectionSummaryText" Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,8,0,0"

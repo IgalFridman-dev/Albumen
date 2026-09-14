@@ -149,7 +149,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public string ActionRecoveryStatusText => photoSnapshot?.ActionRecovery.Status switch
     {
         ActionRecoveryStatus.Loading => "Loading Action records…",
-        ActionRecoveryStatus.Faulted => "Action records could not be safely loaded. Revalidation is unavailable.",
+        ActionRecoveryStatus.Faulted =>
+            "Local data could not be safely loaded. PhotoSift will not modify files until the database is available.",
         _ => string.Empty,
     };
     public bool CanRevalidateUnknownItems => photoSnapshot?.ActionRecovery is
@@ -609,6 +610,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         CanApproveReview = review.Status == ReviewStatus.Ready
             && review.Coverage is ScanSessionStatus.Complete or ScanSessionStatus.Incomplete
             && selectedCount > 0 && !review.Sealed
+            && photoSnapshot?.ActionRecovery.Status != ActionRecoveryStatus.Faulted
             && selectedMembers.All(member => member.Eligibility == ReviewEligibilityState.Eligible);
     }
 
