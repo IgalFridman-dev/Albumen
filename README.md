@@ -4,12 +4,12 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Development status: **7 of 26 stories complete; 19 remain. Epic 1 is complete and Epic 2 is in progress.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); E1-S6 and E2-S1 are currently stacked local branches awaiting later integration decisions. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
+Development status: **6 of 26 stories complete; 20 remain. Epic 1 is complete and E2-S1 is in progress.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); E1-S6 and E2-S1 are currently stacked local branches awaiting later integration decisions. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
 
 Planning is complete and validated. E1-S1 through E1-S6 are done. E1-S6 adds restart-only Action Records, explicit read-only revalidation, accessible progress, and conservative unknown outcomes. Its user-facing safety behavior passed explicit manual verification after the approved two-attempt VM/timing cap stopped the real COM callback crash harness. The deferred automated edge coverage is [PM-001](docs/backlog/post-mvp.md#pm-001--harden-e1-s6-real-process-crash-boundary-automation).
 
-- Latest completed story: **E2-S1 — Lean SQLite ownership and Scan identity foundation (done)**
-- Next eligible story: **E2-S2 — Persist staged Scan state and reconciled accounting**
+- Latest completed story: **E1-S6 — Reconcile interrupted Actions and retain truthful records (done)**
+- Current story: **E2-S1 — Lean SQLite ownership and Scan identity foundation (in progress; implementation evidence recorded, closure pending)**
 - Approved design: [`docs/superpowers/specs/2026-09-14-e2-s1-lean-sqlite-foundation-design.md`](docs/superpowers/specs/2026-09-14-e2-s1-lean-sqlite-foundation-design.md)
 - E2-S1 verification and closing observations: [`docs/evidence/e2-s1/verification.md`](docs/evidence/e2-s1/verification.md)
 - E1-S6 final evidence and manual acceptance: [`docs/evidence/e1-s6/verification.md`](docs/evidence/e1-s6/verification.md)
@@ -52,7 +52,7 @@ The project deliberately excludes cloud inference, accounts, telemetry, automati
 3. Run its required automated, integration, and platform evidence.
 4. Review the change before marking the story done.
 5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
-6. Follow `sprint-status.yaml`; E2-S2 is the next eligible story after the completed E2-S1 foundation.
+6. Follow `sprint-status.yaml`; E2-S1 remains the next eligible story until its whole-branch review and accepted closure are recorded.
 
 The repository contains the .NET 10/C# 14/WPF `win-x64` application with exact local Scope selection/preflight, Exact duplicate detection, survivor-safe Review Selection, durable override evidence, one-item Recycle Bin execution through the sole Action owner, completed E1-S6 restart reconciliation, and an exact version-4 SQLite/Scan identity foundation, plus five test projects and a NIC-free Golden Hyper-V VM verification gate. Review approval supplies an exact sealed request; fresh authority/survivor checks and durable Requested/Executing commits must still precede every shell call. Uncertain or interrupted work is never automatically replayed.
 

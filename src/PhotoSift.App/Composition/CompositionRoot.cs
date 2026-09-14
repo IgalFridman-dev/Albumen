@@ -19,6 +19,17 @@ public static class CompositionRoot
 {
     public static ShellViewModel CreateShellViewModel()
     {
+        var databasePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "PhotoSift", "photosift.db");
+        return CreateShellViewModel(databasePath, new WindowsRecycleBinExecutor());
+    }
+
+    internal static ShellViewModel CreateShellViewModel(
+        string databasePath, IRecycleBinExecutor recycleBinExecutor)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+        ArgumentNullException.ThrowIfNull(recycleBinExecutor);
         ILocalFolderPicker picker = new WpfLocalFolderPicker(
             () => System.Windows.Application.Current?.MainWindow);
         ILocalScopePreflight preflight = new WindowsLocalScopePreflight();
@@ -31,15 +42,12 @@ public static class CompositionRoot
         var analyzer = new StreamingExactContentAnalyzer();
         var executor = new BoundedScanExecutor(new WindowsScanEnumerator(), reader, analyzer);
         var scan = new ScanCoordinator(scheduler, preflight, executor);
-        var databasePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PhotoSift", "photosift.db");
         var stores = new SqlitePhotoSiftStores(databasePath);
         var review = new ReviewCoordinator(scheduler,
             new BoundedReviewRevalidator(reader, analyzer), stores.OverrideEvidence,
             actionSafety: new ProtectedActionSafetyValidator(reader, analyzer));
         var action = new ActionCoordinator(scheduler, review, stores.OverrideEvidence,
-            stores.ActionJournal, new WindowsRecycleBinExecutor());
+            stores.ActionJournal, recycleBinExecutor);
         var recovery = new ActionRecoveryCoordinator(scheduler, stores.ActionRecords,
             new WindowsActionRevalidationProbe());
         var photoWorkflow = new OwnedPhotoSiftWorkflow(

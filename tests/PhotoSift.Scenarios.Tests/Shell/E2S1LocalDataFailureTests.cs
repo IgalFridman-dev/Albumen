@@ -19,12 +19,12 @@ public sealed class E2S1LocalDataFailureTests
         "Local data could not be safely loaded. PhotoSift will not modify files until the database is available.";
 
     [Fact]
-    public void FaultedLocalDataBlocksApprovalWithoutHidingReviewEvidenceOrItsAccessibleReason()
+    public void FaultedLocalDataAtStartupIsVisibleAndAccessibleBeforeLeavingChooseScope()
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var scope = new ReviewStaticScope();
-            var workflow = new FaultedLocalDataWorkflow(scope.Current);
+            var workflow = new FaultedLocalDataWorkflow(scope.Current, WorkflowPhase.ChooseScope);
             var viewModel = new ShellViewModel(scope, workflow);
             var window = new MainWindow { DataContext = viewModel };
             try
@@ -33,9 +33,7 @@ public sealed class E2S1LocalDataFailureTests
                 WpfReviewSelectionTests.Drain();
 
                 Assert.Equal(BlockedMessage, viewModel.ActionRecoveryStatusText);
-                Assert.False(viewModel.CanApproveReview);
-                Assert.NotEmpty(viewModel.ExactGroups);
-                Assert.True(viewModel.IsReviewPhase);
+                Assert.True(viewModel.IsChooseScopePhase);
 
                 var status = Assert.IsType<TextBlock>(window.FindName("LocalDataStatusText"));
                 Assert.True(status.IsVisible);
@@ -54,14 +52,31 @@ public sealed class E2S1LocalDataFailureTests
         });
     }
 
+    [Fact]
+    public void FaultedLocalDataBlocksApprovalWithoutHidingReviewEvidence()
+    {
+        var scope = new ReviewStaticScope();
+        var workflow = new FaultedLocalDataWorkflow(scope.Current, WorkflowPhase.Review);
+        var viewModel = new ShellViewModel(scope, workflow);
+
+        Assert.Equal(BlockedMessage, viewModel.ActionRecoveryStatusText);
+        Assert.False(viewModel.CanApproveReview);
+        Assert.NotEmpty(viewModel.ExactGroups);
+        Assert.True(viewModel.IsReviewPhase);
+
+        viewModel.ApproveReviewCommand.Execute(null);
+        Assert.Equal(0, workflow.ApprovalCalls);
+    }
+
     private sealed class FaultedLocalDataWorkflow : IPhotoSiftWorkflow
     {
-        internal FaultedLocalDataWorkflow(ShellSnapshot scope)
+        internal FaultedLocalDataWorkflow(ShellSnapshot scope, WorkflowPhase phase)
         {
             var review = ReviewData.CreateSnapshot(selected: [1]);
             var baseline = new RecordingReviewWorkflow(scope, review).Current;
             Current = baseline with
             {
+                CurrentPhase = phase,
                 ActionRecovery = new(ActionRecoveryStatus.Faulted, [], null, false),
             };
         }

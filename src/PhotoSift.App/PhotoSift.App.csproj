@@ -12,4 +12,7 @@
     <ProjectReference Include="..\PhotoSift.Infrastructure.Sqlite\PhotoSift.Infrastructure.Sqlite.csproj" />
     <ProjectReference Include="..\PhotoSift.Infrastructure.Windows\PhotoSift.Infrastructure.Windows.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="PhotoSift.Infrastructure.Tests" />
+  </ItemGroup>
 </Project>

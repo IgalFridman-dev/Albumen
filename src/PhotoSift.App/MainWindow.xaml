@@ -138,6 +138,11 @@
                        FontSize="16"
                        TextWrapping="Wrap"
                        Text="Choose one local photo folder. PhotoSift checks it without changing or uploading your photos." />
+            <TextBlock x:Name="LocalDataStatusText" Margin="0,6,0,0"
+                       Text="{Binding ActionRecoveryStatusText}" TextWrapping="Wrap"
+                       AutomationProperties.Name="Local data status"
+                       AutomationProperties.ItemStatus="{Binding ActionRecoveryStatusText}"
+                       AutomationProperties.LiveSetting="Polite" />
         </StackPanel>
 
         <Grid Grid.Row="1">
@@ -442,10 +447,6 @@
                     <TextBlock x:Name="ReviewStatusText" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
                                AutomationProperties.Name="Review status" AutomationProperties.ItemStatus="{Binding ReviewStatusText}"
                                AutomationProperties.LiveSetting="Polite" />
-                    <TextBlock x:Name="LocalDataStatusText" Text="{Binding ActionRecoveryStatusText}" TextWrapping="Wrap"
-                               AutomationProperties.Name="Local data status"
-                               AutomationProperties.ItemStatus="{Binding ActionRecoveryStatusText}"
-                               AutomationProperties.LiveSetting="Polite" />
                     <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" Margin="0,8" />
                     <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
                     <TextBlock x:Name="SelectionSummaryText" Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,8,0,0"
@@ -564,7 +565,6 @@
                         <Separator Margin="0,10,0,8" Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <TextBlock Text="Action Records" FontSize="18" FontWeight="SemiBold"
                                    Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <TextBlock Text="{Binding ActionRecoveryStatusText}" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding ActionRecoveryDisclosure}" TextWrapping="Wrap"
                                    AutomationProperties.AutomationId="action-recovery-disclosure"
                                    Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />

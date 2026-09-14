@@ -1,7 +1,16 @@
 using System.Globalization;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Threading;
 using Microsoft.Data.Sqlite;
+using PhotoSift.App;
+using PhotoSift.App.Composition;
+using PhotoSift.App.Shell;
 using PhotoSift.Application.Action;
+using PhotoSift.Application.Review;
 using PhotoSift.Application.Scan;
+using PhotoSift.Domain.Action;
 using PhotoSift.Infrastructure.Sqlite;
 using Xunit;
 using static PhotoSift.Infrastructure.Tests.Sqlite.SqliteSchemaVersionTwoTests;
@@ -10,6 +19,8 @@ namespace PhotoSift.Infrastructure.Tests.Sqlite;
 
 public sealed class E2S1SqliteAcceptanceTests
 {
+    private const string BlockedMessage =
+        "Local data could not be safely loaded. PhotoSift will not modify files until the database is available.";
     private static readonly int[] ExpectedWriteOrder = [1, 2];
 
     [Fact]
@@ -88,6 +99,69 @@ public sealed class E2S1SqliteAcceptanceTests
     public async Task UnsafeStartupFixturesRemainUnavailableAndUnchanged(string kind)
     {
         await using var fixture = new SqliteOverrideFixture();
+        await PrepareUnsafeFixtureAsync(fixture, kind);
+        var before = await SnapshotFilesAsync(fixture.DatabasePath);
+        try
+        {
+            await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+            Assert.Equal(ActionRecordLoadOutcome.Unavailable,
+                (await stores.ActionRecords.LoadAsync(TestContext.Current.CancellationToken)).Outcome);
+        }
+        finally
+        {
+            if (kind == "read-only") File.SetAttributes(fixture.DatabasePath, FileAttributes.Normal);
+        }
+        Assert.Equal(before, await SnapshotFilesAsync(fixture.DatabasePath));
+    }
+
+    [Theory]
+    [InlineData("corrupt")]
+    [InlineData("foreign")]
+    [InlineData("read-only")]
+    [InlineData("retained-sidecar")]
+    public async Task ProductionStartupProjectsEveryUnsafeDatabaseBeforeLeavingChooseScopeAndNeverInvokesRecycleBin(
+        string kind)
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        await PrepareUnsafeFixtureAsync(fixture, kind);
+        var executor = new CountingRecycleBinExecutor();
+        try
+        {
+            RunOnSta(() =>
+            {
+                var viewModel = CompositionRoot.CreateShellViewModel(fixture.DatabasePath, executor);
+                var window = new MainWindow { DataContext = viewModel };
+                try
+                {
+                    window.Show();
+                    WaitFor(() => viewModel.ActionRecoveryStatusText == BlockedMessage);
+
+                    Assert.True(viewModel.IsChooseScopePhase);
+                    Assert.Equal(BlockedMessage, viewModel.ActionRecoveryStatusText);
+                    var status = Assert.IsType<TextBlock>(window.FindName("LocalDataStatusText"));
+                    Assert.True(status.IsVisible);
+                    Assert.Equal(BlockedMessage, status.Text);
+                    Assert.Equal(BlockedMessage, AutomationProperties.GetItemStatus(status));
+                    Assert.Equal(0, executor.Executions);
+                }
+                finally
+                {
+                    window.Close();
+                    var disposal = viewModel.DisposeAsync().AsTask();
+                    WaitFor(() => disposal.IsCompleted);
+                    disposal.GetAwaiter().GetResult();
+                }
+            });
+        }
+        finally
+        {
+            if (kind == "read-only") File.SetAttributes(fixture.DatabasePath, FileAttributes.Normal);
+        }
+        Assert.Equal(0, executor.Executions);
+    }
+
+    private static async Task PrepareUnsafeFixtureAsync(SqliteOverrideFixture fixture, string kind)
+    {
         if (kind is "read-only" or "retained-sidecar")
             await SeedPopulatedVersionThreeAsync(fixture);
         else if (kind == "corrupt")
@@ -102,18 +176,6 @@ public sealed class E2S1SqliteAcceptanceTests
             await File.WriteAllBytesAsync(fixture.DatabasePath + "-wal", [], TestContext.Current.CancellationToken);
         if (kind == "read-only")
             File.SetAttributes(fixture.DatabasePath, File.GetAttributes(fixture.DatabasePath) | FileAttributes.ReadOnly);
-        var before = await SnapshotFilesAsync(fixture.DatabasePath);
-        try
-        {
-            await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
-            Assert.Equal(ActionRecordLoadOutcome.Unavailable,
-                (await stores.ActionRecords.LoadAsync(TestContext.Current.CancellationToken)).Outcome);
-        }
-        finally
-        {
-            if (kind == "read-only") File.SetAttributes(fixture.DatabasePath, FileAttributes.Normal);
-        }
-        Assert.Equal(before, await SnapshotFilesAsync(fixture.DatabasePath));
     }
 
     private static async Task SeedPopulatedVersionThreeAsync(SqliteOverrideFixture fixture)
@@ -165,4 +227,44 @@ public sealed class E2S1SqliteAcceptanceTests
 
     private static TaskCompletionSource Signal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private static void WaitFor(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            var frame = new DispatcherFrame();
+            Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,
+                () => frame.Continue = false);
+            Dispatcher.PushFrame(frame);
+        }
+        Assert.True(condition());
+    }
+
+    private static void RunOnSta(Action action)
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try { action(); }
+            catch (Exception exception) { failure = exception; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null) throw failure;
+    }
+
+    private sealed class CountingRecycleBinExecutor : IRecycleBinExecutor
+    {
+        internal int Executions { get; private set; }
+        public ValueTask<RecycleBinResult> ExecuteAsync(
+            RecycleBinRequest request, CancellationToken cancellationToken)
+        {
+            Executions++;
+            return ValueTask.FromResult(new RecycleBinResult(
+                RecycleBinOutcomeKind.NotRemoved, ActionSafetyReason.CannotRecycle,
+                new(0, 0, false, null, null, 0, 0, null, false, false, true)));
+        }
+    }
 }
