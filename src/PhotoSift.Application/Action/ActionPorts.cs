@@ -1,4 +1,5 @@
 using PhotoSift.Application.Review;
+using PhotoSift.Domain.Scan;
 
 namespace PhotoSift.Application.Action;
 
@@ -19,6 +20,15 @@ public interface IActionRecordStore
 {
     ValueTask<ActionRecordLoadResult> LoadAsync(CancellationToken cancellationToken);
     ValueTask<ActionRevalidationWriteResult> AppendRevalidationAsync(ActionRevalidationFact fact, CancellationToken cancellationToken);
+}
+public sealed record ActionRevalidationRequest(Guid ActionItemId, string ResolvedPath,
+    PhysicalFileKey ReviewedKey, long ReviewedLength, string ReviewedSha256);
+public sealed record ActionRevalidationProbeResult(ActionRevalidationKind Kind,
+    ActionRevalidationReason Reason, ActionRevalidationObservation Observation);
+public interface IActionRevalidationProbe
+{
+    ValueTask<ActionRevalidationProbeResult> ProbeAsync(ActionRevalidationRequest request,
+        CancellationToken cancellationToken);
 }
 public interface IRecycleBinExecutor
 {

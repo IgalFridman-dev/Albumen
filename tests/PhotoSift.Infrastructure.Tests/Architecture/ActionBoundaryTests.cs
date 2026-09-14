@@ -8,6 +8,7 @@ using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
+using PhotoSift.Infrastructure.Windows.Action;
 using Xunit;
 
 namespace PhotoSift.Infrastructure.Tests.Architecture;
@@ -21,17 +22,21 @@ public sealed class ActionBoundaryTests
         typeof(ResolvedScope), typeof(ScopeSelection), typeof(DirectoryIdentity), typeof(PhysicalFileKey),
         typeof(FileId128), typeof(ContentRevision), typeof(AllocationEvidence), typeof(OverrideEvidenceId),
         typeof(ReviewUnresolvedSummary), typeof(SelectionRecovery),
+        typeof(ActionRevalidationRequest), typeof(ActionRevalidationProbeResult),
+        typeof(ActionRevalidationObservation),
     ];
     private static readonly ImmutableHashSet<Type> ImmutableScalars =
     [
         typeof(bool), typeof(int), typeof(long), typeof(uint), typeof(ulong), typeof(string), typeof(Guid),
         typeof(DateTimeOffset), typeof(ScanStatus), typeof(ScopeRecursion), typeof(SelectionRecoveryUnavailableReason),
         typeof(ActionItemState), typeof(ActionStatus), typeof(ActionSafetyReason),
+        typeof(ActionRevalidationKind), typeof(ActionRevalidationReason),
     ];
     private static readonly string[] ActionOwnerTypeNames =
     [
         "ActionCoordinator", "ActionStore", "ActionOwnerInbox", "IActionCoordinator",
         "ActionSnapshot", "ActionItemSnapshot", "ActionCommandResult", "IActionJournalStore", "IRecycleBinExecutor",
+        "IActionRevalidationProbe", "ActionRevalidationRequest", "ActionRevalidationProbeResult",
     ];
 
     [Fact]
@@ -58,6 +63,29 @@ public sealed class ActionBoundaryTests
             reference.Name!.Contains("Sqlite", StringComparison.OrdinalIgnoreCase)
             || reference.Name.Contains("Windows", StringComparison.OrdinalIgnoreCase)
             || reference.Name == "PresentationFramework");
+    }
+
+    [Fact]
+    public void RevalidationProbeHasOnlyReadOnlyWindowsDependenciesAndNoMutationOrReviewAuthority()
+    {
+        var probe = typeof(WindowsActionRevalidationProbe);
+        Assert.Equal("PhotoSift.Infrastructure.Windows.Action", probe.Namespace);
+        Assert.True(typeof(IActionRevalidationProbe).IsAssignableFrom(probe));
+        var dependencies = probe.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .SelectMany(constructor => constructor.GetParameters().Select(parameter => parameter.ParameterType))
+            .Concat(probe.GetFields(BindingFlags.NonPublic | BindingFlags.Instance).Select(field => field.FieldType))
+            .ToArray();
+        Assert.DoesNotContain(dependencies, type => type == typeof(IRecycleBinExecutor)
+            || type == typeof(IReviewCoordinator)
+            || type.Name.Contains("FileOperation", StringComparison.Ordinal)
+            || type.Name.Contains("Cleanup", StringComparison.Ordinal));
+
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "PhotoSift.Infrastructure.Windows", "Action",
+            "WindowsActionRevalidationProbe.cs"));
+        Assert.DoesNotMatch(@"\b(IRecycleBinExecutor|IFileOperation|IReviewCoordinator|ApprovedActionRequest|ReviewStore)\b", source);
+        Assert.DoesNotMatch(@"\b(File|Directory)\s*\.\s*(Delete|Move|Replace)\s*\(", source);
+        Assert.DoesNotMatch(@"\b(DeleteFile|RemoveDirectory|MoveFile|SHFileOperation|Recycle|Cleanup)\b", source);
     }
 
     [Fact]
@@ -124,7 +152,8 @@ public sealed class ActionBoundaryTests
     [Fact]
     public void ApprovalAndActionSnapshotsExposeOnlyImmutableValuesAndSelectionIsNeverReconstructed()
     {
-        foreach (var type in new[] { typeof(ApprovedActionRequest), typeof(ApprovedActionItem), typeof(ActionSnapshot), typeof(ActionItemSnapshot) })
+        foreach (var type in new[] { typeof(ApprovedActionRequest), typeof(ApprovedActionItem), typeof(ActionSnapshot),
+                     typeof(ActionItemSnapshot), typeof(ActionRevalidationRequest), typeof(ActionRevalidationProbeResult) })
             AssertImmutablePayload(type);
         var root = Path.Combine(FindRepositoryRoot(), "src");
         foreach (var file in Sources(root).Where(file => !file.EndsWith(Path.Combine("Review", "ReviewStore.cs"), StringComparison.Ordinal)))
