@@ -10,6 +10,20 @@ namespace PhotoSift.Infrastructure.Tests.Sqlite;
 public sealed class SqliteNonWritingAdmissionTests
 {
     [Fact]
+    public async Task OwnerReaderCannotAcquireMutationAuthority()
+    {
+        await using var fixture = new SqliteOverrideFixture();
+        await using var owner = new SqliteDatabaseOwner(fixture.DatabasePath);
+
+        var error = await owner.RunReadAsync(async (connection, token) =>
+            await Assert.ThrowsAsync<SqliteException>(() =>
+                SqliteDatabaseOwner.ExecuteAsync(connection, "PRAGMA user_version=99;", token)),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(8, error.SqliteErrorCode);
+    }
+
+    [Fact]
     public async Task RejectedRetainedCommittedWalCannotCheckpointOrChangeAnySidecar()
     {
         await using var donor = new SqliteOverrideFixture();

@@ -125,7 +125,7 @@ internal sealed class SqliteActionJournalStore(SqliteDatabaseOwner owner) : IAct
     {
         try
         {
-            return await owner.RunAsync(true, async (connection, token) =>
+            return await owner.RunWriteAsync(SqliteWriteDurability.ActionFull, async (connection, token) =>
             {
                 await using var transaction = connection.BeginTransaction(deferred: false);
                 await PhotoSiftSchema.ValidateAsync(connection, PhotoSiftSchema.Version, token, transaction).ConfigureAwait(false);

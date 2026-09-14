@@ -11,7 +11,7 @@ internal sealed class SqliteActionRecordStore(SqliteDatabaseOwner owner) : IActi
     {
         try
         {
-            return await owner.RunAsync(false, async (connection, token) =>
+            return await owner.RunReadAsync(async (connection, token) =>
             {
                 await using var transaction = connection.BeginTransaction(deferred: true);
                 await PhotoSiftSchema.ValidateAsync(connection, PhotoSiftSchema.Version, token, transaction).ConfigureAwait(false);
@@ -50,7 +50,7 @@ internal sealed class SqliteActionRecordStore(SqliteDatabaseOwner owner) : IActi
     {
         try
         {
-            return await owner.RunAsync<ActionRevalidationWriteResult>(true, async (connection, token) =>
+            return await owner.RunWriteAsync<ActionRevalidationWriteResult>(SqliteWriteDurability.Normal, async (connection, token) =>
             {
                 await using var transaction = connection.BeginTransaction(deferred: false);
                 await PhotoSiftSchema.ValidateAsync(connection, PhotoSiftSchema.Version, token, transaction).ConfigureAwait(false);

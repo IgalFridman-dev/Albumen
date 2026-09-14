@@ -79,7 +79,7 @@ public sealed class E1S6ActionReconciliationUiTests
         Assert.Same(before[1], during[1]);
         Assert.Contains("Verifying current file state…", ActionShellFixture.Read<string>(fixture.ViewModel, "ActionRecoveryAnnouncement"));
 
-        var resolved = Record(Row(1, ActionRecordEvidenceState.ConfirmedPresent), record.Items[1]);
+        var resolved = Record(record.Items[0] with { State = ActionRecordEvidenceState.ConfirmedPresent }, record.Items[1]);
         fixture.PublishRecovery(new(ActionRecoveryStatus.Ready, [resolved], null, false));
 
         var after = RecoveryRows(fixture);

@@ -8,7 +8,7 @@ namespace PhotoSift.Infrastructure.Tests.Sqlite;
 public sealed class SqliteSharedOwnerTests
 {
     [Fact]
-    public async Task ActionAndOverrideShareOneLaneAndDisposalDrainsBothAdmittedPorts()
+    public async Task ActionAndOverrideWritesShareOneFifoLaneAndDisposalDrainsBothAdmittedPorts()
     {
         await using var fixture = new SqliteOverrideFixture();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

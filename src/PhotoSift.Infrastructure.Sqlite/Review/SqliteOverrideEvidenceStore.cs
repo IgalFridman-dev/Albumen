@@ -34,7 +34,7 @@ internal sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsy
         ArgumentNullException.ThrowIfNull(evidence);
         try
         {
-            return await owner.RunAsync(false, async (connection, token) =>
+            return await owner.RunWriteAsync(SqliteWriteDurability.Normal, async (connection, token) =>
             {
                 var row = Canonicalize(evidence);
                 await using var transaction = connection.BeginTransaction(deferred: false);
@@ -82,14 +82,15 @@ internal sealed class SqliteOverrideEvidenceStore : IOverrideEvidenceStore, IAsy
     {
         try
         {
-            return await owner.RunAsync(false, async (connection, token) =>
+            return await owner.RunReadAsync(async (connection, token) =>
             {
+                await PhotoSiftSchema.ValidateAsync(connection, PhotoSiftSchema.Version, token).ConfigureAwait(false);
                 var row = await ReadRowAsync(connection, null, GuidText(evidenceId.Value), token).ConfigureAwait(false);
                 if (row is null) return new OverrideReadResult(OverrideReadOutcome.Missing, null);
                 return TryReadEvidence(row, out var evidence)
                     ? new OverrideReadResult(OverrideReadOutcome.Found, evidence)
                     : new OverrideReadResult(OverrideReadOutcome.Corrupt, null);
-            }, cancellationToken, observer).ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (SqliteDatabaseOwner.IsUnavailable(exception))
         {
