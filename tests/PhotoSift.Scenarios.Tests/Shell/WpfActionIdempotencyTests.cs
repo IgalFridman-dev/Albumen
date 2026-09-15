@@ -109,9 +109,9 @@ public sealed class WpfActionIdempotencyTests
         });
 
     [Fact]
-    public Task CloseSettlesActionThenReviewThenSharedStoresWhileDispatcherCanStillAcceptWork() =>
+    public Task CloseSettlesActionReviewAndScanBeforeSharedStoresWhileDispatcherCanStillAcceptWork() =>
         WpfScenarioIsolation.RunAsync(typeof(WpfActionIdempotencyTests), "action-close",
-            nameof(CloseSettlesActionThenReviewThenSharedStoresWhileDispatcherCanStillAcceptWork), stage =>
+            nameof(CloseSettlesActionReviewAndScanBeforeSharedStoresWhileDispatcherCanStillAcceptWork), stage =>
         {
             WpfReviewSelectionTests.RunOnSta(() =>
             {
@@ -129,14 +129,17 @@ public sealed class WpfActionIdempotencyTests
                 });
                 var review = new Lifetime(async () =>
                     await dispatcher.InvokeAsync(() => { Assert.False(dispatcher.HasShutdownStarted); calls.Enqueue("review"); }));
+                var scan = new Lifetime(async () =>
+                    await dispatcher.InvokeAsync(() => { Assert.False(dispatcher.HasShutdownStarted); calls.Enqueue("scan"); }));
                 var stores = new Lifetime(async () =>
                     await dispatcher.InvokeAsync(() => { Assert.False(dispatcher.HasShutdownStarted); calls.Enqueue("stores"); }));
                 var ownedType = typeof(CompositionRoot).GetNestedType("OwnedPhotoSiftWorkflow", BindingFlags.NonPublic);
                 Assert.NotNull(ownedType);
                 var constructor = ownedType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                    .SingleOrDefault(candidate => candidate.GetParameters().Length == 4);
+                    .SingleOrDefault(candidate => candidate.GetParameters().Length == 5);
                 Assert.NotNull(constructor);
-                var owned = Assert.IsAssignableFrom<IPhotoSiftWorkflow>(constructor.Invoke([fixture, action, review, stores]));
+                var owned = Assert.IsAssignableFrom<IPhotoSiftWorkflow>(
+                    constructor.Invoke([fixture, scan, action, review, stores]));
                 var viewModel = new ShellViewModel(fixture.Scope, owned);
                 var window = new MainWindow { DataContext = viewModel };
                 var closed = false;
@@ -150,7 +153,7 @@ public sealed class WpfActionIdempotencyTests
                     Assert.Equal(["action-enter"], calls);
                     releaseAction.TrySetResult();
                     WpfActionAccessibilityTests.PumpUntil(() => closed);
-                    Assert.Equal(["action-enter", "action-settled", "review", "stores"], calls);
+                    Assert.Equal(["action-enter", "action-settled", "review", "scan", "stores"], calls);
                     Assert.Empty(fixture.Approvals);
                 }
                 finally

@@ -148,7 +148,10 @@ internal sealed class ScanStore
             groups.Settle(token);
             Observe(outcome);
         }
-        else Invalidate(occurrences[token.OccurrenceId].PhysicalFileKey!.Value, outcome);
+        // A successful signature is durable evidence. A later comparison-open
+        // failure invalidates that evidence through the one legal terminal
+        // correction rather than inventing another terminal-to-terminal edge.
+        else Invalidate(occurrences[token.OccurrenceId].PhysicalFileKey!.Value, Changed);
         return true;
     }
 

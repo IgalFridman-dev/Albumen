@@ -54,6 +54,7 @@ public static class CompositionRoot
         var photoWorkflow = new OwnedPhotoSiftWorkflow(
             new PhotoSiftWorkflow(workflow, scan, scheduler, review, action, recovery),
             recovery,
+            scan,
             action,
             review,
             stores);
@@ -64,13 +65,14 @@ public static class CompositionRoot
     private sealed class OwnedPhotoSiftWorkflow(
         IPhotoSiftWorkflow workflow,
         IAsyncDisposable? recovery,
+        IAsyncDisposable scan,
         IAsyncDisposable action,
         IAsyncDisposable review,
         IAsyncDisposable evidenceStore) : IPhotoSiftWorkflow, IAsyncDisposable
     {
-        private OwnedPhotoSiftWorkflow(IPhotoSiftWorkflow workflow, IAsyncDisposable action,
-            IAsyncDisposable review, IAsyncDisposable evidenceStore)
-            : this(workflow, null, action, review, evidenceStore)
+        private OwnedPhotoSiftWorkflow(IPhotoSiftWorkflow workflow, IAsyncDisposable scan,
+            IAsyncDisposable action, IAsyncDisposable review, IAsyncDisposable evidenceStore)
+            : this(workflow, null, scan, action, review, evidenceStore)
         {
         }
 
@@ -136,6 +138,14 @@ public static class CompositionRoot
             try
             {
                 await review.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
+            try
+            {
+                await scan.DisposeAsync().ConfigureAwait(false);
             }
             catch (Exception exception)
             {

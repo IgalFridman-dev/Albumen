@@ -239,9 +239,10 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         T fallback)
     {
         var persisted = await PersistMutationAsync(operation, mutation).ConfigureAwait(false);
-        if (persisted is null)
+        if (!persisted.Succeeded)
         {
-            await HandlePersistenceFailureAsync(operation).ConfigureAwait(false);
+            await HandlePersistenceFailureAsync(
+                operation, persisted.Failure == ScanCheckpointWriteOutcome.Unavailable).ConfigureAwait(false);
             return fallback;
         }
 
@@ -249,15 +250,15 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         {
             foreach (var pair in persisted.ExactRevisions)
                 operation.ExactRevisions[pair.Key] = pair.Value;
+            var result = operation.Store.Apply(mutation);
             if (!ReferenceEquals(active, operation) || operation.Finished || operation.Faulted)
                 return fallback;
-            var result = operation.Store.Apply(mutation);
             PublishResults(operation);
             return result;
         }).ConfigureAwait(false);
     }
 
-    private async Task<MutationPersistence?> PersistMutationAsync<T>(
+    private async Task<MutationPersistence> PersistMutationAsync<T>(
         Operation operation,
         ScanStoreMutation<T> mutation)
     {
@@ -285,14 +286,14 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             var result = await checkpoints.WriteInitialOccurrenceAsync(
                 new InitialOccurrenceCheckpointCommand(occurrence, enumeration, exact),
                 CancellationToken.None).ConfigureAwait(false);
-            if (!Succeeded(result)) return null;
+            if (!Succeeded(result)) return new(revisions, result.Outcome);
             revisions[row.Token.OccurrenceId] = 1;
         }
 
         foreach (var exact in mutation.ExactMutations)
         {
             if (!revisions.TryGetValue(exact.Token.OccurrenceId, out var expectedRevision))
-                return null;
+                return new(revisions, ScanCheckpointWriteOutcome.Missing);
             var result = await checkpoints.TransitionStageAsync(
                 new ScanStageTransitionCommand(
                     exact.Token.Pin.ScanId,
@@ -302,10 +303,10 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                     Guid.NewGuid(),
                     exact.After),
                 CancellationToken.None).ConfigureAwait(false);
-            if (!Succeeded(result)) return null;
+            if (!Succeeded(result)) return new(revisions, result.Outcome);
             revisions[exact.Token.OccurrenceId] = checked(expectedRevision + 1);
         }
-        return new(revisions);
+        return new(revisions, null);
     }
 
     private async Task<bool> CommitEnumerationAsync(Operation operation, StageOutcome outcome)
@@ -323,7 +324,8 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             CancellationToken.None).ConfigureAwait(false);
         if (!Succeeded(result) || result.Snapshot?.Lifecycle is not { } lifecycle)
         {
-            await HandlePersistenceFailureAsync(operation).ConfigureAwait(false);
+            await HandlePersistenceFailureAsync(
+                operation, result.Outcome == ScanCheckpointWriteOutcome.Unavailable).ConfigureAwait(false);
             return false;
         }
 
@@ -351,27 +353,37 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             if (!inspect) return;
             var evidence = await preflight.InspectAsync(operation.Context.Scope.Selection, operation.Token)
                 .ConfigureAwait(false);
-            var identity = await inbox.CommandAsync(() => PrepareIdentity(operation, evidence))
+            var preparation = await inbox.CommandAsync(() => PrepareStartup(operation, evidence))
                 .ConfigureAwait(false);
-            if (identity is null) return;
+            if (preparation is null) return;
 
-            var durable = await checkpointGate.ExecuteAsync(() => PersistStartupAsync(identity))
+            var nextLifecycle = preparation.Rejection is null
+                ? ScanLifecycleState.Enumerating
+                : ScanLifecycleState.Incomplete;
+            var durable = await checkpointGate.ExecuteAsync(() =>
+                PersistStartupAsync(preparation.Identity, nextLifecycle))
                 .ConfigureAwait(false);
-            if (durable is null)
+            if (durable.Lifecycle is null)
             {
-                await HandlePersistenceFailureAsync(operation).ConfigureAwait(false);
+                await HandlePersistenceFailureAsync(operation, durable.Unavailable).ConfigureAwait(false);
                 return;
             }
             var start = await inbox.CommandAsync(() =>
             {
                 operation.DurableStarted = true;
-                operation.LifecycleRevision = durable.Revision;
-                operation.LifecycleState = durable.State;
+                operation.LifecycleRevision = durable.Lifecycle.Revision;
+                operation.LifecycleState = durable.Lifecycle.State;
                 if (!ReferenceEquals(active, operation)
                     || operation.Canceled
                     || operation.Faulted
                     || current.Status != ScanStatus.Checking)
                 {
+                    return false;
+                }
+                if (preparation.Rejection is { } rejection)
+                {
+                    operation.Enumeration = rejection;
+                    Publish(operation.Store.Snapshot(ScanStatus.Incomplete, rejection));
                     return false;
                 }
                 operation.Enumeration = Running;
@@ -413,7 +425,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         }
     }
 
-    private ScanIdentityRecord? PrepareIdentity(Operation operation, ScopePreflightEvidence evidence)
+    private StartupPreparation? PrepareStartup(Operation operation, ScopePreflightEvidence evidence)
     {
         if (!ReferenceEquals(active, operation)
             || operation.Canceled
@@ -422,44 +434,48 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             return null;
         }
         var result = ScopePreflightPolicy.Evaluate(evidence);
-        if (result.Decision != ScopePreflightDecision.Ready
+        var rejected = result.Decision != ScopePreflightDecision.Ready
             || result.Scope is not { } scope
             || scope.RootIdentity != operation.Context.Scope.RootIdentity
             || scope.Selection != operation.Context.Scope.Selection
-            || !SamePath(scope.ResolvedPath, operation.Context.Scope.ResolvedPath))
-        {
-            operation.Enumeration = new StageOutcome(
-                ScanStageState.FailedTerminal, ScanReason.UnknownSafety);
-            Publish(operation.Store.Snapshot(ScanStatus.Incomplete, operation.Enumeration));
-            return null;
-        }
-        return new ScanIdentityRecord(
-            operation.Context.Pin,
-            scope.Selection,
-            scope.ResolvedPath,
-            scope.RootIdentity,
-            DateTimeOffset.UtcNow);
+            || !SamePath(scope.ResolvedPath, operation.Context.Scope.ResolvedPath);
+        var accepted = operation.Context.Scope;
+        return new(
+            new ScanIdentityRecord(
+                operation.Context.Pin,
+                accepted.Selection,
+                accepted.ResolvedPath,
+                accepted.RootIdentity,
+                DateTimeOffset.UtcNow),
+            rejected
+                ? new StageOutcome(ScanStageState.FailedTerminal, ScanReason.UnknownSafety)
+                : null);
     }
 
-    private async Task<ScanLifecycleCheckpoint?> PersistStartupAsync(ScanIdentityRecord identity)
+    private async Task<StartupPersistence> PersistStartupAsync(
+        ScanIdentityRecord identity,
+        ScanLifecycleState nextState)
     {
         var identityResult = await identities.PersistScanAsync(identity, CancellationToken.None)
             .ConfigureAwait(false);
         if (identityResult.Outcome is not (
             ScanIdentityPersistOutcome.Persisted or ScanIdentityPersistOutcome.ExactRetry))
         {
-            return null;
+            return new(null, identityResult.Outcome == ScanIdentityPersistOutcome.Unavailable);
         }
         var preflight = await checkpoints.TransitionLifecycleAsync(
             new ScanLifecycleTransitionCommand(
                 identity.Pin.ScanId, 1, Guid.NewGuid(), ScanLifecycleState.Preflight),
             CancellationToken.None).ConfigureAwait(false);
-        if (!Succeeded(preflight)) return null;
-        var enumerating = await checkpoints.TransitionLifecycleAsync(
+        if (!Succeeded(preflight))
+            return new(null, preflight.Outcome == ScanCheckpointWriteOutcome.Unavailable);
+        var next = await checkpoints.TransitionLifecycleAsync(
             new ScanLifecycleTransitionCommand(
-                identity.Pin.ScanId, 1, Guid.NewGuid(), ScanLifecycleState.Enumerating),
+                identity.Pin.ScanId, 1, Guid.NewGuid(), nextState),
             CancellationToken.None).ConfigureAwait(false);
-        return Succeeded(enumerating) ? enumerating.Snapshot?.Lifecycle : null;
+        return Succeeded(next)
+            ? new(next.Snapshot?.Lifecycle, false)
+            : new(null, next.Outcome == ScanCheckpointWriteOutcome.Unavailable);
     }
 
     private async Task FinalizeOperationAsync(Operation operation, bool runFaulted)
@@ -468,15 +484,20 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             .ConfigureAwait(false);
         if (preparation is null) return;
 
-        var durable = !operation.PersistenceFailed;
+        var storeAvailable = !operation.PersistenceUnavailable;
+        var stagesDurable = storeAvailable;
         MutationPersistence? persisted = null;
         ScanLifecycleCheckpoint? lifecycle = null;
-        if (durable)
+        if (storeAvailable)
         {
             persisted = await PersistMutationAsync(operation, preparation.Mutation).ConfigureAwait(false);
-            durable = persisted is not null;
+            stagesDurable = persisted.Succeeded;
+            if (persisted.Failure == ScanCheckpointWriteOutcome.Unavailable)
+                storeAvailable = false;
         }
-        if (durable
+        var lifecycleDurable = !operation.DurableStarted
+            || ScanTransitionPolicy.IsTerminal(operation.LifecycleState);
+        if (storeAvailable
             && operation.DurableStarted
             && !ScanTransitionPolicy.IsTerminal(operation.LifecycleState))
         {
@@ -487,10 +508,13 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                     Guid.NewGuid(),
                     preparation.Lifecycle),
                 CancellationToken.None).ConfigureAwait(false);
-            durable = Succeeded(result) && result.Snapshot?.Lifecycle is not null;
+            lifecycleDurable = Succeeded(result) && result.Snapshot?.Lifecycle is not null;
             lifecycle = result.Snapshot?.Lifecycle;
+            if (result.Outcome == ScanCheckpointWriteOutcome.Unavailable)
+                storeAvailable = false;
         }
-        if (!durable) operation.PersistenceFailed = true;
+        var durable = stagesDurable && lifecycleDurable;
+        if (!storeAvailable) operation.PersistenceUnavailable = true;
 
         await inbox.CommandAsync(() =>
         {
@@ -531,7 +555,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         if (operation.Finished) return null;
         var fault = runFaulted
             || operation.Faulted
-            || operation.PersistenceFailed
+            || operation.PersistenceUnavailable
             || operation.Store.Faulted
             || current.Status == ScanStatus.Faulted && ReferenceEquals(active, operation);
         var reconcile = fault
@@ -566,11 +590,11 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             enumeration);
     }
 
-    private async Task HandlePersistenceFailureAsync(Operation operation)
+    private async Task HandlePersistenceFailureAsync(Operation operation, bool unavailable)
     {
         await inbox.CommandAsync(() =>
         {
-            operation.PersistenceFailed = true;
+            operation.PersistenceUnavailable |= unavailable;
             operation.Faulted = true;
             if (ReferenceEquals(active, operation))
                 Publish(operation.Store.Snapshot(ScanStatus.Faulted, ProgrammingFault));
@@ -662,7 +686,20 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
     private static bool SamePath(string left, string right) =>
         ScopePathContainment.Contains(left, right) && ScopePathContainment.Contains(right, left);
 
-    private sealed record MutationPersistence(Dictionary<long, long> ExactRevisions);
+    private sealed record StartupPreparation(
+        ScanIdentityRecord Identity,
+        StageOutcome? Rejection);
+
+    private sealed record StartupPersistence(
+        ScanLifecycleCheckpoint? Lifecycle,
+        bool Unavailable);
+
+    private sealed record MutationPersistence(
+        Dictionary<long, long> ExactRevisions,
+        ScanCheckpointWriteOutcome? Failure)
+    {
+        public bool Succeeded => Failure is null;
+    }
 
     private sealed record Finalization(
         ScanStoreMutation<bool> Mutation,
@@ -699,7 +736,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         public ScanLifecycleState LifecycleState { get; set; } = ScanLifecycleState.Preflight;
         public long LifecycleRevision { get; set; } = 1;
         public bool DurableStarted { get; set; }
-        public bool PersistenceFailed { get; set; }
+        public bool PersistenceUnavailable { get; set; }
         public bool Canceled { get; set; }
         public bool Finished { get; set; }
         public bool Faulted { get; set; }

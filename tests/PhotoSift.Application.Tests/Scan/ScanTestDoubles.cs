@@ -260,22 +260,27 @@ internal sealed class CoordinatorCheckpointStore : IScanCheckpointStore
         System.Action apply,
         CancellationToken cancellationToken)
     {
+        CoordinatorCheckpointAttempt? attempt = null;
         Writes.Enqueue(command);
         var entered = Interlocked.Increment(ref inFlight);
         UpdateMaximum(entered);
         try
         {
-            var outcome = ScanCheckpointWriteOutcome.Accepted;
+            ScanCheckpointWriteOutcome? forcedOutcome = null;
             if (HoldWrites)
             {
-                var attempt = new CoordinatorCheckpointAttempt(command);
+                attempt = new CoordinatorCheckpointAttempt(command);
                 await attempts.Writer.WriteAsync(attempt, cancellationToken);
-                outcome = await attempt.Completion.Task.WaitAsync(cancellationToken);
+                forcedOutcome = await attempt.Completion.Task.WaitAsync(cancellationToken);
             }
-            if (outcome is not (ScanCheckpointWriteOutcome.Accepted or ScanCheckpointWriteOutcome.Idempotent))
-                return new(outcome, null);
             lock (stateLock)
             {
+                var outcome = forcedOutcome ?? Evaluate(command);
+                if (outcome is not (
+                    ScanCheckpointWriteOutcome.Accepted or ScanCheckpointWriteOutcome.Idempotent))
+                {
+                    return new(outcome, null);
+                }
                 if (outcome == ScanCheckpointWriteOutcome.Accepted) apply();
                 return new(outcome, Snapshot(ScanId(command)));
             }
@@ -283,7 +288,59 @@ internal sealed class CoordinatorCheckpointStore : IScanCheckpointStore
         finally
         {
             Interlocked.Decrement(ref inFlight);
+            attempt?.Returned.TrySetResult();
         }
+    }
+
+    private ScanCheckpointWriteOutcome Evaluate(object command) => command switch
+    {
+        InitialOccurrenceCheckpointCommand initial => Evaluate(initial),
+        ScanLifecycleTransitionCommand lifecycle => Evaluate(lifecycle),
+        ScanStageTransitionCommand stage => Evaluate(stage),
+        _ => throw new ArgumentOutOfRangeException(nameof(command)),
+    };
+
+    private ScanCheckpointWriteOutcome Evaluate(InitialOccurrenceCheckpointCommand command)
+    {
+        var token = command.Occurrence.Token;
+        if (!lifecycles.ContainsKey(token.Pin.ScanId)) return ScanCheckpointWriteOutcome.Missing;
+        return occurrences.ContainsKey((token.Pin.ScanId, token.OccurrenceId))
+            ? ScanCheckpointWriteOutcome.Conflict
+            : ScanCheckpointWriteOutcome.Accepted;
+    }
+
+    private ScanCheckpointWriteOutcome Evaluate(ScanLifecycleTransitionCommand command)
+    {
+        if (!lifecycles.TryGetValue(command.ScanId, out var current))
+        {
+            return command.ExpectedRevision == 1 && command.NextState == ScanLifecycleState.Preflight
+                ? ScanCheckpointWriteOutcome.Accepted
+                : ScanCheckpointWriteOutcome.Missing;
+        }
+        if (current.TransitionId == command.TransitionId)
+            return current.State == command.NextState
+                ? ScanCheckpointWriteOutcome.Idempotent
+                : ScanCheckpointWriteOutcome.Conflict;
+        if (current.Revision != command.ExpectedRevision) return ScanCheckpointWriteOutcome.Stale;
+        return ScanTransitionPolicy.CanTransition(current.State, command.NextState)
+            ? ScanCheckpointWriteOutcome.Accepted
+            : ScanCheckpointWriteOutcome.IllegalTransition;
+    }
+
+    private ScanCheckpointWriteOutcome Evaluate(ScanStageTransitionCommand command)
+    {
+        if (!occurrences.ContainsKey((command.ScanId, command.OccurrenceId)))
+            return ScanCheckpointWriteOutcome.Missing;
+        if (!checkpoints.TryGetValue((command.ScanId, command.OccurrenceId, command.Stage), out var current))
+            return ScanCheckpointWriteOutcome.Missing;
+        if (current.TransitionId == command.TransitionId)
+            return current.Outcome == command.Outcome
+                ? ScanCheckpointWriteOutcome.Idempotent
+                : ScanCheckpointWriteOutcome.Conflict;
+        if (current.Revision != command.ExpectedRevision) return ScanCheckpointWriteOutcome.Stale;
+        return ScanTransitionPolicy.CanTransition(command.Stage, current.Outcome, command.Outcome)
+            ? ScanCheckpointWriteOutcome.Accepted
+            : ScanCheckpointWriteOutcome.IllegalTransition;
     }
 
     private void Apply(ScanLifecycleTransitionCommand command)
@@ -361,9 +418,11 @@ internal sealed class CoordinatorCheckpointStore : IScanCheckpointStore
 internal sealed class CoordinatorCheckpointAttempt(object command)
 {
     public object Command { get; } = command;
-    public TaskCompletionSource<ScanCheckpointWriteOutcome> Completion { get; } =
-        ScanTestData.Signal<ScanCheckpointWriteOutcome>();
-    public void Release(ScanCheckpointWriteOutcome outcome = ScanCheckpointWriteOutcome.Accepted) =>
+    public TaskCompletionSource<ScanCheckpointWriteOutcome?> Completion { get; } =
+        ScanTestData.Signal<ScanCheckpointWriteOutcome?>();
+    public TaskCompletionSource Returned { get; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public void Release(ScanCheckpointWriteOutcome? outcome = null) =>
         Completion.TrySetResult(outcome);
 }
 
