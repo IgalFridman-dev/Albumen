@@ -162,6 +162,47 @@ public sealed class WpfLocalDataControlTests
         Assert.Equal(0, control.Calls);
     }
 
+    [Theory]
+    [InlineData(ScanStatus.Idle)]
+    [InlineData(ScanStatus.Faulted)]
+    public async Task UnsettledScanTruthBlocksClearForIdleOrFaultedDisplayStatus(
+        ScanStatus displayStatus)
+    {
+        var fixture = new ExactShellFixture();
+        var control = new RecordingScanDataControl(new(
+            ScanDataClearOutcome.Cleared, 1, 0, "must not clear"));
+        var viewModel = new ShellViewModel(
+            fixture.Scope, fixture.Workflow, localScanDataControl: control);
+        var requestAvailabilityChanges = 0;
+        var confirmAvailabilityChanges = 0;
+        viewModel.RequestClearScanDataCommand.CanExecuteChanged += (_, _) => requestAvailabilityChanges++;
+        viewModel.ConfirmClearScanDataCommand.CanExecuteChanged += (_, _) => confirmAvailabilityChanges++;
+        await viewModel.RequestClearScanDataCommand.ExecuteAsync();
+        Assert.True(viewModel.IsClearScanDataConfirmationPending);
+        var requestChangesBeforeUnsettled = requestAvailabilityChanges;
+        var confirmChangesBeforeUnsettled = confirmAvailabilityChanges;
+
+        fixture.Workflow.Publish(fixture.Workflow.Current with
+        {
+            Scan = fixture.Workflow.Current.Scan with
+            {
+                Status = displayStatus,
+                HasUnsettledWork = true,
+            },
+        });
+
+        Assert.False(viewModel.RequestClearScanDataCommand.CanExecute(null));
+        Assert.False(viewModel.ConfirmClearScanDataCommand.CanExecute(null));
+        Assert.False(viewModel.IsClearScanDataConfirmationPending);
+        Assert.True(requestAvailabilityChanges > requestChangesBeforeUnsettled);
+        Assert.True(confirmAvailabilityChanges > confirmChangesBeforeUnsettled);
+        Assert.Equal(
+            "Local Scan data was retained because a Scan is active. Wait for it to finish, or cancel it, then try again.",
+            viewModel.LocalDataClearStatus);
+        await viewModel.ConfirmClearScanDataCommand.ExecuteAsync();
+        Assert.Equal(0, control.Calls);
+    }
+
     [Fact]
     public async Task RepeatedConfirmationWhileClearIsRunningInvokesTheControlOnce()
     {

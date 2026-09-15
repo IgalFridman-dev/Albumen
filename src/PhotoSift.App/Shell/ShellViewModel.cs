@@ -197,7 +197,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public bool CanContinue => photoSnapshot?.Scope.ScopeState == ScopeSessionState.Ready;
     public bool CanConfirmExactRules => CanContinue && IsConfirmRulesPhase && photoSnapshot?.Rules is null;
     public bool CanStartScan => photoSnapshot is { } snapshot && ShellPhasePolicy.CanStart(snapshot.Scope, snapshot.Rules) && !IsScanBusy;
-    public bool IsScanBusy => photoSnapshot?.Scan.Status is ScanSessionStatus.Checking or ScanSessionStatus.Running;
+    public bool IsScanBusy => photoSnapshot?.Scan is
+        { HasUnsettledWork: true } or
+        { Status: ScanSessionStatus.Checking or ScanSessionStatus.Running };
     public bool CanOpenReview => photoSnapshot?.Scan.Pin is not null;
     public string ExactPreset { get; } = "Exact duplicates only. Files must contain identical bytes. Rules are fixed for this scan.";
     public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";

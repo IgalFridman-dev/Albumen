@@ -123,6 +123,7 @@ public sealed class ScanCoordinatorTests
         await fixture.Pump(signature);
         Assert.True((await signature).Accepted);
         Assert.Equal(ScanStatus.Faulted, fixture.Owner.Current.Status);
+        Assert.True(fixture.Owner.Current.HasUnsettledWork);
 
         // The fake run's Completion can only settle when CancelAsync is called.
         // Dispose is deliberately not a trigger. The timeout bounds a missing
@@ -136,6 +137,7 @@ public sealed class ScanCoordinatorTests
         Assert.False(await rejection.Task);
         await fixture.Pump(run.Disposed.Task);
         await fixture.Until(snapshot => snapshot.Status == ScanStatus.Faulted && snapshot.Counts.Outstanding == 0);
+        Assert.False(fixture.Owner.Current.HasUnsettledWork);
         Assert.Equal(1, fixture.Owner.Current.Counts.Analyzed);
         Assert.Equal(1, fixture.Owner.Current.Counts.Failed);
         Assert.Equal(ScanReason.ProgrammingFault, fixture.Owner.Current.Enumeration.Reason);

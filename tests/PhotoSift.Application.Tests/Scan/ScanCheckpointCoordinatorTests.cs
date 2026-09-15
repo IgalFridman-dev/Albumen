@@ -823,6 +823,47 @@ public sealed class ScanCheckpointCoordinatorTests
         }
     }
 
+    [Fact]
+    public async Task InvalidatedIdleRemainsUnsettledUntilOldTerminalLifecycleWriteReturns()
+    {
+        await using var fixture = new CoordinatorFixture();
+        await fixture.Start();
+        var old = await fixture.Run();
+        fixture.Checkpoints.HoldWrites = true;
+        CoordinatorCheckpointAttempt? terminalAttempt = null;
+        try
+        {
+            await fixture.Pump(fixture.Owner.InvalidateAsync(2, null));
+            Assert.Equal(ScanStatus.Idle, fixture.Owner.Current.Status);
+            Assert.True(fixture.Owner.Current.HasUnsettledWork);
+
+            terminalAttempt = await PumpNext(fixture, fixture.Checkpoints.NextAttemptAsync());
+            var terminal = Assert.IsType<ScanLifecycleTransitionCommand>(terminalAttempt.Command);
+            Assert.Equal(old.Context.Pin.ScanId, terminal.ScanId);
+            Assert.Equal(ScanLifecycleState.Incomplete, terminal.NextState);
+            Assert.True(fixture.Owner.Current.HasUnsettledWork);
+
+            fixture.Checkpoints.HoldWrites = false;
+            terminalAttempt.Release();
+            await fixture.Pump(terminalAttempt.Returned.Task);
+            await fixture.Until(snapshot => !snapshot.HasUnsettledWork);
+
+            Assert.Equal(ScanStatus.Idle, fixture.Owner.Current.Status);
+            Assert.False(fixture.Owner.Current.HasUnsettledWork);
+            var writeCount = fixture.Checkpoints.Writes.Count;
+            var late = fixture.Owner.RegisterAsync(
+                old.Context, ScanTestData.Work(1, old.Context).File).AsTask();
+            await fixture.Pump(late);
+            Assert.Null(await late);
+            Assert.Equal(writeCount, fixture.Checkpoints.Writes.Count);
+        }
+        finally
+        {
+            fixture.Checkpoints.HoldWrites = false;
+            terminalAttempt?.Release();
+        }
+    }
+
     private static async Task AssertTerminalObserverFailureIsIsolatedAsync(
         bool endEnumeration,
         ScanStatus expectedStatus,

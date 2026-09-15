@@ -28,7 +28,10 @@ public sealed record ScanSnapshot(
     StageOutcome Enumeration,
     ImmutableArray<ScanFileOccurrence> Occurrences,
     ImmutableArray<CandidateGroup> Groups,
-    ScanCounts Counts);
+    ScanCounts Counts)
+{
+    public bool HasUnsettledWork { get; init; }
+}
 
 public interface IScanCoordinator : IAsyncDisposable
 {

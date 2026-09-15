@@ -603,13 +603,17 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                 operation.Enumeration = ProgrammingFault;
             }
             operation.Finished = true;
+            operations.Remove(operation);
             if (ReferenceEquals(active, operation))
             {
                 var status = durable ? preparation.Status : ScanStatus.Faulted;
                 var enumeration = durable ? preparation.Enumeration : ProgrammingFault;
                 Publish(operation.Store.Snapshot(status, enumeration));
             }
-            operations.Remove(operation);
+            else if (current.HasUnsettledWork != (operations.Count != 0))
+            {
+                Publish(current);
+            }
             operation.Settled.TrySetResult();
             return true;
         }).ConfigureAwait(false);
@@ -680,6 +684,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
 
     private void Publish(ScanSnapshot snapshot)
     {
+        snapshot = snapshot with { HasUnsettledWork = operations.Count != 0 };
         var terminalIsDurable = active is { DurableStarted: true } terminalOperation
             && snapshot.Pin == terminalOperation.Context.Pin
             && ScanTransitionPolicy.IsTerminal(terminalOperation.LifecycleState);
