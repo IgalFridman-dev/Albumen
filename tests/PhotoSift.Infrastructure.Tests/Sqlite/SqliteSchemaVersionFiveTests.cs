@@ -185,22 +185,31 @@ public sealed class SqliteSchemaVersionFiveTests
         var scan = ScanIdentityData.Scan();
         await using (var stores = new SqlitePhotoSiftStores(fixture.DatabasePath))
         {
-            await stores.ScanIdentities.PersistScanAsync(scan, TestContext.Current.CancellationToken);
-            await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
-                scan.Pin.ScanId,
-                1,
-                Guid.Parse("df95504d-46b4-4a01-b593-cc64801484c0"),
-                ScanLifecycleState.Preflight), TestContext.Current.CancellationToken);
+            var token = TestContext.Current.CancellationToken;
+            Assert.Equal(ScanIdentityPersistOutcome.Persisted,
+                (await stores.ScanIdentities.PersistScanAsync(scan, token)).Outcome);
+            Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+                (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
+                    scan.Pin.ScanId,
+                    1,
+                    Guid.Parse("df95504d-46b4-4a01-b593-cc64801484c0"),
+                    ScanLifecycleState.Preflight), token)).Outcome);
+            Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+                (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
+                    scan.Pin.ScanId,
+                    1,
+                    Guid.Parse("6b378b5d-e531-4689-9e41-a2a5128c55dc"),
+                    ScanLifecycleState.Enumerating), token)).Outcome);
             var succeeded = new StageOutcome(ScanStageState.Succeeded, ScanReason.None);
-            await stores.ScanCheckpoints.WriteInitialOccurrenceAsync(new(
-                ScanIdentityData.Occurrence(scan.Pin, 7),
-                new(scan.Pin.ScanId, 7, ScanStage.Enumeration, 1,
-                    Guid.Parse("be3f6bd3-d7a1-49e3-8d3d-b83b01e26010"), succeeded, null),
-                new(scan.Pin.ScanId, 7, ScanStage.Exact, 1,
-                    Guid.Parse("4f46773c-894e-43d2-a66a-2b946d9109c7"),
-                    new(ScanStageState.Running, ScanReason.None),
-                    new(ScanStage.Enumeration, succeeded))),
-                TestContext.Current.CancellationToken);
+            Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+                (await stores.ScanCheckpoints.WriteInitialOccurrenceAsync(new(
+                    ScanIdentityData.Occurrence(scan.Pin, 7),
+                    new(scan.Pin.ScanId, 7, ScanStage.Enumeration, 1,
+                        Guid.Parse("be3f6bd3-d7a1-49e3-8d3d-b83b01e26010"), succeeded, null),
+                    new(scan.Pin.ScanId, 7, ScanStage.Exact, 1,
+                        Guid.Parse("4f46773c-894e-43d2-a66a-2b946d9109c7"),
+                        new(ScanStageState.Running, ScanReason.None),
+                        new(ScanStage.Enumeration, succeeded))), token)).Outcome);
         }
 
         await using var raw = await fixture.OpenRawAsync(SqliteOpenMode.ReadWrite);

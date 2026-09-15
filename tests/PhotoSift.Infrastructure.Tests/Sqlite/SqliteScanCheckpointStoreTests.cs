@@ -9,6 +9,7 @@ namespace PhotoSift.Infrastructure.Tests.Sqlite;
 
 public sealed class SqliteScanCheckpointStoreTests
 {
+    private static readonly long[] ExpectedSingleOccurrenceIds = [7L];
     private static readonly Guid LifecycleTransitionId =
         Guid.Parse("df95504d-46b4-4a01-b593-cc64801484c0");
     private static readonly Guid EnumerationTransitionId =
@@ -19,6 +20,12 @@ public sealed class SqliteScanCheckpointStoreTests
         Guid.Parse("5b21b75d-c4d8-43ec-a9a4-95b8e4b1c281");
     private static readonly Guid ExactCorrectionTransitionId =
         Guid.Parse("e4272ad4-dd44-47dd-90c1-71a77131d459");
+    private static readonly Guid EnumeratingTransitionId =
+        Guid.Parse("6b378b5d-e531-4689-9e41-a2a5128c55dc");
+    private static readonly Guid ExactLifecycleTransitionId =
+        Guid.Parse("1d307198-34e1-4f26-8c06-872576ccf21a");
+    private static readonly Guid TerminalLifecycleTransitionId =
+        Guid.Parse("dc8cb5b2-9d5f-456d-b282-85b39d7bbaed");
     private static readonly StageOutcome Succeeded =
         new(ScanStageState.Succeeded, ScanReason.None);
     private static readonly StageOutcome Running =
@@ -182,7 +189,7 @@ public sealed class SqliteScanCheckpointStoreTests
     {
         await using var fixture = new ScanIdentityFixture();
         await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
-        var (scan, _) = await BootstrapAsync(stores);
+        var scan = await BootstrapPreflightAsync(stores);
 
         var result = await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
             scan.Pin.ScanId,
@@ -222,6 +229,100 @@ public sealed class SqliteScanCheckpointStoreTests
         var exact = Assert.Single(read.Stages, stage => stage.Stored.Stage == ScanStage.Exact);
         Assert.Equal(Succeeded, exact.Stored.Outcome);
         Assert.Equal(2, exact.Stored.Revision);
+    }
+
+    [Theory]
+    [InlineData(ScanLifecycleState.Complete)]
+    [InlineData(ScanLifecycleState.Incomplete)]
+    [InlineData(ScanLifecycleState.Faulted)]
+    public async Task TerminalLifecycleRejectsNewOccurrenceWithoutChangingAuthority(
+        ScanLifecycleState terminalState)
+    {
+        await using var fixture = new ScanIdentityFixture();
+        await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var (scan, _, _) = await BootstrapTerminalAsync(stores, terminalState);
+        var before = await stores.ScanCheckpoints.ReadAsync(
+            scan.Pin.ScanId, TestContext.Current.CancellationToken);
+
+        var result = await stores.ScanCheckpoints.WriteInitialOccurrenceAsync(
+            Initial(scan, 11), TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointWriteOutcome.IllegalTransition, result.Outcome);
+        Assert.Null(result.Snapshot);
+        var after = await stores.ScanCheckpoints.ReadAsync(
+            scan.Pin.ScanId, TestContext.Current.CancellationToken);
+        Assert.Equal(before.Lifecycle, after.Lifecycle);
+        Assert.Equal(before.Accounting, after.Accounting);
+        Assert.Equal(before.Stages.Select(stage => stage.Stored).ToArray(),
+            after.Stages.Select(stage => stage.Stored).ToArray());
+        Assert.Equal(ExpectedSingleOccurrenceIds, (await stores.ScanIdentities.ReadOccurrencesAsync(
+            scan.Pin.ScanId, TestContext.Current.CancellationToken)).Records
+            .Select(occurrence => occurrence.Token.OccurrenceId).ToArray());
+    }
+
+    [Theory]
+    [InlineData(ScanLifecycleState.Complete)]
+    [InlineData(ScanLifecycleState.Incomplete)]
+    [InlineData(ScanLifecycleState.Faulted)]
+    public async Task TerminalLifecycleRejectsNewStageTransitionWithoutChangingAuthority(
+        ScanLifecycleState terminalState)
+    {
+        await using var fixture = new ScanIdentityFixture();
+        await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var (scan, initial, terminalCommand) = await BootstrapTerminalAsync(stores, terminalState);
+        var before = await stores.ScanCheckpoints.ReadAsync(
+            scan.Pin.ScanId, TestContext.Current.CancellationToken);
+        var command = terminalState == ScanLifecycleState.Complete
+            ? new ScanStageTransitionCommand(
+                scan.Pin.ScanId, 7, ScanStage.Exact, 2,
+                ExactCorrectionTransitionId,
+                new StageOutcome(ScanStageState.FailedRetryable, ScanReason.Changed))
+            : terminalCommand;
+
+        var result = await stores.ScanCheckpoints.TransitionStageAsync(
+            command, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointWriteOutcome.IllegalTransition, result.Outcome);
+        Assert.Null(result.Snapshot);
+        var after = await stores.ScanCheckpoints.ReadAsync(
+            scan.Pin.ScanId, TestContext.Current.CancellationToken);
+        Assert.Equal(before.Lifecycle, after.Lifecycle);
+        Assert.Equal(before.Accounting, after.Accounting);
+        Assert.Equal(before.Stages.Select(stage => stage.Stored).ToArray(),
+            after.Stages.Select(stage => stage.Stored).ToArray());
+        Assert.Equal(initial.Occurrence, Assert.Single(
+            (await stores.ScanIdentities.ReadOccurrencesAsync(
+                scan.Pin.ScanId, TestContext.Current.CancellationToken)).Records));
+    }
+
+    [Fact]
+    public async Task TerminalIncompleteStillAcceptsExactOccurrenceRetry()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var (_, initial, _) = await BootstrapTerminalAsync(
+            stores, ScanLifecycleState.Incomplete);
+
+        var occurrenceRetry = await stores.ScanCheckpoints.WriteInitialOccurrenceAsync(
+            initial, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointWriteOutcome.Idempotent, occurrenceRetry.Outcome);
+        Assert.Equal(ScanLifecycleState.Incomplete, occurrenceRetry.Snapshot!.Lifecycle!.State);
+    }
+
+    [Fact]
+    public async Task TerminalCompleteStillAcceptsExactStageRetry()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var (_, _, terminalCommand) = await BootstrapTerminalAsync(
+            stores, ScanLifecycleState.Complete);
+
+        var stageRetry = await stores.ScanCheckpoints.TransitionStageAsync(
+            terminalCommand, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointWriteOutcome.Idempotent, stageRetry.Outcome);
+        Assert.Equal(ScanLifecycleState.Complete, stageRetry.Snapshot!.Lifecycle!.State);
     }
 
     [Fact]
@@ -288,6 +389,9 @@ public sealed class SqliteScanCheckpointStoreTests
             await setup.ScanCheckpoints.TransitionLifecycleAsync(new(
                 scan.Pin.ScanId, 1, LifecycleTransitionId, ScanLifecycleState.Preflight),
                 TestContext.Current.CancellationToken);
+            await setup.ScanCheckpoints.TransitionLifecycleAsync(new(
+                scan.Pin.ScanId, 1, EnumeratingTransitionId, ScanLifecycleState.Enumerating),
+                TestContext.Current.CancellationToken);
             await setup.ScanCheckpoints.WriteInitialOccurrenceAsync(initial, TestContext.Current.CancellationToken);
         }
         var observer = new SqliteDatabaseObserver(
@@ -343,14 +447,62 @@ public sealed class SqliteScanCheckpointStoreTests
     private static async Task<(ScanIdentityRecord Scan, InitialOccurrenceCheckpointCommand Initial)> BootstrapAsync(
         SqlitePhotoSiftStores stores)
     {
+        var scan = await BootstrapPreflightAsync(stores);
+        var token = TestContext.Current.CancellationToken;
+        Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+            (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
+                scan.Pin.ScanId, 1, EnumeratingTransitionId,
+                ScanLifecycleState.Enumerating), token)).Outcome);
+        return (scan, Initial(scan));
+    }
+
+    private static async Task<ScanIdentityRecord> BootstrapPreflightAsync(
+        SqlitePhotoSiftStores stores)
+    {
         var scan = ScanIdentityData.Scan();
         var token = TestContext.Current.CancellationToken;
         Assert.Equal(ScanIdentityPersistOutcome.Persisted,
             (await stores.ScanIdentities.PersistScanAsync(scan, token)).Outcome);
         Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
             (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
-                scan.Pin.ScanId, 1, LifecycleTransitionId, ScanLifecycleState.Preflight), token)).Outcome);
-        return (scan, Initial(scan));
+                scan.Pin.ScanId, 1, LifecycleTransitionId,
+                ScanLifecycleState.Preflight), token)).Outcome);
+        return scan;
+    }
+
+    private static async Task<(ScanIdentityRecord Scan, InitialOccurrenceCheckpointCommand Initial,
+        ScanStageTransitionCommand TerminalCommand)> BootstrapTerminalAsync(
+        SqlitePhotoSiftStores stores,
+        ScanLifecycleState terminalState)
+    {
+        var (scan, initial) = await BootstrapAsync(stores);
+        var token = TestContext.Current.CancellationToken;
+        Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+            (await stores.ScanCheckpoints.WriteInitialOccurrenceAsync(initial, token)).Outcome);
+        var terminalCommand = new ScanStageTransitionCommand(
+            scan.Pin.ScanId, 7, ScanStage.Exact, 1,
+            ExactTerminalTransitionId, Succeeded);
+        if (terminalState == ScanLifecycleState.Complete)
+        {
+            Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+                (await stores.ScanCheckpoints.TransitionStageAsync(terminalCommand, token)).Outcome);
+            Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+                (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
+                    scan.Pin.ScanId, 2, ExactLifecycleTransitionId,
+                    ScanLifecycleState.Exact), token)).Outcome);
+            Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+                (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
+                    scan.Pin.ScanId, 3, TerminalLifecycleTransitionId,
+                    ScanLifecycleState.Complete), token)).Outcome);
+        }
+        else
+        {
+            Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+                (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
+                    scan.Pin.ScanId, 2, TerminalLifecycleTransitionId,
+                    terminalState), token)).Outcome);
+        }
+        return (scan, initial, terminalCommand);
     }
 
     private static InitialOccurrenceCheckpointCommand Initial(ScanIdentityRecord scan, long occurrenceId = 7)

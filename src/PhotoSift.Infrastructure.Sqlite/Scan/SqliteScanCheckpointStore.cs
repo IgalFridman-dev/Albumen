@@ -23,9 +23,9 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
             if (parent is null) return Rejected(ScanCheckpointWriteOutcome.Missing);
             if (parent != command.Occurrence.Token.Pin)
                 return Rejected(ScanCheckpointWriteOutcome.Conflict);
-            if (await ReadLifecycleRowAsync(connection, transaction, scanId, token).ConfigureAwait(false) is not { } lifecycle)
+            if (await ReadLifecycleRowAsync(connection, transaction, scanId, token).ConfigureAwait(false) is not { } lifecycleRow)
                 return Rejected(ScanCheckpointWriteOutcome.Missing);
-            _ = DecodeLifecycle(lifecycle);
+            var lifecycle = DecodeLifecycle(lifecycleRow);
 
             var existingOccurrence = await ReadOccurrenceRowAsync(
                 connection, transaction, scanId, command.Occurrence.Token.OccurrenceId, token).ConfigureAwait(false);
@@ -44,6 +44,8 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
                     ? await ExistingAsync(connection, transaction, scanId, token).ConfigureAwait(false)
                     : Rejected(ScanCheckpointWriteOutcome.Conflict);
             }
+            if (lifecycle.State != ScanLifecycleState.Enumerating)
+                return Rejected(ScanCheckpointWriteOutcome.IllegalTransition);
 
             await InsertOccurrenceAsync(connection, transaction, command.Occurrence, token).ConfigureAwait(false);
             await InsertStageAsync(connection, transaction, command.Enumeration, token).ConfigureAwait(false);
@@ -120,9 +122,11 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
         {
             var scanId = GuidText(command.ScanId);
             var parent = await ReadScanPinAsync(connection, transaction, scanId, token).ConfigureAwait(false);
-            if (parent is null
-                || await ReadLifecycleRowAsync(connection, transaction, scanId, token).ConfigureAwait(false) is null)
+            if (parent is null)
                 return Rejected(ScanCheckpointWriteOutcome.Missing);
+            var lifecycleRow = await ReadLifecycleRowAsync(connection, transaction, scanId, token).ConfigureAwait(false);
+            if (lifecycleRow is null) return Rejected(ScanCheckpointWriteOutcome.Missing);
+            var lifecycle = DecodeLifecycle(lifecycleRow);
             var occurrenceRow = await ReadOccurrenceRowAsync(
                 connection, transaction, scanId, command.OccurrenceId, token).ConfigureAwait(false);
             if (occurrenceRow is null) return Rejected(ScanCheckpointWriteOutcome.Missing);
@@ -143,6 +147,8 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
                     ? await ExistingAsync(connection, transaction, scanId, token).ConfigureAwait(false)
                     : Rejected(ScanCheckpointWriteOutcome.Conflict);
             }
+            if (lifecycle.State is not (ScanLifecycleState.Enumerating or ScanLifecycleState.Exact))
+                return Rejected(ScanCheckpointWriteOutcome.IllegalTransition);
             if (current.Revision != command.ExpectedRevision)
                 return Rejected(ScanCheckpointWriteOutcome.Stale);
             if (!ScanTransitionPolicy.CanTransition(command.Stage, current.Outcome, command.Outcome))
@@ -275,7 +281,13 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
         if ((long)values.Length != checked((long)occurrences.Count * 2))
             throw new InvalidDataException("Every persisted occurrence must have its complete required-stage set.");
         var recomputed = Recompute(values);
-        return new(lifecycle, values, accounting, recomputed);
+        var candidate = new SnapshotCandidate(lifecycle, values, accounting, recomputed);
+        if (lifecycle.State == ScanLifecycleState.Complete
+            && !SatisfiesCompletionInvariant(candidate))
+        {
+            throw new InvalidDataException("Stored Complete lifecycle does not match checkpoint row truth.");
+        }
+        return candidate;
     }
 
     private async ValueTask<ScanCheckpointReadResult> RepairAccountingAsync(
@@ -339,14 +351,16 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
             return false;
         }
 
-        if (candidate is null
-            || candidate.Lifecycle != current
-            || candidate.StoredAccounting is not { } storedAccounting
-            || storedAccounting != candidate.RecomputedAccounting)
-        {
-            return false;
-        }
+        return candidate is not null
+            && candidate.Lifecycle == current
+            && SatisfiesCompletionInvariant(candidate);
+    }
 
+    private static bool SatisfiesCompletionInvariant(SnapshotCandidate candidate)
+    {
+        if (candidate.StoredAccounting is not { } storedAccounting
+            || storedAccounting != candidate.RecomputedAccounting)
+            return false;
         var enumerationRows = candidate.Stages
             .Where(checkpoint => checkpoint.Stage == ScanStage.Enumeration)
             .ToArray();

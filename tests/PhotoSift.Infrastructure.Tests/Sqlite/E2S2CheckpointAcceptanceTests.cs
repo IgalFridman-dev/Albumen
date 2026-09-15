@@ -582,6 +582,59 @@ public sealed class E2S2CheckpointAcceptanceTests
             result.Snapshot.Accounting);
     }
 
+    public static TheoryData<string> InvalidCompleteAuthority => new()
+    {
+        {
+            "UPDATE scan_stage_checkpoints SET state=1, reason=0 WHERE stage=1; "
+            + "UPDATE scan_accounting SET analyzed=0, outstanding=1;"
+        },
+        {
+            "UPDATE scan_stage_checkpoints SET state=4, reason=9 WHERE stage=0; "
+            + "UPDATE scan_stage_checkpoints SET state=7, reason=9, "
+            + "prerequisite_state=4, prerequisite_reason=9 WHERE stage=1; "
+            + "UPDATE scan_accounting SET analyzed=0, failed=1;"
+        },
+        {
+            "DELETE FROM scan_stage_checkpoints WHERE stage=1; "
+            + "UPDATE scan_accounting SET discovered=0, analyzed=0;"
+        },
+        {
+            "UPDATE scan_accounting SET discovered=0, analyzed=0;"
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidCompleteAuthority))]
+    public async Task ReadRejectsInvalidCompleteAuthorityWithoutRepair(string mutation)
+    {
+        await using var fixture = new ScanIdentityFixture();
+        var scan = ScanIdentityData.Scan();
+        await using (var stores = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await BootstrapAsync(stores, scan);
+            await stores.ScanCheckpoints.WriteInitialOccurrenceAsync(
+                Initial(scan, 7, Succeeded, Running), TestContext.Current.CancellationToken);
+            await stores.ScanCheckpoints.TransitionStageAsync(new(
+                scan.Pin.ScanId, 7, ScanStage.Exact, 1, Transition(302), Succeeded),
+                TestContext.Current.CancellationToken);
+            await MoveToExactAsync(stores, scan);
+            Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+                (await CompleteAsync(stores, scan, expectedRevision: 3)).Outcome);
+        }
+        await MutateAsync(fixture, mutation);
+        var before = await WholeCheckpointFingerprintAsync(fixture);
+
+        await using var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var read = await reopened.ScanCheckpoints.ReadAsync(
+            scan.Pin.ScanId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointReadOutcome.Corrupt, read.Outcome);
+        Assert.Null(read.Lifecycle);
+        Assert.Empty(read.Stages);
+        Assert.Null(read.Accounting);
+        Assert.Equal(before, await WholeCheckpointFingerprintAsync(fixture));
+    }
+
     private static async Task BootstrapAsync(SqlitePhotoSiftStores stores, ScanIdentityRecord scan)
     {
         var token = TestContext.Current.CancellationToken;
@@ -590,6 +643,9 @@ public sealed class E2S2CheckpointAcceptanceTests
         Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
             (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
                 scan.Pin.ScanId, 1, Transition(1), ScanLifecycleState.Preflight), token)).Outcome);
+        Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
+            (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
+                scan.Pin.ScanId, 1, Transition(2), ScanLifecycleState.Enumerating), token)).Outcome);
     }
 
     private static async Task BootstrapToExactAsync(SqlitePhotoSiftStores stores, ScanIdentityRecord scan)
@@ -601,9 +657,6 @@ public sealed class E2S2CheckpointAcceptanceTests
     private static async Task MoveToExactAsync(SqlitePhotoSiftStores stores, ScanIdentityRecord scan)
     {
         var token = TestContext.Current.CancellationToken;
-        Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
-            (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
-                scan.Pin.ScanId, 1, Transition(2), ScanLifecycleState.Enumerating), token)).Outcome);
         Assert.Equal(ScanCheckpointWriteOutcome.Accepted,
             (await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
                 scan.Pin.ScanId, 2, Transition(3), ScanLifecycleState.Exact), token)).Outcome);
