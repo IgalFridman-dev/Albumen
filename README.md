@@ -1,15 +1,17 @@
 # PhotoSift
 
-PhotoSift is a privacy-first Windows 11 desktop application for safely finding and reviewing exact duplicates, near duplicates, and likely blurry photos in ordinary local folders. Analysis stays on-device, recommendations remain explainable, and no file is removed without explicit approval. Approved removals use the Windows Recycle Bin only.
+PhotoSift is a privacy-first Windows 11 desktop application for safely finding and reviewing exact and near-duplicate photos in ordinary local folders. Analysis stays on-device, results remain explainable, and no file is removed without explicit approval. Approved removals use the Windows Recycle Bin only. Blur is planned for V1.1 and Semantic/Likely Matches for V1.2.
 
 ## Project status
 
-Development status: **8 of 26 stories complete; 18 remain. Epic 1, E2-S1, and E2-S2 are complete; E2-S3 is in progress.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); E1-S6 through E2-S2 are currently stacked local branches awaiting later integration decisions. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
+Development status: **8 of 26 stories complete. Eleven lean stories remain for V1; 2 are deferred to V1.1 and 5 to V1.2. E2-S3 is in progress.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); E1-S6 through E2-S2 are currently stacked local branches awaiting later integration decisions. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
 
 Planning is complete and validated. E1-S1 through E1-S6 are done. E1-S6 adds restart-only Action Records, explicit read-only revalidation, accessible progress, and conservative unknown outcomes. Its user-facing safety behavior passed explicit manual verification after the approved two-attempt VM/timing cap stopped the real COM callback crash harness. The deferred automated edge coverage is [PM-001](docs/backlog/post-mvp.md#pm-001--harden-e1-s6-real-process-crash-boundary-automation).
 
 - Latest completed story: **E2-S2 — Persist staged Scan state and reconciled accounting (reviewed automated backend acceptance with an unrelated WPF environmental exception; neither Core nor Full is represented as PASS)**
-- Current story: **E2-S3 — Cancel, resume, and survive drive or process interruption (in progress)**
+- Current story: **E2-S3 — Close interrupted Scans safely and restart fresh (lean V1 scope; in progress)**
+- Approved YAGNI release roadmap: [`docs/superpowers/specs/2026-09-15-yagni-release-roadmap-design.md`](docs/superpowers/specs/2026-09-15-yagni-release-roadmap-design.md)
+- Lean V1 delivery plan: [`docs/superpowers/plans/2026-09-15-yagni-v1-delivery.md`](docs/superpowers/plans/2026-09-15-yagni-v1-delivery.md)
 - E2-S2 approved design: [`docs/superpowers/specs/2026-09-14-e2-s2-scan-checkpoints-design.md`](docs/superpowers/specs/2026-09-14-e2-s2-scan-checkpoints-design.md)
 - E2-S2 verification and closure: [`docs/evidence/e2-s2/verification.md`](docs/evidence/e2-s2/verification.md)
 - E2-S2 pre-release presentation follow-up: [`PM-003`](docs/backlog/post-mvp.md#pm-003--align-e2-s2-scan-detail-and-coverage-wording-before-release)
@@ -41,11 +43,11 @@ The mandatory first-epic sequence is:
 E1-S1 -> E1-S2 -> E1-S3 -> E1-S4 -> E1-S5 -> E1-S6 safety gate
 ```
 
-Epic 1 completed on 2026-09-14 through the explicitly approved E1-S6 manual fallback. Epic 2 is now unlocked and follows its own dependency order. Semantic or Likely Matches work remains in Epic 4 and still depends on the earlier persistence and visual-analysis foundations.
+Epic 1 completed on 2026-09-14 through the explicitly approved E1-S6 manual fallback. The 2026-09-15 YAGNI reset makes Exact/Near cleanup the V1 product: Signature reuse and Blur are V1.1; Semantic/Likely Matches is V1.2.
 
 ## Product boundary
 
-The MVP is a native, offline-first Windows application built as a hexagonal modular monolith. It analyzes one explicitly selected local folder, keeps source-photo mutation behind a durable and revalidated Action boundary, and degrades optional semantic capability without blocking the core cleanup workflow.
+V1 is a native, offline-first Windows application built as a hexagonal modular monolith. It analyzes one explicitly selected local folder, finds Exact and conservative Near Duplicates, supports manual grouped Review, and keeps source-photo mutation behind a durable and revalidated Action boundary.
 
 The project deliberately excludes cloud inference, accounts, telemetry, automatic or permanent deletion, and general-purpose photo-library management.
 
@@ -56,7 +58,7 @@ The project deliberately excludes cloud inference, accounts, telemetry, automati
 3. Run its required automated, integration, and platform evidence.
 4. Review the change before marking the story done.
 5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
-6. Follow `sprint-status.yaml`; E2-S3 is the active story. PM-002 and PM-003 are pre-release obligations and do not block its backend work.
+6. Follow the YAGNI roadmap and `sprint-status.yaml`; E2-S3 lean interruption closure is active. PM-002 and PM-003 are pre-release obligations.
 
 The repository contains the .NET 10/C# 14/WPF `win-x64` application with exact local Scope selection/preflight, Exact duplicate detection, survivor-safe Review Selection, durable override evidence, one-item Recycle Bin execution through the sole Action owner, completed E1-S6 restart reconciliation, and an exact version-5 SQLite foundation with durable Scan identity, `Enumeration`/`Exact` checkpoints, and reconciled row-truth accounting, plus five test projects and a NIC-free Golden Hyper-V VM verification gate. Review approval supplies an exact sealed request; fresh authority/survivor checks and durable Requested/Executing commits must still precede every shell call. Uncertain or interrupted work is never automatically replayed.
 
