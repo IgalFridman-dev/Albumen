@@ -19,6 +19,8 @@ namespace PhotoSift.App.Shell;
 
 public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 {
+    private const string ActiveScanClearStatus =
+        "Local Scan data was retained because a Scan is active. Wait for it to finish, or cancel it, then try again.";
     private readonly IChooseScopeWorkflow chooseScopeWorkflow;
     private readonly IPhotoSiftWorkflow? photoWorkflow;
     private readonly IReviewDialogService? reviewDialog;
@@ -92,9 +94,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         RevalidateUnknownCommand = new AsyncCommand(RevalidateUnknownAsync,
             canExecute: () => CanRevalidateUnknownItems);
         RequestClearScanDataCommand = new AsyncCommand(RequestClearScanDataAsync,
-            canExecute: () => localScanDataControl is not null && !IsClearScanDataConfirmationPending);
+            canExecute: () => localScanDataControl is not null
+                && !IsScanBusy && !IsClearScanDataConfirmationPending);
         ConfirmClearScanDataCommand = new AsyncCommand(ConfirmClearScanDataAsync,
-            canExecute: () => localScanDataControl is not null && IsClearScanDataConfirmationPending);
+            canExecute: () => localScanDataControl is not null
+                && !IsScanBusy && IsClearScanDataConfirmationPending);
         CancelClearScanDataCommand = new AsyncCommand(CancelClearScanDataAsync,
             canExecute: () => IsClearScanDataConfirmationPending);
         NavigateCommand = new AsyncCommand(parameter => photoWorkflow is not null && parameter is WorkflowPhase phase
@@ -424,6 +428,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var previousCanConfirm = CanConfirmExactRules;
         Apply(snapshot.Scope);
         photoSnapshot = snapshot;
+        if (IsScanBusy && IsClearScanDataConfirmationPending)
+            RetainScanDataForActiveScan();
         ProjectAction(previousAction, previousActionReview, snapshot);
         ProjectActionRecovery(previousRecovery, snapshot.ActionRecovery);
         Phases = Project(snapshot.Phases);
@@ -457,7 +463,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             nameof(ScanOutcomeSummaries) })
             OnPropertyChanged(name);
         if (!preserveReviewProjection) OnPropertyChanged(nameof(ExactGroups));
-        if (previousBusy != IsScanBusy) OnPropertyChanged(nameof(IsScanBusy));
+        if (previousBusy != IsScanBusy)
+        {
+            RequestClearScanDataCommand.NotifyCanExecuteChanged();
+            ConfirmClearScanDataCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(IsScanBusy));
+        }
         if (previousCanConfirm != CanConfirmExactRules) OnPropertyChanged(nameof(CanConfirmExactRules));
         if (previousStatus != ScanStatus) OnPropertyChanged(nameof(ScanStatus));
         if (previousPhase != CurrentPhase) OnPropertyChanged(nameof(CurrentPhase));
@@ -466,6 +477,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private Task RequestClearScanDataAsync()
     {
         if (localScanDataControl is null) return Task.CompletedTask;
+        if (IsScanBusy)
+        {
+            RetainScanDataForActiveScan();
+            return Task.CompletedTask;
+        }
         LocalDataClearStatus = string.Empty;
         IsClearScanDataConfirmationPending = true;
         return Task.CompletedTask;
@@ -480,6 +496,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private async Task ConfirmClearScanDataAsync()
     {
         if (localScanDataControl is null || !IsClearScanDataConfirmationPending) return;
+        if (IsScanBusy)
+        {
+            RetainScanDataForActiveScan();
+            return;
+        }
         IsClearScanDataConfirmationPending = false;
         LocalDataClearStatus = "Clearing local Scan data…";
         try
@@ -492,6 +513,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             LocalDataClearStatus =
                 "Local Scan data could not be cleared and was retained. Check the local database, then try again.";
         }
+    }
+
+    private void RetainScanDataForActiveScan()
+    {
+        IsClearScanDataConfirmationPending = false;
+        LocalDataClearStatus = ActiveScanClearStatus;
     }
 
     private static bool IsCouldNotAnalyze(ScanFileOccurrence row) => row.Exact.State switch

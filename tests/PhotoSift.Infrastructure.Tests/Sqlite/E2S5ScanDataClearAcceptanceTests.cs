@@ -37,7 +37,7 @@ public sealed class E2S5ScanDataClearAcceptanceTests
 
         Assert.Equal(ScanDataClearOutcome.Cleared, result.Outcome);
         Assert.Equal(1, result.ClearedScanCount);
-        Assert.Equal(0, result.RetainedScanCount);
+        Assert.Equal<long?>(0, result.RetainedScanCount);
         await using var verify = await fixture.OpenRawAsync(SqliteOpenMode.ReadOnly);
         Assert.Equal("0|0|0|0|0", await ScalarAsync(verify, """
             SELECT
@@ -89,7 +89,7 @@ public sealed class E2S5ScanDataClearAcceptanceTests
 
         Assert.Equal(ScanDataClearOutcome.BlockedByActionReconciliation, result.Outcome);
         Assert.Equal(0, result.ClearedScanCount);
-        Assert.Equal(1, result.RetainedScanCount);
+        Assert.Equal<long?>(1, result.RetainedScanCount);
         Assert.Equal(
             "Local Scan data was retained because an Action is unfinished or unknown. Reconcile the Action record, then try again.",
             result.Message);
@@ -112,7 +112,7 @@ public sealed class E2S5ScanDataClearAcceptanceTests
 
         Assert.Equal(ScanDataClearOutcome.RetainedDatabaseFailure, result.Outcome);
         Assert.Equal(0, result.ClearedScanCount);
-        Assert.Equal(1, result.RetainedScanCount);
+        Assert.Equal<long?>(1, result.RetainedScanCount);
         Assert.Equal(
             "Local Scan data could not be cleared and was retained. Check the local database, then try again.",
             result.Message);
@@ -125,6 +125,25 @@ public sealed class E2S5ScanDataClearAcceptanceTests
               (SELECT COUNT(*) FROM scan_file_occurrences) || '|' ||
               (SELECT COUNT(*) FROM scans);
             """));
+    }
+
+    [Fact]
+    public async Task SchemaFailureBeforeScanCountReportsRetentionAsUnknown()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        await using (var incompatible = await fixture.OpenRawAsync(SqliteOpenMode.ReadWriteCreate))
+            await ExecuteAsync(incompatible, "PRAGMA user_version=99;");
+        await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+
+        var result = await stores.ScanData.ClearAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanDataClearOutcome.RetainedDatabaseFailure, result.Outcome);
+        Assert.Equal(0, result.ClearedScanCount);
+        long? retainedScanCount = result.RetainedScanCount;
+        Assert.False(retainedScanCount.HasValue);
+        Assert.Equal(
+            "Local Scan data could not be cleared and was retained. Check the local database, then try again.",
+            result.Message);
     }
 
     [Fact]

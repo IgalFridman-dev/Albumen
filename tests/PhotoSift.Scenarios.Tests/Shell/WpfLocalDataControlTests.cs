@@ -10,6 +10,8 @@ using System.Windows.Threading;
 using PhotoSift.App;
 using PhotoSift.App.Shell;
 using PhotoSift.Application.LocalData;
+using PhotoSift.Application.Scan;
+using PhotoSift.Domain.Workflow;
 using Xunit;
 
 namespace PhotoSift.Scenarios.Tests.Shell;
@@ -69,8 +71,9 @@ public sealed class WpfLocalDataControlTests
                 Assert.True(viewModel.IsClearScanDataConfirmationPending);
                 Assert.True(confirm.IsVisible && confirm.IsEnabled && confirm.IsTabStop && confirm.Focusable);
                 Assert.True(confirm.IsKeyboardFocusWithin);
-                await viewModel.ConfirmClearScanDataCommand.ExecuteAsync();
-                Drain();
+                InvokeButton(confirm);
+                PumpUntil(() => control.Calls == 1 && status.Text ==
+                    "Local Scan data was cleared. Source photos and Action records were unchanged.");
 
                 Assert.Equal(1, control.Calls);
                 Assert.False(confirm.IsVisible);
@@ -78,6 +81,8 @@ public sealed class WpfLocalDataControlTests
                     "Local Scan data was cleared. Source photos and Action records were unchanged.",
                     status.Text);
                 Assert.Equal(status.Text, AutomationProperties.GetItemStatus(status));
+                Assert.True(status.Focusable);
+                Assert.True(status.IsKeyboardFocusWithin);
             }
             finally
             {
@@ -85,6 +90,76 @@ public sealed class WpfLocalDataControlTests
                 await viewModel.DisposeAsync();
             }
         });
+    }
+
+    [Fact]
+    public void CancelConfirmationRestoresKeyboardFocusToClearRequest()
+    {
+        RunOnSta(async () =>
+        {
+            var fixture = new ExactShellFixture();
+            var viewModel = new ShellViewModel(
+                fixture.Scope, fixture.Workflow, localScanDataControl: new RecordingScanDataControl());
+            var window = new MainWindow { DataContext = viewModel };
+            try
+            {
+                window.Show();
+                window.Activate();
+                Drain();
+                var request = Assert.IsType<Button>(window.FindName("ClearScanDataButton"));
+                var confirm = Assert.IsType<Button>(window.FindName("ConfirmClearScanDataButton"));
+                Assert.True(request.Focus());
+                Keyboard.Focus(request);
+                Assert.True(request.IsKeyboardFocusWithin);
+                InvokeButton(request);
+                PumpUntil(() => viewModel.IsClearScanDataConfirmationPending
+                    && confirm.IsVisible && confirm.IsEnabled);
+                var cancel = WpfReviewSelectionTests.Descendants<Button>(window).Single(button =>
+                    AutomationProperties.GetName(button) == "Cancel clearing local Scan data");
+
+                InvokeButton(cancel);
+                PumpUntil(() => !viewModel.IsClearScanDataConfirmationPending
+                    && request.IsVisible && request.IsEnabled);
+
+                Assert.True(request.IsKeyboardFocusWithin);
+            }
+            finally
+            {
+                window.Close();
+                await viewModel.DisposeAsync();
+            }
+        });
+    }
+
+    [Fact]
+    public async Task ActiveScanDisablesClearAndClosesEarlierConfirmationWithWaitOrCancelResult()
+    {
+        var fixture = new ExactShellFixture();
+        var control = new RecordingScanDataControl(new(
+            ScanDataClearOutcome.Cleared, 1, 0, "must not clear"));
+        var viewModel = new ShellViewModel(
+            fixture.Scope, fixture.Workflow, localScanDataControl: control);
+        var requestAvailabilityChanges = 0;
+        var confirmAvailabilityChanges = 0;
+        viewModel.RequestClearScanDataCommand.CanExecuteChanged += (_, _) => requestAvailabilityChanges++;
+        viewModel.ConfirmClearScanDataCommand.CanExecuteChanged += (_, _) => confirmAvailabilityChanges++;
+        await viewModel.RequestClearScanDataCommand.ExecuteAsync();
+        Assert.True(viewModel.IsClearScanDataConfirmationPending);
+        var requestChangesBeforeBusy = requestAvailabilityChanges;
+        var confirmChangesBeforeBusy = confirmAvailabilityChanges;
+
+        fixture.PublishPhase(WorkflowPhase.Scan, ScanStatus.Running);
+
+        Assert.False(viewModel.RequestClearScanDataCommand.CanExecute(null));
+        Assert.False(viewModel.ConfirmClearScanDataCommand.CanExecute(null));
+        Assert.False(viewModel.IsClearScanDataConfirmationPending);
+        Assert.True(requestAvailabilityChanges > requestChangesBeforeBusy);
+        Assert.True(confirmAvailabilityChanges > confirmChangesBeforeBusy);
+        Assert.Equal(
+            "Local Scan data was retained because a Scan is active. Wait for it to finish, or cancel it, then try again.",
+            viewModel.LocalDataClearStatus);
+        await viewModel.ConfirmClearScanDataCommand.ExecuteAsync();
+        Assert.Equal(0, control.Calls);
     }
 
     [Fact]
@@ -118,6 +193,21 @@ public sealed class WpfLocalDataControlTests
         Dispatcher.CurrentDispatcher.BeginInvoke(
             DispatcherPriority.Background, new Action(() => frame.Continue = false));
         Dispatcher.PushFrame(frame);
+    }
+
+    private static void InvokeButton(Button button)
+    {
+        var peer = UIElementAutomationPeer.CreatePeerForElement(button);
+        Assert.NotNull(peer);
+        Assert.IsAssignableFrom<IInvokeProvider>(peer.GetPattern(PatternInterface.Invoke)).Invoke();
+    }
+
+    private static void PumpUntil(Func<bool> condition)
+    {
+        var waitingSince = Stopwatch.GetTimestamp();
+        while (!condition() && Stopwatch.GetElapsedTime(waitingSince) < TimeSpan.FromSeconds(2))
+            WpfReviewSelectionTests.Drain();
+        Assert.True(condition(), "The WPF postcondition did not settle before the two-second deadline.");
     }
 
     private static void RunOnSta(Func<Task> action)

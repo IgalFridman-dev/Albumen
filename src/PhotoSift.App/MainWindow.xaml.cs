@@ -204,37 +204,48 @@ public partial class MainWindow : Window
         object sender,
         DependencyPropertyChangedEventArgs eventArgs)
     {
-        if (eventArgs.NewValue is not true) return;
         Dispatcher.InvokeAsync(() =>
         {
-            if (!ReferenceEquals(sender, ConfirmClearScanDataButton)
-                || shellViewModel?.IsClearScanDataConfirmationPending is not true
-                || !ConfirmClearScanDataButton.IsVisible
-                || !ConfirmClearScanDataButton.IsEnabled)
+            if (!ReferenceEquals(sender, ConfirmClearScanDataButton)) return;
+            if (eventArgs.NewValue is true)
+            {
+                if (shellViewModel?.IsClearScanDataConfirmationPending is not true
+                    || !ConfirmClearScanDataButton.IsVisible
+                    || !ConfirmClearScanDataButton.IsEnabled)
+                    return;
+                Activate();
+                ConfirmClearScanDataButton.Focus();
+                Keyboard.Focus(ConfirmClearScanDataButton);
+                return;
+            }
+            if (shellViewModel?.IsClearScanDataConfirmationPending is true
+                || !string.IsNullOrEmpty(shellViewModel?.LocalDataClearStatus)
+                || !ClearScanDataButton.IsVisible
+                || !ClearScanDataButton.IsEnabled)
                 return;
             Activate();
-            ConfirmClearScanDataButton.Focus();
-            Keyboard.Focus(ConfirmClearScanDataButton);
+            ClearScanDataButton.Focus();
+            Keyboard.Focus(ClearScanDataButton);
         }, DispatcherPriority.Input);
     }
 
     private void QueueLocalDataClearStatusAnnouncement()
     {
-        var generation = dataContextGeneration;
-        var expected = shellViewModel;
-        var status = expected?.LocalDataClearStatus;
+        var status = shellViewModel?.LocalDataClearStatus;
         if (string.IsNullOrWhiteSpace(status)) return;
         Dispatcher.InvokeAsync(() =>
         {
-            if (isClosed || generation != dataContextGeneration
-                || !ReferenceEquals(expected, shellViewModel)
+            if (isClosed || shellViewModel?.LocalDataClearStatus != status
                 || LocalDataClearStatusText.Text != status
                 || AutomationProperties.GetItemStatus(LocalDataClearStatusText) != status)
                 return;
             var peer = UIElementAutomationPeer.FromElement(LocalDataClearStatusText)
                 ?? UIElementAutomationPeer.CreatePeerForElement(LocalDataClearStatusText);
             peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
-        }, DispatcherPriority.Background);
+            Activate();
+            LocalDataClearStatusText.Focus();
+            Keyboard.Focus(LocalDataClearStatusText);
+        }, DispatcherPriority.Input);
     }
 
     private void QueueScopeStatusAnnouncement()

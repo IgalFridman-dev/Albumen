@@ -10,7 +10,7 @@ public enum ScanDataClearOutcome
 public sealed record ScanDataClearResult(
     ScanDataClearOutcome Outcome,
     long ClearedScanCount,
-    long RetainedScanCount,
+    long? RetainedScanCount,
     string Message);
 
 public interface ILocalScanDataControl

@@ -17,7 +17,7 @@ internal sealed class SqliteScanDataControl(SqliteDatabaseOwner owner) : ILocalS
 
     public async ValueTask<ScanDataClearResult> ClearAsync(CancellationToken cancellationToken)
     {
-        long retainedScanCount = 0;
+        long? retainedScanCount = null;
         try
         {
             return await owner.RunWriteAsync(SqliteWriteDurability.Normal, async (connection, token) =>
@@ -48,7 +48,7 @@ internal sealed class SqliteScanDataControl(SqliteDatabaseOwner owner) : ILocalS
                 await transaction.CommitAsync(token).ConfigureAwait(false);
                 return new ScanDataClearResult(
                     ScanDataClearOutcome.Cleared,
-                    retainedScanCount,
+                    retainedScanCount.Value,
                     0,
                     ClearedMessage);
             }, cancellationToken).ConfigureAwait(false);
