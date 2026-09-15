@@ -110,6 +110,10 @@ public partial class MainWindow : Window
         {
             QueueActionRecoveryAnnouncement();
         }
+        if (eventArgs.PropertyName == nameof(ShellViewModel.LocalDataClearStatus))
+        {
+            QueueLocalDataClearStatusAnnouncement();
+        }
         if (eventArgs.PropertyName == nameof(ShellViewModel.ReviewAnnouncement))
         {
             QueueReviewFailureAnnouncement();
@@ -195,6 +199,43 @@ public partial class MainWindow : Window
                 Keyboard.Focus(BlockingNotice);
             },
             DispatcherPriority.Input);
+
+    private void OnClearScanDataConfirmationVisibilityChanged(
+        object sender,
+        DependencyPropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.NewValue is not true) return;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (!ReferenceEquals(sender, ConfirmClearScanDataButton)
+                || shellViewModel?.IsClearScanDataConfirmationPending is not true
+                || !ConfirmClearScanDataButton.IsVisible
+                || !ConfirmClearScanDataButton.IsEnabled)
+                return;
+            Activate();
+            ConfirmClearScanDataButton.Focus();
+            Keyboard.Focus(ConfirmClearScanDataButton);
+        }, DispatcherPriority.Input);
+    }
+
+    private void QueueLocalDataClearStatusAnnouncement()
+    {
+        var generation = dataContextGeneration;
+        var expected = shellViewModel;
+        var status = expected?.LocalDataClearStatus;
+        if (string.IsNullOrWhiteSpace(status)) return;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || generation != dataContextGeneration
+                || !ReferenceEquals(expected, shellViewModel)
+                || LocalDataClearStatusText.Text != status
+                || AutomationProperties.GetItemStatus(LocalDataClearStatusText) != status)
+                return;
+            var peer = UIElementAutomationPeer.FromElement(LocalDataClearStatusText)
+                ?? UIElementAutomationPeer.CreatePeerForElement(LocalDataClearStatusText);
+            peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        }, DispatcherPriority.Background);
+    }
 
     private void QueueScopeStatusAnnouncement()
     {

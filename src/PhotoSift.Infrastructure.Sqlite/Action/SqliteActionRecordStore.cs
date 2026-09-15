@@ -15,20 +15,8 @@ internal sealed class SqliteActionRecordStore(SqliteDatabaseOwner owner) : IActi
             {
                 await using var transaction = connection.BeginTransaction(deferred: true);
                 await PhotoSiftSchema.ValidateAsync(connection, PhotoSiftSchema.Version, token, transaction).ConfigureAwait(false);
-                var journal = await SqliteActionJournalStore.LoadJournalAsync(connection, transaction, token).ConfigureAwait(false);
-                var rows = await ReadRowsAsync(connection, transaction, token).ConfigureAwait(false);
-                var facts = ValidateRows(rows);
-                ValidateReferences(journal, facts);
-                var byItem = facts.GroupBy(value => value.ActionItemId).ToDictionary(group => group.Key,
-                    group => group.ToImmutableArray());
-                var items = journal.Select(item =>
-                {
-                    byItem.TryGetValue(item.Requested.ActionItemId, out var observations);
-                    observations = observations.IsDefault ? [] : observations;
-                    ValidateResolution(item.Terminal, observations);
-                    return item with { Revalidations = observations };
-                }).ToImmutableArray();
-                return new ActionRecordLoadResult(ActionRecordLoadOutcome.Loaded, items);
+                return new ActionRecordLoadResult(ActionRecordLoadOutcome.Loaded,
+                    await LoadInTransactionAsync(connection, transaction, token).ConfigureAwait(false));
             }, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (Unavailable(exception))
@@ -36,6 +24,27 @@ internal sealed class SqliteActionRecordStore(SqliteDatabaseOwner owner) : IActi
             if (exception is ObjectDisposedException) throw;
             return new(ActionRecordLoadOutcome.Unavailable, []);
         }
+    }
+
+    internal static async Task<ImmutableArray<PersistedActionItem>> LoadInTransactionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken token)
+    {
+        var journal = await SqliteActionJournalStore.LoadJournalAsync(
+            connection, transaction, token).ConfigureAwait(false);
+        var rows = await ReadRowsAsync(connection, transaction, token).ConfigureAwait(false);
+        var facts = ValidateRows(rows);
+        ValidateReferences(journal, facts);
+        var byItem = facts.GroupBy(value => value.ActionItemId).ToDictionary(
+            group => group.Key, group => group.ToImmutableArray());
+        return journal.Select(item =>
+        {
+            byItem.TryGetValue(item.Requested.ActionItemId, out var observations);
+            observations = observations.IsDefault ? [] : observations;
+            ValidateResolution(item.Terminal, observations);
+            return item with { Revalidations = observations };
+        }).ToImmutableArray();
     }
 
     public ValueTask<ActionRevalidationWriteResult> AppendRevalidationAsync(ActionRevalidationFact fact,

@@ -245,6 +245,11 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
         observer?.AfterCheckpointAuthoritativeWrite?.Invoke(connection, transaction, token)
         ?? ValueTask.CompletedTask;
 
+    internal ValueTask AfterScanDataChildrenDeletedAsync(
+        SqliteConnection connection, SqliteTransaction transaction, CancellationToken token) =>
+        observer?.AfterScanDataChildrenDeleted?.Invoke(connection, transaction, token)
+        ?? ValueTask.CompletedTask;
+
     private void CompleteWriteAdmission()
     {
         lock (lifecycle)
@@ -371,4 +376,5 @@ internal sealed record SqliteDatabaseObserver(
     Func<int, SqliteConnection, CancellationToken, ValueTask>? MigrationStep = null,
     Func<SqliteConnection, CancellationToken, ValueTask>? BeforeActionTransaction = null,
     Func<SqliteConnection, SqliteTransaction, CancellationToken, ValueTask>? AfterActionInsert = null,
-    Func<SqliteConnection, SqliteTransaction, CancellationToken, ValueTask>? AfterCheckpointAuthoritativeWrite = null);
+    Func<SqliteConnection, SqliteTransaction, CancellationToken, ValueTask>? AfterCheckpointAuthoritativeWrite = null,
+    Func<SqliteConnection, SqliteTransaction, CancellationToken, ValueTask>? AfterScanDataChildrenDeleted = null);

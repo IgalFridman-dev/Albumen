@@ -59,7 +59,7 @@ public static class CompositionRoot
             review,
             stores);
         var dialog = new WpfReviewDialogService(() => System.Windows.Application.Current?.MainWindow);
-        return new ShellViewModel(workflow, photoWorkflow, dialog);
+        return new ShellViewModel(workflow, photoWorkflow, dialog, stores.ScanData);
     }
 
     private sealed class OwnedPhotoSiftWorkflow(

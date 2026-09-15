@@ -51,6 +51,7 @@ public sealed class ScanOccurrenceViewModel
             : "Unknown physical identity";
         PathKind = isAlias ? "Alias path to the same physical file" : "Physical file";
         Allocation = $"Allocation: {occurrence.Allocation.AllocatedBytes?.ToString(CultureInfo.InvariantCulture) ?? "unknown"} bytes; links: {occurrence.Allocation.LinkCount?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; metadata {(occurrence.Allocation.Stable ? "stable" : "unavailable or unstable")}";
+        (OutcomeLabel, NextStep) = DescribeOutcome(occurrence);
         ToggleSelectionCommand = toggle;
         IsSelected = selected;
         EligibilityText = "Not part of the active Review";
@@ -62,6 +63,8 @@ public sealed class ScanOccurrenceViewModel
     public string DiscoveredPath { get; }
     public string ResolvedPath { get; }
     public string Outcome { get; }
+    public string OutcomeLabel { get; }
+    public string NextStep { get; }
     public string ByteLength { get; }
     public string PhysicalIdentity { get; }
     public string PathKind { get; }
@@ -74,4 +77,29 @@ public sealed class ScanOccurrenceViewModel
     public string AutomationName { get; }
     public string ItemStatus { get; }
     public AsyncCommand? ToggleSelectionCommand { get; }
+
+    private static (string Label, string NextStep) DescribeOutcome(ScanFileOccurrence occurrence)
+    {
+        var state = occurrence.Exact.State == ScanStageState.NotApplicable
+            ? occurrence.Enumerate.State
+            : occurrence.Exact.State;
+        return state switch
+        {
+            ScanStageState.Unsupported => (
+                "Unsupported",
+                "Use a supported JPEG or PNG file, then start a fresh Scan."),
+            ScanStageState.Canceled => (
+                "Canceled/unprocessed",
+                "Start a fresh Scan to analyze this file."),
+            ScanStageState.FailedRetryable or ScanStageState.FailedTerminal => (
+                "Failed",
+                "Check file access and health, then start a fresh Scan."),
+            ScanStageState.Pending or ScanStageState.Running => (
+                "Outstanding",
+                "Wait for this Scan to finish, or cancel it and start a fresh Scan."),
+            _ => (
+                "Analyzed acceptable",
+                "No duplicate candidate was found. Keep it, or scan again after the file changes."),
+        };
+    }
 }

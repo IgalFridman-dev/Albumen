@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using PhotoSift.Application.Review;
 using PhotoSift.Application.Action;
+using PhotoSift.Application.LocalData;
 using PhotoSift.Domain.Action;
 using PhotoSift.Application.Shell;
 using ScanSessionStatus = PhotoSift.Application.Scan.ScanStatus;
@@ -21,6 +22,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IChooseScopeWorkflow chooseScopeWorkflow;
     private readonly IPhotoSiftWorkflow? photoWorkflow;
     private readonly IReviewDialogService? reviewDialog;
+    private readonly ILocalScanDataControl? localScanDataControl;
     private PhotoSiftSnapshot? photoSnapshot;
     private ShellSnapshot? currentSnapshot;
     private ImmutableArray<PhaseItemViewModel> phases = [];
@@ -56,6 +58,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string approvalAutomationStatus = string.Empty;
     private string actionAnnouncement = string.Empty;
     private string actionRecoveryAnnouncement = string.Empty;
+    private bool isClearScanDataConfirmationPending;
+    private string localDataClearStatus = string.Empty;
     private readonly ObservableCollection<ActionItemViewModel> actionRows = [];
     private readonly ObservableCollection<ActionRecordViewModel> actionRecoveryRecords = [];
     private readonly object lifetime = new();
@@ -87,6 +91,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ApproveReviewCommand = new AsyncCommand(ApproveReviewAsync);
         RevalidateUnknownCommand = new AsyncCommand(RevalidateUnknownAsync,
             canExecute: () => CanRevalidateUnknownItems);
+        RequestClearScanDataCommand = new AsyncCommand(RequestClearScanDataAsync,
+            canExecute: () => localScanDataControl is not null && !IsClearScanDataConfirmationPending);
+        ConfirmClearScanDataCommand = new AsyncCommand(ConfirmClearScanDataAsync,
+            canExecute: () => localScanDataControl is not null && IsClearScanDataConfirmationPending);
+        CancelClearScanDataCommand = new AsyncCommand(CancelClearScanDataAsync,
+            canExecute: () => IsClearScanDataConfirmationPending);
         NavigateCommand = new AsyncCommand(parameter => photoWorkflow is not null && parameter is WorkflowPhase phase
             ? photoWorkflow.NavigateAsync(phase) : parameter is WorkflowPhase.ChooseScope
                 ? this.chooseScopeWorkflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None) : Task.CompletedTask);
@@ -95,10 +105,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
 
     public ShellViewModel(IChooseScopeWorkflow scope, IPhotoSiftWorkflow workflow,
-        IReviewDialogService? reviewDialog = null) : this(scope)
+        IReviewDialogService? reviewDialog = null,
+        ILocalScanDataControl? localScanDataControl = null) : this(scope)
     {
         photoWorkflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
         this.reviewDialog = reviewDialog;
+        this.localScanDataControl = localScanDataControl;
         workflow.SnapshotChanged += OnPhotoSnapshotChanged;
         ApplyCombined(workflow.Current);
     }
@@ -110,7 +122,29 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand OpenReviewCommand { get; }
     public AsyncCommand ApproveReviewCommand { get; }
     public AsyncCommand RevalidateUnknownCommand { get; }
+    public AsyncCommand RequestClearScanDataCommand { get; }
+    public AsyncCommand ConfirmClearScanDataCommand { get; }
+    public AsyncCommand CancelClearScanDataCommand { get; }
     public AsyncCommand NavigateCommand { get; }
+    public bool HasLocalScanDataControl => localScanDataControl is not null;
+    public bool IsClearScanDataConfirmationPending
+    {
+        get => isClearScanDataConfirmationPending;
+        private set
+        {
+            if (isClearScanDataConfirmationPending == value) return;
+            isClearScanDataConfirmationPending = value;
+            RequestClearScanDataCommand.NotifyCanExecuteChanged();
+            ConfirmClearScanDataCommand.NotifyCanExecuteChanged();
+            CancelClearScanDataCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged();
+        }
+    }
+    public string LocalDataClearStatus
+    {
+        get => localDataClearStatus;
+        private set => SetField(ref localDataClearStatus, value);
+    }
     public WorkflowPhase CurrentPhase => photoSnapshot?.CurrentPhase ?? WorkflowPhase.ChooseScope;
     internal ReviewSessionPin? ReviewSession => photoSnapshot?.Review.Pin;
     public bool IsChooseScopePhase => CurrentPhase == WorkflowPhase.ChooseScope;
@@ -173,11 +207,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public string ScanCountsText => photoSnapshot is { Scan.Counts: var count }
         ? $"Discovered: {count.Discovered}; Analyzed: {count.Analyzed}; Unsupported: {count.Unsupported}; Failed: {count.Failed}; Canceled: {count.Canceled}; Outstanding: {count.Outstanding}" : string.Empty;
     public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
-        ? "Complete scope coverage. Read failures and exclusions are reported separately."
+        ? "Complete scope coverage. Unsupported, failed, and canceled/unprocessed files are reported separately."
         : "Partial results — incomplete scope coverage. Results do not represent every file in the Scope.";
     public string ReviewDisclaimer { get; } = "Analyzed revisions; scan again after files change. Results are memory-only and are not restored after restart.";
     public ImmutableArray<ExactGroupViewModel> ExactGroups { get; private set; } = [];
     public ImmutableArray<ScanOccurrenceViewModel> CouldNotAnalyze { get; private set; } = [];
+    public ImmutableArray<ScanOutcomeSummaryItemViewModel> ScanOutcomeSummaries { get; private set; } = [];
 
     public string SelectionSummary
     {
@@ -403,8 +438,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                     (kind, ids) => ChangeReviewSelectionAsync(group.Candidate.GroupId, kind, ids))).ToImmutableArray();
         }
         CouldNotAnalyze = snapshot.Scan.Occurrences
-            .Where(row => row.Exact.State is ScanStageState.FailedRetryable or ScanStageState.FailedTerminal or ScanStageState.Canceled)
+            .Where(IsCouldNotAnalyze)
             .Select(row => new ScanOccurrenceViewModel(row)).ToImmutableArray();
+        ScanOutcomeSummaries = ProjectOutcomeSummaries(snapshot.Scan);
         ProjectReview(snapshot.Review);
         if (snapshot.Review.Pin is not null && snapshot.Review.Status == ReviewStatus.Faulted
             && (previousReview is null || previousReview.Pin != snapshot.Review.Pin || previousReview.Status != ReviewStatus.Faulted
@@ -417,13 +453,89 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (previousReviewStatusText != ReviewStatusText) OnPropertyChanged(nameof(ReviewStatusText));
         foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsScanPhase), nameof(IsReviewPhase), nameof(IsActionPhase),
             nameof(CanContinue), nameof(CanStartScan), nameof(CanOpenReview),
-            nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze) })
+            nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze),
+            nameof(ScanOutcomeSummaries) })
             OnPropertyChanged(name);
         if (!preserveReviewProjection) OnPropertyChanged(nameof(ExactGroups));
         if (previousBusy != IsScanBusy) OnPropertyChanged(nameof(IsScanBusy));
         if (previousCanConfirm != CanConfirmExactRules) OnPropertyChanged(nameof(CanConfirmExactRules));
         if (previousStatus != ScanStatus) OnPropertyChanged(nameof(ScanStatus));
         if (previousPhase != CurrentPhase) OnPropertyChanged(nameof(CurrentPhase));
+    }
+
+    private Task RequestClearScanDataAsync()
+    {
+        if (localScanDataControl is null) return Task.CompletedTask;
+        LocalDataClearStatus = string.Empty;
+        IsClearScanDataConfirmationPending = true;
+        return Task.CompletedTask;
+    }
+
+    private Task CancelClearScanDataAsync()
+    {
+        IsClearScanDataConfirmationPending = false;
+        return Task.CompletedTask;
+    }
+
+    private async Task ConfirmClearScanDataAsync()
+    {
+        if (localScanDataControl is null || !IsClearScanDataConfirmationPending) return;
+        IsClearScanDataConfirmationPending = false;
+        LocalDataClearStatus = "Clearing local Scan data…";
+        try
+        {
+            var result = await localScanDataControl.ClearAsync(CancellationToken.None);
+            LocalDataClearStatus = result.Message;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LocalDataClearStatus =
+                "Local Scan data could not be cleared and was retained. Check the local database, then try again.";
+        }
+    }
+
+    private static bool IsCouldNotAnalyze(ScanFileOccurrence row) => row.Exact.State switch
+    {
+        ScanStageState.Unsupported or ScanStageState.FailedRetryable or ScanStageState.FailedTerminal
+            or ScanStageState.Canceled or ScanStageState.Pending or ScanStageState.Running => true,
+        ScanStageState.NotApplicable => row.Enumerate.State is ScanStageState.Unsupported
+            or ScanStageState.FailedRetryable or ScanStageState.FailedTerminal or ScanStageState.Canceled
+            or ScanStageState.Pending or ScanStageState.Running,
+        _ => false,
+    };
+
+    private static ImmutableArray<ScanOutcomeSummaryItemViewModel> ProjectOutcomeSummaries(
+        PhotoSift.Application.Scan.ScanSnapshot scan)
+    {
+        var uncertainIds = scan.Groups.Where(group => group.Uncertain)
+            .SelectMany(group => group.Members)
+            .Select(member => member.Token.OccurrenceId)
+            .ToHashSet();
+        var candidateIds = scan.Groups.Where(group => !group.Uncertain)
+            .SelectMany(group => group.Members)
+            .Select(member => member.Token.OccurrenceId)
+            .Where(id => !uncertainIds.Contains(id))
+            .ToHashSet();
+        var acceptable = scan.Occurrences.LongCount(row =>
+            row.Exact.State == ScanStageState.Succeeded
+            && !candidateIds.Contains(row.Token.OccurrenceId)
+            && !uncertainIds.Contains(row.Token.OccurrenceId));
+        return
+        [
+            new("Candidate", candidateIds.Count, "Review the group and choose manually."),
+            new("Analyzed acceptable", acceptable,
+                "No duplicate candidate was found. Keep it, or scan again after the file changes."),
+            new("Uncertain", uncertainIds.Count,
+                "Review it before selecting; PhotoSift could not classify it confidently."),
+            new("Unsupported", scan.Counts.Unsupported,
+                "Use a supported JPEG or PNG file, then start a fresh Scan."),
+            new("Canceled/unprocessed", scan.Counts.Canceled,
+                "Start a fresh Scan to analyze this file."),
+            new("Failed", scan.Counts.Failed,
+                "Check file access and health, then start a fresh Scan."),
+            new("Outstanding", scan.Counts.Outstanding,
+                "Wait for this Scan to finish, or cancel it and start a fresh Scan."),
+        ];
     }
 
     private void ProjectAction(ActionSnapshot? previous, ReviewSnapshot? previousReview, PhotoSiftSnapshot snapshot)

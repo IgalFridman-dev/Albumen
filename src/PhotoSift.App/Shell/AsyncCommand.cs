@@ -30,6 +30,9 @@ public sealed class AsyncCommand : ICommand
 
     public event EventHandler? CanExecuteChanged;
 
+    internal void NotifyCanExecuteChanged() =>
+        CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+
     public bool CanExecute(object? parameter) =>
         (canExecute?.Invoke() ?? true)
         && (allowConcurrentExecutions || Volatile.Read(ref executionCount) == 0);
@@ -74,7 +77,7 @@ public sealed class AsyncCommand : ICommand
         // notify WPF controls from arbitrary command callers when nothing changed.
         if (!allowConcurrentExecutions)
         {
-            CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+            NotifyCanExecuteChanged();
         }
     }
 }

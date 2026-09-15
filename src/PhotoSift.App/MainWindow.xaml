@@ -30,6 +30,22 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="DangerButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#FFB3261E" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource ActionFocusVisual}" />
+        </Style>
+        <DataTemplate x:Key="ScanOutcomeSummaryTemplate">
+            <StackPanel Margin="0,2">
+                <TextBlock TextWrapping="Wrap">
+                    <Run FontWeight="SemiBold" Text="{Binding Label}" />
+                    <Run Text=": " />
+                    <Run Text="{Binding Count, Mode=OneWay}" />
+                </TextBlock>
+                <TextBlock Text="{Binding NextStep}" TextWrapping="Wrap" />
+            </StackPanel>
+        </DataTemplate>
         <DataTemplate x:Key="ActionItemTemplate">
             <app:ReviewAutomationBorder Margin="4,6" Padding="8" BorderThickness="1"
                     BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
@@ -97,6 +113,8 @@
                 <TextBlock Text="{Binding ByteLength, StringFormat='Content length: {0} bytes'}" TextWrapping="Wrap" />
                 <TextBlock Text="{Binding Allocation}" TextWrapping="Wrap" />
                 <TextBlock Text="{Binding Outcome}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding OutcomeLabel}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding NextStep}" TextWrapping="Wrap" />
             </StackPanel>
         </DataTemplate>
         <DataTemplate x:Key="ReviewOccurrenceTemplate">
@@ -143,6 +161,54 @@
                        AutomationProperties.Name="Local data status"
                        AutomationProperties.ItemStatus="{Binding ActionRecoveryStatusText}"
                        AutomationProperties.LiveSetting="Polite" />
+            <StackPanel Margin="0,10,0,0"
+                        Visibility="{Binding HasLocalScanDataControl, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Button x:Name="ClearScanDataButton"
+                        Content="Clear local Scan data"
+                        HorizontalAlignment="Left"
+                        MinHeight="34"
+                        Padding="12,6"
+                        IsDefault="False"
+                        IsCancel="False"
+                        AutomationProperties.Name="Clear local Scan data"
+                        AutomationProperties.HelpText="Starts confirmation. Source photos and Action records are not cleared."
+                        Command="{Binding RequestClearScanDataCommand}" />
+                <StackPanel Margin="0,8,0,0"
+                            Visibility="{Binding IsClearScanDataConfirmationPending, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock x:Name="ClearScanDataConsequenceText"
+                               Text="This clears local Scan history and checkpoints. Source photos are unchanged. Action records are retained."
+                               TextWrapping="Wrap" />
+                    <WrapPanel Margin="0,6,0,0">
+                        <Button x:Name="ConfirmClearScanDataButton"
+                                Content="Confirm clear local Scan data"
+                                MinHeight="34"
+                                Padding="12,6"
+                                Margin="0,0,8,0"
+                                IsDefault="False"
+                                IsCancel="False"
+                                IsTabStop="True"
+                                Style="{StaticResource DangerButtonStyle}"
+                                AutomationProperties.Name="Confirm clear local Scan data"
+                                AutomationProperties.HelpText="Clears local Scan data. Source photos and Action records remain unchanged."
+                                IsVisibleChanged="OnClearScanDataConfirmationVisibilityChanged"
+                                Command="{Binding ConfirmClearScanDataCommand}" />
+                        <Button Content="Cancel"
+                                MinHeight="34"
+                                Padding="12,6"
+                                IsDefault="False"
+                                IsCancel="False"
+                                AutomationProperties.Name="Cancel clearing local Scan data"
+                                Command="{Binding CancelClearScanDataCommand}" />
+                    </WrapPanel>
+                </StackPanel>
+                <TextBlock x:Name="LocalDataClearStatusText"
+                           Margin="0,6,0,0"
+                           Text="{Binding LocalDataClearStatus}"
+                           TextWrapping="Wrap"
+                           AutomationProperties.Name="Local Scan data clear status"
+                           AutomationProperties.ItemStatus="{Binding LocalDataClearStatus}"
+                           AutomationProperties.LiveSetting="Polite" />
+            </StackPanel>
         </StackPanel>
 
         <Grid Grid.Row="1">
@@ -421,6 +487,9 @@
                     <ProgressBar Height="8" IsIndeterminate="{Binding IsScanBusy}" AutomationProperties.Name="Scan activity"
                                  AutomationProperties.ItemStatus="{Binding ScanStatus}" />
                     <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" Margin="0,12" />
+                    <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
+                                  ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
+                                  AutomationProperties.Name="Scan outcome categories" />
                     <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" />
                     <WrapPanel Margin="0,16,0,0">
                         <Button x:Name="CancelScanButton" Content="Cancel Scan" Padding="12,8" Margin="0,0,10,10"
@@ -449,6 +518,9 @@
                                AutomationProperties.LiveSetting="Polite" />
                     <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" Margin="0,8" />
                     <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
+                    <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
+                                  ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
+                                  AutomationProperties.Name="Scan outcome categories" />
                     <TextBlock x:Name="SelectionSummaryText" Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,8,0,0"
                                AutomationProperties.Name="Selection summary"
                                AutomationProperties.ItemStatus="{Binding SelectionSummary}"
