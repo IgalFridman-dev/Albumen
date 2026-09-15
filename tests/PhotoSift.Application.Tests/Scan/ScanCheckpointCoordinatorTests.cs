@@ -218,20 +218,30 @@ public sealed class ScanCheckpointCoordinatorTests
 
         await fixture.Pump(fixture.Owner.CancelAsync());
         await fixture.Until(snapshot => snapshot.Status == ScanStatus.Incomplete);
-        var interruptedCheckpoint = await fixture.Checkpoints.ReadAsync(
+        var interruptedBeforeRestart = await fixture.Checkpoints.ReadAsync(
             interrupted.Context.Pin.ScanId, TestContext.Current.CancellationToken);
 
         fixture.Executor.Arrived = ScanTestData.Signal<CoordinatorRun>();
         await fixture.Start();
         var fresh = await fixture.Run();
+        var interruptedAfterRestart = await fixture.Checkpoints.ReadAsync(
+            interrupted.Context.Pin.ScanId, TestContext.Current.CancellationToken);
+        var freshCheckpoint = await fixture.Checkpoints.ReadAsync(
+            fresh.Context.Pin.ScanId, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, preflightCount);
         Assert.NotEqual(interrupted.Context.Pin.ScanId, fresh.Context.Pin.ScanId);
         Assert.Empty(fixture.Owner.Current.Occurrences);
-        Assert.Equal(ScanLifecycleState.Incomplete, interruptedCheckpoint.Lifecycle!.State);
-        Assert.Equal(2, interruptedCheckpoint.Stages.Length);
-        Assert.Equal(ScanStageState.Canceled, interruptedCheckpoint.Stages.Single(
+        Assert.Equal(ScanLifecycleState.Incomplete, interruptedBeforeRestart.Lifecycle!.State);
+        Assert.Equal(interruptedBeforeRestart.Lifecycle, interruptedAfterRestart.Lifecycle);
+        Assert.Equal(interruptedBeforeRestart.Accounting, interruptedAfterRestart.Accounting);
+        Assert.Equal(interruptedBeforeRestart.Stages.ToArray(), interruptedAfterRestart.Stages.ToArray());
+        Assert.Equal(2, interruptedAfterRestart.Stages.Length);
+        Assert.Equal(ScanStageState.Canceled, interruptedAfterRestart.Stages.Single(
             row => row.Stored.Stage == ScanStage.Exact).Stored.Outcome.State);
+        Assert.Equal(fresh.Context.Pin.ScanId, freshCheckpoint.Lifecycle!.ScanId);
+        Assert.Equal(ScanLifecycleState.Enumerating, freshCheckpoint.Lifecycle.State);
+        Assert.Empty(freshCheckpoint.Stages);
     }
 
     [Fact]

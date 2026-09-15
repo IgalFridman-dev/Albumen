@@ -4,16 +4,17 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Development status: **8 of 26 stories complete. Eleven lean stories remain for V1; 2 are deferred to V1.1 and 5 to V1.2. E2-S3 is in progress.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); E1-S6 through E2-S2 are currently stacked local branches awaiting later integration decisions. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
+Development status: **9 of 26 stories complete. Ten lean stories remain for V1; 2 are deferred to V1.1 and 5 to V1.2. E2-S5 is next.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); E1-S6 through E2-S3 are currently stacked local branches awaiting later integration decisions. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
 
 Planning is complete and validated. E1-S1 through E1-S6 are done. E1-S6 adds restart-only Action Records, explicit read-only revalidation, accessible progress, and conservative unknown outcomes. Its user-facing safety behavior passed explicit manual verification after the approved two-attempt VM/timing cap stopped the real COM callback crash harness. The deferred automated edge coverage is [PM-001](docs/backlog/post-mvp.md#pm-001--harden-e1-s6-real-process-crash-boundary-automation).
 
-- Latest completed story: **E2-S2 — Persist staged Scan state and reconciled accounting (reviewed automated backend acceptance with an unrelated WPF environmental exception; neither Core nor Full is represented as PASS)**
-- Current story: **E2-S3 — Close interrupted Scans safely and restart fresh (lean V1 scope; in progress)**
+- Latest completed story: **E2-S3 — Close interrupted Scans safely and restart fresh (acceptance-only closure on unchanged production behavior; Core retains the unrelated WPF exception and is not represented as PASS)**
+- Next story: **E2-S5 — Explain outcomes and clear local Scan data safely (lean V1 scope)**
 - Approved YAGNI release roadmap: [`docs/superpowers/specs/2026-09-15-yagni-release-roadmap-design.md`](docs/superpowers/specs/2026-09-15-yagni-release-roadmap-design.md)
 - Lean V1 delivery plan: [`docs/superpowers/plans/2026-09-15-yagni-v1-delivery.md`](docs/superpowers/plans/2026-09-15-yagni-v1-delivery.md)
 - E2-S2 approved design: [`docs/superpowers/specs/2026-09-14-e2-s2-scan-checkpoints-design.md`](docs/superpowers/specs/2026-09-14-e2-s2-scan-checkpoints-design.md)
 - E2-S2 verification and closure: [`docs/evidence/e2-s2/verification.md`](docs/evidence/e2-s2/verification.md)
+- E2-S3 verification and closure: [`docs/evidence/e2-s3/verification.md`](docs/evidence/e2-s3/verification.md)
 - E2-S2 pre-release presentation follow-up: [`PM-003`](docs/backlog/post-mvp.md#pm-003--align-e2-s2-scan-detail-and-coverage-wording-before-release)
 - E2-S1 design: [`docs/superpowers/specs/2026-09-14-e2-s1-lean-sqlite-foundation-design.md`](docs/superpowers/specs/2026-09-14-e2-s1-lean-sqlite-foundation-design.md)
 - E2-S1 verification and closing observations: [`docs/evidence/e2-s1/verification.md`](docs/evidence/e2-s1/verification.md)

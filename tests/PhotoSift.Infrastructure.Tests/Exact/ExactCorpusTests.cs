@@ -311,6 +311,13 @@ public sealed class ExactCorpusTests
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             await File.WriteAllBytesAsync(path, bytes, TestContext.Current.CancellationToken);
         }
+        var sourceBytes = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in Directory.EnumerateFiles(corpus.Root, "*", SearchOption.AllDirectories))
+        {
+            sourceBytes.Add(
+                Path.GetRelativePath(corpus.Root, path),
+                await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken));
+        }
 
         var hashEntered = Signal();
         var reader = new ObservedProtectedFileReader(new WindowsProtectedFileReader());
@@ -339,6 +346,20 @@ public sealed class ExactCorpusTests
         Assert.Equal(BoundedScanExecutor.WorkCapacity + 2, snapshot.Counts.Discovered);
         Assert.Equal(snapshot.Counts.Discovered, snapshot.Counts.Canceled);
         Assert.Equal(0, reader.Live);
+        var settledBytes = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in Directory.EnumerateFiles(corpus.Root, "*", SearchOption.AllDirectories))
+        {
+            settledBytes.Add(
+                Path.GetRelativePath(corpus.Root, path),
+                await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken));
+        }
+        Assert.Equal(
+            sourceBytes.Keys.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+            settledBytes.Keys.Order(StringComparer.OrdinalIgnoreCase).ToArray());
+        foreach (var source in sourceBytes)
+        {
+            Assert.Equal(source.Value, settledBytes[source.Key]);
+        }
     }
 
     private static ProtectedFileFacts Project(
