@@ -103,6 +103,99 @@ public sealed class E2S2CheckpointAcceptanceTests
     }
 
     [Fact]
+    public async Task MissingAccountingCacheIsRebuiltFromCompleteAuthoritativeRows()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        var scan = ScanIdentityData.Scan();
+        await using (var setup = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await BootstrapAsync(setup, scan);
+            await setup.ScanCheckpoints.WriteInitialOccurrenceAsync(
+                Initial(scan, 7, Succeeded, Running), TestContext.Current.CancellationToken);
+        }
+        await MutateAsync(fixture, "DELETE FROM scan_accounting;");
+        var authoritativeBefore = await AuthorityFingerprintAsync(fixture);
+
+        ScanCheckpointReadResult read;
+        await using (var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath))
+            read = await reopened.ScanCheckpoints.ReadAsync(
+                scan.Pin.ScanId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointReadOutcome.Found, read.Outcome);
+        Assert.Equal(new ScanAccounting(1, 0, 0, 0, 0, 1), read.Accounting);
+        Assert.Equal(authoritativeBefore, await AuthorityFingerprintAsync(fixture));
+        Assert.Equal("1|0|0|0|0|1", await AccountingFingerprintAsync(fixture));
+    }
+
+    [Fact]
+    public async Task RetainedWalSidecarPreventsAccountingRepairAndLeavesRowsUnchanged()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        var scan = ScanIdentityData.Scan();
+        await using (var setup = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await BootstrapAsync(setup, scan);
+            await setup.ScanCheckpoints.WriteInitialOccurrenceAsync(
+                Initial(scan, 7, Succeeded, Running), TestContext.Current.CancellationToken);
+        }
+        await MutateAsync(fixture, """
+            UPDATE scan_accounting
+            SET discovered=0, analyzed=0, unsupported=0, failed=0, canceled=0, outstanding=0;
+            """);
+        await using var retained = await fixture.OpenRawAsync(SqliteOpenMode.ReadWrite);
+        await ExecuteAsync(retained, "PRAGMA journal_mode=WAL;");
+        Assert.True(File.Exists(fixture.DatabasePath + "-wal"));
+        var authorityBefore = await AuthorityFingerprintAsync(retained);
+        var accountingBefore = await AccountingFingerprintAsync(retained);
+
+        ScanCheckpointReadResult read;
+        await using (var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath))
+            read = await reopened.ScanCheckpoints.ReadAsync(
+                scan.Pin.ScanId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointReadOutcome.Unavailable, read.Outcome);
+        Assert.True(File.Exists(fixture.DatabasePath + "-wal"));
+        Assert.Equal(authorityBefore, await AuthorityFingerprintAsync(retained));
+        Assert.Equal(accountingBefore, await AccountingFingerprintAsync(retained));
+    }
+
+    [Fact]
+    public async Task GlobalIntegrityRejectionPreventsAccountingRepairAndLeavesBytesUnchanged()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        var scan = ScanIdentityData.Scan();
+        await using (var setup = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await BootstrapAsync(setup, scan);
+            await setup.ScanCheckpoints.WriteInitialOccurrenceAsync(
+                Initial(scan, 7, Succeeded, Running), TestContext.Current.CancellationToken);
+        }
+        await MutateAsync(fixture, """
+            PRAGMA ignore_check_constraints=ON;
+            UPDATE scan_accounting
+            SET discovered=0, analyzed=0, unsupported=0, failed=0, canceled=0, outstanding=0;
+            INSERT INTO scans (
+                scan_id, scope_revision, rule_set_revision, analysis_revision,
+                selected_path, resolved_path, recursion, root_volume_serial,
+                root_file_id_high, root_file_id_low, created_utc)
+            SELECT 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 0,
+                   rule_set_revision, analysis_revision, selected_path, resolved_path,
+                   recursion, root_volume_serial, root_file_id_high, root_file_id_low, created_utc
+            FROM scans LIMIT 1;
+            """);
+        var before = await SnapshotCheckpointFilesAsync(fixture);
+
+        ScanCheckpointReadResult read;
+        await using (var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath))
+            read = await reopened.ScanCheckpoints.ReadAsync(
+                scan.Pin.ScanId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointReadOutcome.Unavailable, read.Outcome);
+        Assert.Equal(before, await SnapshotCheckpointFilesAsync(fixture));
+        Assert.Equal("0|0|0|0|0|0", await AccountingFingerprintAsync(fixture));
+    }
+
+    [Fact]
     public async Task FailedAggregateRepairReturnsUnavailableInsteadOfStaleFoundData()
     {
         await using var fixture = new ScanIdentityFixture();
@@ -137,8 +230,9 @@ public sealed class E2S2CheckpointAcceptanceTests
     public static TheoryData<string> AuthoritativeCorruptions => new()
     {
         {
-            "PRAGMA ignore_check_constraints=ON; "
-            + "UPDATE scan_lifecycle SET state=99;"
+            "UPDATE scan_file_occurrences "
+            + "SET volume_serial='gggggggggggggggg', "
+            + "file_id_high='0000000000000001', file_id_low='0000000000000002';"
         },
         {
             "PRAGMA foreign_keys=OFF; "
@@ -187,6 +281,93 @@ public sealed class E2S2CheckpointAcceptanceTests
         Assert.Null(read.Lifecycle);
         Assert.Empty(read.Stages);
         Assert.Null(read.Accounting);
+        Assert.Equal(before, await WholeCheckpointFingerprintAsync(fixture));
+    }
+
+    [Fact]
+    public async Task ExistingParentWithoutLifecycleIsCorruptRatherThanMissing()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        var scan = ScanIdentityData.Scan();
+        await using (var setup = new SqlitePhotoSiftStores(fixture.DatabasePath))
+            Assert.Equal(ScanIdentityPersistOutcome.Persisted,
+                (await setup.ScanIdentities.PersistScanAsync(
+                    scan, TestContext.Current.CancellationToken)).Outcome);
+
+        await using var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var read = await reopened.ScanCheckpoints.ReadAsync(
+            scan.Pin.ScanId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointReadOutcome.Corrupt, read.Outcome);
+        Assert.Null(read.Lifecycle);
+        Assert.Empty(read.Stages);
+        Assert.Null(read.Accounting);
+    }
+
+    [Fact]
+    public async Task CaseVariantOccurrenceAndStageAuthorityCannotBeSilentlyOmitted()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        var scan = ScanIdentityData.Scan();
+        await using (var setup = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await BootstrapAsync(setup, scan);
+            await setup.ScanCheckpoints.WriteInitialOccurrenceAsync(
+                Initial(scan, 7, Succeeded, Running), TestContext.Current.CancellationToken);
+        }
+        await MutateAsync(fixture, """
+            PRAGMA foreign_keys=OFF;
+            INSERT INTO scan_file_occurrences
+            SELECT upper(scan_id), occurrence_id, occurrence_revision, attempt,
+                   discovered_path, resolved_path, volume_serial, file_id_high, file_id_low
+            FROM scan_file_occurrences;
+            INSERT INTO scan_stage_checkpoints
+            SELECT upper(scan_id), occurrence_id, stage, revision, transition_id, state, reason,
+                   prerequisite_stage, prerequisite_state, prerequisite_reason
+            FROM scan_stage_checkpoints;
+            """);
+        var before = await WholeCheckpointFingerprintAsync(fixture);
+
+        await using var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var read = await reopened.ScanCheckpoints.ReadAsync(
+            scan.Pin.ScanId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointReadOutcome.Corrupt, read.Outcome);
+        Assert.Equal(before, await WholeCheckpointFingerprintAsync(fixture));
+    }
+
+    public static TheoryData<string> NonCanonicalAccountingAuthorities => new()
+    {
+        {
+            "PRAGMA foreign_keys=OFF; "
+            + "INSERT INTO scan_accounting SELECT upper(scan_id), discovered, analyzed, "
+            + "unsupported, failed, canceled, outstanding FROM scan_accounting;"
+        },
+        {
+            "PRAGMA foreign_keys=OFF; UPDATE scan_accounting SET scan_id=upper(scan_id);"
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(NonCanonicalAccountingAuthorities))]
+    public async Task DuplicateOrNonCanonicalAccountingAuthorityIsCorruptAndNeverRepaired(string mutation)
+    {
+        await using var fixture = new ScanIdentityFixture();
+        var scan = ScanIdentityData.Scan();
+        await using (var setup = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await BootstrapAsync(setup, scan);
+            await setup.ScanCheckpoints.WriteInitialOccurrenceAsync(
+                Initial(scan, 7, Succeeded, Running), TestContext.Current.CancellationToken);
+        }
+        await MutateAsync(fixture, mutation);
+        var before = await WholeCheckpointFingerprintAsync(fixture);
+
+        await using var reopened = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var read = await reopened.ScanCheckpoints.ReadAsync(
+            scan.Pin.ScanId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointReadOutcome.Corrupt, read.Outcome);
         Assert.Equal(before, await WholeCheckpointFingerprintAsync(fixture));
     }
 
@@ -456,14 +637,42 @@ public sealed class E2S2CheckpointAcceptanceTests
 
     private static async Task MutateAsync(ScanIdentityFixture fixture, string sql)
     {
-        await using var raw = await fixture.OpenRawAsync(SqliteOpenMode.ReadWrite);
-        await ExecuteAsync(raw, sql);
+        await using (var raw = await fixture.OpenRawAsync(SqliteOpenMode.ReadWrite))
+        {
+            await ExecuteAsync(raw, sql);
+            await ExecuteAsync(raw, "PRAGMA wal_checkpoint(TRUNCATE);");
+        }
         SqliteConnection.ClearAllPools();
+        AssertCheckpointSidecarsAbsent(fixture);
+    }
+
+    private static void AssertCheckpointSidecarsAbsent(ScanIdentityFixture fixture)
+    {
+        foreach (var suffix in new[] { "-wal", "-shm", "-journal" })
+            Assert.False(File.Exists(fixture.DatabasePath + suffix),
+                $"Mutation fixture retained unexpected {suffix} sidecar.");
+    }
+
+    private static async Task<Dictionary<string, byte[]?>> SnapshotCheckpointFilesAsync(
+        ScanIdentityFixture fixture)
+    {
+        var snapshot = new Dictionary<string, byte[]?>();
+        foreach (var suffix in new[] { "", "-wal", "-shm", "-journal" })
+            snapshot[suffix] = File.Exists(fixture.DatabasePath + suffix)
+                ? await File.ReadAllBytesAsync(
+                    fixture.DatabasePath + suffix, TestContext.Current.CancellationToken)
+                : null;
+        return snapshot;
     }
 
     private static async Task<string> AuthorityFingerprintAsync(ScanIdentityFixture fixture)
     {
-        await using var raw = await fixture.OpenRawAsync(SqliteOpenMode.ReadOnly);
+        await using var raw = await OpenImmutableAsync(fixture);
+        return await AuthorityFingerprintAsync(raw);
+    }
+
+    private static async Task<string> AuthorityFingerprintAsync(SqliteConnection raw)
+    {
         return Assert.IsType<string>(await ScalarAsync(raw, """
             SELECT
                 (SELECT group_concat(value, ';') FROM (
@@ -497,7 +706,12 @@ public sealed class E2S2CheckpointAcceptanceTests
 
     private static async Task<string> AccountingFingerprintAsync(ScanIdentityFixture fixture)
     {
-        await using var raw = await fixture.OpenRawAsync(SqliteOpenMode.ReadOnly);
+        await using var raw = await OpenImmutableAsync(fixture);
+        return await AccountingFingerprintAsync(raw);
+    }
+
+    private static async Task<string> AccountingFingerprintAsync(SqliteConnection raw)
+    {
         return Assert.IsType<string>(await ScalarAsync(raw, """
             SELECT discovered || '|' || analyzed || '|' || unsupported || '|'
                    || failed || '|' || canceled || '|' || outstanding
@@ -510,5 +724,17 @@ public sealed class E2S2CheckpointAcceptanceTests
         await using var raw = await fixture.OpenRawAsync(SqliteOpenMode.ReadOnly);
         return Assert.IsType<string>(await ScalarAsync(raw,
             "SELECT state || '|' || revision FROM scan_lifecycle ORDER BY scan_id;"));
+    }
+
+    private static async Task<SqliteConnection> OpenImmutableAsync(ScanIdentityFixture fixture)
+    {
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = new Uri(fixture.DatabasePath).AbsoluteUri + "?immutable=1",
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+        }.ToString());
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        return connection;
     }
 }

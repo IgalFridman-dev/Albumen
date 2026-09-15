@@ -149,6 +149,32 @@ public sealed class ScanCheckpointContractTests
         Assert.DoesNotContain("Excluded", properties);
     }
 
+    [Theory]
+    [InlineData(ScanStageState.FailedRetryable, ScanReason.ReadFailure, 1, 0)]
+    [InlineData(ScanStageState.FailedTerminal, ScanReason.UnknownSafety, 1, 0)]
+    [InlineData(ScanStageState.Canceled, ScanReason.Canceled, 0, 1)]
+    public void NotApplicableProjectionUsesItsEnumerationPrerequisiteCategory(
+        ScanStageState enumerationState,
+        ScanReason reason,
+        long failed,
+        long canceled)
+    {
+        var enumeration = new StageOutcome(enumerationState, reason);
+        var rows = ImmutableArray.Create(Occurrence(
+            1,
+            enumeration,
+            new StageOutcome(ScanStageState.NotApplicable, reason)));
+
+        var snapshot = ScanSnapshotProjector.Create(
+            Pin,
+            ScanStatus.Running,
+            new StageOutcome(ScanStageState.Running, ScanReason.None),
+            rows,
+            ImmutableArray<CandidateGroup>.Empty);
+
+        Assert.Equal(new ScanCounts(1, 0, 0, failed, canceled, 0), snapshot.Counts);
+    }
+
     [Fact]
     public void TransitionCommandsRejectStaleShapesAndInitialOccurrenceCarriesIdentity()
     {

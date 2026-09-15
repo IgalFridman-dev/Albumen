@@ -14,8 +14,15 @@ internal static class ScanSnapshotProjector
             switch (row.Exact.State)
             {
                 case ScanStageState.Succeeded: analyzed++; break;
-                case ScanStageState.Unsupported:
-                case ScanStageState.NotApplicable: unsupported++; break;
+                case ScanStageState.Unsupported: unsupported++; break;
+                case ScanStageState.NotApplicable:
+                    switch (row.Enumerate.State)
+                    {
+                        case ScanStageState.Unsupported: unsupported++; break;
+                        case ScanStageState.Canceled: canceled++; break;
+                        default: failed++; break;
+                    }
+                    break;
                 case ScanStageState.FailedRetryable:
                 case ScanStageState.FailedTerminal: failed++; break;
                 case ScanStageState.Canceled: canceled++; break;

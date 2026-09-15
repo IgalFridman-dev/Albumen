@@ -249,7 +249,7 @@ public sealed class SqliteScanCheckpointStoreTests
     }
 
     [Fact]
-    public async Task MissingParentLifecycleOccurrenceAndStageCommandsReturnMissingWithoutRows()
+    public async Task MissingCommandsReturnMissingAndExistingParentWithoutLifecycleReadsCorrupt()
     {
         await using var fixture = new ScanIdentityFixture();
         await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
@@ -272,7 +272,7 @@ public sealed class SqliteScanCheckpointStoreTests
                 scan.Pin.ScanId, 7, ScanStage.Exact, 1, ExactTerminalTransitionId, Succeeded), token)).Outcome);
 
         var read = await stores.ScanCheckpoints.ReadAsync(scan.Pin.ScanId, token);
-        Assert.Equal(ScanCheckpointReadOutcome.Missing, read.Outcome);
+        Assert.Equal(ScanCheckpointReadOutcome.Corrupt, read.Outcome);
         Assert.Empty((await stores.ScanIdentities.ReadOccurrencesAsync(scan.Pin.ScanId, token)).Records);
     }
 
