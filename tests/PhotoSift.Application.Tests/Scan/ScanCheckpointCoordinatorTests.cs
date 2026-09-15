@@ -708,6 +708,75 @@ public sealed class ScanCheckpointCoordinatorTests
             ScanStatus.Incomplete,
             ScanLifecycleState.Incomplete);
 
+    [Theory]
+    [InlineData(true, ScanStatus.Complete, ScanLifecycleState.Complete)]
+    [InlineData(false, ScanStatus.Incomplete, ScanLifecycleState.Incomplete)]
+    public async Task CallbackArrivingDuringTerminalPersistenceCannotOverwriteTerminalTruth(
+        bool endEnumeration,
+        ScanStatus expectedStatus,
+        ScanLifecycleState expectedLifecycle)
+    {
+        await using var fixture = new CoordinatorFixture();
+        await fixture.Start();
+        var run = await fixture.Run();
+        if (endEnumeration)
+            await fixture.Pump(
+                fixture.Owner.EnumerationEndedAsync(run.Context, ScanTestData.Success).AsTask());
+
+        fixture.Checkpoints.HoldWrites = true;
+        var terminal = ScanTestData.Signal<ScanSnapshot>();
+        fixture.Owner.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.Status == expectedStatus)
+                terminal.TrySetResult(snapshot);
+        };
+        CoordinatorCheckpointAttempt? terminalAttempt = null;
+        CoordinatorCheckpointAttempt? lateAttempt = null;
+        try
+        {
+            run.Done.TrySetResult();
+            terminalAttempt = await PumpNext(fixture, fixture.Checkpoints.NextAttemptAsync());
+            var terminalCommand = Assert.IsType<ScanLifecycleTransitionCommand>(
+                terminalAttempt.Command);
+            Assert.Equal(expectedLifecycle, terminalCommand.NextState);
+
+            var late = fixture.Owner.RegisterAsync(
+                run.Context, ScanTestData.Work(1, run.Context).File).AsTask();
+            await AssertOwnerResponsiveWhilePersistenceWaits(fixture);
+            var admissionClosedBeforeCommit = late.IsCompleted;
+
+            if (admissionClosedBeforeCommit)
+                fixture.Checkpoints.HoldWrites = false;
+            terminalAttempt.Release();
+            if (!admissionClosedBeforeCommit)
+            {
+                lateAttempt = await PumpNext(fixture, fixture.Checkpoints.NextAttemptAsync());
+                Assert.IsType<InitialOccurrenceCheckpointCommand>(lateAttempt.Command);
+                fixture.Checkpoints.HoldWrites = false;
+                lateAttempt.Release(ScanCheckpointWriteOutcome.IllegalTransition);
+            }
+            await fixture.Pump(Task.WhenAll(late, terminal.Task));
+
+            Assert.Equal(expectedStatus, fixture.Owner.Current.Status);
+            Assert.True(admissionClosedBeforeCommit,
+                "Finalization must close new result admission before awaiting its terminal write.");
+            Assert.Null(await late);
+            var durable = await fixture.Checkpoints.ReadAsync(
+                run.Context.Pin.ScanId, TestContext.Current.CancellationToken);
+            Assert.Equal(expectedLifecycle, durable.Lifecycle!.State);
+            Assert.Empty(durable.Stages);
+            Assert.DoesNotContain(
+                fixture.Checkpoints.Writes,
+                command => command is InitialOccurrenceCheckpointCommand);
+        }
+        finally
+        {
+            fixture.Checkpoints.HoldWrites = false;
+            terminalAttempt?.Release();
+            lateAttempt?.Release();
+        }
+    }
+
     private static async Task AssertTerminalObserverFailureIsIsolatedAsync(
         bool endEnumeration,
         ScanStatus expectedStatus,

@@ -192,7 +192,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         }));
 
     private bool CanAccept(ScanPin pin) => !disposed
-        && active is { Canceled: false, Finished: false, Faulted: false }
+        && active is { Canceled: false, Finalizing: false, Finished: false, Faulted: false }
         && active.Context.Pin == pin
         && current.Status == ScanStatus.Running;
 
@@ -420,7 +420,13 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                 faulted = true;
             }
             await operation.DisposeAsync().ConfigureAwait(false);
-            await checkpointGate.ExecuteAsync(async () =>
+            var finalize = await inbox.CommandAsync(() =>
+            {
+                if (operation.Finalizing || operation.Finished) return false;
+                operation.Finalizing = true;
+                return true;
+            }).ConfigureAwait(false);
+            if (finalize) await checkpointGate.ExecuteAsync(async () =>
             {
                 await FinalizeOperationAsync(operation, faulted).ConfigureAwait(false);
                 return true;
@@ -536,6 +542,8 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
 
     private async Task FinalizeOperationAsync(Operation operation, bool runFaulted)
     {
+        // Entering this gate drains checkpoints admitted before Finalizing closed
+        // the owner boundary. Prepare only after that private state is current.
         var preparation = await inbox.CommandAsync(() => PrepareFinalization(operation, runFaulted))
             .ConfigureAwait(false);
         if (preparation is null) return;
@@ -801,6 +809,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         public bool SuppressLifecycleFinalization { get; set; }
         public bool PersistenceUnavailable { get; set; }
         public bool Canceled { get; set; }
+        public bool Finalizing { get; set; }
         public bool Finished { get; set; }
         public bool Faulted { get; set; }
 
