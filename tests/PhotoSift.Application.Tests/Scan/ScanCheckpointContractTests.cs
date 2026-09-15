@@ -45,8 +45,7 @@ public sealed class ScanCheckpointContractTests
             1,
             TransitionId,
             Succeeded,
-            null,
-            false));
+            null));
         Assert.Throws<ArgumentException>(() => Checkpoint(
             prerequisite: new ScanStagePrerequisite(ScanStage.Exact, Succeeded)));
         Assert.Throws<ArgumentException>(() => Checkpoint(
@@ -84,13 +83,21 @@ public sealed class ScanCheckpointContractTests
     [Fact]
     public void InterruptionMarkerBelongsOnlyToReadFailureProjection()
     {
-        Assert.Throws<ArgumentException>(() => Checkpoint(recoveredFromInterruption: true));
+        Assert.Null(typeof(ScanCheckpoint).GetProperty("RecoveredFromInterruption"));
+        var stored = Checkpoint(outcome: new StageOutcome(ScanStageState.Running, ScanReason.None));
 
-        var recovered = Checkpoint(
-            outcome: new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure),
-            recoveredFromInterruption: true);
+        Assert.Throws<ArgumentException>(() => new ScanCheckpointProjection(
+            stored,
+            Succeeded,
+            true));
+        var recovered = new ScanCheckpointProjection(
+            stored,
+            new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure),
+            true);
 
         Assert.True(recovered.RecoveredFromInterruption);
+        Assert.Equal(ScanStageState.Running, recovered.Stored.Outcome.State);
+        Assert.Equal(ScanStageState.FailedRetryable, recovered.Outcome.State);
     }
 
     [Fact]
@@ -124,6 +131,24 @@ public sealed class ScanCheckpointContractTests
     }
 
     [Fact]
+    public void InitialOccurrenceRejectsContradictorySiblingPrerequisiteAndProjectionMetadata()
+    {
+        var occurrence = new ScanOccurrenceIdentityRecord(
+            new OccurrenceToken(Pin, 7, 1, 1), @"C:\photos\a.jpg", @"C:\photos\a.jpg", null);
+        var enumeration = Checkpoint(stage: ScanStage.Enumeration, prerequisite: null);
+        var failed = new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure);
+        var contradictoryExact = Checkpoint(
+            outcome: new StageOutcome(ScanStageState.NotApplicable, ScanReason.ReadFailure),
+            prerequisite: new ScanStagePrerequisite(ScanStage.Enumeration, failed));
+
+        Assert.Throws<ArgumentException>(() =>
+            new InitialOccurrenceCheckpointCommand(occurrence, enumeration, contradictoryExact));
+        Assert.DoesNotContain(
+            typeof(InitialOccurrenceCheckpointCommand).GetProperties(),
+            property => property.PropertyType == typeof(ScanCheckpointProjection));
+    }
+
+    [Fact]
     public void ResultsAreClosedAndPortContainsNoSqliteTypes()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -133,7 +158,7 @@ public sealed class ScanCheckpointContractTests
         Assert.Throws<ArgumentException>(() => new ScanCheckpointReadResult(
             ScanCheckpointReadOutcome.Found,
             null,
-            ImmutableArray<ScanCheckpoint>.Empty,
+            ImmutableArray<ScanCheckpointProjection>.Empty,
             null));
 
         var sqliteTypes = typeof(IScanCheckpointStore).GetMethods()
@@ -152,8 +177,7 @@ public sealed class ScanCheckpointContractTests
         long revision = 1,
         Guid? transitionId = null,
         StageOutcome? outcome = null,
-        ScanStagePrerequisite? prerequisite = default,
-        bool recoveredFromInterruption = false)
+        ScanStagePrerequisite? prerequisite = default)
     {
         var actualOutcome = outcome ?? Succeeded;
         var actualPrerequisite = prerequisite ?? (stage == ScanStage.Exact
@@ -166,7 +190,6 @@ public sealed class ScanCheckpointContractTests
             revision,
             transitionId ?? TransitionId,
             actualOutcome,
-            actualPrerequisite,
-            recoveredFromInterruption);
+            actualPrerequisite);
     }
 }

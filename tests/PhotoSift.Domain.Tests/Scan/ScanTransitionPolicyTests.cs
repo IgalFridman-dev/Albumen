@@ -106,21 +106,75 @@ public sealed class ScanTransitionPolicyTests
     {
         var succeeded = new StageOutcome(ScanStageState.Succeeded, ScanReason.None);
         var accounting = new ScanAccounting(1, 1, 0, 0, 0, 0);
-        var exact = Checkpoint(ScanStage.Exact, succeeded, succeeded);
+        var rows = new[]
+        {
+            Checkpoint(ScanStage.Enumeration, succeeded, succeeded),
+            Checkpoint(ScanStage.Exact, succeeded, succeeded),
+        };
 
         Assert.True(ScanTransitionPolicy.CanComplete(
-            succeeded, [exact], accounting, accounting));
+            succeeded, rows, accounting));
         Assert.False(ScanTransitionPolicy.CanComplete(
             new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure),
-            [exact], accounting, accounting));
+            rows, accounting));
         Assert.False(ScanTransitionPolicy.CanComplete(
             succeeded,
-            [Checkpoint(ScanStage.Exact,
+            [rows[0], Checkpoint(ScanStage.Exact,
                 new StageOutcome(ScanStageState.Running, ScanReason.None), succeeded)],
-            new ScanAccounting(1, 0, 0, 0, 0, 1),
             new ScanAccounting(1, 0, 0, 0, 0, 1)));
         Assert.False(ScanTransitionPolicy.CanComplete(
-            succeeded, [exact], accounting, new ScanAccounting(1, 0, 0, 0, 0, 1)));
+            succeeded, rows, new ScanAccounting(1, 0, 0, 0, 0, 1)));
+    }
+
+    [Fact]
+    public void CompleteRejectsMissingDuplicateMixedScanAndContradictorySiblingRows()
+    {
+        var succeeded = new StageOutcome(ScanStageState.Succeeded, ScanReason.None);
+        var failed = new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure);
+        var analyzed = new ScanAccounting(1, 1, 0, 0, 0, 0);
+        var enumeration = Checkpoint(ScanStage.Enumeration, succeeded, succeeded);
+        var exact = Checkpoint(ScanStage.Exact, succeeded, succeeded);
+
+        Assert.False(ScanTransitionPolicy.CanComplete(succeeded, [], analyzed));
+        Assert.False(ScanTransitionPolicy.CanComplete(succeeded, [enumeration], analyzed));
+        Assert.False(ScanTransitionPolicy.CanComplete(
+            succeeded, [enumeration, exact, exact], analyzed));
+        Assert.False(ScanTransitionPolicy.CanComplete(
+            succeeded,
+            [enumeration, Checkpoint(
+                ScanStage.Exact,
+                succeeded,
+                succeeded,
+                scanId: Guid.Parse("e7d85894-b30d-4bc2-8b56-525c08cff4e2"))],
+            analyzed));
+        Assert.False(ScanTransitionPolicy.CanComplete(
+            succeeded,
+            [enumeration, Checkpoint(ScanStage.Exact,
+                new StageOutcome(ScanStageState.NotApplicable, ScanReason.ReadFailure), failed)],
+            analyzed));
+    }
+
+    [Fact]
+    public void AccountingIsRecomputedFromOneStagePairPerOccurrence()
+    {
+        var succeeded = new StageOutcome(ScanStageState.Succeeded, ScanReason.None);
+        var unsupported = new StageOutcome(ScanStageState.Unsupported, ScanReason.UnsupportedExtension);
+        var canceled = new StageOutcome(ScanStageState.Canceled, ScanReason.Canceled);
+        var rows = new[]
+        {
+            Checkpoint(ScanStage.Enumeration, succeeded, succeeded, occurrenceId: 7),
+            Checkpoint(ScanStage.Exact, succeeded, succeeded, occurrenceId: 7),
+            Checkpoint(ScanStage.Enumeration, succeeded, succeeded, occurrenceId: 8),
+            Checkpoint(ScanStage.Exact, unsupported, succeeded, occurrenceId: 8),
+            Checkpoint(ScanStage.Enumeration, succeeded, succeeded, occurrenceId: 9),
+            Checkpoint(ScanStage.Exact, canceled, succeeded, occurrenceId: 9),
+            Checkpoint(ScanStage.Enumeration, succeeded, succeeded, occurrenceId: 10),
+            Checkpoint(ScanStage.Exact,
+                new StageOutcome(ScanStageState.Running, ScanReason.None), succeeded, occurrenceId: 10),
+        };
+
+        Assert.True(ScanTransitionPolicy.TryRecomputeAccounting(rows, out var accounting));
+        Assert.Equal(new ScanAccounting(4, 1, 1, 0, 1, 1), accounting);
     }
 
     [Fact]
@@ -137,15 +191,16 @@ public sealed class ScanTransitionPolicyTests
     private static ScanCheckpoint Checkpoint(
         ScanStage stage,
         StageOutcome outcome,
-        StageOutcome prerequisiteOutcome) => new(
-            Guid.Parse("5a7bce28-1eab-4900-b22c-a02cc6900e68"),
-            7,
+        StageOutcome prerequisiteOutcome,
+        long occurrenceId = 7,
+        Guid? scanId = null) => new(
+            scanId ?? Guid.Parse("5a7bce28-1eab-4900-b22c-a02cc6900e68"),
+            occurrenceId,
             stage,
             3,
             Guid.Parse("a25e6cb7-dd4f-4825-ab8a-86f148797f4e"),
             outcome,
             stage == ScanStage.Exact
                 ? new ScanStagePrerequisite(ScanStage.Enumeration, prerequisiteOutcome)
-                : null,
-            false);
+                : null);
 }

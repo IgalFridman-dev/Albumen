@@ -94,7 +94,8 @@ public sealed record InitialOccurrenceCheckpointCommand
             || enumeration.OccurrenceId != token.OccurrenceId
             || exact.OccurrenceId != token.OccurrenceId
             || enumeration.Stage != ScanStage.Enumeration
-            || exact.Stage != ScanStage.Exact)
+            || exact.Stage != ScanStage.Exact
+            || exact.Prerequisite?.Outcome != enumeration.Outcome)
         {
             throw new ArgumentException(
                 "Initial checkpoint rows must identify the supplied occurrence and Enumeration/Exact stages.");
@@ -158,7 +159,7 @@ public sealed record ScanCheckpointReadResult
     public ScanCheckpointReadResult(
         ScanCheckpointReadOutcome outcome,
         ScanLifecycleCheckpoint? lifecycle,
-        ImmutableArray<ScanCheckpoint> stages,
+        ImmutableArray<ScanCheckpointProjection> stages,
         ScanAccounting? accounting)
     {
         if (!Enum.IsDefined(outcome))
@@ -174,7 +175,7 @@ public sealed record ScanCheckpointReadResult
                 "Only a Found read can expose lifecycle, stage, and accounting values.");
         }
 
-        if (found && stages.Any(stage => stage.ScanId != lifecycle!.ScanId))
+        if (found && stages.Any(stage => stage.Stored.ScanId != lifecycle!.ScanId))
             throw new ArgumentException("All checkpoint rows must belong to the lifecycle Scan.", nameof(stages));
 
         Outcome = outcome;
@@ -187,7 +188,7 @@ public sealed record ScanCheckpointReadResult
 
     public ScanLifecycleCheckpoint? Lifecycle { get; }
 
-    public ImmutableArray<ScanCheckpoint> Stages { get; }
+    public ImmutableArray<ScanCheckpointProjection> Stages { get; }
 
     public ScanAccounting? Accounting { get; }
 }

@@ -90,8 +90,7 @@ public sealed record ScanCheckpoint
         long revision,
         Guid transitionId,
         StageOutcome outcome,
-        ScanStagePrerequisite? prerequisite,
-        bool recoveredFromInterruption)
+        ScanStagePrerequisite? prerequisite)
     {
         ScanLifecycleCheckpoint.ValidateScanId(scanId);
         if (occurrenceId <= 0)
@@ -103,13 +102,6 @@ public sealed record ScanCheckpoint
         ArgumentNullException.ThrowIfNull(outcome);
 
         ValidateStageShape(stage, outcome, prerequisite);
-        if (recoveredFromInterruption
-            && outcome != new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure))
-        {
-            throw new ArgumentException(
-                "An interruption projection must expose FailedRetryable(ReadFailure).",
-                nameof(recoveredFromInterruption));
-        }
 
         ScanId = scanId;
         OccurrenceId = occurrenceId;
@@ -118,7 +110,6 @@ public sealed record ScanCheckpoint
         TransitionId = transitionId;
         Outcome = outcome;
         Prerequisite = prerequisite;
-        RecoveredFromInterruption = recoveredFromInterruption;
     }
 
     public Guid ScanId { get; }
@@ -134,8 +125,6 @@ public sealed record ScanCheckpoint
     public StageOutcome Outcome { get; }
 
     public ScanStagePrerequisite? Prerequisite { get; }
-
-    public bool RecoveredFromInterruption { get; }
 
     private static void ValidateStageShape(
         ScanStage stage,
@@ -177,6 +166,45 @@ public sealed record ScanCheckpoint
                 nameof(outcome));
         }
     }
+}
+
+public sealed record ScanCheckpointProjection
+{
+    public ScanCheckpointProjection(
+        ScanCheckpoint stored,
+        StageOutcome outcome,
+        bool recoveredFromInterruption)
+    {
+        ArgumentNullException.ThrowIfNull(stored);
+        ArgumentNullException.ThrowIfNull(outcome);
+
+        if (recoveredFromInterruption)
+        {
+            if (stored.Outcome.State != ScanStageState.Running
+                || outcome != new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure))
+            {
+                throw new ArgumentException(
+                    "An interruption projection must replace a stored Running outcome with FailedRetryable(ReadFailure).",
+                    nameof(recoveredFromInterruption));
+            }
+        }
+        else if (outcome != stored.Outcome)
+        {
+            throw new ArgumentException(
+                "A non-recovered projection must preserve the stored outcome.",
+                nameof(outcome));
+        }
+
+        Stored = stored;
+        Outcome = outcome;
+        RecoveredFromInterruption = recoveredFromInterruption;
+    }
+
+    public ScanCheckpoint Stored { get; }
+
+    public StageOutcome Outcome { get; }
+
+    public bool RecoveredFromInterruption { get; }
 }
 
 public sealed record ScanAccounting
@@ -302,18 +330,121 @@ public static class ScanTransitionPolicy
     public static bool CanComplete(
         StageOutcome enumeration,
         IReadOnlyCollection<ScanCheckpoint> requiredStages,
-        ScanAccounting recomputed,
         ScanAccounting stored)
     {
         ArgumentNullException.ThrowIfNull(enumeration);
         ArgumentNullException.ThrowIfNull(requiredStages);
-        ArgumentNullException.ThrowIfNull(recomputed);
         ArgumentNullException.ThrowIfNull(stored);
 
         return enumeration.State == ScanStageState.Succeeded
-            && requiredStages.All(checkpoint => checkpoint is not null && IsTerminal(checkpoint.Outcome.State))
+            && TryRecomputeAccounting(requiredStages, out var recomputed)
+            && requiredStages.All(checkpoint => IsTerminal(checkpoint.Outcome.State))
             && recomputed.Outstanding == 0
             && recomputed == stored;
+    }
+
+    public static bool TryRecomputeAccounting(
+        IReadOnlyCollection<ScanCheckpoint> stages,
+        out ScanAccounting accounting)
+    {
+        ArgumentNullException.ThrowIfNull(stages);
+        accounting = null!;
+
+        if (stages.Count % 2 != 0 || stages.Any(stage => stage is null))
+            return false;
+        if (stages.Count == 0)
+        {
+            accounting = new ScanAccounting(0, 0, 0, 0, 0, 0);
+            return true;
+        }
+
+        var scanId = stages.First().ScanId;
+        if (stages.Any(stage => stage.ScanId != scanId))
+            return false;
+
+        long analyzed = 0;
+        long unsupported = 0;
+        long failed = 0;
+        long canceled = 0;
+        long outstanding = 0;
+        var occurrences = stages.GroupBy(stage => stage.OccurrenceId).ToArray();
+        foreach (var occurrence in occurrences)
+        {
+            var rows = occurrence.ToArray();
+            if (rows.Length != 2)
+                return false;
+            var enumerationRows = rows.Where(row => row.Stage == ScanStage.Enumeration).ToArray();
+            var exactRows = rows.Where(row => row.Stage == ScanStage.Exact).ToArray();
+            if (enumerationRows.Length != 1 || exactRows.Length != 1)
+                return false;
+            var enumeration = enumerationRows[0];
+            var exact = exactRows[0];
+            if (exact.Prerequisite is null
+                || exact.Prerequisite.Stage != ScanStage.Enumeration
+                || exact.Prerequisite.Outcome != enumeration.Outcome)
+            {
+                return false;
+            }
+
+            switch (exact.Outcome.State)
+            {
+                case ScanStageState.Pending:
+                case ScanStageState.Running:
+                    outstanding++;
+                    break;
+                case ScanStageState.Succeeded:
+                    analyzed++;
+                    break;
+                case ScanStageState.Unsupported:
+                    unsupported++;
+                    break;
+                case ScanStageState.FailedRetryable:
+                case ScanStageState.FailedTerminal:
+                    failed++;
+                    break;
+                case ScanStageState.Canceled:
+                    canceled++;
+                    break;
+                case ScanStageState.NotApplicable:
+                    ClassifyNotApplicable(
+                        enumeration.Outcome.State,
+                        ref unsupported,
+                        ref failed,
+                        ref canceled);
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        accounting = new ScanAccounting(
+            occurrences.LongLength,
+            analyzed,
+            unsupported,
+            failed,
+            canceled,
+            outstanding);
+        return true;
+    }
+
+    private static void ClassifyNotApplicable(
+        ScanStageState prerequisite,
+        ref long unsupported,
+        ref long failed,
+        ref long canceled)
+    {
+        switch (prerequisite)
+        {
+            case ScanStageState.Unsupported:
+                unsupported++;
+                break;
+            case ScanStageState.Canceled:
+                canceled++;
+                break;
+            default:
+                failed++;
+                break;
+        }
     }
 
     private static void Validate<T>(T value, string name) where T : struct, Enum
