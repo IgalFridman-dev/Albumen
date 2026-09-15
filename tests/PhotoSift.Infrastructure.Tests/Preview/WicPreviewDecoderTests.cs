@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -141,6 +142,38 @@ public sealed class WicPreviewDecoderTests
         Assert.Equal(PreviewAvailability.Available, result.Availability);
         Assert.Equal(1, lease.RefreshCount);
         Assert.True(lease.Content.CanRead);
+    }
+
+    [Fact]
+    public async Task RepeatedLargeImageNavigationHasMeasuredOwnedMemoryBound()
+    {
+        using var fixture = PngFixture.Create(width: 2048, height: 2048);
+        using var pool = new TrackingMemoryPool(extraBytesPerOwner: 257);
+        var capability = new WicCodecCapability(new FixedComClassAvailability(available: true));
+        var decoder = new WicPreviewDecoder(capability, pool);
+        var ownerBytes = (128 * 128 * 4) + 257;
+        var capacity = ownerBytes * 2L;
+        var trace = new List<(long CacheBytes, long RentedBytes)>();
+
+        using (var cache = new BoundedThumbnailCache(capacity))
+        {
+            for (var index = 0; index < 8; index++)
+            {
+                using var result = await decoder.DecodeAsync(
+                    fixture.Path, 128, TestContext.Current.CancellationToken);
+                cache.Add($"navigation-{index}", result.TakeFrame());
+                trace.Add((cache.OwnedBytes, pool.CurrentBytes));
+            }
+
+            Assert.All(trace, sample =>
+            {
+                Assert.True(sample.CacheBytes <= capacity);
+                Assert.Equal(sample.CacheBytes, sample.RentedBytes);
+            });
+            Assert.True(pool.PeakBytes <= capacity + ownerBytes);
+        }
+
+        Assert.Equal(0, pool.CurrentBytes);
     }
 
     [Theory]
@@ -301,5 +334,43 @@ public sealed class WicPreviewDecoderTests
         }
 
         public ValueTask DisposeAsync() => stream.DisposeAsync();
+    }
+
+    private sealed class TrackingMemoryPool(int extraBytesPerOwner) : MemoryPool<byte>
+    {
+        private long currentBytes;
+        private long peakBytes;
+        public override int MaxBufferSize => int.MaxValue;
+        public long CurrentBytes => Interlocked.Read(ref currentBytes);
+        public long PeakBytes => Interlocked.Read(ref peakBytes);
+
+        public override IMemoryOwner<byte> Rent(int minBufferSize = -1)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(minBufferSize);
+            var length = checked(minBufferSize + extraBytesPerOwner);
+            var current = Interlocked.Add(ref currentBytes, length);
+            while (true)
+            {
+                var peak = Interlocked.Read(ref peakBytes);
+                if (current <= peak || Interlocked.CompareExchange(
+                    ref peakBytes, current, peak) == peak) break;
+            }
+            return new TrackingOwner(length,
+                () => Interlocked.Add(ref currentBytes, -length));
+        }
+
+        protected override void Dispose(bool disposing) { }
+
+        private sealed class TrackingOwner(int length, Action released) : IMemoryOwner<byte>
+        {
+            private byte[]? bytes = new byte[length];
+            public Memory<byte> Memory => bytes ??
+                throw new ObjectDisposedException(nameof(TrackingOwner));
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref bytes, null) is null) return;
+                released();
+            }
+        }
     }
 }

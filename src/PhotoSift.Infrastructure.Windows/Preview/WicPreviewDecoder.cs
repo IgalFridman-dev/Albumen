@@ -11,6 +11,7 @@ namespace PhotoSift.Infrastructure.Windows.Preview;
 public sealed class WicPreviewDecoder
 {
     private readonly WicCodecCapability codecs;
+    private readonly MemoryPool<byte> memoryPool;
 
     public const string UnsupportedReason =
         "Preview unavailable: this file format is not supported.";
@@ -23,10 +24,17 @@ public sealed class WicPreviewDecoder
     public const string ChangedReason =
         "Preview unavailable: the file changed while it was analyzed.";
 
-    public WicPreviewDecoder() : this(new WicCodecCapability(new ComClassAvailability())) { }
+    public WicPreviewDecoder() : this(
+        new WicCodecCapability(new ComClassAvailability()), MemoryPool<byte>.Shared) { }
 
-    internal WicPreviewDecoder(WicCodecCapability codecs) =>
+    internal WicPreviewDecoder(WicCodecCapability codecs) :
+        this(codecs, MemoryPool<byte>.Shared) { }
+
+    internal WicPreviewDecoder(WicCodecCapability codecs, MemoryPool<byte> memoryPool)
+    {
         this.codecs = codecs ?? throw new ArgumentNullException(nameof(codecs));
+        this.memoryPool = memoryPool ?? throw new ArgumentNullException(nameof(memoryPool));
+    }
 
     internal Task<PreviewDecodeResult> DecodeAsync(
         string fullPath, int maximumEdge, CancellationToken cancellationToken = default)
@@ -117,7 +125,7 @@ public sealed class WicPreviewDecoder
         }
     }
 
-    private static PreviewDecodeResult DecodeContent(
+    private PreviewDecodeResult DecodeContent(
         Stream stream, string fullPath, int maximumEdge, CancellationToken cancellationToken)
     {
         var header = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat,
@@ -142,7 +150,7 @@ public sealed class WicPreviewDecoder
         var bgra = new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0);
         bgra.Freeze();
         return PreviewDecodeResult.Success(fullPath,
-            CopyOriented(bgra, orientation, cancellationToken));
+            CopyOriented(bgra, orientation, memoryPool, cancellationToken));
     }
 
     private static bool IsExpectedDecodeFailure(Exception exception) => exception is
@@ -157,7 +165,10 @@ public sealed class WicPreviewDecoder
                 fullPath, PreviewAvailability.CouldNotAnalyze, CouldNotAnalyzeReason);
 
     private static PreviewFrame CopyOriented(
-        BitmapSource source, ushort orientation, CancellationToken cancellationToken)
+        BitmapSource source,
+        ushort orientation,
+        MemoryPool<byte> memoryPool,
+        CancellationToken cancellationToken)
     {
         var width = source.PixelWidth;
         var height = source.PixelHeight;
@@ -167,7 +178,8 @@ public sealed class WicPreviewDecoder
         {
             source.CopyPixels(sourcePixels, width * 4, 0);
             var swapsAxes = orientation is 5 or 6 or 7 or 8;
-            var output = PreviewFrame.Rent(swapsAxes ? height : width, swapsAxes ? width : height);
+            var output = PreviewFrame.Rent(
+                swapsAxes ? height : width, swapsAxes ? width : height, memoryPool);
             try
             {
                 var target = output.WritablePixels.Span;

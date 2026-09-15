@@ -29,16 +29,17 @@ public sealed class BoundedThumbnailCache : IDisposable
         {
             ObjectDisposedException.ThrowIf(disposed, this);
             if (entries.Remove(key, out var existing)) Remove(existing);
-            if (frame.ByteLength > byteCapacity)
+            if (frame.OwnedByteLength > byteCapacity)
             {
                 frame.Dispose();
                 return;
             }
 
+            while (ownedBytes > byteCapacity - frame.OwnedByteLength)
+                Remove(recency.Last!);
             var node = recency.AddFirst(new Entry(key, frame));
             entries.Add(key, node);
-            ownedBytes += frame.ByteLength;
-            while (ownedBytes > byteCapacity) Remove(recency.Last!);
+            ownedBytes += frame.OwnedByteLength;
         }
     }
 
@@ -75,7 +76,7 @@ public sealed class BoundedThumbnailCache : IDisposable
     {
         recency.Remove(node);
         entries.Remove(node.Value.Key);
-        ownedBytes -= node.Value.Frame.ByteLength;
+        ownedBytes -= node.Value.Frame.OwnedByteLength;
         node.Value.Frame.Dispose();
     }
 

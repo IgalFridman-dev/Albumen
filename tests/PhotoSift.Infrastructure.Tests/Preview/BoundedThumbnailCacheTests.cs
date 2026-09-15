@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using PhotoSift.Infrastructure.Windows.Preview;
@@ -8,27 +9,18 @@ namespace PhotoSift.Infrastructure.Tests.Preview;
 public sealed class BoundedThumbnailCacheTests
 {
     [Fact]
-    public async Task LeastRecentlyUsedEvictionDisposesOwnedPixelsAndStaysWithinByteLimit()
+    public void CacheChargesActualPooledOwnerBytesRatherThanLogicalPixelBytes()
     {
-        using var fixture = PngFixture.Create();
-        using var cache = new BoundedThumbnailCache(byteCapacity: 32);
-        var first = await DecodeFrameAsync(fixture.Path);
-        var second = await DecodeFrameAsync(fixture.Path);
-        var third = await DecodeFrameAsync(fixture.Path);
+        using var cache = new BoundedThumbnailCache(byteCapacity: 48);
+        var first = new PreviewFrame(2, 2, new OversizedMemoryOwner(32));
+        var second = new PreviewFrame(2, 2, new OversizedMemoryOwner(32));
         cache.Add("first", first);
         cache.Add("second", second);
-        Assert.True(cache.TryGet("first", out var firstHit));
-        Assert.NotNull(firstHit);
-        firstHit.Dispose();
 
-        cache.Add("third", third);
-
-        Assert.True(cache.TryGet("first", out var retainedHit));
-        Assert.NotNull(retainedHit);
-        retainedHit.Dispose();
-        Assert.False(cache.TryGet("second", out _));
-        Assert.True(second.IsDisposed);
-        Assert.True(cache.OwnedBytes <= 32);
+        Assert.Equal(32, second.OwnedByteLength);
+        Assert.True(first.IsDisposed);
+        Assert.False(second.IsDisposed);
+        Assert.Equal(32, cache.OwnedBytes);
     }
 
     [Fact]
@@ -82,5 +74,13 @@ public sealed class BoundedThumbnailCacheTests
         }
 
         public void Dispose() => Directory.Delete(DirectoryPath, recursive: true);
+    }
+
+    private sealed class OversizedMemoryOwner(int length) : IMemoryOwner<byte>
+    {
+        private byte[]? bytes = new byte[length];
+        public Memory<byte> Memory => bytes ??
+            throw new ObjectDisposedException(nameof(OversizedMemoryOwner));
+        public void Dispose() => bytes = null;
     }
 }

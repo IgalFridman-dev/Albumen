@@ -1,0 +1,21 @@
+<UserControl x:Class="PhotoSift.App.PreviewStatusControl"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AutomationProperties.Name="{Binding AutomationName}"
+        AutomationProperties.ItemStatus="{Binding StatusText}">
+    <StackPanel>
+        <TextBox x:Name="PreviewFullPathTextBox"
+                 Text="{Binding FullPath, Mode=OneWay}"
+                 IsReadOnly="True"
+                 TextWrapping="Wrap"
+                 Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                 Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                 AutomationProperties.Name="Full preview path" />
+        <TextBlock x:Name="PreviewStatusText"
+                   Text="{Binding StatusText, Mode=OneWay}"
+                   TextWrapping="Wrap"
+                   AutomationProperties.Name="{Binding StatusText}"
+                   AutomationProperties.ItemStatus="{Binding StatusText}"
+                   AutomationProperties.LiveSetting="Polite" />
+    </StackPanel>
+</UserControl>

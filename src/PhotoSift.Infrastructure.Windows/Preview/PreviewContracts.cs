@@ -58,7 +58,7 @@ public sealed class PreviewFrame : IDisposable
 {
     private IMemoryOwner<byte>? owner;
 
-    private PreviewFrame(int width, int height, IMemoryOwner<byte> owner)
+    internal PreviewFrame(int width, int height, IMemoryOwner<byte> owner)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
@@ -66,11 +66,20 @@ public sealed class PreviewFrame : IDisposable
         Width = width;
         Height = height;
         ByteLength = checked(width * height * 4);
+        OwnedByteLength = owner.Memory.Length;
+        if (OwnedByteLength < ByteLength)
+        {
+            this.owner = null;
+            owner.Dispose();
+            throw new ArgumentException(
+                "The memory owner is smaller than the frame pixels.", nameof(owner));
+        }
     }
 
     public int Width { get; }
     public int Height { get; }
     public int ByteLength { get; }
+    public int OwnedByteLength { get; }
     public bool IsDisposed => owner is null;
     public ReadOnlyMemory<byte> DisplayPixels => Pixels;
     public ReadOnlyMemory<byte> AnalysisPixels => Pixels;
@@ -78,10 +87,14 @@ public sealed class PreviewFrame : IDisposable
     private ReadOnlyMemory<byte> Pixels =>
         (owner ?? throw new ObjectDisposedException(nameof(PreviewFrame))).Memory[..ByteLength];
 
-    internal static PreviewFrame Rent(int width, int height)
+    internal static PreviewFrame Rent(int width, int height) =>
+        Rent(width, height, MemoryPool<byte>.Shared);
+
+    internal static PreviewFrame Rent(int width, int height, MemoryPool<byte> pool)
     {
+        ArgumentNullException.ThrowIfNull(pool);
         var length = checked(width * height * 4);
-        return new(width, height, MemoryPool<byte>.Shared.Rent(length));
+        return new(width, height, pool.Rent(length));
     }
 
     internal Memory<byte> WritablePixels =>
