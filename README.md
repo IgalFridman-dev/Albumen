@@ -59,7 +59,7 @@ The project deliberately excludes cloud inference, accounts, telemetry, automati
 3. Run its required automated, integration, and platform evidence.
 4. Review the change before marking the story done.
 5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
-6. Follow the YAGNI roadmap and `sprint-status.yaml`; E2-S3 lean interruption closure is active. PM-002 and PM-003 are pre-release obligations.
+6. Follow the YAGNI roadmap and `sprint-status.yaml`; E2-S3 lean interruption closure is complete and E2-S5 is active. PM-002 and PM-003 are pre-release obligations.
 
 The repository contains the .NET 10/C# 14/WPF `win-x64` application with exact local Scope selection/preflight, Exact duplicate detection, survivor-safe Review Selection, durable override evidence, one-item Recycle Bin execution through the sole Action owner, completed E1-S6 restart reconciliation, and an exact version-5 SQLite foundation with durable Scan identity, `Enumeration`/`Exact` checkpoints, and reconciled row-truth accounting, plus five test projects and a NIC-free Golden Hyper-V VM verification gate. Review approval supplies an exact sealed request; fresh authority/survivor checks and durable Requested/Executing commits must still precede every shell call. Uncertain or interrupted work is never automatically replayed.
 
