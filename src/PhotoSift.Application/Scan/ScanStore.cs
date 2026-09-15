@@ -4,15 +4,33 @@ using PhotoSift.Domain.Scope;
 
 namespace PhotoSift.Application.Scan;
 
-internal sealed class ScanStore(ScanRunContext context)
+internal sealed class ScanStore
 {
     private static readonly StageOutcome Running = new(ScanStageState.Running, ScanReason.None);
     private static readonly StageOutcome Success = new(ScanStageState.Succeeded, ScanReason.None);
     private static readonly StageOutcome Changed = new(ScanStageState.FailedRetryable, ScanReason.Changed);
-    private readonly Dictionary<long, ScanFileOccurrence> occurrences = [];
-    private readonly Dictionary<PhysicalFileKey, StageOutcome> invalidPhysical = [];
-    private readonly ExactGroupIndex groups = new();
+    private readonly ScanRunContext context;
+    private Dictionary<long, ScanFileOccurrence> occurrences = [];
+    private Dictionary<PhysicalFileKey, StageOutcome> invalidPhysical = [];
+    private ExactGroupIndex groups = new();
     private long nextId;
+    private long revision;
+
+    public ScanStore(ScanRunContext context)
+    {
+        this.context = context ?? throw new ArgumentNullException(nameof(context));
+    }
+
+    private ScanStore(ScanStore source) : this(source.context)
+    {
+        occurrences = new Dictionary<long, ScanFileOccurrence>(source.occurrences);
+        invalidPhysical = new Dictionary<PhysicalFileKey, StageOutcome>(source.invalidPhysical);
+        groups = source.groups.Clone();
+        nextId = source.nextId;
+        revision = source.revision;
+        Incomplete = source.Incomplete;
+        Faulted = source.Faulted;
+    }
 
     public bool Incomplete { get; private set; }
     public bool Faulted { get; private set; }
@@ -20,10 +38,46 @@ internal sealed class ScanStore(ScanRunContext context)
 
     public bool MatchesGroup(Guid groupId, long groupRevision) => groups.IsCurrent(groupId, groupRevision);
 
+    public ScanStoreMutation<OccurrenceWork?> PrepareRegistration(EnumeratedFile file) =>
+        Prepare(store => store.Register(file));
+
+    public ScanStoreMutation<SignatureCommit> PrepareSignature(SignatureEvidence evidence) =>
+        Prepare(store => store.CommitSignature(evidence));
+
+    public ScanStoreMutation<bool> PrepareComparison(ComparisonEvidence evidence) =>
+        Prepare(store => store.CommitComparison(evidence));
+
+    public ScanStoreMutation<bool> PrepareFailure(OccurrenceToken token, StageOutcome outcome) =>
+        Prepare(store => store.Fail(token, outcome));
+
+    public ScanStoreMutation<bool> PrepareReconciliation(StageOutcome outcome) => Prepare(store =>
+    {
+        store.Reconcile(outcome);
+        return true;
+    });
+
+    public T Apply<T>(ScanStoreMutation<T> mutation)
+    {
+        ArgumentNullException.ThrowIfNull(mutation);
+        if (mutation.SourceRevision != revision)
+            throw new InvalidOperationException("A prepared Scan mutation is stale.");
+        var next = mutation.Next;
+        occurrences = next.occurrences;
+        invalidPhysical = next.invalidPhysical;
+        groups = next.groups;
+        nextId = next.nextId;
+        Incomplete = next.Incomplete;
+        Faulted = next.Faulted;
+        revision = checked(revision + 1);
+        return mutation.Result;
+    }
+
     public OccurrenceWork? Register(EnumeratedFile file)
     {
         var token = new OccurrenceToken(context.Pin, ++nextId, 1, 1);
-        var exact = file.Outcome.State == ScanStageState.Succeeded ? Running : file.Outcome;
+        var exact = file.Outcome.State == ScanStageState.Succeeded
+            ? Running
+            : new StageOutcome(ScanStageState.NotApplicable, file.Outcome.Reason);
         if (file.Outcome.State == ScanStageState.Succeeded && file.PhysicalFileKey is null)
             exact = new StageOutcome(ScanStageState.FailedTerminal, ScanReason.UnknownSafety);
         if (file.PhysicalFileKey is { } key && invalidPhysical.TryGetValue(key, out var invalid)) exact = invalid;
@@ -162,4 +216,36 @@ internal sealed class ScanStore(ScanRunContext context)
         if (outcome.Reason is ScanReason.Changed or ScanReason.Canceled or ScanReason.UnsafeLocation
             or ScanReason.UnknownSafety or ScanReason.IncompleteEnumeration) Incomplete = true;
     }
+
+    private ScanStoreMutation<T> Prepare<T>(Func<ScanStore, T> change)
+    {
+        var next = new ScanStore(this);
+        var result = change(next);
+        var added = next.occurrences.Values
+            .Where(row => !occurrences.ContainsKey(row.Token.OccurrenceId))
+            .OrderBy(row => row.Token.OccurrenceId)
+            .ToImmutableArray();
+        var exact = next.occurrences.Values
+            .Where(row => occurrences.TryGetValue(row.Token.OccurrenceId, out var before)
+                && before.Exact != row.Exact)
+            .OrderBy(row => row.Token.OccurrenceId)
+            .Select(row => new ScanExactMutation(
+                occurrences[row.Token.OccurrenceId].Token,
+                occurrences[row.Token.OccurrenceId].Exact,
+                row.Exact))
+            .ToImmutableArray();
+        return new(revision, next, result, added, exact);
+    }
 }
+
+internal sealed record ScanStoreMutation<T>(
+    long SourceRevision,
+    ScanStore Next,
+    T Result,
+    ImmutableArray<ScanFileOccurrence> AddedOccurrences,
+    ImmutableArray<ScanExactMutation> ExactMutations);
+
+internal sealed record ScanExactMutation(
+    OccurrenceToken Token,
+    StageOutcome Before,
+    StageOutcome After);

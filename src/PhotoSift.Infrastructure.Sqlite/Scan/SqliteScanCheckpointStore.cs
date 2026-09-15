@@ -137,7 +137,7 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
             }
             if (current.Revision != command.ExpectedRevision)
                 return Rejected(ScanCheckpointWriteOutcome.Stale);
-            if (!ScanTransitionPolicy.CanTransition(command.Stage, current.Outcome.State, command.Outcome.State))
+            if (!ScanTransitionPolicy.CanTransition(command.Stage, current.Outcome, command.Outcome))
                 return Rejected(ScanCheckpointWriteOutcome.IllegalTransition);
 
             var updated = new ScanCheckpoint(

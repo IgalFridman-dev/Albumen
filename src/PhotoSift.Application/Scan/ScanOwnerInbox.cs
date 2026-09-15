@@ -34,4 +34,19 @@ public sealed class ScanOwnerInbox
             resultSlots.Release();
         }
     }
+
+    public async Task<T> ResultOperationAsync<T>(Func<Task<T>> callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        await resultSlots.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var operation = await turns.InvokeAsync(callback).ConfigureAwait(false);
+            return await operation.ConfigureAwait(false);
+        }
+        finally
+        {
+            resultSlots.Release();
+        }
+    }
 }

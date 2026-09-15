@@ -313,6 +313,18 @@ public static class ScanTransitionPolicy
                 or ScanStageState.Canceled;
     }
 
+    public static bool CanTransition(ScanStage stage, StageOutcome current, StageOutcome next)
+    {
+        Validate(stage, nameof(stage));
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(next);
+
+        return CanTransition(stage, current.State, next.State)
+            || stage == ScanStage.Exact
+                && current == new StageOutcome(ScanStageState.Succeeded, ScanReason.None)
+                && next == new StageOutcome(ScanStageState.FailedRetryable, ScanReason.Changed);
+    }
+
     public static bool IsTerminal(ScanStageState state)
     {
         Validate(state, nameof(state));

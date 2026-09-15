@@ -17,6 +17,8 @@ public sealed class SqliteScanCheckpointStoreTests
         Guid.Parse("4f46773c-894e-43d2-a66a-2b946d9109c7");
     private static readonly Guid ExactTerminalTransitionId =
         Guid.Parse("5b21b75d-c4d8-43ec-a9a4-95b8e4b1c281");
+    private static readonly Guid ExactCorrectionTransitionId =
+        Guid.Parse("e4272ad4-dd44-47dd-90c1-71a77131d459");
     private static readonly StageOutcome Succeeded =
         new(ScanStageState.Succeeded, ScanReason.None);
     private static readonly StageOutcome Running =
@@ -104,6 +106,37 @@ public sealed class SqliteScanCheckpointStoreTests
         Assert.Equal(new ScanAccounting(1, 1, 0, 0, 0, 0), accepted.Snapshot.Accounting);
         Assert.Equal(accepted.Snapshot.Lifecycle, retry.Snapshot!.Lifecycle);
         Assert.Equal(accepted.Snapshot.Accounting, retry.Snapshot.Accounting);
+        Assert.Equal(accepted.Snapshot.Stages.ToArray(), retry.Snapshot.Stages.ToArray());
+    }
+
+    [Fact]
+    public async Task SucceededExactCanBeCorrectedOnlyToRetryableChangedAndRetriedIdempotently()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var (_, initial) = await BootstrapAsync(stores);
+        var token = TestContext.Current.CancellationToken;
+        await stores.ScanCheckpoints.WriteInitialOccurrenceAsync(initial, token);
+        await stores.ScanCheckpoints.TransitionStageAsync(new(
+            initial.Occurrence.Token.Pin.ScanId, 7, ScanStage.Exact, 1,
+            ExactTerminalTransitionId, Succeeded), token);
+        var changed = new StageOutcome(ScanStageState.FailedRetryable, ScanReason.Changed);
+        var command = new ScanStageTransitionCommand(
+            initial.Occurrence.Token.Pin.ScanId, 7, ScanStage.Exact, 2,
+            ExactCorrectionTransitionId, changed);
+
+        var accepted = await stores.ScanCheckpoints.TransitionStageAsync(command, token);
+        var retry = await stores.ScanCheckpoints.TransitionStageAsync(command, token);
+
+        Assert.Equal(ScanCheckpointWriteOutcome.Accepted, accepted.Outcome);
+        Assert.Equal(ScanCheckpointWriteOutcome.Idempotent, retry.Outcome);
+        var exact = Assert.Single(accepted.Snapshot!.Stages,
+            stage => stage.Stored.Stage == ScanStage.Exact);
+        Assert.Equal(3, exact.Stored.Revision);
+        Assert.Equal(ExactCorrectionTransitionId, exact.Stored.TransitionId);
+        Assert.Equal(changed, exact.Stored.Outcome);
+        Assert.Equal(new ScanAccounting(1, 0, 0, 1, 0, 0), accepted.Snapshot.Accounting);
+        Assert.Equal(accepted.Snapshot.Accounting, retry.Snapshot!.Accounting);
         Assert.Equal(accepted.Snapshot.Stages.ToArray(), retry.Snapshot.Stages.ToArray());
     }
 

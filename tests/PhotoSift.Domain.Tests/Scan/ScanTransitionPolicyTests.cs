@@ -72,6 +72,45 @@ public sealed class ScanTransitionPolicyTests
     };
 
     [Theory]
+    [MemberData(nameof(EvidenceCorrectionEdges))]
+    public void ExactTerminalCorrectionAllowsOnlySucceededToChanged(
+        StageOutcome current,
+        StageOutcome next,
+        bool expected)
+    {
+        Assert.Equal(expected, ScanTransitionPolicy.CanTransition(ScanStage.Exact, current, next));
+    }
+
+    public static TheoryData<StageOutcome, StageOutcome, bool> EvidenceCorrectionEdges() => new()
+    {
+        {
+            new StageOutcome(ScanStageState.Succeeded, ScanReason.None),
+            new StageOutcome(ScanStageState.FailedRetryable, ScanReason.Changed),
+            true
+        },
+        {
+            new StageOutcome(ScanStageState.Succeeded, ScanReason.None),
+            new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure),
+            false
+        },
+        {
+            new StageOutcome(ScanStageState.Succeeded, ScanReason.None),
+            new StageOutcome(ScanStageState.FailedTerminal, ScanReason.ProgrammingFault),
+            false
+        },
+        {
+            new StageOutcome(ScanStageState.Unsupported, ScanReason.UnsupportedExtension),
+            new StageOutcome(ScanStageState.FailedRetryable, ScanReason.Changed),
+            false
+        },
+        {
+            new StageOutcome(ScanStageState.FailedRetryable, ScanReason.Changed),
+            new StageOutcome(ScanStageState.Running, ScanReason.None),
+            false
+        },
+    };
+
+    [Theory]
     [InlineData(ScanStageState.Pending, false)]
     [InlineData(ScanStageState.Running, false)]
     [InlineData(ScanStageState.Succeeded, true)]

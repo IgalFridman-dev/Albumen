@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Scan;
@@ -156,6 +157,214 @@ internal sealed class ScanTestEnumerator(int count) : IScanEnumerator
         if (EndException is not null) throw EndException;
         if (IncludeEnd) yield return new ScanEnumerationEnded(ScanTestData.Success);
     }
+}
+
+internal sealed class CoordinatorIdentityStore : IScanIdentityStore
+{
+    private readonly Channel<CoordinatorIdentityAttempt> attempts =
+        Channel.CreateUnbounded<CoordinatorIdentityAttempt>();
+    private readonly ConcurrentDictionary<Guid, ScanIdentityRecord> scans = new();
+    public ConcurrentQueue<ScanIdentityRecord> ScanWrites { get; } = new();
+    public int OccurrenceWriteCount;
+    public bool HoldWrites { get; set; }
+
+    public async ValueTask<ScanIdentityPersistResult> PersistScanAsync(
+        ScanIdentityRecord record,
+        CancellationToken cancellationToken)
+    {
+        ScanWrites.Enqueue(record);
+        var outcome = ScanIdentityPersistOutcome.Persisted;
+        if (HoldWrites)
+        {
+            var attempt = new CoordinatorIdentityAttempt(record);
+            await attempts.Writer.WriteAsync(attempt, cancellationToken);
+            outcome = await attempt.Completion.Task.WaitAsync(cancellationToken);
+        }
+        if (outcome is ScanIdentityPersistOutcome.Persisted or ScanIdentityPersistOutcome.ExactRetry)
+            scans.TryAdd(record.Pin.ScanId, record);
+        return new(outcome);
+    }
+
+    public ValueTask<ScanIdentityPersistResult> PersistOccurrenceAsync(
+        ScanOccurrenceIdentityRecord record,
+        CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref OccurrenceWriteCount);
+        return ValueTask.FromResult(new ScanIdentityPersistResult(ScanIdentityPersistOutcome.Persisted));
+    }
+
+    public ValueTask<ScanIdentityReadResult> ReadScanAsync(Guid scanId, CancellationToken cancellationToken) =>
+        ValueTask.FromResult(scans.TryGetValue(scanId, out var record)
+            ? new ScanIdentityReadResult(ScanIdentityReadOutcome.Found, record)
+            : new ScanIdentityReadResult(ScanIdentityReadOutcome.Missing, null));
+
+    public ValueTask<ScanOccurrenceIdentityReadResult> ReadOccurrencesAsync(
+        Guid scanId,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(new ScanOccurrenceIdentityReadResult(
+            ScanIdentityReadOutcome.Found,
+            ImmutableArray<ScanOccurrenceIdentityRecord>.Empty));
+
+    public Task<CoordinatorIdentityAttempt> NextAttemptAsync() =>
+        attempts.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask();
+}
+
+internal sealed class CoordinatorIdentityAttempt(ScanIdentityRecord record)
+{
+    public ScanIdentityRecord Record { get; } = record;
+    public TaskCompletionSource<ScanIdentityPersistOutcome> Completion { get; } =
+        ScanTestData.Signal<ScanIdentityPersistOutcome>();
+    public void Release(ScanIdentityPersistOutcome outcome = ScanIdentityPersistOutcome.Persisted) =>
+        Completion.TrySetResult(outcome);
+}
+
+internal sealed class CoordinatorCheckpointStore : IScanCheckpointStore
+{
+    private readonly Channel<CoordinatorCheckpointAttempt> attempts =
+        Channel.CreateUnbounded<CoordinatorCheckpointAttempt>();
+    private readonly object stateLock = new();
+    private readonly Dictionary<Guid, ScanLifecycleCheckpoint> lifecycles = [];
+    private readonly Dictionary<(Guid ScanId, long OccurrenceId), ScanOccurrenceIdentityRecord> occurrences = [];
+    private readonly Dictionary<(Guid ScanId, long OccurrenceId, ScanStage Stage), ScanCheckpoint> checkpoints = [];
+    private int inFlight;
+    private int maximumInFlight;
+    public ConcurrentQueue<object> Writes { get; } = new();
+    public bool HoldWrites { get; set; }
+    public int MaximumInFlight => Volatile.Read(ref maximumInFlight);
+
+    public ValueTask<ScanCheckpointWriteResult> WriteInitialOccurrenceAsync(
+        InitialOccurrenceCheckpointCommand command,
+        CancellationToken cancellationToken) =>
+        WriteAsync(command, () => Apply(command), cancellationToken);
+
+    public ValueTask<ScanCheckpointWriteResult> TransitionLifecycleAsync(
+        ScanLifecycleTransitionCommand command,
+        CancellationToken cancellationToken) =>
+        WriteAsync(command, () => Apply(command), cancellationToken);
+
+    public ValueTask<ScanCheckpointWriteResult> TransitionStageAsync(
+        ScanStageTransitionCommand command,
+        CancellationToken cancellationToken) =>
+        WriteAsync(command, () => Apply(command), cancellationToken);
+
+    public ValueTask<ScanCheckpointReadResult> ReadAsync(Guid scanId, CancellationToken cancellationToken)
+    {
+        lock (stateLock) return ValueTask.FromResult(Snapshot(scanId));
+    }
+
+    public Task<CoordinatorCheckpointAttempt> NextAttemptAsync() =>
+        attempts.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask();
+
+    private async ValueTask<ScanCheckpointWriteResult> WriteAsync(
+        object command,
+        System.Action apply,
+        CancellationToken cancellationToken)
+    {
+        Writes.Enqueue(command);
+        var entered = Interlocked.Increment(ref inFlight);
+        UpdateMaximum(entered);
+        try
+        {
+            var outcome = ScanCheckpointWriteOutcome.Accepted;
+            if (HoldWrites)
+            {
+                var attempt = new CoordinatorCheckpointAttempt(command);
+                await attempts.Writer.WriteAsync(attempt, cancellationToken);
+                outcome = await attempt.Completion.Task.WaitAsync(cancellationToken);
+            }
+            if (outcome is not (ScanCheckpointWriteOutcome.Accepted or ScanCheckpointWriteOutcome.Idempotent))
+                return new(outcome, null);
+            lock (stateLock)
+            {
+                if (outcome == ScanCheckpointWriteOutcome.Accepted) apply();
+                return new(outcome, Snapshot(ScanId(command)));
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref inFlight);
+        }
+    }
+
+    private void Apply(ScanLifecycleTransitionCommand command)
+    {
+        var revision = command.NextState == ScanLifecycleState.Preflight
+            ? 1
+            : checked(lifecycles[command.ScanId].Revision + 1);
+        lifecycles[command.ScanId] = new(
+            command.ScanId, revision, command.TransitionId, command.NextState);
+    }
+
+    private void Apply(InitialOccurrenceCheckpointCommand command)
+    {
+        var token = command.Occurrence.Token;
+        occurrences[(token.Pin.ScanId, token.OccurrenceId)] = command.Occurrence;
+        checkpoints[(token.Pin.ScanId, token.OccurrenceId, ScanStage.Enumeration)] = command.Enumeration;
+        checkpoints[(token.Pin.ScanId, token.OccurrenceId, ScanStage.Exact)] = command.Exact;
+    }
+
+    private void Apply(ScanStageTransitionCommand command)
+    {
+        var key = (command.ScanId, command.OccurrenceId, command.Stage);
+        var current = checkpoints[key];
+        checkpoints[key] = new(
+            command.ScanId,
+            command.OccurrenceId,
+            command.Stage,
+            checked(current.Revision + 1),
+            command.TransitionId,
+            command.Outcome,
+            current.Prerequisite);
+    }
+
+    private ScanCheckpointReadResult Snapshot(Guid scanId)
+    {
+        if (!lifecycles.TryGetValue(scanId, out var lifecycle))
+            return new(ScanCheckpointReadOutcome.Missing, null, [], null);
+        var rows = checkpoints.Values
+            .Where(row => row.ScanId == scanId)
+            .OrderBy(row => row.OccurrenceId)
+            .ThenBy(row => row.Stage)
+            .ToArray();
+        var accounting = rows.Length == 0
+            ? new ScanAccounting(0, 0, 0, 0, 0, 0)
+            : ScanTransitionPolicy.TryRecomputeAccounting(rows, out var recomputed)
+                ? recomputed
+                : throw new InvalidOperationException("The checkpoint double received contradictory stage rows.");
+        return new(
+            ScanCheckpointReadOutcome.Found,
+            lifecycle,
+            rows.Select(row => new ScanCheckpointProjection(row, row.Outcome, false)).ToImmutableArray(),
+            accounting);
+    }
+
+    private static Guid ScanId(object command) => command switch
+    {
+        InitialOccurrenceCheckpointCommand initial => initial.Occurrence.Token.Pin.ScanId,
+        ScanLifecycleTransitionCommand lifecycle => lifecycle.ScanId,
+        ScanStageTransitionCommand stage => stage.ScanId,
+        _ => throw new ArgumentOutOfRangeException(nameof(command)),
+    };
+
+    private void UpdateMaximum(int value)
+    {
+        var current = Volatile.Read(ref maximumInFlight);
+        while (value > current)
+        {
+            var observed = Interlocked.CompareExchange(ref maximumInFlight, value, current);
+            if (observed == current) return;
+            current = observed;
+        }
+    }
+}
+
+internal sealed class CoordinatorCheckpointAttempt(object command)
+{
+    public object Command { get; } = command;
+    public TaskCompletionSource<ScanCheckpointWriteOutcome> Completion { get; } =
+        ScanTestData.Signal<ScanCheckpointWriteOutcome>();
+    public void Release(ScanCheckpointWriteOutcome outcome = ScanCheckpointWriteOutcome.Accepted) =>
+        Completion.TrySetResult(outcome);
 }
 
 internal sealed class FailingScanStream : MemoryStream

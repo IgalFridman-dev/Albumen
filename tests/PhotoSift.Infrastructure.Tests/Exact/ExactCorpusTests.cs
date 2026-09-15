@@ -7,6 +7,7 @@ using PhotoSift.Application.Scan;
 using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
+using PhotoSift.Infrastructure.Sqlite;
 using PhotoSift.Infrastructure.Windows.Scan;
 using PhotoSift.Infrastructure.Windows.Scope;
 using Xunit;
@@ -123,7 +124,8 @@ public sealed class ExactCorpusTests
         Assert.False(originalBytes.AsSpan().SequenceEqual(differentBytes));
 
         var unsupported = Occurrence(snapshot, "unsupported/abc.gif", corpus);
-        Assert.Equal(new StageOutcome(ScanStageState.Unsupported, ScanReason.UnsupportedExtension), unsupported.Exact);
+        Assert.Equal(new StageOutcome(
+            ScanStageState.NotApplicable, ScanReason.UnsupportedExtension), unsupported.Exact);
         var heic = Occurrence(snapshot, "codec/conditional.heic", corpus);
         Assert.True(heic.Exact == new StageOutcome(ScanStageState.Succeeded, ScanReason.None)
             || heic.Exact == new StageOutcome(ScanStageState.Unsupported, ScanReason.CodecUnavailable));
@@ -395,15 +397,24 @@ internal sealed class ExactScanFixture : IAsyncDisposable
 {
     private readonly SerialTestScheduler scheduler;
     private readonly ScanCoordinator coordinator;
+    private readonly SqlitePhotoSiftStores stores;
+    private readonly string databasePath;
     private readonly ShellSnapshot ready;
     private readonly TaskCompletionSource<ScanSnapshot> terminal =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? settlement;
 
-    private ExactScanFixture(SerialTestScheduler scheduler, ScanCoordinator coordinator, ShellSnapshot ready)
+    private ExactScanFixture(
+        SerialTestScheduler scheduler,
+        ScanCoordinator coordinator,
+        SqlitePhotoSiftStores stores,
+        string databasePath,
+        ShellSnapshot ready)
     {
         this.scheduler = scheduler;
         this.coordinator = coordinator;
+        this.stores = stores;
+        this.databasePath = databasePath;
         this.ready = ready;
         coordinator.SnapshotChanged += OnSnapshotChanged;
     }
@@ -420,10 +431,13 @@ internal sealed class ExactScanFixture : IAsyncDisposable
         }
 
         var scheduler = new SerialTestScheduler();
-        var coordinator = new ScanCoordinator(scheduler, preflight, executor);
+        var databasePath = Path.Combine(Path.GetTempPath(), $"photosift-exact-{Guid.NewGuid():N}.db");
+        var stores = new SqlitePhotoSiftStores(databasePath);
+        var coordinator = new ScanCoordinator(
+            scheduler, preflight, executor, stores.ScanIdentities, stores.ScanCheckpoints);
         var ready = new ShellSnapshot([], "Exact corpus ready", ScopeSessionState.Ready,
             selection, result, Revision: 1);
-        return new ExactScanFixture(scheduler, coordinator, ready);
+        return new ExactScanFixture(scheduler, coordinator, stores, databasePath, ready);
     }
 
     public Task StartAsync(long ruleRevision = 1) => Bound(coordinator.StartAsync(
@@ -448,6 +462,8 @@ internal sealed class ExactScanFixture : IAsyncDisposable
         coordinator.SnapshotChanged -= OnSnapshotChanged;
         await SettleAsync();
         await scheduler.DisposeAsync();
+        await stores.DisposeAsync();
+        File.Delete(databasePath);
     }
 
     private static Task Bound(Task task) => task.WaitAsync(

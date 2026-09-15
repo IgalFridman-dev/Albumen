@@ -21,6 +21,24 @@ internal sealed class ExactGroupIndex
         this.advanceRevision = advanceRevision;
     }
 
+    private ExactGroupIndex(ExactGroupIndex source)
+    {
+        advanceRevision = source.advanceRevision;
+        foreach (var pair in source.representatives) representatives.Add(pair.Key, pair.Value);
+        pending.UnionWith(source.pending);
+        equality.AddRange(source.equality);
+        foreach (var pair in source.published)
+        {
+            var value = pair.Value;
+            published.Add(pair.Key, value with
+            {
+                PhysicalFiles = new HashSet<PhysicalFileKey>(value.PhysicalFiles),
+            });
+        }
+    }
+
+    internal ExactGroupIndex Clone() => new(this);
+
     public int PendingCount => pending.Count;
 
     public ContentRevision? ContentFor(PhysicalFileKey key) =>

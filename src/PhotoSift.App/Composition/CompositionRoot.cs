@@ -41,8 +41,9 @@ public static class CompositionRoot
         var reader = new WindowsProtectedFileReader();
         var analyzer = new StreamingExactContentAnalyzer();
         var executor = new BoundedScanExecutor(new WindowsScanEnumerator(), reader, analyzer);
-        var scan = new ScanCoordinator(scheduler, preflight, executor);
         var stores = new SqlitePhotoSiftStores(databasePath);
+        var scan = new ScanCoordinator(
+            scheduler, preflight, executor, stores.ScanIdentities, stores.ScanCheckpoints);
         var review = new ReviewCoordinator(scheduler,
             new BoundedReviewRevalidator(reader, analyzer), stores.OverrideEvidence,
             actionSafety: new ProtectedActionSafetyValidator(reader, analyzer));

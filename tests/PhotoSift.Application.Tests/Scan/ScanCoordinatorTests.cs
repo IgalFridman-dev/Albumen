@@ -177,6 +177,7 @@ public sealed class ScanCoordinatorTests
         await fixture.Pump(fixture.Owner.CancelAsync());
         run.Done.TrySetResult();
         await fixture.Pump(run.Disposed.Task);
+        await fixture.Until(snapshot => snapshot.Status == ScanStatus.Incomplete);
         Assert.Equal(ScanStatus.Incomplete, fixture.Owner.Current.Status);
         Assert.Equal(3, fixture.Owner.Current.Counts.Analyzed);
         Assert.Equal(0, fixture.Owner.Current.Counts.Outstanding);
@@ -194,16 +195,28 @@ internal sealed class CoordinatorFixture : IAsyncDisposable
     public ManualScanScheduler Scheduler { get; } = new();
     public CoordinatorPreflight Preflight { get; } = new();
     public CoordinatorExecutor Executor { get; } = new();
+    public CoordinatorIdentityStore Identities { get; }
+    public CoordinatorCheckpointStore Checkpoints { get; }
     public ScanCoordinator Owner { get; }
     public ResolvedScope Scope { get; } = ScanTestData.Context().Scope;
     public ScopePreflightEvidence Evidence => new(Scope, ScopeVolumeKind.Fixed, ScopeCloudState.Local,
         ScopeTraversalState.Complete, new ScopeOutcomeCounts(1, 0, 0, 0), new ScopeRestrictionCounts(0, 0));
     public ShellSnapshot Ready(long revision = 1) => new([], "ready", ScopeSessionState.Ready,
         Scope.Selection, ScopePreflightPolicy.Evaluate(Evidence), Revision: revision);
-    public CoordinatorFixture(IScanExecutor? executor = null)
+    public CoordinatorFixture(
+        IScanExecutor? executor = null,
+        CoordinatorIdentityStore? identities = null,
+        CoordinatorCheckpointStore? checkpoints = null)
     {
+        Identities = identities ?? new CoordinatorIdentityStore();
+        Checkpoints = checkpoints ?? new CoordinatorCheckpointStore();
         Preflight.Inspect = (_, _) => Task.FromResult(Evidence);
-        Owner = new ScanCoordinator(Scheduler, Preflight, executor ?? Executor);
+        Owner = new ScanCoordinator(
+            Scheduler,
+            Preflight,
+            executor ?? Executor,
+            Identities,
+            Checkpoints);
     }
     public Task Pump(Task task) => ScanTestData.Bound(Scheduler.PumpUntilAsync(task));
     public Task Start(long scope = 1, long rules = 1) => Pump(Owner.StartAsync(Ready(scope), new ExactRuleConfirmation(scope, rules), CancellationToken.None));
@@ -257,8 +270,17 @@ internal sealed class CoordinatorRun(ScanRunContext context) : IScanRun
     public TaskCompletionSource Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Func<Task>? OnCancel { get; set; }
     public Exception? DisposalFailure { get; set; }
+    public TaskCompletionSource CancellationRequested { get; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public int CancellationRequestCount;
     public Task Completion => Done.Task;
-    public Task CancelAsync() { Done.TrySetResult(); return OnCancel?.Invoke() ?? Task.CompletedTask; }
+    public Task CancelAsync()
+    {
+        Interlocked.Increment(ref CancellationRequestCount);
+        CancellationRequested.TrySetResult();
+        Done.TrySetResult();
+        return OnCancel?.Invoke() ?? Task.CompletedTask;
+    }
     public ValueTask DisposeAsync()
     {
         Disposed.TrySetResult();
