@@ -350,13 +350,10 @@ public static class ScanTransitionPolicy
         ArgumentNullException.ThrowIfNull(stages);
         accounting = null!;
 
-        if (stages.Count % 2 != 0 || stages.Any(stage => stage is null))
+        if (stages.Count == 0
+            || stages.Count % 2 != 0
+            || stages.Any(stage => stage is null))
             return false;
-        if (stages.Count == 0)
-        {
-            accounting = new ScanAccounting(0, 0, 0, 0, 0, 0);
-            return true;
-        }
 
         var scanId = stages.First().ScanId;
         if (stages.Any(stage => stage.ScanId != scanId))

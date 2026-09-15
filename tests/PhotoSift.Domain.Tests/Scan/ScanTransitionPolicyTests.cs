@@ -136,6 +136,8 @@ public sealed class ScanTransitionPolicyTests
         var exact = Checkpoint(ScanStage.Exact, succeeded, succeeded);
 
         Assert.False(ScanTransitionPolicy.CanComplete(succeeded, [], analyzed));
+        Assert.False(ScanTransitionPolicy.CanComplete(
+            succeeded, [], new ScanAccounting(0, 0, 0, 0, 0, 0)));
         Assert.False(ScanTransitionPolicy.CanComplete(succeeded, [enumeration], analyzed));
         Assert.False(ScanTransitionPolicy.CanComplete(
             succeeded, [enumeration, exact, exact], analyzed));
