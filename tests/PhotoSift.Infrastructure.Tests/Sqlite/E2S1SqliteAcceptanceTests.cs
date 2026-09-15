@@ -48,7 +48,7 @@ public sealed class E2S1SqliteAcceptanceTests
 
         await using (var migrated = await fixture.OpenRawAsync())
         {
-            Assert.Equal(4L, await ScalarAsync(migrated, "PRAGMA user_version;"));
+            Assert.Equal(5L, await ScalarAsync(migrated, "PRAGMA user_version;"));
             Assert.Equal(epicOneBefore, await EpicOneRowsAsync(migrated));
         }
 

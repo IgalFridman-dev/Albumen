@@ -7,7 +7,7 @@ namespace PhotoSift.Infrastructure.Sqlite;
 
 internal static class PhotoSiftSchema
 {
-    internal const int Version = 4;
+    internal const int Version = 5;
 
     internal static async Task ValidateAsync(SqliteConnection connection, int expectedVersion,
         CancellationToken token, SqliteTransaction? transaction = null)
@@ -41,6 +41,15 @@ internal static class PhotoSiftSchema
             expected.Add("scan_file_occurrences", ("table", "scan_file_occurrences", ScanIdentitySchema.CreateOccurrencesSql));
             expected.Add("sqlite_autoindex_scans_1", ("index", "scans", null));
             expected.Add("sqlite_autoindex_scan_file_occurrences_1", ("index", "scan_file_occurrences", null));
+        }
+        if (expectedVersion >= 5)
+        {
+            expected.Add("scan_lifecycle", ("table", "scan_lifecycle", ScanCheckpointSchema.CreateLifecycleSql));
+            expected.Add("scan_stage_checkpoints", ("table", "scan_stage_checkpoints", ScanCheckpointSchema.CreateStagesSql));
+            expected.Add("scan_accounting", ("table", "scan_accounting", ScanCheckpointSchema.CreateAccountingSql));
+            expected.Add("sqlite_autoindex_scan_lifecycle_1", ("index", "scan_lifecycle", null));
+            expected.Add("sqlite_autoindex_scan_stage_checkpoints_1", ("index", "scan_stage_checkpoints", null));
+            expected.Add("sqlite_autoindex_scan_accounting_1", ("index", "scan_accounting", null));
         }
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -107,7 +116,16 @@ internal static class PhotoSiftSchema
                 await SqliteDatabaseOwner.ExecuteAsync(connection, ScanIdentitySchema.CreateOccurrencesSql, token).ConfigureAwait(false);
                 await ObserveAsync(++step).ConfigureAwait(false);
             }
-            await SqliteDatabaseOwner.ExecuteAsync(connection, "PRAGMA user_version=4;", token).ConfigureAwait(false);
+            if (source < 5)
+            {
+                await SqliteDatabaseOwner.ExecuteAsync(connection, ScanCheckpointSchema.CreateLifecycleSql, token).ConfigureAwait(false);
+                await ObserveAsync(++step).ConfigureAwait(false);
+                await SqliteDatabaseOwner.ExecuteAsync(connection, ScanCheckpointSchema.CreateStagesSql, token).ConfigureAwait(false);
+                await ObserveAsync(++step).ConfigureAwait(false);
+                await SqliteDatabaseOwner.ExecuteAsync(connection, ScanCheckpointSchema.CreateAccountingSql, token).ConfigureAwait(false);
+                await ObserveAsync(++step).ConfigureAwait(false);
+            }
+            await SqliteDatabaseOwner.ExecuteAsync(connection, "PRAGMA user_version=5;", token).ConfigureAwait(false);
             await ObserveAsync(++step).ConfigureAwait(false);
             await ValidateAsync(connection, Version, token).ConfigureAwait(false);
             await ObserveAsync(++step).ConfigureAwait(false);

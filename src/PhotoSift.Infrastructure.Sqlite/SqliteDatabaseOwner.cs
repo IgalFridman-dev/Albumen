@@ -240,6 +240,11 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
         CancellationToken token) => observer?.AfterActionInsert?.Invoke(connection, transaction, token)
             ?? ValueTask.CompletedTask;
 
+    internal ValueTask AfterCheckpointAuthoritativeWriteAsync(
+        SqliteConnection connection, SqliteTransaction transaction, CancellationToken token) =>
+        observer?.AfterCheckpointAuthoritativeWrite?.Invoke(connection, transaction, token)
+        ?? ValueTask.CompletedTask;
+
     private void CompleteWriteAdmission()
     {
         lock (lifecycle)
@@ -365,4 +370,5 @@ internal sealed record SqliteDatabaseObserver(
     Func<CancellationToken, ValueTask>? LaneEntered = null,
     Func<int, SqliteConnection, CancellationToken, ValueTask>? MigrationStep = null,
     Func<SqliteConnection, CancellationToken, ValueTask>? BeforeActionTransaction = null,
-    Func<SqliteConnection, SqliteTransaction, CancellationToken, ValueTask>? AfterActionInsert = null);
+    Func<SqliteConnection, SqliteTransaction, CancellationToken, ValueTask>? AfterActionInsert = null,
+    Func<SqliteConnection, SqliteTransaction, CancellationToken, ValueTask>? AfterCheckpointAuthoritativeWrite = null);

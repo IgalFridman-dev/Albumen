@@ -18,10 +18,12 @@ public sealed class SqlitePhotoSiftStores : IAsyncDisposable
         ActionJournal = new SqliteActionJournalStore(owner);
         ActionRecords = new SqliteActionRecordStore(owner);
         ScanIdentities = new SqliteScanIdentityStore(owner);
+        ScanCheckpoints = new SqliteScanCheckpointStore(owner);
     }
     public IOverrideEvidenceStore OverrideEvidence { get; }
     public IActionJournalStore ActionJournal { get; }
     public IActionRecordStore ActionRecords { get; }
     public IScanIdentityStore ScanIdentities { get; }
+    public IScanCheckpointStore ScanCheckpoints { get; }
     public ValueTask DisposeAsync() => owner.DisposeAsync();
 }

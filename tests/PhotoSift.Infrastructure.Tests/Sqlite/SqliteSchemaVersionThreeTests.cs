@@ -17,8 +17,8 @@ public sealed class SqliteSchemaVersionThreeTests
                 (await stores.ActionRecords.LoadAsync(TestContext.Current.CancellationToken)).Outcome);
 
         await using var connection = await fixture.OpenRawAsync();
-        Assert.Equal(4L, await ScalarAsync(connection, "PRAGMA user_version;"));
-        Assert.Equal("action_items,action_revalidations,action_transitions,override_evidence,scan_file_occurrences,scans,sqlite_autoindex_action_items_1,sqlite_autoindex_action_items_2,sqlite_autoindex_action_revalidations_1,sqlite_autoindex_action_revalidations_2,sqlite_autoindex_action_transitions_1,sqlite_autoindex_override_evidence_1,sqlite_autoindex_scan_file_occurrences_1,sqlite_autoindex_scans_1",
+        Assert.Equal(5L, await ScalarAsync(connection, "PRAGMA user_version;"));
+        Assert.Equal("action_items,action_revalidations,action_transitions,override_evidence,scan_accounting,scan_file_occurrences,scan_lifecycle,scan_stage_checkpoints,scans,sqlite_autoindex_action_items_1,sqlite_autoindex_action_items_2,sqlite_autoindex_action_revalidations_1,sqlite_autoindex_action_revalidations_2,sqlite_autoindex_action_transitions_1,sqlite_autoindex_override_evidence_1,sqlite_autoindex_scan_accounting_1,sqlite_autoindex_scan_file_occurrences_1,sqlite_autoindex_scan_lifecycle_1,sqlite_autoindex_scan_stage_checkpoints_1,sqlite_autoindex_scans_1",
             await ScalarAsync(connection, "SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_schema ORDER BY name);"));
         Assert.Equal("revalidation_id,action_item_id,sequence,observed_utc,result_kind,reason,observation_payload,observation_payload_sha256",
             await ScalarAsync(connection, "SELECT group_concat(name, ',') FROM pragma_table_info('action_revalidations');"));
@@ -42,7 +42,7 @@ public sealed class SqliteSchemaVersionThreeTests
         {
             itemBefore = await RowAsync(connection, "action_items");
             transitionBefore = await RowAsync(connection, "action_transitions");
-            await ExecuteAsync(connection, "DROP TABLE scan_file_occurrences; DROP TABLE scans; DROP TABLE action_revalidations; PRAGMA user_version=2; PRAGMA journal_mode=DELETE;");
+            await ExecuteAsync(connection, "DROP TABLE scan_stage_checkpoints; DROP TABLE scan_accounting; DROP TABLE scan_lifecycle; DROP TABLE scan_file_occurrences; DROP TABLE scans; DROP TABLE action_revalidations; PRAGMA user_version=2; PRAGMA journal_mode=DELETE;");
         }
 
         await using (var stores = new SqlitePhotoSiftStores(fixture.DatabasePath))
@@ -50,7 +50,7 @@ public sealed class SqliteSchemaVersionThreeTests
                 (await stores.ActionRecords.LoadAsync(TestContext.Current.CancellationToken)).Outcome);
 
         await using var verify = await fixture.OpenRawAsync();
-        Assert.Equal(4L, await ScalarAsync(verify, "PRAGMA user_version;"));
+        Assert.Equal(5L, await ScalarAsync(verify, "PRAGMA user_version;"));
         Assert.Equal(itemBefore, await RowAsync(verify, "action_items"));
         Assert.Equal(transitionBefore, await RowAsync(verify, "action_transitions"));
     }
@@ -87,7 +87,7 @@ public sealed class SqliteSchemaVersionThreeTests
         await using (var initialized = new SqlitePhotoSiftStores(fixture.DatabasePath))
             _ = await initialized.ActionRecords.LoadAsync(TestContext.Current.CancellationToken);
         await using (var connection = await fixture.OpenRawAsync())
-            await ExecuteAsync(connection, "DROP TABLE scan_file_occurrences; DROP TABLE scans; DROP TABLE action_revalidations; PRAGMA user_version=2; PRAGMA journal_mode=DELETE;");
+            await ExecuteAsync(connection, "DROP TABLE scan_stage_checkpoints; DROP TABLE scan_accounting; DROP TABLE scan_lifecycle; DROP TABLE scan_file_occurrences; DROP TABLE scans; DROP TABLE action_revalidations; PRAGMA user_version=2; PRAGMA journal_mode=DELETE;");
         var observer = new SqliteDatabaseObserver(MigrationStep: (step, _, _) =>
             step == faultStep ? ValueTask.FromException(new IOException("migration fault")) : ValueTask.CompletedTask);
 

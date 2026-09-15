@@ -49,7 +49,7 @@ public sealed class E1S4SqliteAcceptanceTests
         await using var verify = await fixture.OpenRawAsync();
         await using var version = verify.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
-        Assert.Equal(4L, Convert.ToInt64(
+        Assert.Equal(5L, Convert.ToInt64(
             await version.ExecuteScalarAsync(TestContext.Current.CancellationToken),
             System.Globalization.CultureInfo.InvariantCulture));
         await using var count = verify.CreateCommand();
