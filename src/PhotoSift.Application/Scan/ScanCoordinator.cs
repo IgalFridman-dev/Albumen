@@ -672,6 +672,9 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
 
     private void Publish(ScanSnapshot snapshot)
     {
+        var terminalIsDurable = active is { DurableStarted: true } terminalOperation
+            && snapshot.Pin == terminalOperation.Context.Pin
+            && ScanTransitionPolicy.IsTerminal(terminalOperation.LifecycleState);
         Operation? newlyFaulted = null;
         if (snapshot.Status == ScanStatus.Faulted
             && active is { } operation
@@ -696,7 +699,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                 failed = true;
             }
         }
-        if (!failed || snapshot.Status == ScanStatus.Faulted) return;
+        if (!failed || snapshot.Status == ScanStatus.Faulted || terminalIsDurable) return;
         // A throwing observer cannot prevent acknowledgment or hide the fault.
         Publish(snapshot with { Status = ScanStatus.Faulted, Enumeration = ProgrammingFault });
     }

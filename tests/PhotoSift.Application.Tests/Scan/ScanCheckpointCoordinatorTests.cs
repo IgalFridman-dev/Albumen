@@ -694,6 +694,57 @@ public sealed class ScanCheckpointCoordinatorTests
         await fixture.Until(snapshot => snapshot.Status == ScanStatus.Complete);
     }
 
+    [Fact]
+    public Task CompleteObserverFailureCannotReplaceDurableTerminalSnapshotWithFault() =>
+        AssertTerminalObserverFailureIsIsolatedAsync(
+            endEnumeration: true,
+            ScanStatus.Complete,
+            ScanLifecycleState.Complete);
+
+    [Fact]
+    public Task IncompleteObserverFailureCannotReplaceDurableTerminalSnapshotWithFault() =>
+        AssertTerminalObserverFailureIsIsolatedAsync(
+            endEnumeration: false,
+            ScanStatus.Incomplete,
+            ScanLifecycleState.Incomplete);
+
+    private static async Task AssertTerminalObserverFailureIsIsolatedAsync(
+        bool endEnumeration,
+        ScanStatus expectedStatus,
+        ScanLifecycleState expectedLifecycle)
+    {
+        await using var fixture = new CoordinatorFixture();
+        await fixture.Start();
+        var run = await fixture.Run();
+        if (endEnumeration)
+            await fixture.Pump(
+                fixture.Owner.EnumerationEndedAsync(run.Context, ScanTestData.Success).AsTask());
+
+        var observed = ScanTestData.Signal<ScanSnapshot>();
+        fixture.Owner.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.Status == expectedStatus)
+                throw new InvalidOperationException("terminal observer failure");
+        };
+        fixture.Owner.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.Status == expectedStatus)
+                observed.TrySetResult(snapshot);
+        };
+
+        run.Done.TrySetResult();
+        await fixture.Pump(observed.Task);
+
+        Assert.Equal(expectedStatus, (await observed.Task).Status);
+        Assert.Equal(expectedStatus, fixture.Owner.Current.Status);
+        var durable = await fixture.Checkpoints.ReadAsync(
+            run.Context.Pin.ScanId, TestContext.Current.CancellationToken);
+        Assert.Equal(expectedLifecycle, durable.Lifecycle!.State);
+        Assert.DoesNotContain(
+            LifecycleWrites(fixture, run.Context.Pin.ScanId),
+            command => command.NextState == ScanLifecycleState.Faulted);
+    }
+
     private static async Task<OccurrenceWork> Register(
         CoordinatorFixture fixture,
         CoordinatorRun run,
