@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using PhotoSift.Application.Scan;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Infrastructure.Sqlite;
 using Xunit;
 using static PhotoSift.Infrastructure.Tests.Sqlite.SqliteSchemaVersionTwoTests;
@@ -27,6 +28,7 @@ public sealed class SqliteSchemaVersionFiveTests
             AND substr(transition_id, 19, 1) = '-'
             AND substr(transition_id, 24, 1) = '-'
             AND length(replace(transition_id, '-', '')) = 32
+            AND transition_id != '00000000-0000-0000-0000-000000000000'
             AND transition_id NOT GLOB '*[^0-9a-f-]*'),
           state INTEGER NOT NULL CHECK(state IN (0, 1, 2, 3, 4, 5, 6, 7)),
           FOREIGN KEY(scan_id) REFERENCES scans(scan_id) ON DELETE RESTRICT
@@ -47,6 +49,7 @@ public sealed class SqliteSchemaVersionFiveTests
             AND substr(transition_id, 19, 1) = '-'
             AND substr(transition_id, 24, 1) = '-'
             AND length(replace(transition_id, '-', '')) = 32
+            AND transition_id != '00000000-0000-0000-0000-000000000000'
             AND transition_id NOT GLOB '*[^0-9a-f-]*'),
           state INTEGER NOT NULL CHECK(state IN (0, 1, 2, 3, 4, 5, 6, 7)),
           reason INTEGER NOT NULL CHECK(reason IN (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)),
@@ -171,6 +174,38 @@ public sealed class SqliteSchemaVersionFiveTests
         Assert.Equal(Normalize(ExpectedLifecycleSql), await TableSqlAsync(connection, "scan_lifecycle"));
         Assert.Equal(Normalize(ExpectedStageSql), await TableSqlAsync(connection, "scan_stage_checkpoints"));
         Assert.Equal(Normalize(ExpectedAccountingSql), await TableSqlAsync(connection, "scan_accounting"));
+    }
+
+    [Theory]
+    [InlineData("scan_lifecycle")]
+    [InlineData("scan_stage_checkpoints")]
+    public async Task CheckpointTablesRejectTheCanonicalEmptyTransitionId(string table)
+    {
+        await using var fixture = new ScanIdentityFixture();
+        var scan = ScanIdentityData.Scan();
+        await using (var stores = new SqlitePhotoSiftStores(fixture.DatabasePath))
+        {
+            await stores.ScanIdentities.PersistScanAsync(scan, TestContext.Current.CancellationToken);
+            await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
+                scan.Pin.ScanId,
+                1,
+                Guid.Parse("df95504d-46b4-4a01-b593-cc64801484c0"),
+                ScanLifecycleState.Preflight), TestContext.Current.CancellationToken);
+            var succeeded = new StageOutcome(ScanStageState.Succeeded, ScanReason.None);
+            await stores.ScanCheckpoints.WriteInitialOccurrenceAsync(new(
+                ScanIdentityData.Occurrence(scan.Pin, 7),
+                new(scan.Pin.ScanId, 7, ScanStage.Enumeration, 1,
+                    Guid.Parse("be3f6bd3-d7a1-49e3-8d3d-b83b01e26010"), succeeded, null),
+                new(scan.Pin.ScanId, 7, ScanStage.Exact, 1,
+                    Guid.Parse("4f46773c-894e-43d2-a66a-2b946d9109c7"),
+                    new(ScanStageState.Running, ScanReason.None),
+                    new(ScanStage.Enumeration, succeeded))),
+                TestContext.Current.CancellationToken);
+        }
+
+        await using var raw = await fixture.OpenRawAsync(SqliteOpenMode.ReadWrite);
+        await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync(raw,
+            $"UPDATE {table} SET transition_id='00000000-0000-0000-0000-000000000000';"));
     }
 
     [Fact]

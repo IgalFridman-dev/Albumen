@@ -10,6 +10,7 @@ internal static class ScanCheckpointSchema
             AND substr(transition_id, 19, 1) = '-'
             AND substr(transition_id, 24, 1) = '-'
             AND length(replace(transition_id, '-', '')) = 32
+            AND transition_id != '00000000-0000-0000-0000-000000000000'
             AND transition_id NOT GLOB '*[^0-9a-f-]*'
         """;
 

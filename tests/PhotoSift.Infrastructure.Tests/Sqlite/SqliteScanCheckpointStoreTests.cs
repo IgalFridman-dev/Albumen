@@ -145,6 +145,77 @@ public sealed class SqliteScanCheckpointStoreTests
     }
 
     [Fact]
+    public async Task LifecycleSameTransitionDifferentPayloadIsConflictAtMaximumExpectedRevision()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var (scan, _) = await BootstrapAsync(stores);
+
+        var result = await stores.ScanCheckpoints.TransitionLifecycleAsync(new(
+            scan.Pin.ScanId,
+            long.MaxValue,
+            LifecycleTransitionId,
+            ScanLifecycleState.Faulted), TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointWriteOutcome.Conflict, result.Outcome);
+        var read = await stores.ScanCheckpoints.ReadAsync(scan.Pin.ScanId, TestContext.Current.CancellationToken);
+        Assert.Equal(ScanLifecycleState.Preflight, read.Lifecycle!.State);
+        Assert.Equal(1, read.Lifecycle.Revision);
+    }
+
+    [Fact]
+    public async Task StageSameTransitionDifferentPayloadIsConflictAtMaximumExpectedRevision()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var (_, initial) = await BootstrapAsync(stores);
+        await stores.ScanCheckpoints.WriteInitialOccurrenceAsync(initial, TestContext.Current.CancellationToken);
+        await stores.ScanCheckpoints.TransitionStageAsync(new(
+            initial.Occurrence.Token.Pin.ScanId, 7, ScanStage.Exact, 1,
+            ExactTerminalTransitionId, Succeeded), TestContext.Current.CancellationToken);
+
+        var result = await stores.ScanCheckpoints.TransitionStageAsync(new(
+            initial.Occurrence.Token.Pin.ScanId,
+            7,
+            ScanStage.Exact,
+            long.MaxValue,
+            ExactTerminalTransitionId,
+            new StageOutcome(ScanStageState.Unsupported, ScanReason.UnsupportedExtension)),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointWriteOutcome.Conflict, result.Outcome);
+        var read = await stores.ScanCheckpoints.ReadAsync(
+            initial.Occurrence.Token.Pin.ScanId, TestContext.Current.CancellationToken);
+        var exact = Assert.Single(read.Stages, stage => stage.Stored.Stage == ScanStage.Exact);
+        Assert.Equal(Succeeded, exact.Stored.Outcome);
+        Assert.Equal(2, exact.Stored.Revision);
+    }
+
+    [Fact]
+    public async Task MultiOccurrenceReadReturnsEveryCanonicalRowInOccurrenceStageOrder()
+    {
+        await using var fixture = new ScanIdentityFixture();
+        await using var stores = new SqlitePhotoSiftStores(fixture.DatabasePath);
+        var (scan, _) = await BootstrapAsync(stores);
+        foreach (var occurrenceId in new long[] { 20, 3, 11 })
+            await stores.ScanCheckpoints.WriteInitialOccurrenceAsync(
+                Initial(scan, occurrenceId), TestContext.Current.CancellationToken);
+
+        var read = await stores.ScanCheckpoints.ReadAsync(scan.Pin.ScanId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ScanCheckpointReadOutcome.Found, read.Outcome);
+        Assert.Equal(
+            new[]
+            {
+                (3L, ScanStage.Enumeration), (3L, ScanStage.Exact),
+                (11L, ScanStage.Enumeration), (11L, ScanStage.Exact),
+                (20L, ScanStage.Enumeration), (20L, ScanStage.Exact),
+            },
+            read.Stages.Select(stage => (stage.Stored.OccurrenceId, stage.Stored.Stage)).ToArray());
+        Assert.Equal(new ScanAccounting(3, 0, 0, 0, 0, 3), read.Accounting);
+    }
+
+    [Fact]
     public async Task MissingParentLifecycleOccurrenceAndStageCommandsReturnMissingWithoutRows()
     {
         await using var fixture = new ScanIdentityFixture();
@@ -249,14 +320,14 @@ public sealed class SqliteScanCheckpointStoreTests
         return (scan, Initial(scan));
     }
 
-    private static InitialOccurrenceCheckpointCommand Initial(ScanIdentityRecord scan)
+    private static InitialOccurrenceCheckpointCommand Initial(ScanIdentityRecord scan, long occurrenceId = 7)
     {
-        var occurrence = ScanIdentityData.Occurrence(scan.Pin, 7);
+        var occurrence = ScanIdentityData.Occurrence(scan.Pin, occurrenceId);
         var enumeration = new ScanCheckpoint(
-            scan.Pin.ScanId, 7, ScanStage.Enumeration, 1,
+            scan.Pin.ScanId, occurrenceId, ScanStage.Enumeration, 1,
             EnumerationTransitionId, Succeeded, null);
         var exact = new ScanCheckpoint(
-            scan.Pin.ScanId, 7, ScanStage.Exact, 1,
+            scan.Pin.ScanId, occurrenceId, ScanStage.Exact, 1,
             ExactStartTransitionId, Running,
             new ScanStagePrerequisite(ScanStage.Enumeration, Succeeded));
         return new(occurrence, enumeration, exact);

@@ -78,12 +78,13 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
             var current = DecodeLifecycle(row);
             if (current.TransitionId == command.TransitionId)
             {
+                if (current.State != command.NextState)
+                    return Rejected(ScanCheckpointWriteOutcome.Conflict);
                 var exactBootstrapRetry = current.Revision == 1
                     && command.ExpectedRevision == 1
-                    && current.State == ScanLifecycleState.Preflight
                     && command.NextState == ScanLifecycleState.Preflight;
-                var exactTransitionRetry = current.Revision == CheckedIncrement(command.ExpectedRevision)
-                    && current.State == command.NextState;
+                var exactTransitionRetry = command.ExpectedRevision < long.MaxValue
+                    && current.Revision == command.ExpectedRevision + 1;
                 return exactBootstrapRetry || exactTransitionRetry
                     ? await ExistingAsync(connection, transaction, scanId, token).ConfigureAwait(false)
                     : Rejected(ScanCheckpointWriteOutcome.Conflict);
@@ -126,8 +127,10 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
 
             if (current.TransitionId == command.TransitionId)
             {
-                var exactRetry = current.Revision == CheckedIncrement(command.ExpectedRevision)
-                    && current.Outcome == command.Outcome;
+                if (current.Outcome != command.Outcome)
+                    return Rejected(ScanCheckpointWriteOutcome.Conflict);
+                var exactRetry = command.ExpectedRevision < long.MaxValue
+                    && current.Revision == command.ExpectedRevision + 1;
                 return exactRetry
                     ? await ExistingAsync(connection, transaction, scanId, token).ConfigureAwait(false)
                     : Rejected(ScanCheckpointWriteOutcome.Conflict);
@@ -230,12 +233,18 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
         if (lifecycleRow is null) return EmptyRead(ScanCheckpointReadOutcome.Missing);
         var lifecycle = DecodeLifecycle(lifecycleRow);
         var stageRows = await ReadStageRowsAsync(connection, transaction, scanId, null, token).ConfigureAwait(false);
+        var occurrenceRows = await ReadOccurrenceRowsAsync(connection, transaction, scanId, token).ConfigureAwait(false);
+        var occurrences = new Dictionary<long, ScanOccurrenceIdentityRecord>();
+        foreach (var row in occurrenceRows)
+        {
+            if (!TryDecodeOccurrence(row, parent, out var occurrence)
+                || !occurrences.TryAdd(occurrence.Token.OccurrenceId, occurrence))
+                throw new InvalidDataException("Checkpoint occurrence identity is not canonical.");
+        }
         var checkpoints = ImmutableArray.CreateBuilder<ScanCheckpoint>(stageRows.Count);
         foreach (var row in stageRows)
         {
-            var occurrence = await ReadOccurrenceRowAsync(
-                connection, transaction, scanId, row.OccurrenceId, token).ConfigureAwait(false);
-            if (occurrence is null || !TryDecodeOccurrence(occurrence, parent, out _))
+            if (!occurrences.ContainsKey(row.OccurrenceId))
                 throw new InvalidDataException("Checkpoint occurrence identity is not canonical.");
             checkpoints.Add(DecodeStage(row));
         }
@@ -502,6 +511,28 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
             reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3),
             reader.GetString(4), reader.GetString(5), NullableString(reader, 6),
             NullableString(reader, 7), NullableString(reader, 8)) : null;
+    }
+
+    private static async Task<List<StoredOccurrenceRow>> ReadOccurrenceRowsAsync(
+        SqliteConnection connection, SqliteTransaction? transaction, string scanId, CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT scan_id, occurrence_id, occurrence_revision, attempt,
+                   discovered_path, resolved_path, volume_serial, file_id_high, file_id_low
+            FROM scan_file_occurrences
+            WHERE scan_id=$scan_id
+            ORDER BY occurrence_id;
+            """;
+        command.Parameters.AddWithValue("$scan_id", scanId);
+        await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+        var rows = new List<StoredOccurrenceRow>();
+        while (await reader.ReadAsync(token).ConfigureAwait(false))
+            rows.Add(new(reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3),
+                reader.GetString(4), reader.GetString(5), NullableString(reader, 6),
+                NullableString(reader, 7), NullableString(reader, 8)));
+        return rows;
     }
 
     private static async Task<StoredStageRow?> ReadStageRowAsync(
