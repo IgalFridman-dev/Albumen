@@ -17,7 +17,7 @@ public enum ScanStatus
 public sealed record ScanCounts(
     long Discovered,
     long Analyzed,
-    long Excluded,
+    long Unsupported,
     long Failed,
     long Canceled,
     long Outstanding);

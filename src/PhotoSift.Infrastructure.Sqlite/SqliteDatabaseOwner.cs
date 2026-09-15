@@ -15,6 +15,7 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
     private readonly string databasePath;
     private readonly object lifecycle = new();
     private readonly SqliteDatabaseObserver? observer;
+    private readonly SemaphoreSlim checkpointRepairGate = new(1, 1);
     private readonly Channel<IWriteCommand> writes = Channel.CreateUnbounded<IWriteCommand>(
         new UnboundedChannelOptions
         {
@@ -41,7 +42,8 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
     }
 
     internal Task<T> RunReadAsync<T>(Func<SqliteConnection, CancellationToken, Task<T>> work,
-        CancellationToken token)
+        CancellationToken token,
+        bool allowReadAfterInitializationRejection = false)
     {
         ArgumentNullException.ThrowIfNull(work);
         token.ThrowIfCancellationRequested();
@@ -58,7 +60,16 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
         {
             try
             {
-                await initialized.Task.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    await initialized.Task.WaitAsync(token).ConfigureAwait(false);
+                }
+                catch (InvalidDataException) when (allowReadAfterInitializationRejection)
+                {
+                    // Checkpoint reads distinguish malformed authoritative rows
+                    // from an unavailable database after validating the schema
+                    // on their independent read-only connection.
+                }
                 await using var connection = await OpenReaderAsync(token).ConfigureAwait(false);
                 return await work(connection, token).ConfigureAwait(false);
             }
@@ -100,6 +111,72 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
             command.RejectAdmission(exception);
             throw;
         }
+    }
+
+    internal async Task<T> RunCheckpointRepairAsync<T>(
+        Func<SqliteConnection, CancellationToken, Task<T>> work,
+        CancellationToken token)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+        token.ThrowIfCancellationRequested();
+        lock (lifecycle)
+        {
+            ObjectDisposedException.ThrowIf(disposal is not null, this);
+            EnsurePumpStarted();
+        }
+
+        try
+        {
+            await initialized.Task.WaitAsync(token).ConfigureAwait(false);
+        }
+        catch (InvalidDataException)
+        {
+            return await RunCheckpointRepairAfterInitializationRejectionAsync(work, token).ConfigureAwait(false);
+        }
+
+        return await RunWriteAsync(SqliteWriteDurability.Normal, work, token).ConfigureAwait(false);
+    }
+
+    private Task<T> RunCheckpointRepairAfterInitializationRejectionAsync<T>(
+        Func<SqliteConnection, CancellationToken, Task<T>> work,
+        CancellationToken token)
+    {
+        lock (lifecycle)
+        {
+            ObjectDisposedException.ThrowIf(disposal is not null, this);
+            admitted++;
+        }
+
+        return Task.Run(async () =>
+        {
+            try
+            {
+                await checkpointRepairGate.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+                    {
+                        DataSource = databasePath,
+                        Mode = SqliteOpenMode.ReadWrite,
+                        Pooling = false,
+                        DefaultTimeout = 1,
+                    }.ToString());
+                    await connection.OpenAsync(token).ConfigureAwait(false);
+                    await ConfigureConnectionAsync(connection, setWal: false, token).ConfigureAwait(false);
+                    await ConfigureDurabilityAsync(connection, SqliteWriteDurability.Normal, token)
+                        .ConfigureAwait(false);
+                    return await work(connection, token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    checkpointRepairGate.Release();
+                }
+            }
+            finally
+            {
+                CompleteAdmission();
+            }
+        }, CancellationToken.None);
     }
 
     private void EnsurePumpStarted() => pump ??= Task.Run(PumpAsync);
@@ -273,16 +350,21 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
                 writes.Writer.TryComplete();
                 var drain = admitted == 0 ? Task.CompletedTask
                     : (drained = new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
-                disposal = DisposeAfterDrainAsync(drain, pump ?? Task.CompletedTask);
+                disposal = DisposeAfterDrainAsync(
+                    drain, pump ?? Task.CompletedTask, checkpointRepairGate);
             }
             return new(disposal);
         }
     }
 
-    private static async Task DisposeAfterDrainAsync(Task drain, Task pump)
+    private static async Task DisposeAfterDrainAsync(
+        Task drain,
+        Task pump,
+        SemaphoreSlim checkpointRepairGate)
     {
         await drain.ConfigureAwait(false);
         await pump.ConfigureAwait(false);
+        checkpointRepairGate.Dispose();
     }
 
     internal static async Task ExecuteAsync(SqliteConnection connection, string sql, CancellationToken token,

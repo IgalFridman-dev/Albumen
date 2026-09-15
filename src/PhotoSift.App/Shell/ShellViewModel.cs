@@ -171,7 +171,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ? $"Review is faulted ({ReviewFaultReason}); controls are unavailable."
         : $"Review: {ReviewState}";
     public string ScanCountsText => photoSnapshot is { Scan.Counts: var count }
-        ? $"Discovered: {count.Discovered}; Analyzed: {count.Analyzed}; Excluded: {count.Excluded}; Failed: {count.Failed}; Canceled: {count.Canceled}; Outstanding: {count.Outstanding}" : string.Empty;
+        ? $"Discovered: {count.Discovered}; Analyzed: {count.Analyzed}; Unsupported: {count.Unsupported}; Failed: {count.Failed}; Canceled: {count.Canceled}; Outstanding: {count.Outstanding}" : string.Empty;
     public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
         ? "Complete scope coverage. Read failures and exclusions are reported separately."
         : "Partial results — incomplete scope coverage. Results do not represent every file in the Scope.";

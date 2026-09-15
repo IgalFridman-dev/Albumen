@@ -111,6 +111,45 @@ public sealed class ScanCheckpointContractTests
     }
 
     [Fact]
+    public void AccountingRejectsCategorizedTotalOverflow()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new ScanAccounting(long.MaxValue, long.MaxValue, 1, 0, 0, 0));
+    }
+
+    [Fact]
+    public void SnapshotProjectionNamesUnsupportedExplicitlyAndPreservesSixCategories()
+    {
+        var rows = ImmutableArray.Create(
+            Occurrence(1, Succeeded, Succeeded),
+            Occurrence(2, Succeeded,
+                new StageOutcome(ScanStageState.Unsupported, ScanReason.UnsupportedExtension)),
+            Occurrence(3,
+                new StageOutcome(ScanStageState.Unsupported, ScanReason.UnsupportedExtension),
+                new StageOutcome(ScanStageState.NotApplicable, ScanReason.UnsupportedExtension)),
+            Occurrence(4, Succeeded,
+                new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure)),
+            Occurrence(5, Succeeded,
+                new StageOutcome(ScanStageState.Canceled, ScanReason.Canceled)),
+            Occurrence(6, Succeeded,
+                new StageOutcome(ScanStageState.Running, ScanReason.None)));
+
+        var snapshot = ScanSnapshotProjector.Create(
+            Pin,
+            ScanStatus.Running,
+            new StageOutcome(ScanStageState.Running, ScanReason.None),
+            rows,
+            ImmutableArray<CandidateGroup>.Empty);
+
+        Assert.Equal(new ScanCounts(6, 1, 2, 1, 1, 1), snapshot.Counts);
+        var properties = typeof(ScanCounts).GetProperties().Select(property => property.Name).ToArray();
+        Assert.Equal(
+            ["Discovered", "Analyzed", "Unsupported", "Failed", "Canceled", "Outstanding"],
+            properties);
+        Assert.DoesNotContain("Excluded", properties);
+    }
+
+    [Fact]
     public void TransitionCommandsRejectStaleShapesAndInitialOccurrenceCarriesIdentity()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new ScanLifecycleTransitionCommand(
@@ -191,5 +230,27 @@ public sealed class ScanCheckpointContractTests
             transitionId ?? TransitionId,
             actualOutcome,
             actualPrerequisite);
+    }
+
+    private static ScanFileOccurrence Occurrence(
+        long occurrenceId,
+        StageOutcome enumeration,
+        StageOutcome exact)
+    {
+        var physical = exact.State == ScanStageState.Succeeded
+            ? new PhysicalFileKey(1, new FileId128(0, (ulong)occurrenceId))
+            : (PhysicalFileKey?)null;
+        var content = physical is { } key
+            ? new ContentRevision(key, 1, new string('0', 64))
+            : null;
+        return new ScanFileOccurrence(
+            new OccurrenceToken(Pin, occurrenceId, 1, 1),
+            $@"C:\photos\{occurrenceId}.jpg",
+            $@"C:\photos\{occurrenceId}.jpg",
+            physical,
+            enumeration,
+            exact,
+            content,
+            new AllocationEvidence(null, null, false));
     }
 }

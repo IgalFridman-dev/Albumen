@@ -8,14 +8,14 @@ internal static class ScanSnapshotProjector
     public static ScanSnapshot Create(ScanPin? pin, ScanStatus status, StageOutcome enumeration,
         ImmutableArray<ScanFileOccurrence> rows, ImmutableArray<CandidateGroup> groups)
     {
-        long analyzed = 0, excluded = 0, failed = 0, canceled = 0, outstanding = 0;
+        long analyzed = 0, unsupported = 0, failed = 0, canceled = 0, outstanding = 0;
         foreach (var row in rows)
         {
             switch (row.Exact.State)
             {
                 case ScanStageState.Succeeded: analyzed++; break;
                 case ScanStageState.Unsupported:
-                case ScanStageState.NotApplicable: excluded++; break;
+                case ScanStageState.NotApplicable: unsupported++; break;
                 case ScanStageState.FailedRetryable:
                 case ScanStageState.FailedTerminal: failed++; break;
                 case ScanStageState.Canceled: canceled++; break;
@@ -24,6 +24,6 @@ internal static class ScanSnapshotProjector
             }
         }
         return new ScanSnapshot(pin, status, enumeration, rows, groups,
-            new ScanCounts(rows.Length, analyzed, excluded, failed, canceled, outstanding));
+            new ScanCounts(rows.Length, analyzed, unsupported, failed, canceled, outstanding));
     }
 }

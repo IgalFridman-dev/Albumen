@@ -8,6 +8,9 @@ namespace PhotoSift.Infrastructure.Sqlite.Scan;
 
 internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : IScanCheckpointStore
 {
+    private static readonly StageOutcome Succeeded =
+        new(ScanStageState.Succeeded, ScanReason.None);
+
     public ValueTask<ScanCheckpointWriteResult> WriteInitialOccurrenceAsync(
         InitialOccurrenceCheckpointCommand command,
         CancellationToken cancellationToken)
@@ -93,6 +96,11 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
                 return Rejected(ScanCheckpointWriteOutcome.Stale);
             if (!ScanTransitionPolicy.CanTransition(current.State, command.NextState))
                 return Rejected(ScanCheckpointWriteOutcome.IllegalTransition);
+            if (command.NextState == ScanLifecycleState.Complete
+                && !await CanCompleteAsync(connection, transaction, scanId, current, token).ConfigureAwait(false))
+            {
+                return Rejected(ScanCheckpointWriteOutcome.IllegalTransition);
+            }
 
             var updated = new ScanLifecycleCheckpoint(
                 command.ScanId, CheckedIncrement(current.Revision), command.TransitionId, command.NextState);
@@ -157,18 +165,27 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
         if (scanId == Guid.Empty) throw new ArgumentException("Scan ID must be nonempty.", nameof(scanId));
         try
         {
-            return await owner.RunReadAsync(async (connection, token) =>
+            var inspection = await owner.RunReadAsync(async (connection, token) =>
             {
                 await PhotoSiftSchema.ValidateAsync(connection, PhotoSiftSchema.Version, token).ConfigureAwait(false);
                 try
                 {
-                    return await ReadSnapshotAsync(connection, null, GuidText(scanId), token).ConfigureAwait(false);
+                    var candidate = await ReadSnapshotCandidateAsync(
+                        connection, null, GuidText(scanId), token).ConfigureAwait(false);
+                    if (candidate is null)
+                        return new ReadInspection(EmptyRead(ScanCheckpointReadOutcome.Missing), false);
+                    return candidate.StoredAccounting == candidate.RecomputedAccounting
+                        ? new ReadInspection(Project(candidate, recoverInterruptions: true), false)
+                        : new ReadInspection(null, true);
                 }
                 catch (Exception exception) when (exception is InvalidDataException || IsMalformedValue(exception))
                 {
-                    return EmptyRead(ScanCheckpointReadOutcome.Corrupt);
+                    return new ReadInspection(EmptyRead(ScanCheckpointReadOutcome.Corrupt), false);
                 }
-            }, cancellationToken).ConfigureAwait(false);
+            }, cancellationToken, allowReadAfterInitializationRejection: true).ConfigureAwait(false);
+
+            if (!inspection.RepairRequired) return inspection.Result!;
+            return await RepairAccountingAsync(GuidText(scanId), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (SqliteDatabaseOwner.IsUnavailable(exception))
         {
@@ -218,19 +235,19 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
     private static async Task<ScanCheckpointReadResult> RequireFoundAsync(
         SqliteConnection connection, SqliteTransaction transaction, string scanId, CancellationToken token)
     {
-        var snapshot = await ReadSnapshotAsync(connection, transaction, scanId, token).ConfigureAwait(false);
-        return snapshot.Outcome == ScanCheckpointReadOutcome.Found
-            ? snapshot
+        var candidate = await ReadSnapshotCandidateAsync(connection, transaction, scanId, token).ConfigureAwait(false);
+        return candidate is not null && candidate.StoredAccounting == candidate.RecomputedAccounting
+            ? Project(candidate, recoverInterruptions: false)
             : throw new InvalidDataException("Checkpoint write did not read back a canonical snapshot.");
     }
 
-    private static async Task<ScanCheckpointReadResult> ReadSnapshotAsync(
+    private static async Task<SnapshotCandidate?> ReadSnapshotCandidateAsync(
         SqliteConnection connection, SqliteTransaction? transaction, string scanId, CancellationToken token)
     {
         var parent = await ReadScanPinAsync(connection, transaction, scanId, token).ConfigureAwait(false);
-        if (parent is null) return EmptyRead(ScanCheckpointReadOutcome.Missing);
+        if (parent is null) return null;
         var lifecycleRow = await ReadLifecycleRowAsync(connection, transaction, scanId, token).ConfigureAwait(false);
-        if (lifecycleRow is null) return EmptyRead(ScanCheckpointReadOutcome.Missing);
+        if (lifecycleRow is null) return null;
         var lifecycle = DecodeLifecycle(lifecycleRow);
         var stageRows = await ReadStageRowsAsync(connection, transaction, scanId, null, token).ConfigureAwait(false);
         var occurrenceRows = await ReadOccurrenceRowsAsync(connection, transaction, scanId, token).ConfigureAwait(false);
@@ -252,12 +269,104 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
             ?? throw new InvalidDataException("Checkpoint accounting row is missing.");
         var accounting = DecodeAccounting(accountingRow);
         var values = checkpoints.MoveToImmutable();
+        if ((long)values.Length != checked((long)occurrences.Count * 2))
+            throw new InvalidDataException("Every persisted occurrence must have its complete required-stage set.");
         var recomputed = Recompute(values);
-        if (recomputed != accounting)
-            throw new InvalidDataException("Checkpoint accounting does not match stage-row truth.");
-        var projections = values.Select(value => new ScanCheckpointProjection(
-            value, value.Outcome, recoveredFromInterruption: false)).ToImmutableArray();
-        return new(ScanCheckpointReadOutcome.Found, lifecycle, projections, accounting);
+        return new(lifecycle, values, accounting, recomputed);
+    }
+
+    private async ValueTask<ScanCheckpointReadResult> RepairAccountingAsync(
+        string scanId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await owner.RunCheckpointRepairAsync(async (connection, token) =>
+            {
+                await using var transaction = connection.BeginTransaction(deferred: false);
+                await PhotoSiftSchema.ValidateAsync(connection, PhotoSiftSchema.Version, token, transaction)
+                    .ConfigureAwait(false);
+                SnapshotCandidate? candidate;
+                try
+                {
+                    candidate = await ReadSnapshotCandidateAsync(connection, transaction, scanId, token)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is InvalidDataException || IsMalformedValue(exception))
+                {
+                    return EmptyRead(ScanCheckpointReadOutcome.Corrupt);
+                }
+
+                if (candidate is null) return EmptyRead(ScanCheckpointReadOutcome.Missing);
+                await WriteAccountingAsync(
+                    connection, transaction, scanId, candidate.RecomputedAccounting, token).ConfigureAwait(false);
+                var repaired = await ReadSnapshotCandidateAsync(connection, transaction, scanId, token)
+                    .ConfigureAwait(false);
+                if (repaired is null || repaired.StoredAccounting != repaired.RecomputedAccounting)
+                    throw new InvalidDataException("Checkpoint accounting repair did not read back canonically.");
+                token.ThrowIfCancellationRequested();
+                await transaction.CommitAsync(token).ConfigureAwait(false);
+                return Project(repaired, recoverInterruptions: true);
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (SqliteDatabaseOwner.IsUnavailable(exception)
+            || IsMalformedValue(exception))
+        {
+            return EmptyRead(ScanCheckpointReadOutcome.Unavailable);
+        }
+    }
+
+    private static async Task<bool> CanCompleteAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string scanId,
+        ScanLifecycleCheckpoint current,
+        CancellationToken token)
+    {
+        SnapshotCandidate? candidate;
+        try
+        {
+            candidate = await ReadSnapshotCandidateAsync(connection, transaction, scanId, token)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidDataException || IsMalformedValue(exception))
+        {
+            return false;
+        }
+
+        if (candidate is null
+            || candidate.Lifecycle != current
+            || candidate.StoredAccounting != candidate.RecomputedAccounting)
+        {
+            return false;
+        }
+
+        var enumerationRows = candidate.Stages
+            .Where(checkpoint => checkpoint.Stage == ScanStage.Enumeration)
+            .ToArray();
+        return enumerationRows.Length > 0
+            && enumerationRows.All(checkpoint => checkpoint.Outcome.State is
+                ScanStageState.Succeeded or ScanStageState.Unsupported)
+            && ScanTransitionPolicy.CanComplete(Succeeded, candidate.Stages, candidate.StoredAccounting);
+    }
+
+    private static ScanCheckpointReadResult Project(
+        SnapshotCandidate candidate,
+        bool recoverInterruptions)
+    {
+        var projections = candidate.Stages.Select(value => recoverInterruptions
+                && value.Outcome.State == ScanStageState.Running
+            ? new ScanCheckpointProjection(
+                value,
+                new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure),
+                recoveredFromInterruption: true)
+            : new ScanCheckpointProjection(value, value.Outcome, recoveredFromInterruption: false))
+            .ToImmutableArray();
+        return new(
+            ScanCheckpointReadOutcome.Found,
+            candidate.Lifecycle,
+            projections,
+            candidate.RecomputedAccounting);
     }
 
     private static async Task RecomputeAndWriteAccountingAsync(
@@ -727,6 +836,12 @@ internal sealed class SqliteScanCheckpointStore(SqliteDatabaseOwner owner) : ISc
         && Hex(value).Equals(text, StringComparison.Ordinal);
 
     private sealed record StoredLifecycleRow(string ScanId, long Revision, string TransitionId, long State);
+    private sealed record ReadInspection(ScanCheckpointReadResult? Result, bool RepairRequired);
+    private sealed record SnapshotCandidate(
+        ScanLifecycleCheckpoint Lifecycle,
+        ImmutableArray<ScanCheckpoint> Stages,
+        ScanAccounting StoredAccounting,
+        ScanAccounting RecomputedAccounting);
     private sealed record StoredStageRow(
         string ScanId, long OccurrenceId, long Stage, long Revision, string TransitionId,
         long State, long Reason, long? PrerequisiteStage, long? PrerequisiteState, long? PrerequisiteReason);
