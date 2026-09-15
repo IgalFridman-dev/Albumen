@@ -199,6 +199,42 @@ public sealed class ScanCheckpointCoordinatorTests
     }
 
     [Fact]
+    public async Task NewRequestAfterCancellationRunsFreshPreflightWithNewIdentityAndNoReplay()
+    {
+        await using var fixture = new CoordinatorFixture();
+        var preflightCount = 0;
+        fixture.Preflight.Inspect = (_, _) =>
+        {
+            preflightCount++;
+            return Task.FromResult(fixture.Evidence);
+        };
+
+        await fixture.Start();
+        var interrupted = await fixture.Run();
+        var registration = fixture.Owner.RegisterAsync(
+            interrupted.Context, ScanTestData.Work(1, interrupted.Context).File).AsTask();
+        await fixture.Pump(registration);
+        Assert.NotNull(await registration);
+
+        await fixture.Pump(fixture.Owner.CancelAsync());
+        await fixture.Until(snapshot => snapshot.Status == ScanStatus.Incomplete);
+        var interruptedCheckpoint = await fixture.Checkpoints.ReadAsync(
+            interrupted.Context.Pin.ScanId, TestContext.Current.CancellationToken);
+
+        fixture.Executor.Arrived = ScanTestData.Signal<CoordinatorRun>();
+        await fixture.Start();
+        var fresh = await fixture.Run();
+
+        Assert.Equal(2, preflightCount);
+        Assert.NotEqual(interrupted.Context.Pin.ScanId, fresh.Context.Pin.ScanId);
+        Assert.Empty(fixture.Owner.Current.Occurrences);
+        Assert.Equal(ScanLifecycleState.Incomplete, interruptedCheckpoint.Lifecycle!.State);
+        Assert.Equal(2, interruptedCheckpoint.Stages.Length);
+        Assert.Equal(ScanStageState.Canceled, interruptedCheckpoint.Stages.Single(
+            row => row.Stored.Stage == ScanStage.Exact).Stored.Outcome.State);
+    }
+
+    [Fact]
     public async Task ReplacementLetsAdmittedOldWriteFinishWithoutUpdatingActiveSnapshot()
     {
         await using var fixture = new CoordinatorFixture();
