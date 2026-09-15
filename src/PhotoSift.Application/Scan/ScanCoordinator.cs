@@ -363,16 +363,19 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             var durable = await checkpointGate.ExecuteAsync(() =>
                 PersistStartupAsync(preparation.Identity, nextLifecycle))
                 .ConfigureAwait(false);
-            if (durable.Lifecycle is null)
+            if (!durable.Succeeded)
             {
+                await inbox.CommandAsync(() =>
+                {
+                    ApplyStartupPersistence(operation, durable);
+                    return true;
+                }).ConfigureAwait(false);
                 await HandlePersistenceFailureAsync(operation, durable.Unavailable).ConfigureAwait(false);
                 return;
             }
             var start = await inbox.CommandAsync(() =>
             {
-                operation.DurableStarted = true;
-                operation.LifecycleRevision = durable.Lifecycle.Revision;
-                operation.LifecycleState = durable.Lifecycle.State;
+                ApplyStartupPersistence(operation, durable);
                 if (!ReferenceEquals(active, operation)
                     || operation.Canceled
                     || operation.Faulted
@@ -452,6 +455,19 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                 : null);
     }
 
+    private static void ApplyStartupPersistence(
+        Operation operation,
+        StartupPersistence persistence)
+    {
+        if (persistence.Lifecycle is { } lifecycle)
+        {
+            operation.DurableStarted = true;
+            operation.LifecycleRevision = lifecycle.Revision;
+            operation.LifecycleState = lifecycle.State;
+        }
+        operation.SuppressLifecycleFinalization |= persistence.SuppressLifecycleFinalization;
+    }
+
     private async Task<StartupPersistence> PersistStartupAsync(
         ScanIdentityRecord identity,
         ScanLifecycleState nextState)
@@ -461,21 +477,61 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         if (identityResult.Outcome is not (
             ScanIdentityPersistOutcome.Persisted or ScanIdentityPersistOutcome.ExactRetry))
         {
-            return new(null, identityResult.Outcome == ScanIdentityPersistOutcome.Unavailable);
+            return new(
+                null,
+                false,
+                identityResult.Outcome == ScanIdentityPersistOutcome.Unavailable,
+                false);
         }
         var preflight = await checkpoints.TransitionLifecycleAsync(
             new ScanLifecycleTransitionCommand(
                 identity.Pin.ScanId, 1, Guid.NewGuid(), ScanLifecycleState.Preflight),
             CancellationToken.None).ConfigureAwait(false);
-        if (!Succeeded(preflight))
-            return new(null, preflight.Outcome == ScanCheckpointWriteOutcome.Unavailable);
+        if (!Succeeded(preflight) || preflight.Snapshot?.Lifecycle is not { } preflightLifecycle)
+        {
+            return new(
+                null,
+                false,
+                preflight.Outcome == ScanCheckpointWriteOutcome.Unavailable,
+                false);
+        }
         var next = await checkpoints.TransitionLifecycleAsync(
             new ScanLifecycleTransitionCommand(
                 identity.Pin.ScanId, 1, Guid.NewGuid(), nextState),
             CancellationToken.None).ConfigureAwait(false);
-        return Succeeded(next)
-            ? new(next.Snapshot?.Lifecycle, false)
-            : new(null, next.Outcome == ScanCheckpointWriteOutcome.Unavailable);
+        if (Succeeded(next) && next.Snapshot?.Lifecycle is { } nextLifecycle)
+            return new(nextLifecycle, true, false, false);
+        if (next.Outcome == ScanCheckpointWriteOutcome.Unavailable)
+            return new(preflightLifecycle, false, true, false);
+
+        var canonical = await checkpoints.ReadAsync(identity.Pin.ScanId, CancellationToken.None)
+            .ConfigureAwait(false);
+        if (canonical.Outcome != ScanCheckpointReadOutcome.Found
+            || canonical.Lifecycle is not { } canonicalLifecycle)
+        {
+            return new(
+                preflightLifecycle,
+                false,
+                canonical.Outcome == ScanCheckpointReadOutcome.Unavailable,
+                true);
+        }
+        if (ScanTransitionPolicy.IsTerminal(canonicalLifecycle.State))
+            return new(canonicalLifecycle, false, false, true);
+
+        var faulted = await checkpoints.TransitionLifecycleAsync(
+            new ScanLifecycleTransitionCommand(
+                identity.Pin.ScanId,
+                canonicalLifecycle.Revision,
+                Guid.NewGuid(),
+                ScanLifecycleState.Faulted),
+            CancellationToken.None).ConfigureAwait(false);
+        return Succeeded(faulted) && faulted.Snapshot?.Lifecycle is { } faultedLifecycle
+            ? new(faultedLifecycle, false, false, true)
+            : new(
+                canonicalLifecycle,
+                false,
+                faulted.Outcome == ScanCheckpointWriteOutcome.Unavailable,
+                true);
     }
 
     private async Task FinalizeOperationAsync(Operation operation, bool runFaulted)
@@ -499,6 +555,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             || ScanTransitionPolicy.IsTerminal(operation.LifecycleState);
         if (storeAvailable
             && operation.DurableStarted
+            && !operation.SuppressLifecycleFinalization
             && !ScanTransitionPolicy.IsTerminal(operation.LifecycleState))
         {
             var result = await checkpoints.TransitionLifecycleAsync(
@@ -692,7 +749,9 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
 
     private sealed record StartupPersistence(
         ScanLifecycleCheckpoint? Lifecycle,
-        bool Unavailable);
+        bool Succeeded,
+        bool Unavailable,
+        bool SuppressLifecycleFinalization);
 
     private sealed record MutationPersistence(
         Dictionary<long, long> ExactRevisions,
@@ -736,6 +795,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         public ScanLifecycleState LifecycleState { get; set; } = ScanLifecycleState.Preflight;
         public long LifecycleRevision { get; set; } = 1;
         public bool DurableStarted { get; set; }
+        public bool SuppressLifecycleFinalization { get; set; }
         public bool PersistenceUnavailable { get; set; }
         public bool Canceled { get; set; }
         public bool Finished { get; set; }

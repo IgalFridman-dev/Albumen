@@ -222,6 +222,8 @@ internal sealed class CoordinatorCheckpointStore : IScanCheckpointStore
 {
     private readonly Channel<CoordinatorCheckpointAttempt> attempts =
         Channel.CreateUnbounded<CoordinatorCheckpointAttempt>();
+    private readonly Channel<CoordinatorCheckpointReadAttempt> readAttempts =
+        Channel.CreateUnbounded<CoordinatorCheckpointReadAttempt>();
     private readonly object stateLock = new();
     private readonly Dictionary<Guid, ScanLifecycleCheckpoint> lifecycles = [];
     private readonly Dictionary<(Guid ScanId, long OccurrenceId), ScanOccurrenceIdentityRecord> occurrences = [];
@@ -230,6 +232,7 @@ internal sealed class CoordinatorCheckpointStore : IScanCheckpointStore
     private int maximumInFlight;
     public ConcurrentQueue<object> Writes { get; } = new();
     public bool HoldWrites { get; set; }
+    public bool HoldReads { get; set; }
     public int MaximumInFlight => Volatile.Read(ref maximumInFlight);
 
     public ValueTask<ScanCheckpointWriteResult> WriteInitialOccurrenceAsync(
@@ -247,13 +250,34 @@ internal sealed class CoordinatorCheckpointStore : IScanCheckpointStore
         CancellationToken cancellationToken) =>
         WriteAsync(command, () => Apply(command), cancellationToken);
 
-    public ValueTask<ScanCheckpointReadResult> ReadAsync(Guid scanId, CancellationToken cancellationToken)
+    public async ValueTask<ScanCheckpointReadResult> ReadAsync(
+        Guid scanId,
+        CancellationToken cancellationToken)
     {
-        lock (stateLock) return ValueTask.FromResult(Snapshot(scanId));
+        if (HoldReads)
+        {
+            var attempt = new CoordinatorCheckpointReadAttempt(scanId);
+            await readAttempts.Writer.WriteAsync(attempt, cancellationToken);
+            await attempt.Completion.Task.WaitAsync(cancellationToken);
+        }
+        lock (stateLock) return Snapshot(scanId);
     }
 
     public Task<CoordinatorCheckpointAttempt> NextAttemptAsync() =>
         attempts.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask();
+
+    public Task<CoordinatorCheckpointReadAttempt> NextReadAttemptAsync() =>
+        readAttempts.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask();
+
+    public void SetCanonicalLifecycle(ScanLifecycleCheckpoint lifecycle)
+    {
+        lock (stateLock)
+        {
+            if (!lifecycles.ContainsKey(lifecycle.ScanId))
+                throw new InvalidOperationException("A lifecycle must be bootstrapped before it can be replaced.");
+            lifecycles[lifecycle.ScanId] = lifecycle;
+        }
+    }
 
     private async ValueTask<ScanCheckpointWriteResult> WriteAsync(
         object command,
@@ -424,6 +448,14 @@ internal sealed class CoordinatorCheckpointAttempt(object command)
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     public void Release(ScanCheckpointWriteOutcome? outcome = null) =>
         Completion.TrySetResult(outcome);
+}
+
+internal sealed class CoordinatorCheckpointReadAttempt(Guid scanId)
+{
+    public Guid ScanId { get; } = scanId;
+    public TaskCompletionSource Completion { get; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public void Release() => Completion.TrySetResult();
 }
 
 internal sealed class FailingScanStream : MemoryStream

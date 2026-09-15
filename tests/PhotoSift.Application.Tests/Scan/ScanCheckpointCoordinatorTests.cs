@@ -434,6 +434,206 @@ public sealed class ScanCheckpointCoordinatorTests
     }
 
     [Theory]
+    [InlineData(false, ScanCheckpointWriteOutcome.Stale)]
+    [InlineData(false, ScanCheckpointWriteOutcome.Conflict)]
+    [InlineData(true, ScanCheckpointWriteOutcome.Stale)]
+    [InlineData(true, ScanCheckpointWriteOutcome.Conflict)]
+    public async Task StartupSecondTransitionLogicalRejectionDurablyFaultsCanonicalNonterminalLifecycle(
+        bool rejectedPreflight,
+        ScanCheckpointWriteOutcome expectedRejection)
+    {
+        await using var fixture = new CoordinatorFixture();
+        if (rejectedPreflight)
+        {
+            fixture.Preflight.Inspect = (_, _) => Task.FromResult(fixture.Evidence with
+            {
+                Scope = fixture.Scope with { RootIdentity = new DirectoryIdentity(9, 9, 9) },
+            });
+        }
+        fixture.Checkpoints.HoldWrites = true;
+        var terminal = ObserveTerminal(fixture);
+        CoordinatorCheckpointAttempt? preflightAttempt = null;
+        CoordinatorCheckpointAttempt? secondAttempt = null;
+        CoordinatorCheckpointAttempt? faultAttempt = null;
+        try
+        {
+            await fixture.Start();
+            preflightAttempt = await PumpNext(fixture, fixture.Checkpoints.NextAttemptAsync());
+            var preflight = Assert.IsType<ScanLifecycleTransitionCommand>(preflightAttempt.Command);
+            Assert.Equal(ScanLifecycleState.Preflight, preflight.NextState);
+            preflightAttempt.Release();
+            secondAttempt = await PumpNext(fixture, fixture.Checkpoints.NextAttemptAsync());
+            var second = Assert.IsType<ScanLifecycleTransitionCommand>(secondAttempt.Command);
+            Assert.Equal(
+                rejectedPreflight ? ScanLifecycleState.Incomplete : ScanLifecycleState.Enumerating,
+                second.NextState);
+
+            long canonicalRevision = expectedRejection == ScanCheckpointWriteOutcome.Stale ? 2 : 1;
+            fixture.Checkpoints.SetCanonicalLifecycle(expectedRejection switch
+            {
+                ScanCheckpointWriteOutcome.Stale => new(
+                    second.ScanId,
+                    canonicalRevision,
+                    Guid.Parse("0ac6c60f-54dd-4560-bd8e-e31c9262cd5a"),
+                    ScanLifecycleState.Enumerating),
+                ScanCheckpointWriteOutcome.Conflict => new(
+                    second.ScanId,
+                    canonicalRevision,
+                    second.TransitionId,
+                    ScanLifecycleState.Preflight),
+                _ => throw new ArgumentOutOfRangeException(nameof(expectedRejection)),
+            });
+
+            secondAttempt.Release();
+            var faultAttemptTask = fixture.Checkpoints.NextAttemptAsync();
+            var winner = await PumpNext(fixture, Task.WhenAny(faultAttemptTask, terminal));
+            Assert.Same(faultAttemptTask, winner);
+            Assert.False(terminal.IsCompleted);
+            faultAttempt = await faultAttemptTask;
+            var fault = Assert.IsType<ScanLifecycleTransitionCommand>(faultAttempt.Command);
+            Assert.Equal(second.ScanId, fault.ScanId);
+            Assert.Equal(canonicalRevision, fault.ExpectedRevision);
+            Assert.Equal(ScanLifecycleState.Faulted, fault.NextState);
+
+            fixture.Checkpoints.HoldWrites = false;
+            faultAttempt.Release();
+            await fixture.Pump(terminal);
+            Assert.Equal(ScanStatus.Faulted, (await terminal).Status);
+            var durable = await fixture.Checkpoints.ReadAsync(
+                second.ScanId, TestContext.Current.CancellationToken);
+            Assert.Equal(ScanLifecycleState.Faulted, durable.Lifecycle!.State);
+            Assert.Equal(canonicalRevision + 1, durable.Lifecycle.Revision);
+            Assert.Equal(3, LifecycleWrites(fixture, second.ScanId).Length);
+            Assert.Empty(fixture.Executor.Started);
+        }
+        finally
+        {
+            fixture.Checkpoints.HoldWrites = false;
+            preflightAttempt?.Release();
+            secondAttempt?.Release();
+            faultAttempt?.Release();
+        }
+    }
+
+    [Fact]
+    public async Task StartupIllegalTransitionLeavesTerminalCanonicalLifecycleUnchanged()
+    {
+        await using var fixture = new CoordinatorFixture();
+        fixture.Checkpoints.HoldWrites = true;
+        fixture.Checkpoints.HoldReads = true;
+        var terminal = ObserveTerminal(fixture);
+        CoordinatorCheckpointAttempt? preflightAttempt = null;
+        CoordinatorCheckpointAttempt? secondAttempt = null;
+        CoordinatorCheckpointReadAttempt? readAttempt = null;
+        try
+        {
+            await fixture.Start();
+            preflightAttempt = await PumpNext(fixture, fixture.Checkpoints.NextAttemptAsync());
+            preflightAttempt.Release();
+            secondAttempt = await PumpNext(fixture, fixture.Checkpoints.NextAttemptAsync());
+            var second = Assert.IsType<ScanLifecycleTransitionCommand>(secondAttempt.Command);
+            fixture.Checkpoints.SetCanonicalLifecycle(new(
+                second.ScanId,
+                1,
+                Guid.Parse("66582e84-57b0-4c38-8be3-0898fe19ea71"),
+                ScanLifecycleState.Incomplete));
+
+            fixture.Checkpoints.HoldWrites = false;
+            secondAttempt.Release();
+            var readAttemptTask = fixture.Checkpoints.NextReadAttemptAsync();
+            var winner = await PumpNext(fixture, Task.WhenAny(readAttemptTask, terminal));
+            Assert.Same(readAttemptTask, winner);
+            Assert.False(terminal.IsCompleted);
+            readAttempt = await readAttemptTask;
+            Assert.Equal(second.ScanId, readAttempt.ScanId);
+            fixture.Checkpoints.HoldReads = false;
+            readAttempt.Release();
+
+            await fixture.Pump(terminal);
+            Assert.Equal(ScanStatus.Faulted, (await terminal).Status);
+            var durable = await fixture.Checkpoints.ReadAsync(
+                second.ScanId, TestContext.Current.CancellationToken);
+            Assert.Equal(ScanLifecycleState.Incomplete, durable.Lifecycle!.State);
+            Assert.Equal(1, durable.Lifecycle.Revision);
+            Assert.Equal(
+                Guid.Parse("66582e84-57b0-4c38-8be3-0898fe19ea71"),
+                durable.Lifecycle.TransitionId);
+            Assert.Equal(2, LifecycleWrites(fixture, second.ScanId).Length);
+            Assert.DoesNotContain(
+                LifecycleWrites(fixture, second.ScanId),
+                command => command.NextState == ScanLifecycleState.Faulted);
+        }
+        finally
+        {
+            fixture.Checkpoints.HoldWrites = false;
+            fixture.Checkpoints.HoldReads = false;
+            preflightAttempt?.Release();
+            secondAttempt?.Release();
+            readAttempt?.Release();
+        }
+    }
+
+    [Fact]
+    public async Task StartupFaultSettlementLogicalRejectionIsNotRetried()
+    {
+        await using var fixture = new CoordinatorFixture();
+        fixture.Checkpoints.HoldWrites = true;
+        var terminal = ObserveTerminal(fixture);
+        CoordinatorCheckpointAttempt? preflightAttempt = null;
+        CoordinatorCheckpointAttempt? secondAttempt = null;
+        CoordinatorCheckpointAttempt? faultAttempt = null;
+        try
+        {
+            await fixture.Start();
+            preflightAttempt = await PumpNext(fixture, fixture.Checkpoints.NextAttemptAsync());
+            preflightAttempt.Release();
+            secondAttempt = await PumpNext(fixture, fixture.Checkpoints.NextAttemptAsync());
+            var second = Assert.IsType<ScanLifecycleTransitionCommand>(secondAttempt.Command);
+            fixture.Checkpoints.SetCanonicalLifecycle(new(
+                second.ScanId,
+                2,
+                Guid.Parse("1943110c-6291-4428-8cf9-14210ec695ef"),
+                ScanLifecycleState.Enumerating));
+
+            secondAttempt.Release();
+            var faultAttemptTask = fixture.Checkpoints.NextAttemptAsync();
+            var winner = await PumpNext(fixture, Task.WhenAny(faultAttemptTask, terminal));
+            Assert.Same(faultAttemptTask, winner);
+            faultAttempt = await faultAttemptTask;
+            var fault = Assert.IsType<ScanLifecycleTransitionCommand>(faultAttempt.Command);
+            Assert.Equal(2, fault.ExpectedRevision);
+            Assert.Equal(ScanLifecycleState.Faulted, fault.NextState);
+            fixture.Checkpoints.SetCanonicalLifecycle(new(
+                second.ScanId,
+                3,
+                Guid.Parse("398a0e8b-f636-4a71-95dd-dbe3d426da4b"),
+                ScanLifecycleState.Pausing));
+
+            fixture.Checkpoints.HoldWrites = false;
+            faultAttempt.Release();
+            await fixture.Pump(terminal);
+            await fixture.Pump(fixture.Owner.DisposeAsync().AsTask());
+
+            Assert.Equal(ScanStatus.Faulted, fixture.Owner.Current.Status);
+            var durable = await fixture.Checkpoints.ReadAsync(
+                second.ScanId, TestContext.Current.CancellationToken);
+            Assert.Equal(ScanLifecycleState.Pausing, durable.Lifecycle!.State);
+            Assert.Equal(3, durable.Lifecycle.Revision);
+            Assert.Equal(
+                Guid.Parse("398a0e8b-f636-4a71-95dd-dbe3d426da4b"),
+                durable.Lifecycle.TransitionId);
+            Assert.Equal(3, LifecycleWrites(fixture, second.ScanId).Length);
+        }
+        finally
+        {
+            fixture.Checkpoints.HoldWrites = false;
+            preflightAttempt?.Release();
+            secondAttempt?.Release();
+            faultAttempt?.Release();
+        }
+    }
+
+    [Theory]
     [InlineData(ScanCheckpointWriteOutcome.Stale)]
     [InlineData(ScanCheckpointWriteOutcome.Conflict)]
     [InlineData(ScanCheckpointWriteOutcome.IllegalTransition)]
@@ -511,6 +711,24 @@ public sealed class ScanCheckpointCoordinatorTests
         await fixture.Pump(task);
         return await task;
     }
+
+    private static Task<ScanSnapshot> ObserveTerminal(CoordinatorFixture fixture)
+    {
+        var terminal = ScanTestData.Signal<ScanSnapshot>();
+        fixture.Owner.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.Status is ScanStatus.Incomplete or ScanStatus.Faulted)
+                terminal.TrySetResult(snapshot);
+        };
+        return terminal.Task;
+    }
+
+    private static ScanLifecycleTransitionCommand[] LifecycleWrites(
+        CoordinatorFixture fixture,
+        Guid scanId) =>
+        fixture.Checkpoints.Writes.OfType<ScanLifecycleTransitionCommand>()
+            .Where(command => command.ScanId == scanId)
+            .ToArray();
 
     private static Task AssertOwnerResponsiveWhilePersistenceWaits(CoordinatorFixture fixture) =>
         fixture.Pump(fixture.Owner.InvalidateAsync(0, 0));
