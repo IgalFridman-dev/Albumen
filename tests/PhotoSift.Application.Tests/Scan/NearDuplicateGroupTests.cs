@@ -9,6 +9,28 @@ namespace PhotoSift.Application.Tests.Scan;
 public sealed class NearDuplicateGroupTests
 {
     [Fact]
+    public void ByteIdenticalOccurrencesRemainExactAndAreExcludedFromNearGroups()
+    {
+        var store = new ScanStore(ScanTestData.Context());
+        var first = StoreFixture.Register(store, 1);
+        Assert.True(store.CommitSignature(StoreFixture.Signature(first)).Accepted);
+        var second = StoreFixture.Register(store, 2);
+        var comparison = Assert.Single(store.CommitSignature(StoreFixture.Signature(second)).Comparisons);
+        Assert.True(store.CommitComparison(StoreFixture.Equality(comparison)));
+        var rows = StoreFixture.Snapshot(store).Occurrences;
+
+        var committed = store.CommitNearDuplicates(new(rows[0].Token.Pin, "managed-dhash-bgra-v1",
+            [Success(rows[0], 0), Success(rows[1], 1)]));
+        var snapshot = StoreFixture.Snapshot(store);
+
+        Assert.True(committed.Accepted);
+        var exact = Assert.Single(snapshot.Groups);
+        Assert.Equal(CandidateCategory.Exact, exact.Category);
+        Assert.Equal([rows[0].Token, rows[1].Token], exact.Members.Select(member => member.Token));
+        Assert.DoesNotContain(snapshot.Groups, group => group.Category != CandidateCategory.Exact);
+    }
+
+    [Fact]
     public void AtomicCommitKeepsExactDistinctAndPublishesDeterministicNearAndUncertainGroups()
     {
         var store = ExactRows(4);
@@ -31,17 +53,28 @@ public sealed class NearDuplicateGroupTests
             group => Assert.Null(group.KeeperOccurrenceId));
     }
 
-    [Fact]
-    public void StaleOccurrenceContentScanOrAnalysisRevisionRejectsWholeBatchWithoutEffect()
+    [Theory]
+    [InlineData("scan")]
+    [InlineData("occurrence")]
+    [InlineData("content")]
+    [InlineData("analysis")]
+    public void EveryStaleNearBatchIdentityRejectsWithoutEffect(string mismatch)
     {
         var store = ExactRows(2);
         var rows = StoreFixture.Snapshot(store).Occurrences;
         var valid = new NearDuplicateBatch(rows[0].Token.Pin, "managed-dhash-bgra-v1",
             [Success(rows[0], 0), Success(rows[1], 1)]);
         var before = StoreFixture.Snapshot(store);
-        var stale = valid with { Results = valid.Results.SetItem(1,
-            valid.Results[1] with { Content = new ContentRevision(valid.Results[1].Content!.PhysicalFileKey,
-                valid.Results[1].Content!.ByteLength, new string('F', 64)) }) };
+        var stale = mismatch switch
+        {
+            "scan" => valid with { Pin = valid.Pin with { ScanId = Guid.NewGuid() } },
+            "occurrence" => valid with { Results = valid.Results.SetItem(1,
+                valid.Results[1] with { Token = valid.Results[1].Token with { OccurrenceRevision = 99 } }) },
+            "content" => valid with { Results = valid.Results.SetItem(1,
+                valid.Results[1] with { Content = new ContentRevision(valid.Results[1].Content!.PhysicalFileKey,
+                    valid.Results[1].Content!.ByteLength, new string('F', 64)) }) },
+            _ => valid with { Pin = valid.Pin with { AnalysisRevision = 99 } },
+        };
 
         var result = store.CommitNearDuplicates(stale);
         var after = StoreFixture.Snapshot(store);
@@ -50,6 +83,29 @@ public sealed class NearDuplicateGroupTests
         Assert.Equal(before.Occurrences, after.Occurrences);
         Assert.Equal(before.Groups.Select(GroupShape), after.Groups.Select(GroupShape));
         Assert.Equal(before.Counts, after.Counts);
+    }
+
+    [Fact]
+    public void ChangedMaterialEvidenceAdvancesRevisionAndRetiresThePriorGroupRevision()
+    {
+        var store = ExactRows(2);
+        var rows = StoreFixture.Snapshot(store).Occurrences;
+        var initialBatch = new NearDuplicateBatch(rows[0].Token.Pin, "managed-dhash-bgra-v1",
+            [Success(rows[0], 0), Success(rows[1], 1)]);
+        Assert.True(store.CommitNearDuplicates(initialBatch).Accepted);
+        var initial = Assert.Single(StoreFixture.Snapshot(store).Groups);
+
+        var changedBatch = initialBatch with
+        {
+            Results = initialBatch.Results.SetItem(1, Success(rows[1], 3)),
+        };
+        Assert.True(store.CommitNearDuplicates(changedBatch).Accepted);
+        var changed = Assert.Single(StoreFixture.Snapshot(store).Groups);
+
+        Assert.Equal(initial.GroupId, changed.GroupId);
+        Assert.Equal(initial.GroupRevision + 1, changed.GroupRevision);
+        Assert.False(store.MatchesGroup(initial.GroupId, initial.GroupRevision));
+        Assert.True(store.MatchesGroup(changed.GroupId, changed.GroupRevision));
     }
 
     [Fact]
