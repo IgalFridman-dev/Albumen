@@ -83,4 +83,7 @@ public sealed class ReviewComparisonEvidenceViewModel
     public string Transformations { get; }
     public string Reason { get; }
     public string Recommendation { get; } = "No recommendation; manual Selection.";
+    public string AutomationName => $"{Category} comparison evidence for {FullPath}";
+    public string ItemStatus =>
+        $"{Confidence}; Uncertainty: {Uncertainty}; {Recommendation}";
 }

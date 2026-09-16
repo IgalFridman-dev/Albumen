@@ -23,31 +23,56 @@ public enum ReviewNavigationLevel
 
 public sealed class ReviewCategoryViewModel
 {
+    private readonly Func<Guid, int?> findGroupIndex;
+
     internal ReviewCategoryViewModel(
         ReviewCategoryKind category,
         string name,
         int groupCount,
-        Func<int, ReviewGroupViewModel> groupFactory)
+        int positionInSet,
+        int sizeOfSet,
+        Func<int, ReviewGroupViewModel> groupFactory,
+        Func<Guid, int?> findGroupIndex)
     {
         Category = category;
         Name = name;
         GroupCount = groupCount;
+        PositionInSet = positionInSet;
+        SizeOfSet = sizeOfSet;
         Groups = new(groupCount, groupFactory);
+        this.findGroupIndex = findGroupIndex;
     }
 
     public ReviewCategoryKind Category { get; }
     public string Name { get; }
     public int GroupCount { get; }
+    public int PositionInSet { get; }
+    public int SizeOfSet { get; }
+    public string AutomationName => $"{Name}: {GroupCount.ToString(CultureInfo.InvariantCulture)} groups";
     public LazyReviewCollection<ReviewGroupViewModel> Groups { get; }
+
+    internal ReviewGroupViewModel? FindGroup(Guid groupId) =>
+        findGroupIndex(groupId) is { } index ? Groups[index] : null;
 }
 
 public sealed class ReviewGroupViewModel
 {
-    internal ReviewGroupViewModel(CandidateGroup group, ReviewCategoryKind category)
+    private readonly Dictionary<long, int> memberIndexes;
+
+    internal ReviewGroupViewModel(
+        CandidateGroup group,
+        ReviewCategoryKind category,
+        int positionInSet,
+        int sizeOfSet)
     {
         GroupId = group.GroupId;
         Category = category;
+        PositionInSet = positionInSet;
+        SizeOfSet = sizeOfSet;
         var members = group.Members.OrderBy(member => member.Token.OccurrenceId).ToImmutableArray();
+        memberIndexes = members
+            .Select((member, index) => (OccurrenceId: member.Token.OccurrenceId, Index: index))
+            .ToDictionary(pair => pair.OccurrenceId, pair => pair.Index);
         Members = new(members.Length, index => new ScanOccurrenceViewModel(
             members[index], IsAlias(members, index)));
         MemberCount = members.Length;
@@ -59,12 +84,19 @@ public sealed class ReviewGroupViewModel
     internal ReviewGroupViewModel(
         ReviewGroupSnapshot group,
         ReviewCategoryKind category,
+        int positionInSet,
+        int sizeOfSet,
         bool reviewAllowsSelection,
         Func<SelectionCommandKind, ImmutableArray<long>, Task> changeSelection)
     {
         GroupId = group.Candidate.GroupId;
         Category = category;
+        PositionInSet = positionInSet;
+        SizeOfSet = sizeOfSet;
         var members = group.Members.OrderBy(member => member.Occurrence.Token.OccurrenceId).ToImmutableArray();
+        memberIndexes = members
+            .Select((member, index) => (OccurrenceId: member.Occurrence.Token.OccurrenceId, Index: index))
+            .ToDictionary(pair => pair.OccurrenceId, pair => pair.Index);
         var canChangeSelection = reviewAllowsSelection && !group.Sealed;
         Members = new(members.Length, index => new ScanOccurrenceViewModel(
             members[index], IsAlias(members, index), canChangeSelection,
@@ -85,10 +117,13 @@ public sealed class ReviewGroupViewModel
             canExecute: () => canChangeSelection);
     }
 
-    internal ReviewGroupViewModel(ScanFileOccurrence occurrence)
+    internal ReviewGroupViewModel(ScanFileOccurrence occurrence, int positionInSet, int sizeOfSet)
     {
         GroupId = Guid.Empty;
         Category = ReviewCategoryKind.CouldNotAnalyze;
+        PositionInSet = positionInSet;
+        SizeOfSet = sizeOfSet;
+        memberIndexes = new Dictionary<long, int> { [occurrence.Token.OccurrenceId] = 0 };
         Members = new(1, _ => new ScanOccurrenceViewModel(occurrence));
         MemberCount = 1;
         Summary = $"Could Not Analyze: {occurrence.DiscoveredPath}";
@@ -99,10 +134,17 @@ public sealed class ReviewGroupViewModel
     public Guid GroupId { get; }
     public ReviewCategoryKind Category { get; }
     public int MemberCount { get; }
+    public int PositionInSet { get; }
+    public int SizeOfSet { get; }
     public string Summary { get; }
+    public string AutomationName => Summary;
+    public string ItemStatus => $"{Category}; {MemberCount.ToString(CultureInfo.InvariantCulture)} comparison paths";
     public LazyReviewCollection<ScanOccurrenceViewModel> Members { get; }
     public AsyncCommand SelectAllCommand { get; }
     public AsyncCommand ReplaceSelectionCommand { get; }
+
+    internal ScanOccurrenceViewModel? FindMember(long occurrenceId) =>
+        memberIndexes.TryGetValue(occurrenceId, out var index) ? Members[index] : null;
 
     private static bool IsAlias(ImmutableArray<ScanFileOccurrence> members, int index)
     {

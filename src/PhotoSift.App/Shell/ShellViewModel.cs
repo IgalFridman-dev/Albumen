@@ -278,6 +278,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         get => reviewBreadcrumbs;
         private set => reviewBreadcrumbs = value;
     }
+    public string ReviewBreadcrumbText => string.Join(" > ", ReviewBreadcrumbs);
+    public bool CanReviewBack => ReviewNavigationLevel != ReviewLevel.Categories;
+    public LazyReviewCollection<ReviewGroupViewModel>? ActiveReviewGroups => ActiveReviewCategory?.Groups;
+    public LazyReviewCollection<ScanOccurrenceViewModel>? ActiveReviewMembers => ActiveReviewGroup?.Members;
     public ReviewCategoryViewModel? ActiveReviewCategory
     {
         get => activeReviewCategory;
@@ -528,6 +532,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 : "Exact enabled; Near disabled — confirmed";
         if (!preserveReviewProjection)
         {
+            var previousNavigationLevel = ReviewNavigationLevel;
+            var previousCategory = ActiveReviewCategory?.Category;
+            var previousGroupId = ActiveReviewGroup?.GroupId;
+            var previousMemberId = ActiveReviewMember?.OccurrenceId;
             ExactGroups = snapshot.Review.Pin is null
                 ? snapshot.Scan.Groups.Select(group => new ExactGroupViewModel(group)).ToImmutableArray()
                 : snapshot.Review.Groups.Select((group, index) => new ExactGroupViewModel(group,
@@ -535,7 +543,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                     snapshot.Review.SelectionRevision, index + 1, snapshot.Review.Groups.Length,
                     (kind, ids) => ChangeReviewSelectionAsync(group.Candidate.GroupId, kind, ids))).ToImmutableArray();
             ReviewCategories = ProjectReviewCategories(snapshot);
-            ResetReviewNavigation();
+            RestoreReviewNavigation(previousNavigationLevel, previousCategory,
+                previousGroupId, previousMemberId);
         }
         CouldNotAnalyze = snapshot.Scan.Occurrences
             .Where(IsCouldNotAnalyze)
@@ -641,46 +650,74 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private ImmutableArray<ReviewCategoryViewModel> ProjectReviewCategories(PhotoSiftSnapshot snapshot) =>
     [
-        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Exact, "Exact"),
-        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Near, "Near"),
-        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Uncertain, "Uncertain"),
-        ProjectCouldNotAnalyzeCategory(snapshot.Scan),
+        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Exact, "Exact", 1),
+        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Near, "Near", 2),
+        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Uncertain, "Uncertain", 3),
+        ProjectCouldNotAnalyzeCategory(snapshot.Scan, 4),
     ];
 
     private ReviewCategoryViewModel ProjectCandidateCategory(
         PhotoSiftSnapshot snapshot,
         ReviewCategoryKind category,
-        string name)
+        string name,
+        int positionInSet)
     {
         if (snapshot.Review.Pin is not null)
         {
             var groups = snapshot.Review.Groups
                 .Where(group => InCategory(group.Candidate, category))
                 .ToImmutableArray();
-            return new(category, name, groups.Length, index =>
-            {
-                var group = groups[index];
-                return new ReviewGroupViewModel(
-                    group,
+            return new(category, name, groups.Length, positionInSet, 4, index =>
+                new ReviewGroupViewModel(
+                    groups[index],
                     category,
+                    index + 1,
+                    groups.Length,
                     snapshot.Review.Status == ReviewStatus.Ready && !snapshot.Review.Sealed,
-                    (kind, ids) => ChangeReviewSelectionAsync(group.Candidate.GroupId, kind, ids));
-            });
+                    (kind, ids) => ChangeReviewSelectionAsync(groups[index].Candidate.GroupId, kind, ids)),
+                groupId => FindGroupIndex(groups, groupId));
         }
 
         var candidates = snapshot.Scan.Groups
             .Where(group => InCategory(group, category))
             .ToImmutableArray();
-        return new(category, name, candidates.Length,
-            index => new ReviewGroupViewModel(candidates[index], category));
+        return new(category, name, candidates.Length, positionInSet, 4,
+            index => new ReviewGroupViewModel(
+                candidates[index], category, index + 1, candidates.Length),
+            groupId => FindGroupIndex(candidates, groupId));
     }
 
     private static ReviewCategoryViewModel ProjectCouldNotAnalyzeCategory(
-        PhotoSift.Application.Scan.ScanSnapshot scan)
+        PhotoSift.Application.Scan.ScanSnapshot scan,
+        int positionInSet)
     {
         var rows = scan.Occurrences.Where(IsCouldNotAnalyze).ToImmutableArray();
         return new(ReviewCategoryKind.CouldNotAnalyze, "Could Not Analyze", rows.Length,
-            index => new ReviewGroupViewModel(rows[index]));
+            positionInSet, 4,
+            index => new ReviewGroupViewModel(rows[index], index + 1, rows.Length),
+            _ => null);
+    }
+
+    private static int? FindGroupIndex(
+        ImmutableArray<ReviewGroupSnapshot> groups,
+        Guid groupId)
+    {
+        for (var index = 0; index < groups.Length; index++)
+        {
+            if (groups[index].Candidate.GroupId == groupId) return index;
+        }
+        return null;
+    }
+
+    private static int? FindGroupIndex(
+        ImmutableArray<CandidateGroup> groups,
+        Guid groupId)
+    {
+        for (var index = 0; index < groups.Length; index++)
+        {
+            if (groups[index].GroupId == groupId) return index;
+        }
+        return null;
     }
 
     private static bool InCategory(CandidateGroup group, ReviewCategoryKind category) => category switch
@@ -733,14 +770,53 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private void ResetReviewNavigation() =>
         SetReviewNavigation(ReviewLevel.Categories, null, null, null);
 
+    private void RestoreReviewNavigation(
+        ReviewLevel level,
+        ReviewCategoryKind? categoryKind,
+        Guid? groupId,
+        long? memberId)
+    {
+        if (level == ReviewLevel.Categories || categoryKind is null)
+        {
+            ResetReviewNavigation();
+            return;
+        }
+
+        var category = ReviewCategories.FirstOrDefault(row => row.Category == categoryKind);
+        if (category is null)
+        {
+            ResetReviewNavigation();
+            return;
+        }
+
+        if (level == ReviewLevel.Groups || groupId is null)
+        {
+            SetReviewNavigation(ReviewLevel.Groups, category, null, null);
+            return;
+        }
+
+        var group = category.FindGroup(groupId.Value);
+        if (group is null)
+        {
+            SetReviewNavigation(ReviewLevel.Groups, category, null, null);
+            return;
+        }
+
+        var member = memberId is { } id ? group.FindMember(id) : null;
+        SetReviewNavigation(ReviewLevel.Comparisons, category, group, member,
+            preservePreview: member is not null);
+    }
+
     private void SetReviewNavigation(
         ReviewLevel level,
         ReviewCategoryViewModel? category,
         ReviewGroupViewModel? group,
-        ScanOccurrenceViewModel? member)
+        ScanOccurrenceViewModel? member,
+        bool preservePreview = false)
     {
-        if (!ReferenceEquals(ActiveReviewMember, member))
+        if (!preservePreview && !ReferenceEquals(ActiveReviewMember, member))
             ClearActiveReviewPreview();
+        var navigationLevelChanged = ReviewNavigationLevel != level;
         ReviewNavigationLevel = level;
         ActiveReviewCategory = category;
         ActiveReviewGroup = group;
@@ -752,11 +828,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             ReviewLevel.Comparisons => ["Review", category!.Name, group!.Summary],
             _ => throw new InvalidOperationException($"Unknown Review navigation level: {level}"),
         };
-        OnPropertyChanged(nameof(ReviewNavigationLevel));
+        if (navigationLevelChanged) OnPropertyChanged(nameof(ReviewNavigationLevel));
         OnPropertyChanged(nameof(ActiveReviewCategory));
         OnPropertyChanged(nameof(ActiveReviewGroup));
         OnPropertyChanged(nameof(ActiveReviewMember));
         OnPropertyChanged(nameof(ReviewBreadcrumbs));
+        OnPropertyChanged(nameof(ReviewBreadcrumbText));
+        if (navigationLevelChanged) OnPropertyChanged(nameof(CanReviewBack));
+        OnPropertyChanged(nameof(ActiveReviewGroups));
+        OnPropertyChanged(nameof(ActiveReviewMembers));
         ReviewBackCommand.NotifyCanExecuteChanged();
     }
 

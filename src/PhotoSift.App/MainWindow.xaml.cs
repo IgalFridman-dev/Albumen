@@ -39,6 +39,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
+        SizeChanged += OnReviewSizeChanged;
         Closing += OnClosing;
         Closed += OnClosed;
         AddHandler(Keyboard.GotKeyboardFocusEvent,
@@ -64,6 +65,7 @@ public partial class MainWindow : Window
         {
             shellViewModel.PropertyChanged += OnViewModelPropertyChanged;
         }
+        UpdateReviewLayout();
     }
 
     private void OnLoaded(object sender, RoutedEventArgs eventArgs)
@@ -73,6 +75,7 @@ public partial class MainWindow : Window
             FocusBlockingNotice();
         }
         if (shellViewModel?.IsActionPhase is true) QueuePhaseFocus();
+        UpdateReviewLayout();
     }
 
     private void OnViewModelPropertyChanged(
@@ -119,9 +122,15 @@ public partial class MainWindow : Window
             QueueReviewFailureAnnouncement();
             QueueReviewFocusRestoration();
         }
-        if (eventArgs.PropertyName == nameof(ShellViewModel.ExactGroups))
+        if (eventArgs.PropertyName is nameof(ShellViewModel.ExactGroups)
+            or nameof(ShellViewModel.ReviewCategories))
         {
             QueueReviewFocusRestoration();
+        }
+        if (eventArgs.PropertyName == nameof(ShellViewModel.ReviewNavigationLevel))
+        {
+            UpdateReviewLayout();
+            QueueReviewNavigationFocus();
         }
 
         if (eventArgs.PropertyName == nameof(ShellViewModel.IsBlocked) &&
@@ -141,10 +150,11 @@ public partial class MainWindow : Window
             || !CanReceiveFocus(element))
             return;
         if (element.DataContext is ScanOccurrenceViewModel member
-            && FindDataContext<ExactGroupViewModel>(element) is { } group)
+            && FindReviewGroupId(element) is { } groupId)
         {
             reviewFocusGeneration++;
-            reviewFocusIdentity = new(session, group.GroupId, member.OccurrenceId);
+            reviewFocusIdentity = new(session, groupId, member.OccurrenceId,
+                IsWithin(element, ReviewComparisonsList));
             return;
         }
         if (reviewFocusIdentity?.Session != session || !IsDeliberateReviewFocusTarget(element)) return;
@@ -167,17 +177,138 @@ public partial class MainWindow : Window
 
     private void OnCanSelectFocusedReviewGroup(object sender, CanExecuteRoutedEventArgs eventArgs)
     {
-        var group = FindDataContext<ExactGroupViewModel>(eventArgs.OriginalSource as DependencyObject);
-        eventArgs.CanExecute = group?.SelectAllCommand.CanExecute(null) is true;
-        eventArgs.Handled = group is not null;
+        var command = FindSelectAllCommand(eventArgs.OriginalSource as DependencyObject);
+        eventArgs.CanExecute = command?.CanExecute(null) is true;
+        eventArgs.Handled = command is not null;
     }
 
     private void OnSelectFocusedReviewGroup(object sender, ExecutedRoutedEventArgs eventArgs)
     {
-        var group = FindDataContext<ExactGroupViewModel>(eventArgs.OriginalSource as DependencyObject);
-        if (group is null || !group.SelectAllCommand.CanExecute(null)) return;
-        group.SelectAllCommand.Execute(null);
+        var command = FindSelectAllCommand(eventArgs.OriginalSource as DependencyObject);
+        if (command is null || !command.CanExecute(null)) return;
+        command.Execute(null);
         eventArgs.Handled = true;
+    }
+
+    private AsyncCommand? FindSelectAllCommand(DependencyObject? source) =>
+        FindDataContext<ReviewGroupViewModel>(source)?.SelectAllCommand
+        ?? FindDataContext<ExactGroupViewModel>(source)?.SelectAllCommand
+        ?? (IsWithin(source, ReviewComparisonsList)
+            ? shellViewModel?.ActiveReviewGroup?.SelectAllCommand
+            : null);
+
+    private Guid? FindReviewGroupId(DependencyObject? source) =>
+        FindDataContext<ReviewGroupViewModel>(source)?.GroupId
+        ?? FindDataContext<ExactGroupViewModel>(source)?.GroupId
+        ?? (IsWithin(source, ReviewComparisonsList) ? shellViewModel?.ActiveReviewGroup?.GroupId : null);
+
+    private static bool IsWithin(DependencyObject? source, DependencyObject ancestor)
+    {
+        while (source is not null)
+        {
+            if (ReferenceEquals(source, ancestor)) return true;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return false;
+    }
+
+    private void OnReviewListPreviewKeyDown(object sender, KeyEventArgs eventArgs)
+    {
+        if (eventArgs.Key != Key.Enter || sender is not ListBox list || shellViewModel is null)
+            return;
+
+        var source = eventArgs.OriginalSource as DependencyObject
+            ?? Keyboard.FocusedElement as DependencyObject;
+        var item = list.SelectedItem
+            ?? FindDataContext<ReviewCategoryViewModel>(source)
+            ?? (object?)FindDataContext<ReviewGroupViewModel>(source)
+            ?? FindDataContext<ScanOccurrenceViewModel>(source);
+        if (ReferenceEquals(list, ReviewCategoriesList) && item is ReviewCategoryViewModel category)
+            shellViewModel.OpenReviewCategoryCommand.Execute(category);
+        else if (ReferenceEquals(list, ReviewGroupsList) && item is ReviewGroupViewModel group)
+            shellViewModel.OpenReviewGroupCommand.Execute(group);
+        else if (ReferenceEquals(list, ReviewComparisonsList) && item is ScanOccurrenceViewModel member)
+            shellViewModel.OpenReviewMemberCommand.Execute(member);
+        else
+            return;
+
+        eventArgs.Handled = true;
+    }
+
+    private void OnOpenReviewCategoryClick(object sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is Button { DataContext: ReviewCategoryViewModel category })
+            shellViewModel?.OpenReviewCategoryCommand.Execute(category);
+    }
+
+    private void OnOpenReviewGroupClick(object sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is Button { DataContext: ReviewGroupViewModel group })
+            shellViewModel?.OpenReviewGroupCommand.Execute(group);
+    }
+
+    private void OnOpenReviewMemberClick(object sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is Button { DataContext: ScanOccurrenceViewModel member })
+            shellViewModel?.OpenReviewMemberCommand.Execute(member);
+    }
+
+    private void OnReviewBackClick(object sender, RoutedEventArgs eventArgs) =>
+        shellViewModel?.ReviewBackCommand.Execute(null);
+
+    private void OnReviewSizeChanged(object sender, SizeChangedEventArgs eventArgs) =>
+        UpdateReviewLayout();
+
+    private void UpdateReviewLayout()
+    {
+        if (!IsInitialized) return;
+        var width = double.IsNaN(Width) ? ActualWidth : Width;
+        var level = shellViewModel?.ReviewNavigationLevel ?? ReviewNavigationLevel.Categories;
+        if (width >= 920)
+        {
+            ReviewCategoriesPanel.Visibility = Visibility.Visible;
+            ReviewGroupsPanel.Visibility = Visibility.Visible;
+            ReviewComparisonsPanel.Visibility = Visibility.Visible;
+            return;
+        }
+
+        if (width >= 800)
+        {
+            ReviewCategoriesPanel.Visibility = Visibility.Visible;
+            ReviewGroupsPanel.Visibility = level == ReviewNavigationLevel.Groups
+                ? Visibility.Visible : Visibility.Collapsed;
+            ReviewComparisonsPanel.Visibility = level == ReviewNavigationLevel.Comparisons
+                ? Visibility.Visible : Visibility.Collapsed;
+            return;
+        }
+
+        ReviewCategoriesPanel.Visibility = level == ReviewNavigationLevel.Categories
+            ? Visibility.Visible : Visibility.Collapsed;
+        ReviewGroupsPanel.Visibility = level == ReviewNavigationLevel.Groups
+            ? Visibility.Visible : Visibility.Collapsed;
+        ReviewComparisonsPanel.Visibility = level == ReviewNavigationLevel.Comparisons
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void QueueReviewNavigationFocus()
+    {
+        var expected = shellViewModel;
+        var level = expected?.ReviewNavigationLevel;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || !ReferenceEquals(expected, shellViewModel) || !IsVisible) return;
+            UpdateLayout();
+            var target = level switch
+            {
+                ReviewNavigationLevel.Categories => ReviewCategoriesList,
+                ReviewNavigationLevel.Groups => ReviewGroupsList,
+                ReviewNavigationLevel.Comparisons => ReviewComparisonsList,
+                _ => null,
+            };
+            if (target is null || !CanReceiveFocus(target)) return;
+            target.Focus();
+            Keyboard.Focus(target);
+        }, DispatcherPriority.Input);
     }
 
     private static T? FindDataContext<T>(DependencyObject? current) where T : class
@@ -415,9 +546,10 @@ public partial class MainWindow : Window
     {
         if (invokingFocus is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } element
             || shellViewModel?.ReviewSession is not { } session
-            || FindDataContext<ExactGroupViewModel>(element) is not { } group)
+            || FindReviewGroupId(element) is not { } groupId)
             return null;
-        var identity = new ReviewFocusIdentity(session, group.GroupId, member.OccurrenceId);
+        var identity = new ReviewFocusIdentity(session, groupId, member.OccurrenceId,
+            IsWithin(element, ReviewComparisonsList));
         return identity == reviewFocusIdentity ? CaptureReviewFocusRestorationToken(identity) : null;
     }
 
@@ -428,7 +560,7 @@ public partial class MainWindow : Window
             || expected.ReviewSession != identity.Session)
             return null;
         return new(expected, dataContextGeneration, identity.Session, identity.GroupId,
-            identity.OccurrenceId, reviewFocusGeneration);
+            identity.OccurrenceId, identity.GroupedSurface, reviewFocusGeneration);
     }
 
     internal void QueueReviewFocusRestoration(
@@ -440,8 +572,9 @@ public partial class MainWindow : Window
             if (!IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration)) return;
             UpdateLayout();
             if (!IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration)) return;
-            var identity = new ReviewFocusIdentity(token.Session, token.GroupId, token.OccurrenceId);
-            var target = FindCurrentSelectionControl(this, identity);
+            var identity = new ReviewFocusIdentity(token.Session, token.GroupId,
+                token.OccurrenceId, token.GroupedSurface);
+            var target = FindCurrentSelectionControl(identity);
             if (target is null
                 || !IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration))
                 return;
@@ -473,19 +606,31 @@ public partial class MainWindow : Window
         && ReferenceEquals(token.ExpectedViewModel, shellViewModel)
         && token.ExpectedViewModel.IsReviewPhase
         && token.ExpectedViewModel.ReviewSession == token.Session
-        && reviewFocusIdentity == new ReviewFocusIdentity(token.Session, token.GroupId, token.OccurrenceId);
+        && reviewFocusIdentity == new ReviewFocusIdentity(token.Session, token.GroupId,
+            token.OccurrenceId, token.GroupedSurface);
 
-    private static ReviewSelectionCheckBox? FindCurrentSelectionControl(
-        DependencyObject root,
+    private ReviewSelectionCheckBox? FindCurrentSelectionControl(
         ReviewFocusIdentity identity)
     {
+        var root = identity.GroupedSurface
+            ? (DependencyObject)ReviewComparisonsList
+            : ExactGroupsList;
+        var active = identity.GroupedSurface
+            ? shellViewModel?.ActiveReviewMembers?.FirstOrDefault(member =>
+                member.OccurrenceId == identity.OccurrenceId)
+            : null;
+        if (active is not null)
+        {
+            ReviewComparisonsList.ScrollIntoView(active);
+            ReviewComparisonsList.ApplyTemplate();
+            ReviewComparisonsList.UpdateLayout();
+        }
         foreach (var control in Descendants<ReviewSelectionCheckBox>(root))
         {
             if (control.DataContext is not ScanOccurrenceViewModel member
                 || member.OccurrenceId != identity.OccurrenceId)
                 continue;
-            var group = FindDataContext<ExactGroupViewModel>(control);
-            if (group?.GroupId == identity.GroupId && CanReceiveFocus(control)) return control;
+            if (FindReviewGroupId(control) == identity.GroupId && CanReceiveFocus(control)) return control;
         }
         return null;
     }
@@ -590,9 +735,14 @@ public partial class MainWindow : Window
         ReviewSessionPin Session,
         Guid GroupId,
         long OccurrenceId,
+        bool GroupedSurface,
         long FocusGeneration);
 
-    private sealed record ReviewFocusIdentity(ReviewSessionPin Session, Guid GroupId, long OccurrenceId);
+    private sealed record ReviewFocusIdentity(
+        ReviewSessionPin Session,
+        Guid GroupId,
+        long OccurrenceId,
+        bool GroupedSurface);
 }
 
 public class ReviewAutomationBorder : Border

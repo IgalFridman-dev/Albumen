@@ -2,7 +2,7 @@ using System.Collections;
 
 namespace PhotoSift.App.Shell;
 
-public sealed class LazyReviewCollection<T> : IReadOnlyList<T>
+public sealed class LazyReviewCollection<T> : IReadOnlyList<T>, IList
 {
     private readonly Func<int, T> factory;
     private readonly Dictionary<int, T> materialized = [];
@@ -43,6 +43,46 @@ public sealed class LazyReviewCollection<T> : IReadOnlyList<T>
                 return value;
             }
         }
+    }
+
+    object? IList.this[int index]
+    {
+        get => this[index];
+        set => throw new NotSupportedException();
+    }
+
+    bool IList.IsFixedSize => true;
+    bool IList.IsReadOnly => true;
+    bool ICollection.IsSynchronized => true;
+    object ICollection.SyncRoot => gate;
+
+    int IList.Add(object? value) => throw new NotSupportedException();
+    void IList.Clear() => throw new NotSupportedException();
+    void IList.Insert(int index, object? value) => throw new NotSupportedException();
+    void IList.Remove(object? value) => throw new NotSupportedException();
+    void IList.RemoveAt(int index) => throw new NotSupportedException();
+
+    bool IList.Contains(object? value) => value is T item && ((IList)this).IndexOf(item) >= 0;
+
+    int IList.IndexOf(object? value)
+    {
+        if (value is not T item) return -1;
+        var comparer = EqualityComparer<T>.Default;
+        lock (gate)
+        {
+            foreach (var pair in materialized)
+            {
+                if (comparer.Equals(pair.Value, item)) return pair.Key;
+            }
+        }
+        return -1;
+    }
+
+    void ICollection.CopyTo(Array array, int index)
+    {
+        ArgumentNullException.ThrowIfNull(array);
+        for (var itemIndex = 0; itemIndex < Count; itemIndex++)
+            array.SetValue(this[itemIndex], index + itemIndex);
     }
 
     public IEnumerator<T> GetEnumerator()
