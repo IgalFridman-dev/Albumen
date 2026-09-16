@@ -100,6 +100,41 @@ public sealed class GroupedReviewEvidenceTests
         Assert.True(olderResult.IsDisposed);
     }
 
+    [Fact]
+    public async Task SelectionRefreshRestartsThePreviewForTheLogicallyActiveReplacement()
+    {
+        var source = new ControllableReviewPreviewSource();
+        var scope = new ReviewStaticScope();
+        var workflow = new RecordingReviewWorkflow(
+            scope.Current, ReviewData.CreateSnapshot());
+        await using var viewModel = new ShellViewModel(
+            scope, workflow, reviewPreviewSource: source);
+        var member = (await OpenGroupAsync(viewModel, ReviewCategoryKind.Exact)).Members[0];
+
+        var originalLoad = viewModel.OpenReviewMemberCommand.ExecuteAsync(member);
+        await source.WaitForRequestCountAsync(1);
+        workflow.Publish(ReviewData.WithSelection(
+            workflow.Current.Review, [member.OccurrenceId], 10));
+        await source.WaitForRequestCountAsync(2);
+
+        var replacement = Assert.IsType<ScanOccurrenceViewModel>(viewModel.ActiveReviewMember);
+        Assert.NotSame(member, replacement);
+        Assert.Equal(member.OccurrenceId, replacement.OccurrenceId);
+        Assert.True(source.Requests[0].CancellationToken.IsCancellationRequested);
+        using var replacementResult = ReviewPreviewResult.Failure(
+            replacement.ResolvedPath, PreviewAvailability.Unavailable, "replacement result");
+        source.Complete(1, replacementResult);
+        await WaitForPreviewStatusAsync(viewModel, "replacement result");
+        using var staleResult = ReviewPreviewResult.Failure(
+            member.ResolvedPath, PreviewAvailability.Unavailable, "stale result");
+        source.Complete(0, staleResult);
+        await originalLoad;
+
+        Assert.Equal("replacement result", viewModel.ActiveReviewPreview?.StatusText);
+        Assert.Equal(replacement.OccurrenceId, source.Requests[1].Occurrence.Token.OccurrenceId);
+        Assert.True(staleResult.IsDisposed);
+    }
+
     [Theory]
     [InlineData(typeof(FileNotFoundException))]
     [InlineData(typeof(UnauthorizedAccessException))]
@@ -129,6 +164,19 @@ public sealed class GroupedReviewEvidenceTests
         var group = Assert.Single(row.Groups);
         await viewModel.OpenReviewGroupCommand.ExecuteAsync(group);
         return group;
+    }
+
+    private static async Task WaitForPreviewStatusAsync(
+        ShellViewModel viewModel,
+        string expected)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
+        while (viewModel.ActiveReviewPreview?.StatusText != expected)
+        {
+            if (DateTimeOffset.UtcNow >= deadline)
+                throw new TimeoutException($"Preview status did not become '{expected}'.");
+            await Task.Delay(10);
+        }
     }
 }
 

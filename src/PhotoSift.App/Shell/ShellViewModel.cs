@@ -820,8 +820,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         var member = memberId is { } id ? group.FindMember(id) : null;
+        var reloadPreview = member is not null && ActiveReviewMember is not null;
         SetReviewNavigation(ReviewLevel.Comparisons, category, group, member,
-            preservePreview: member is not null);
+            preservePreview: member is not null && !reloadPreview);
+        if (reloadPreview)
+            _ = LoadActiveReviewPreviewAsync(member!);
     }
 
     private void SetReviewNavigation(
@@ -944,7 +947,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         return new(
             occurrence.ResolvedPath,
             CategoryName(category),
-            result.PixelWidth is { } width && result.PixelHeight is { } height
+            result.SourcePixelWidth is { } width && result.SourcePixelHeight is { } height
                 ? $"{width.ToString(CultureInfo.InvariantCulture)} × {height.ToString(CultureInfo.InvariantCulture)} pixels"
                 : unavailable,
             (result.ByteLength ?? occurrence.Content?.ByteLength) is { } bytes

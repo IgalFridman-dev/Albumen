@@ -150,7 +150,8 @@ public sealed class WicPreviewDecoder
         var bgra = new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0);
         bgra.Freeze();
         return PreviewDecodeResult.Success(fullPath,
-            CopyOriented(bgra, orientation, memoryPool, cancellationToken));
+            CopyOriented(bgra, orientation, sourceWidth, sourceHeight,
+                memoryPool, cancellationToken));
     }
 
     private static bool IsExpectedDecodeFailure(Exception exception) => exception is
@@ -167,6 +168,8 @@ public sealed class WicPreviewDecoder
     private static PreviewFrame CopyOriented(
         BitmapSource source,
         ushort orientation,
+        int sourceWidth,
+        int sourceHeight,
         MemoryPool<byte> memoryPool,
         CancellationToken cancellationToken)
     {
@@ -179,7 +182,11 @@ public sealed class WicPreviewDecoder
             source.CopyPixels(sourcePixels, width * 4, 0);
             var swapsAxes = orientation is 5 or 6 or 7 or 8;
             var output = PreviewFrame.Rent(
-                swapsAxes ? height : width, swapsAxes ? width : height, memoryPool);
+                swapsAxes ? height : width,
+                swapsAxes ? width : height,
+                swapsAxes ? sourceHeight : sourceWidth,
+                swapsAxes ? sourceWidth : sourceHeight,
+                memoryPool);
             try
             {
                 var target = output.WritablePixels.Span;

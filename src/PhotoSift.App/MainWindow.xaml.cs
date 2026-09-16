@@ -625,8 +625,10 @@ public partial class MainWindow : Window
     private ReviewSelectionCheckBox? FindCurrentSelectionControl(
         ReviewFocusIdentity identity)
     {
-        var active = shellViewModel?.ActiveReviewMembers?.FirstOrDefault(member =>
-            member.OccurrenceId == identity.OccurrenceId);
+        var group = shellViewModel?.ActiveReviewGroup;
+        var active = group?.GroupId == identity.GroupId
+            ? group.FindMember(identity.OccurrenceId)
+            : null;
         if (active is not null)
         {
             ReviewComparisonsList.ScrollIntoView(active);

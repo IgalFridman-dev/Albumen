@@ -52,6 +52,8 @@ public sealed class ReviewPreviewResult : IDisposable
     public PreviewFrame? Frame => Volatile.Read(ref frame);
     public int? PixelWidth => Frame?.Width;
     public int? PixelHeight => Frame?.Height;
+    public int? SourcePixelWidth => Frame?.SourceWidth;
+    public int? SourcePixelHeight => Frame?.SourceHeight;
     public long? ByteLength { get; }
     public DateTimeOffset? RelevantDate { get; }
     public bool IsDisposed => Volatile.Read(ref disposed) != 0;
@@ -115,6 +117,8 @@ public sealed class PreviewDecodeResult : IDisposable
     public PreviewAvailability Availability { get; }
     public string Reason { get; }
     public PreviewFrame? Frame => Volatile.Read(ref frame);
+    public int? SourcePixelWidth => Frame?.SourceWidth;
+    public int? SourcePixelHeight => Frame?.SourceHeight;
 
     internal static PreviewDecodeResult Success(string fullPath, PreviewFrame frame) =>
         new(fullPath, PreviewAvailability.Available, string.Empty, frame);
@@ -139,12 +143,26 @@ public sealed class PreviewFrame : IDisposable
     private IMemoryOwner<byte>? owner;
 
     internal PreviewFrame(int width, int height, IMemoryOwner<byte> owner)
+        : this(width, height, width, height, owner)
+    {
+    }
+
+    internal PreviewFrame(
+        int width,
+        int height,
+        int sourceWidth,
+        int sourceHeight,
+        IMemoryOwner<byte> owner)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sourceWidth);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sourceHeight);
         this.owner = owner ?? throw new ArgumentNullException(nameof(owner));
         Width = width;
         Height = height;
+        SourceWidth = sourceWidth;
+        SourceHeight = sourceHeight;
         ByteLength = checked(width * height * 4);
         OwnedByteLength = owner.Memory.Length;
         if (OwnedByteLength < ByteLength)
@@ -158,6 +176,8 @@ public sealed class PreviewFrame : IDisposable
 
     public int Width { get; }
     public int Height { get; }
+    public int SourceWidth { get; }
+    public int SourceHeight { get; }
     public int ByteLength { get; }
     public int OwnedByteLength { get; }
     public bool IsDisposed => owner is null;
@@ -171,10 +191,18 @@ public sealed class PreviewFrame : IDisposable
         Rent(width, height, MemoryPool<byte>.Shared);
 
     internal static PreviewFrame Rent(int width, int height, MemoryPool<byte> pool)
+        => Rent(width, height, width, height, pool);
+
+    internal static PreviewFrame Rent(
+        int width,
+        int height,
+        int sourceWidth,
+        int sourceHeight,
+        MemoryPool<byte> pool)
     {
         ArgumentNullException.ThrowIfNull(pool);
         var length = checked(width * height * 4);
-        return new(width, height, pool.Rent(length));
+        return new(width, height, sourceWidth, sourceHeight, pool.Rent(length));
     }
 
     internal Memory<byte> WritablePixels =>
@@ -182,7 +210,7 @@ public sealed class PreviewFrame : IDisposable
 
     internal PreviewFrame Clone()
     {
-        var clone = Rent(Width, Height);
+        var clone = Rent(Width, Height, SourceWidth, SourceHeight, MemoryPool<byte>.Shared);
         Pixels.CopyTo(clone.WritablePixels);
         return clone;
     }

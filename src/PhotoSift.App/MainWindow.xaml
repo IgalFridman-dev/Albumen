@@ -575,11 +575,10 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="3*" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="2*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
+                <ScrollViewer Grid.Row="0" MaxHeight="180"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
                     <TextBlock x:Name="ReviewHeading" Text="Review" FontSize="24" FontWeight="SemiBold" Focusable="True"
                                AutomationProperties.Name="Grouped duplicate review" />
@@ -603,6 +602,7 @@
                                AutomationProperties.Name="Review command status"
                                AutomationProperties.LiveSetting="Polite" />
                 </StackPanel>
+                </ScrollViewer>
 
                 <Grid x:Name="ReviewNavigationGrid" Grid.Row="1" MinHeight="120" Margin="0,6,0,0">
                     <Grid.ColumnDefinitions>
@@ -642,7 +642,10 @@
                     </Border>
                 </Grid>
 
-                <app:ReviewAutomationBorder x:Name="ReviewEvidencePanel" Grid.Row="2" Margin="0,8,0,0" Padding="8"
+                <ScrollViewer x:Name="ReviewDetailsScrollViewer" Grid.Row="2" Margin="0,8,0,0"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel>
+                <app:ReviewAutomationBorder x:Name="ReviewEvidencePanel" Padding="8"
                         BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                         AutomationProperties.AutomationId="review-evidence"
                         AutomationProperties.Name="{Binding ActiveReviewEvidence.AutomationName}"
@@ -664,14 +667,12 @@
                     </StackPanel>
                 </app:ReviewAutomationBorder>
 
-                <TextBlock x:Name="SelectionSummaryText" Grid.Row="3" Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,8,0,0"
+                <TextBlock x:Name="SelectionSummaryText" Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,8,0,0"
                            AutomationProperties.Name="Selection summary"
                            AutomationProperties.ItemStatus="{Binding SelectionSummary}"
                            AutomationProperties.LiveSetting="Polite" />
 
-                <ScrollViewer Grid.Row="4" Margin="0,8,0,0"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <app:ReviewAutomationBorder x:Name="ApprovalPanel" Padding="12" Focusable="True"
+                    <app:ReviewAutomationBorder x:Name="ApprovalPanel" Margin="0,8,0,0" Padding="12" Focusable="True"
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                             AutomationProperties.AutomationId="approval-panel"
                             AutomationProperties.Name="Cleanup approval disclosure"
@@ -694,8 +695,7 @@
                                     Command="{Binding ApproveReviewCommand}" IsEnabled="{Binding CanApproveReview}" />
                         </StackPanel>
                     </app:ReviewAutomationBorder>
-                </ScrollViewer>
-                <StackPanel Grid.Row="5" Margin="0,10,0,0">
+                <StackPanel Margin="0,10,0,0">
                     <TextBlock Text="{Binding ReviewDisclaimer}" TextWrapping="Wrap" />
                     <WrapPanel>
                         <Button Content="Cancel Scan" Padding="10,6" Margin="0,6,8,0" AutomationProperties.Name="Cancel Scan from Review"
@@ -704,6 +704,8 @@
                                 Command="{Binding StartScanCommand}" IsEnabled="{Binding CanStartScan}" />
                     </WrapPanel>
                 </StackPanel>
+                  </StackPanel>
+                </ScrollViewer>
             </Grid>
             <app:ReviewAutomationBorder x:Name="ActionPanel" Grid.Column="2"
                     Visibility="{Binding IsActionPhase, Converter={StaticResource BooleanToVisibilityConverter}}"

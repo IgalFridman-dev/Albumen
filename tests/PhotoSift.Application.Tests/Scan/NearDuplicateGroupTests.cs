@@ -124,6 +124,8 @@ public sealed class NearDuplicateGroupTests
         Assert.Equal(failure, snapshot.Occurrences[1].VisualFeatures);
         Assert.Equal(ScanStageState.Succeeded, snapshot.Occurrences[0].NearDuplicate.State);
         Assert.Equal(ScanStageState.Succeeded, snapshot.Occurrences[2].NearDuplicate.State);
+        Assert.Equal(2, snapshot.Counts.Analyzed);
+        Assert.Equal(1, snapshot.Counts.Failed);
     }
 
     private static ScanStore ExactRows(int count)

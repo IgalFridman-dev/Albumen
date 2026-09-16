@@ -346,6 +346,44 @@ public sealed class WpfReviewSelectionTests
     }
 
     [Fact]
+    public void LateMemberFocusRestorationDoesNotMaterializeAllPrecedingComparisons()
+    {
+        RunOnSta(() =>
+        {
+            const int memberCount = 10_000;
+            var scope = new ReviewStaticScope();
+            var workflow = new RecordingReviewWorkflow(
+                scope.Current, ReviewData.CreateLargeMemberSnapshot(memberCount));
+            var viewModel = new ShellViewModel(scope, workflow);
+            OpenFirstGroupedComparison(viewModel);
+            var window = new MainWindow { DataContext = viewModel, Height = 720 };
+            try
+            {
+                window.Show();
+                Drain();
+                var list = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
+                var lateMember = viewModel.ActiveReviewGroup!.Members[memberCount - 1];
+                var row = RealizeContainer(list, lateMember);
+                var original = Assert.Single(Descendants<ReviewSelectionCheckBox>(row));
+                Assert.True(original.Focus());
+                Keyboard.Focus(original);
+
+                workflow.Publish(ReviewData.WithSelection(
+                    workflow.Current.Review, [lateMember.OccurrenceId], 10));
+                Drain();
+
+                Assert.True(viewModel.ActiveReviewMembers!.MaterializedCount < 100,
+                    $"Focus restoration materialized {viewModel.ActiveReviewMembers.MaterializedCount} comparisons.");
+                Assert.Equal(lateMember.OccurrenceId,
+                    Assert.IsType<ScanOccurrenceViewModel>(
+                        Assert.IsType<ReviewSelectionCheckBox>(Keyboard.FocusedElement).DataContext)
+                        .OccurrenceId);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
     public void QueuedRestoreDoesNotStealNewerDeliberateReviewFocus()
     {
         RunOnSta(() =>
@@ -901,6 +939,31 @@ internal static class ReviewData
                 false, []));
         return new ReviewSnapshot(session, ReviewStatus.Ready, ScanStatus.Incomplete, 9, groups,
             new(1, 2, 3, 4, 1, 1, 2), false, null, ReviewUnavailableReason.None);
+    }
+
+    internal static ReviewSnapshot CreateLargeMemberSnapshot(int memberCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(memberCount, 2);
+        var snapshot = CreateSnapshot();
+        var original = snapshot.Groups[0];
+        var rows = Enumerable.Range(1, memberCount)
+            .Select(index => Row(snapshot.Pin!.Scan, index, checked((ulong)index),
+                $@"C:\Photos\large-{index}.jpg", 1))
+            .ToImmutableArray();
+        var candidate = original.Candidate with { Members = rows };
+        var members = rows.Select(row => new ReviewMemberSnapshot(
+                row, ReviewEligibilityState.Eligible, ReviewUnavailableReason.None, false))
+            .ToImmutableArray();
+        return snapshot with
+        {
+            Groups = [original with
+            {
+                Candidate = candidate,
+                Members = members,
+                SelectedOccurrenceIds = [],
+                Recovery = new(0, SelectionRecoveryUnavailableReason.None),
+            }],
+        };
     }
 
     internal static OverrideProposalToken Proposal(ReviewSnapshot snapshot) => new(

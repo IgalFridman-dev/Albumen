@@ -74,6 +74,21 @@ public sealed class WicPreviewDecoderTests
     }
 
     [Fact]
+    public async Task BoundedPreviewPreservesTheOriginalOrientedSourceDimensions()
+    {
+        using var fixture = PngFixture.Create(width: 6000, height: 4000);
+
+        using var result = await new WicPreviewDecoder().DecodeAsync(
+            fixture.Path, 512, TestContext.Current.CancellationToken);
+
+        Assert.Equal(PreviewAvailability.Available, result.Availability);
+        Assert.Equal(6000, result.SourcePixelWidth);
+        Assert.Equal(4000, result.SourcePixelHeight);
+        Assert.Equal(512, result.Frame?.Width);
+        Assert.Equal(341, result.Frame?.Height);
+    }
+
+    [Fact]
     public async Task MissingOptionalHeifCodecIsUnsupportedWithoutDownloadingAnything()
     {
         using var directory = TemporaryDirectory.Create();

@@ -11,7 +11,8 @@ internal static class ScanSnapshotProjector
         long analyzed = 0, unsupported = 0, failed = 0, canceled = 0, outstanding = 0;
         foreach (var row in rows)
         {
-            switch (row.Exact.State)
+            var state = EffectiveState(row);
+            switch (state)
             {
                 case ScanStageState.Succeeded: analyzed++; break;
                 case ScanStageState.Unsupported: unsupported++; break;
@@ -33,4 +34,19 @@ internal static class ScanSnapshotProjector
         return new ScanSnapshot(pin, status, enumeration, rows, groups,
             new ScanCounts(rows.Length, analyzed, unsupported, failed, canceled, outstanding));
     }
+
+    private static ScanStageState EffectiveState(ScanFileOccurrence row)
+    {
+        if (row.Exact.State != ScanStageState.Succeeded)
+            return row.Exact.State;
+        if (IsUnresolved(row.VisualFeatures.State))
+            return row.VisualFeatures.State;
+        if (IsUnresolved(row.NearDuplicate.State))
+            return row.NearDuplicate.State;
+        return ScanStageState.Succeeded;
+    }
+
+    private static bool IsUnresolved(ScanStageState state) => state is
+        ScanStageState.Unsupported or ScanStageState.FailedRetryable
+        or ScanStageState.FailedTerminal or ScanStageState.Canceled;
 }

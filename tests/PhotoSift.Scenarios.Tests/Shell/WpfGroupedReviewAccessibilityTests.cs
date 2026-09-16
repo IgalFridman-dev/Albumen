@@ -293,6 +293,48 @@ public sealed class WpfGroupedReviewAccessibilityTests
         });
     }
 
+    [Fact]
+    public void TallPortraitEvidenceIsScrollableWhileSelectionAndApprovalRemainReachable()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = GroupedWpfFixture.Create();
+            OpenFirstComparison(fixture.ViewModel);
+            var window = new MainWindow
+            {
+                DataContext = fixture.ViewModel,
+                Width = 960,
+                Height = 720,
+                FontSize = 24,
+            };
+            try
+            {
+                ShowAndDrain(window);
+                var preview = Assert.IsType<PreviewStatusControl>(
+                    window.FindName("ReviewPreviewStatusControl"));
+                preview.Height = 512;
+                ShowAndDrain(window);
+
+                var evidence = NamedElement(window, "ReviewEvidencePanel");
+                var evidenceScroller = Ancestors(evidence).OfType<ScrollViewer>().FirstOrDefault();
+                Assert.NotNull(evidenceScroller);
+                Assert.True(evidenceScroller.ViewportHeight < evidenceScroller.ExtentHeight);
+                var selectionSummary = NamedElement(window, "SelectionSummaryText");
+                selectionSummary.BringIntoView();
+                ShowAndDrain(window);
+                AssertInsideWindow(window, selectionSummary);
+                var approve = NamedElement(window, "ApproveCleanupButton");
+                approve.BringIntoView();
+                ShowAndDrain(window);
+                AssertInsideWindow(window, approve);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     private static void OpenFirstComparison(ShellViewModel viewModel)
     {
         var category = viewModel.ReviewCategories[0];
@@ -346,6 +388,21 @@ public sealed class WpfGroupedReviewAccessibilityTests
             if (child is T match) yield return match;
             foreach (var nested in Descendants<T>(child)) yield return nested;
         }
+    }
+
+    private static IEnumerable<DependencyObject> Ancestors(DependencyObject child)
+    {
+        for (var current = VisualTreeHelper.GetParent(child); current is not null;
+             current = VisualTreeHelper.GetParent(current))
+            yield return current;
+    }
+
+    private static void AssertInsideWindow(Window window, FrameworkElement element)
+    {
+        var bounds = element.TransformToAncestor(window).TransformBounds(
+            new Rect(new Point(), element.RenderSize));
+        Assert.True(bounds.Top >= 0 && bounds.Bottom <= window.ActualHeight,
+            $"{element.Name} bounds {bounds} were outside window height {window.ActualHeight}.");
     }
 }
 
