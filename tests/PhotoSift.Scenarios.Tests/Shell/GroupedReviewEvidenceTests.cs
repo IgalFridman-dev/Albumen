@@ -1,0 +1,132 @@
+using PhotoSift.App.Shell;
+using PhotoSift.Application.Scan;
+using PhotoSift.Domain.Scan;
+using PhotoSift.Infrastructure.Windows.Preview;
+using Xunit;
+
+namespace PhotoSift.Scenarios.Tests.Shell;
+
+public sealed class GroupedReviewEvidenceTests
+{
+    [Fact]
+    public async Task OnlyTheActiveMemberLoadsAndAStaleCompletionCannotReplaceIt()
+    {
+        var source = new ControllableReviewPreviewSource();
+        var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
+        await using var viewModel = new ShellViewModel(
+            workflow.Scope, workflow, reviewPreviewSource: source);
+        var group = await OpenGroupAsync(viewModel, ReviewCategoryKind.Exact);
+        var first = group.Members[0];
+        var second = group.Members[1];
+
+        Assert.Empty(source.Requests);
+
+        var firstNavigation = viewModel.OpenReviewMemberCommand.ExecuteAsync(first);
+        await source.WaitForRequestCountAsync(1);
+        var secondNavigation = viewModel.OpenReviewMemberCommand.ExecuteAsync(second);
+        await source.WaitForRequestCountAsync(2);
+
+        using var secondResult = ReviewPreviewResult.Failure(
+            second.ResolvedPath, PreviewAvailability.Unavailable, "second unavailable");
+        source.Complete(1, secondResult);
+        await secondNavigation;
+
+        Assert.Same(second, viewModel.ActiveReviewMember);
+        Assert.Equal(second.ResolvedPath, viewModel.ActiveReviewPreview?.FullPath);
+
+        using var firstResult = ReviewPreviewResult.Failure(
+            first.ResolvedPath, PreviewAvailability.Unavailable, "first unavailable");
+        source.Complete(0, firstResult);
+        await firstNavigation;
+
+        Assert.Same(second, viewModel.ActiveReviewMember);
+        Assert.Equal(second.ResolvedPath, viewModel.ActiveReviewPreview?.FullPath);
+        Assert.True(firstResult.IsDisposed);
+        Assert.Collection(source.Requests,
+            request => Assert.Equal(first.OccurrenceId, request.Occurrence.Token.OccurrenceId),
+            request => Assert.Equal(second.OccurrenceId, request.Occurrence.Token.OccurrenceId));
+    }
+
+    [Fact]
+    public async Task AbsentComparisonEvidenceUsesTheLiteralUnavailableAndNoRecommendation()
+    {
+        var source = new ControllableReviewPreviewSource(autoComplete: true);
+        var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
+        await using var viewModel = new ShellViewModel(
+            workflow.Scope, workflow, reviewPreviewSource: source);
+        var group = await OpenGroupAsync(viewModel, ReviewCategoryKind.Near);
+
+        await viewModel.OpenReviewMemberCommand.ExecuteAsync(group.Members[0]);
+
+        var evidence = Assert.IsType<ReviewComparisonEvidenceViewModel>(
+            viewModel.ActiveReviewEvidence);
+        Assert.Equal(group.Members[0].ResolvedPath, evidence.FullPath);
+        Assert.Equal("Near", evidence.Category);
+        Assert.Equal("Unavailable", evidence.Dimensions);
+        Assert.Equal("512 bytes", evidence.Size);
+        Assert.Equal("Unavailable", evidence.RelevantDate);
+        Assert.Equal("Unavailable", evidence.Confidence);
+        Assert.Equal("Unavailable", evidence.Uncertainty);
+        Assert.Equal("Unavailable", evidence.Transformations);
+        Assert.Equal("Unavailable", evidence.Reason);
+        Assert.Equal("No recommendation; manual Selection.", evidence.Recommendation);
+    }
+
+    private static async Task<ReviewGroupViewModel> OpenGroupAsync(
+        ShellViewModel viewModel,
+        ReviewCategoryKind category)
+    {
+        var row = viewModel.ReviewCategories.Single(item => item.Category == category);
+        await viewModel.OpenReviewCategoryCommand.ExecuteAsync(row);
+        var group = Assert.Single(row.Groups);
+        await viewModel.OpenReviewGroupCommand.ExecuteAsync(group);
+        return group;
+    }
+}
+
+internal sealed class ControllableReviewPreviewSource(bool autoComplete = false) : IReviewPreviewSource
+{
+    private readonly List<PendingPreviewRequest> requests = [];
+    private TaskCompletionSource<bool> requestChanged = NewSignal();
+
+    public IReadOnlyList<PendingPreviewRequest> Requests => requests;
+
+    public Task<ReviewPreviewResult> LoadAsync(
+        ScanRunContext context,
+        ScanFileOccurrence occurrence,
+        CancellationToken cancellationToken)
+    {
+        var completion = new TaskCompletionSource<ReviewPreviewResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        requests.Add(new(context, occurrence, completion));
+        requestChanged.TrySetResult(true);
+        if (autoComplete)
+            completion.SetResult(ReviewPreviewResult.Failure(
+                occurrence.ResolvedPath, PreviewAvailability.Unavailable, "Unavailable"));
+        return completion.Task;
+    }
+
+    public void Complete(int index, ReviewPreviewResult result) =>
+        requests[index].Completion.SetResult(result);
+
+    public async Task WaitForRequestCountAsync(int count)
+    {
+        while (requests.Count < count)
+        {
+            var signal = requestChanged;
+            await signal.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            if (ReferenceEquals(signal, requestChanged))
+                requestChanged = NewSignal();
+        }
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private static TaskCompletionSource<bool> NewSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+}
+
+internal sealed record PendingPreviewRequest(
+    ScanRunContext Context,
+    ScanFileOccurrence Occurrence,
+    TaskCompletionSource<ReviewPreviewResult> Completion);

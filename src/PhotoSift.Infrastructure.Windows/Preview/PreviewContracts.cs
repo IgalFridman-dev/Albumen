@@ -1,4 +1,6 @@
 using System.Buffers;
+using PhotoSift.Application.Scan;
+using PhotoSift.Domain.Scan;
 
 namespace PhotoSift.Infrastructure.Windows.Preview;
 
@@ -8,6 +10,84 @@ public enum PreviewAvailability
     Unsupported,
     CouldNotAnalyze,
     Unavailable,
+}
+
+public interface IReviewPreviewSource : IAsyncDisposable
+{
+    Task<ReviewPreviewResult> LoadAsync(
+        ScanRunContext context,
+        ScanFileOccurrence occurrence,
+        CancellationToken cancellationToken);
+}
+
+public sealed class ReviewPreviewResult : IDisposable
+{
+    private PreviewFrame? frame;
+    private int disposed;
+
+    private ReviewPreviewResult(
+        string fullPath,
+        PreviewAvailability availability,
+        string reason,
+        PreviewFrame? frame,
+        long? byteLength,
+        DateTimeOffset? relevantDate)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fullPath);
+        ArgumentNullException.ThrowIfNull(reason);
+        if ((availability is PreviewAvailability.Available) != (frame is not null))
+            throw new ArgumentException("Only an available preview can contain pixels.", nameof(frame));
+
+        FullPath = fullPath;
+        Availability = availability;
+        Reason = reason;
+        this.frame = frame;
+        ByteLength = byteLength;
+        RelevantDate = relevantDate;
+    }
+
+    public string FullPath { get; }
+    public PreviewAvailability Availability { get; }
+    public string Reason { get; }
+    public PreviewFrame? Frame => Volatile.Read(ref frame);
+    public int? PixelWidth => Frame?.Width;
+    public int? PixelHeight => Frame?.Height;
+    public long? ByteLength { get; }
+    public DateTimeOffset? RelevantDate { get; }
+    public bool IsDisposed => Volatile.Read(ref disposed) != 0;
+
+    internal static ReviewPreviewResult Success(
+        string fullPath,
+        PreviewFrame frame,
+        long byteLength,
+        DateTimeOffset? relevantDate) =>
+        new(fullPath, PreviewAvailability.Available, string.Empty,
+            frame, byteLength, relevantDate);
+
+    public static ReviewPreviewResult Failure(
+        string fullPath,
+        PreviewAvailability availability,
+        string reason) =>
+        Failure(fullPath, availability, reason, null, null);
+
+    internal static ReviewPreviewResult Failure(
+        string fullPath,
+        PreviewAvailability availability,
+        string reason,
+        long? byteLength,
+        DateTimeOffset? relevantDate)
+    {
+        if (availability is PreviewAvailability.Available)
+            throw new ArgumentException("A failure cannot be available.", nameof(availability));
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        return new(fullPath, availability, reason, null, byteLength, relevantDate);
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        Interlocked.Exchange(ref frame, null)?.Dispose();
+    }
 }
 
 public sealed class PreviewDecodeResult : IDisposable

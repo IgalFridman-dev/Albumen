@@ -4,6 +4,11 @@
         AutomationProperties.Name="{Binding AutomationName}"
         AutomationProperties.ItemStatus="{Binding StatusText}">
     <StackPanel>
+        <Image Source="{Binding Image, Mode=OneWay}"
+               MaxWidth="512"
+               MaxHeight="512"
+               Stretch="Uniform"
+               AutomationProperties.Name="Active comparison preview" />
         <TextBox x:Name="PreviewFullPathTextBox"
                  Text="{Binding FullPath, Mode=OneWay}"
                  IsReadOnly="True"
