@@ -21,6 +21,20 @@ public sealed class ExactCorpusTests
         ["alias-only/a-first-link.png", "alias-only/b-second-link.jpg"];
     private static readonly string[] CollisionGroupPaths =
         ["large/a-original.jpg", "large/b-renamed-copy.jpeg"];
+    private static readonly ImmutableArray<(string Transformation, bool ExpectedExact)>
+        NearQualityExactExpectations =
+        [
+            ("byte-identical", true),
+            ("brightness", false),
+            ("burst shift", false),
+            ("recompression", false),
+            ("resize ambiguity", false),
+            ("crop", false),
+            ("mirror", false),
+            ("rotation", false),
+            ("unrelated", false),
+            ("decoder failure", false),
+        ];
 
     [Fact]
     public async Task VersionOneCorpusPublishesEveryExpectedPhysicalGroupAndNoFalsePositive()
@@ -133,6 +147,39 @@ public sealed class ExactCorpusTests
         Assert.Equal(ScanStageState.Succeeded, Occurrence(snapshot,
             "deep/segment-0-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/segment-1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/segment-2-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/segment-3-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/deep-unique.jpeg",
             corpus).Exact.State);
+    }
+
+    [Fact]
+    public async Task NearQualityPairsProduceNoFalseExactGrouping()
+    {
+        var analyzer = new StreamingExactContentAnalyzer();
+
+        foreach (var expected in NearQualityExactExpectations)
+        {
+            var pair = NearQualityExactCorpusRecipes.CreatePair(expected.Transformation);
+            using var leftForHash = new MemoryStream(pair.Left, writable: false);
+            using var rightForHash = new MemoryStream(pair.Right, writable: false);
+            var leftDigest = await analyzer.HashAsync(leftForHash, pair.Left.LongLength,
+                TestContext.Current.CancellationToken);
+            var rightDigest = await analyzer.HashAsync(rightForHash, pair.Right.LongLength,
+                TestContext.Current.CancellationToken);
+            var groupedAsExact = false;
+            if (pair.Left.LongLength == pair.Right.LongLength && leftDigest == rightDigest)
+            {
+                using var leftForComparison = new MemoryStream(pair.Left, writable: false);
+                using var rightForComparison = new MemoryStream(pair.Right, writable: false);
+                groupedAsExact = (await analyzer.CompareAsync(
+                    leftForComparison,
+                    rightForComparison,
+                    pair.Left.LongLength,
+                    TestContext.Current.CancellationToken)).Equal;
+            }
+
+            if (expected.ExpectedExact)
+                Assert.True(groupedAsExact, $"{expected.Transformation} did not remain Exact.");
+            else
+                Assert.False(groupedAsExact, $"{expected.Transformation} was falsely grouped as Exact.");
+        }
     }
 
     [Fact]
@@ -413,6 +460,152 @@ public sealed class ExactCorpusTests
         UnstableAllocation,
     }
 }
+
+internal static class NearQualityExactCorpusRecipes
+{
+    public static NearQualityExactPair CreatePair(string transformation)
+    {
+        if (transformation == "crop")
+        {
+            var cropSource = CropSource(24, 16);
+            return new(cropSource, Crop(cropSource, 24, 8, 8));
+        }
+
+        var source = Gradient(24, 16);
+        var right = transformation switch
+        {
+            "byte-identical" => source.ToArray(),
+            "brightness" => Brighten(source, 8),
+            "burst shift" => Shift(source, 1),
+            "recompression" => Quantize(source, 16),
+            "resize ambiguity" => ResizeNearest(source, 24, 16, 12, 8),
+            "mirror" => Mirror(source, 24, 16),
+            "rotation" => RotateClockwise(source, 24, 16),
+            "unrelated" => Checkerboard(24, 16),
+            "decoder failure" => [0x00],
+            _ => throw new InvalidDataException($"Unknown quality transformation: {transformation}"),
+        };
+        return new(source, right);
+    }
+
+    private static byte[] CropSource(int width, int height)
+    {
+        var result = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var value = (byte)(x < 8 && y < 8
+                ? ((x + y) & 1) == 0 ? 10 : 245
+                : 0);
+            var offset = (y * width + x) * 4;
+            result[offset] = result[offset + 1] = result[offset + 2] = value;
+            result[offset + 3] = 255;
+        }
+        return result;
+    }
+
+    private static byte[] Gradient(int width, int height)
+    {
+        var pixels = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var value = (byte)((x * 9 + y * 5) % 220);
+            var offset = (y * width + x) * 4;
+            pixels[offset] = (byte)(value / 2);
+            pixels[offset + 1] = value;
+            pixels[offset + 2] = (byte)Math.Min(255, value + 20);
+            pixels[offset + 3] = 255;
+        }
+        return pixels;
+    }
+
+    private static byte[] Brighten(byte[] source, byte amount)
+    {
+        var result = source.ToArray();
+        for (var index = 0; index < result.Length; index += 4)
+        for (var channel = 0; channel < 3; channel++)
+            result[index + channel] = (byte)Math.Min(255, result[index + channel] + amount);
+        return result;
+    }
+
+    private static byte[] Shift(byte[] source, int pixels)
+    {
+        var result = new byte[source.Length];
+        const int width = 24;
+        const int height = 16;
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+            Array.Copy(source, (y * width + Math.Max(0, x - pixels)) * 4,
+                result, (y * width + x) * 4, 4);
+        return result;
+    }
+
+    private static byte[] Quantize(byte[] source, int step)
+    {
+        var result = source.ToArray();
+        for (var index = 0; index < result.Length; index += 4)
+        for (var channel = 0; channel < 3; channel++)
+            result[index + channel] = (byte)(result[index + channel] / step * step);
+        return result;
+    }
+
+    private static byte[] ResizeNearest(
+        byte[] source, int width, int height, int outputWidth, int outputHeight)
+    {
+        var result = new byte[outputWidth * outputHeight * 4];
+        for (var y = 0; y < outputHeight; y++)
+        for (var x = 0; x < outputWidth; x++)
+            Array.Copy(source, ((y * height / outputHeight) * width + x * width / outputWidth) * 4,
+                result, (y * outputWidth + x) * 4, 4);
+        return result;
+    }
+
+    private static byte[] Crop(byte[] source, int width, int cropWidth, int cropHeight)
+    {
+        var result = new byte[cropWidth * cropHeight * 4];
+        for (var y = 0; y < cropHeight; y++)
+        for (var x = 0; x < cropWidth; x++)
+            Array.Copy(source, (y * width + x) * 4, result, (y * cropWidth + x) * 4, 4);
+        return result;
+    }
+
+    private static byte[] Mirror(byte[] source, int width, int height)
+    {
+        var result = new byte[source.Length];
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+            Array.Copy(source, (y * width + width - 1 - x) * 4,
+                result, (y * width + x) * 4, 4);
+        return result;
+    }
+
+    private static byte[] RotateClockwise(byte[] source, int width, int height)
+    {
+        var result = new byte[source.Length];
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+            Array.Copy(source, (y * width + x) * 4,
+                result, (x * height + height - 1 - y) * 4, 4);
+        return result;
+    }
+
+    private static byte[] Checkerboard(int width, int height)
+    {
+        var result = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var value = (byte)(((x / 2 + y / 2) & 1) == 0 ? 10 : 245);
+            var offset = (y * width + x) * 4;
+            result[offset] = result[offset + 1] = result[offset + 2] = value;
+            result[offset + 3] = 255;
+        }
+        return result;
+    }
+}
+
+internal sealed record NearQualityExactPair(byte[] Left, byte[] Right);
 
 internal sealed class ExactScanFixture : IAsyncDisposable
 {

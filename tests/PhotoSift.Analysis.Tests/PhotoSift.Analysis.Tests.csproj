@@ -13,4 +13,7 @@
     <ProjectReference Include="..\..\src\PhotoSift.Application\PhotoSift.Application.csproj" />
     <ProjectReference Include="..\..\src\PhotoSift.Domain\PhotoSift.Domain.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="NearDuplicate\NearQualityCorpusManifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

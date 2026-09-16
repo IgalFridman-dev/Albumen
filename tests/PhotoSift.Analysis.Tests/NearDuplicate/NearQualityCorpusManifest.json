@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "byte-identical-v1",
+      "version": 1,
+      "consentProvenance": "generated-project-owned",
+      "transformation": "byte-identical",
+      "expectedRelationship": "Exact",
+      "failureSlice": "exact-zero-false-grouping"
+    },
+    {
+      "id": "brightness-v1",
+      "version": 1,
+      "consentProvenance": "generated-project-owned",
+      "transformation": "brightness",
+      "expectedRelationship": "Near",
+      "failureSlice": "near-precision"
+    },
+    {
+      "id": "burst-shift-v1",
+      "version": 1,
+      "consentProvenance": "generated-project-owned",
+      "transformation": "burst shift",
+      "expectedRelationship": "Near",
+      "failureSlice": "near-precision"
+    },
+    {
+      "id": "recompression-v1",
+      "version": 1,
+      "consentProvenance": "generated-project-owned",
+      "transformation": "recompression",
+      "expectedRelationship": "Near",
+      "failureSlice": "near-precision"
+    },
+    {
+      "id": "resize-ambiguity-v1",
+      "version": 1,
+      "consentProvenance": "generated-project-owned",
+      "transformation": "resize ambiguity",
+      "expectedRelationship": "Uncertain",
+      "failureSlice": "ambiguous-routing"
+    },
+    {
+      "id": "crop-v1",
+      "version": 1,
+      "consentProvenance": "generated-project-owned",
+      "transformation": "crop",
+      "expectedRelationship": "NotRelated",
+      "failureSlice": "non-near"
+    },
+    {
+      "id": "mirror-v1",
+      "version": 1,
+      "consentProvenance": "generated-project-owned",
+      "transformation": "mirror",
+      "expectedRelationship": "NotRelated",
+      "failureSlice": "non-near"
+    },
+    {
+      "id": "rotation-v1",
+      "version": 1,
+      "consentProvenance": "generated-project-owned",
+      "transformation": "rotation",
+      "expectedRelationship": "NotRelated",
+      "failureSlice": "non-near"
+    },
+    {
+      "id": "unrelated-v1",
+      "version": 1,
+      "consentProvenance": "generated-project-owned",
+      "transformation": "unrelated",
+      "expectedRelationship": "NotRelated",
+      "failureSlice": "non-near"
+    },
+    {
+      "id": "decoder-failure-v1",
+      "version": 1,
+      "consentProvenance": "generated-project-owned",
+      "transformation": "decoder failure",
+      "expectedRelationship": "DecoderFailure",
+      "failureSlice": "decoder-failure"
+    }
+  ]
+}
