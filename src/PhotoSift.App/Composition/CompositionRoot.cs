@@ -1,6 +1,7 @@
 using System.IO;
 using PhotoSift.App.Shell;
 using PhotoSift.Analysis.Exact;
+using PhotoSift.Analysis.NearDuplicate;
 using PhotoSift.Application.Scan;
 using PhotoSift.Application.Review;
 using PhotoSift.Application.Action;
@@ -12,6 +13,7 @@ using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Workflow;
 using PhotoSift.Infrastructure.Windows.Scope;
+using PhotoSift.Infrastructure.Windows.Preview;
 
 namespace PhotoSift.App.Composition;
 
@@ -42,8 +44,11 @@ public static class CompositionRoot
         var analyzer = new StreamingExactContentAnalyzer();
         var executor = new BoundedScanExecutor(new WindowsScanEnumerator(), reader, analyzer);
         var stores = new SqlitePhotoSiftStores(databasePath);
+        var nearDuplicates = new BoundedNearDuplicatePipeline(
+            new WicNearFeatureSource(reader, analyzer, new WicPreviewDecoder(),
+                new ManagedPerceptualSignature()));
         var scan = new ScanCoordinator(
-            scheduler, preflight, executor, stores.ScanIdentities, stores.ScanCheckpoints);
+            scheduler, preflight, executor, stores.ScanIdentities, stores.ScanCheckpoints, nearDuplicates);
         var review = new ReviewCoordinator(scheduler,
             new BoundedReviewRevalidator(reader, analyzer), stores.OverrideEvidence,
             actionSafety: new ProtectedActionSafetyValidator(reader, analyzer));

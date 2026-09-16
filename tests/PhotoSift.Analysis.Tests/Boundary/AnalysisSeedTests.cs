@@ -1,5 +1,6 @@
 using PhotoSift.Analysis;
 using PhotoSift.Analysis.Exact;
+using PhotoSift.Analysis.NearDuplicate;
 using PhotoSift.Application.Scan;
 using Xunit;
 
@@ -8,12 +9,12 @@ namespace PhotoSift.Analysis.Tests.Boundary;
 public sealed class AnalysisSeedTests
 {
     [Fact]
-    public void ProductionAssemblyExportsItsMarkerAndExactStreamAnalyzer()
+    public void ProductionAssemblyExportsOnlyItsMarkerAndImplementedAnalyzers()
     {
         var exportedTypes = typeof(AssemblyMarker).Assembly.GetExportedTypes().OrderBy(type => type.FullName).ToArray();
 
         Assert.Equal(
-            [typeof(AssemblyMarker), typeof(StreamingExactContentAnalyzer)],
+            [typeof(AssemblyMarker), typeof(StreamingExactContentAnalyzer), typeof(ManagedPerceptualSignature)],
             exportedTypes);
         Assert.Contains(typeof(IExactContentAnalyzer), typeof(StreamingExactContentAnalyzer).GetInterfaces());
     }

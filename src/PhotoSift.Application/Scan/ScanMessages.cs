@@ -31,6 +31,19 @@ public sealed record SignatureCommit(
     bool Accepted,
     ImmutableArray<ComparisonWork> Comparisons);
 
+public sealed record NearFeatureResult(
+    OccurrenceToken Token,
+    ContentRevision? Content,
+    PerceptualSignature? Signature,
+    StageOutcome Outcome);
+
+public sealed record NearDuplicateBatch(
+    ScanPin Pin,
+    string ImplementationRevision,
+    ImmutableArray<NearFeatureResult> Results);
+
+public sealed record NearDuplicateCommit(bool Accepted);
+
 public interface IScanResultSink
 {
     ValueTask<OccurrenceWork?> RegisterAsync(ScanRunContext context, EnumeratedFile file);

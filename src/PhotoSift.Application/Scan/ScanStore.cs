@@ -13,6 +13,7 @@ internal sealed class ScanStore
     private Dictionary<long, ScanFileOccurrence> occurrences = [];
     private Dictionary<PhysicalFileKey, StageOutcome> invalidPhysical = [];
     private ExactGroupIndex groups = new();
+    private NearDuplicateGroupIndex nearGroups = new();
     private long nextId;
     private long revision;
 
@@ -26,6 +27,7 @@ internal sealed class ScanStore
         occurrences = new Dictionary<long, ScanFileOccurrence>(source.occurrences);
         invalidPhysical = new Dictionary<PhysicalFileKey, StageOutcome>(source.invalidPhysical);
         groups = source.groups.Clone();
+        nearGroups = source.nearGroups.Clone();
         nextId = source.nextId;
         revision = source.revision;
         Incomplete = source.Incomplete;
@@ -36,7 +38,8 @@ internal sealed class ScanStore
     public bool Faulted { get; private set; }
     public int PendingComparisons => groups.PendingCount;
 
-    public bool MatchesGroup(Guid groupId, long groupRevision) => groups.IsCurrent(groupId, groupRevision);
+    public bool MatchesGroup(Guid groupId, long groupRevision) => groups.IsCurrent(groupId, groupRevision)
+        || nearGroups.IsCurrent(groupId, groupRevision);
 
     public ScanStoreMutation<OccurrenceWork?> PrepareRegistration(EnumeratedFile file) =>
         Prepare(store => store.Register(file));
@@ -56,6 +59,9 @@ internal sealed class ScanStore
         return true;
     });
 
+    public ScanStoreMutation<NearDuplicateCommit> PrepareNearDuplicates(NearDuplicateBatch batch) =>
+        Prepare(store => store.CommitNearDuplicates(batch));
+
     public T Apply<T>(ScanStoreMutation<T> mutation)
     {
         ArgumentNullException.ThrowIfNull(mutation);
@@ -65,6 +71,7 @@ internal sealed class ScanStore
         occurrences = next.occurrences;
         invalidPhysical = next.invalidPhysical;
         groups = next.groups;
+        nearGroups = next.nearGroups;
         nextId = next.nextId;
         Incomplete = next.Incomplete;
         Faulted = next.Faulted;
@@ -155,6 +162,43 @@ internal sealed class ScanStore
         return true;
     }
 
+    public NearDuplicateCommit CommitNearDuplicates(NearDuplicateBatch batch)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        if (batch.Pin != context.Pin
+            || string.IsNullOrWhiteSpace(batch.ImplementationRevision)
+            || batch.Results.Length != occurrences.Count
+            || batch.Results.Select(result => result.Token.OccurrenceId).Distinct().Count() != batch.Results.Length)
+            return new(false);
+
+        foreach (var result in batch.Results)
+        {
+            if (!occurrences.TryGetValue(result.Token.OccurrenceId, out var row)
+                || row.Token != result.Token || row.Content != result.Content
+                || result.Outcome.State is ScanStageState.Pending or ScanStageState.Running
+                || (result.Outcome.State == ScanStageState.Succeeded) != (result.Signature is not null)
+                || (row.Exact.State != ScanStageState.Succeeded
+                    && (result.Signature is not null || result.Outcome.State != ScanStageState.NotApplicable))
+                || (result.Signature is not null && result.Signature.ImplementationRevision != batch.ImplementationRevision))
+                return new(false);
+        }
+
+        foreach (var result in batch.Results)
+        {
+            var row = occurrences[result.Token.OccurrenceId];
+            var near = result.Outcome.State == ScanStageState.Succeeded
+                ? Success
+                : new StageOutcome(ScanStageState.NotApplicable, result.Outcome.Reason);
+            occurrences[result.Token.OccurrenceId] = row with
+            {
+                VisualFeatures = result.Outcome,
+                NearDuplicate = near,
+            };
+        }
+        nearGroups.Replace(batch.Results, occurrences.Values.OrderBy(row => row.Token.OccurrenceId).ToImmutableArray());
+        return new(true);
+    }
+
     // A worker may stop before opening later returned comparison descriptors.
     // Finalization settles those tickets without erasing already verified bytes.
     public void Reconcile(StageOutcome outcome)
@@ -175,7 +219,8 @@ internal sealed class ScanStore
     public ScanSnapshot Snapshot(ScanStatus status, StageOutcome enumeration)
     {
         var rows = occurrences.Values.OrderBy(row => row.Token.OccurrenceId).ToImmutableArray();
-        return ScanSnapshotProjector.Create(context.Pin, status, enumeration, rows, groups.Groups(context.Pin, rows));
+        var allGroups = groups.Groups(context.Pin, rows).AddRange(nearGroups.Groups(context.Pin));
+        return ScanSnapshotProjector.Create(context.Pin, status, enumeration, rows, allGroups);
     }
 
     private bool Matches(OccurrenceToken token, ScanStageState state) => token.Pin == context.Pin

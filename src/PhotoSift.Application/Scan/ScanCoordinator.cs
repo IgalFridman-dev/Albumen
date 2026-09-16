@@ -21,6 +21,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
     private readonly IScanExecutor executor;
     private readonly IScanIdentityStore identities;
     private readonly IScanCheckpointStore checkpoints;
+    private readonly INearDuplicatePipeline? nearDuplicates;
     private readonly HashSet<Operation> operations = [];
     private Operation? active;
     private ScanSnapshot current = ScanSnapshotProjector.Create(null, ScanStatus.Idle, Pending, [], []);
@@ -34,13 +35,15 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         ILocalScopePreflight preflight,
         IScanExecutor executor,
         IScanIdentityStore identities,
-        IScanCheckpointStore checkpoints)
+        IScanCheckpointStore checkpoints,
+        INearDuplicatePipeline? nearDuplicates = null)
     {
         inbox = new ScanOwnerInbox(scheduler);
         this.preflight = preflight ?? throw new ArgumentNullException(nameof(preflight));
         this.executor = executor ?? throw new ArgumentNullException(nameof(executor));
         this.identities = identities ?? throw new ArgumentNullException(nameof(identities));
         this.checkpoints = checkpoints ?? throw new ArgumentNullException(nameof(checkpoints));
+        this.nearDuplicates = nearDuplicates;
     }
 
     public ScanSnapshot Current => Volatile.Read(ref current);
@@ -398,6 +401,23 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             run = executor.Start(operation.Context, this);
             operation.RunReady.TrySetResult(run);
             await run.Completion.ConfigureAwait(false);
+            if (nearDuplicates is not null && !operation.Token.IsCancellationRequested)
+            {
+                var rows = await inbox.CommandAsync(() => operation.Store
+                    .Snapshot(ScanStatus.Running, operation.Enumeration).Occurrences).ConfigureAwait(false);
+                var batch = await nearDuplicates.AnalyzeAsync(
+                    operation.Context, rows, operation.Token).ConfigureAwait(false);
+                await inbox.CommandAsync(() =>
+                {
+                    if (!ReferenceEquals(active, operation) || operation.Canceled || operation.Faulted)
+                        return false;
+                    var mutation = operation.Store.PrepareNearDuplicates(batch);
+                    var result = operation.Store.Apply(mutation);
+                    if (!result.Accepted) return false;
+                    PublishResults(operation);
+                    return true;
+                }).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (operation.Token.IsCancellationRequested) { }
         catch (Exception)

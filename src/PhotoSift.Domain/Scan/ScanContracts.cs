@@ -159,11 +159,19 @@ public sealed record ScanFileOccurrence
     public ContentRevision? Content { get; }
 
     public AllocationEvidence Allocation { get; }
+
+    public StageOutcome VisualFeatures { get; init; } =
+        new(ScanStageState.Pending, ScanReason.None);
+
+    public StageOutcome NearDuplicate { get; init; } =
+        new(ScanStageState.Pending, ScanReason.None);
 }
 
 public enum CandidateCategory
 {
     Exact,
+    NearDuplicate,
+    Uncertain,
 }
 
 public enum RecoveryUnavailableReason
@@ -184,6 +192,28 @@ public sealed record EqualityEvidence(
     ContentRevision LeftContent,
     ContentRevision RightContent);
 
+public sealed record PerceptualSignature(
+    string ImplementationRevision,
+    ulong DifferenceHash,
+    byte AverageLuma,
+    byte AverageBlue,
+    byte AverageGreen,
+    byte AverageRed);
+
+public enum NearRelationshipKind
+{
+    NotRelated,
+    Uncertain,
+    Near,
+}
+
+public sealed record NearDuplicateEvidence(
+    OccurrenceToken Left,
+    OccurrenceToken Right,
+    int HammingDistance,
+    int ColorDistance,
+    NearRelationshipKind Kind);
+
 public sealed record CandidateGroup(
     Guid GroupId,
     long GroupRevision,
@@ -202,6 +232,8 @@ public sealed record CandidateGroup(
         get => groupRevision;
         init => groupRevision = ValidateRevision(value);
     }
+
+    public ImmutableArray<NearDuplicateEvidence> Similarity { get; init; } = [];
 
     private static long ValidateRevision(long revision) => revision > 0
         ? revision
