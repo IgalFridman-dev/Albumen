@@ -1,0 +1,46 @@
+# BMAD/uv workflow caches (generated and disposable)
+.uv-cache-bmad-*/
+.uv-cache/
+
+# Visual Studio, VS Code, and JetBrains local state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# .NET build outputs
+**/bin/
+**/obj/
+artifacts/
+publish/
+
+# Test and coverage outputs
+TestResults/
+**/TestResults/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+
+# NuGet and package artifacts
+*.nupkg
+*.snupkg
+packages/
+
+# Logs, crash dumps, and local temporary files
+*.log
+*.dmp
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
