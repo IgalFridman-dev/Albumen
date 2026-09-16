@@ -86,6 +86,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 new ChangeScopeRecursionCommand(RequireBoolean(parameter)), CancellationToken.None),
             allowConcurrentExecutions: true);
         ContinueCommand = new AsyncCommand(() => photoWorkflow?.ContinueAsync() ?? Task.CompletedTask);
+        ChangeNearDuplicateModeCommand = new AsyncCommand(
+            parameter => photoWorkflow?.SetScanOptionsAsync(new(
+                ExactDuplicateMode.Enabled,
+                RequireBoolean(parameter)
+                    ? NearDuplicateMode.Conservative
+                    : NearDuplicateMode.Disabled)) ?? Task.CompletedTask,
+            canExecute: () => CanChangeScanOptions);
         ConfirmExactRulesCommand = new AsyncCommand(() => photoWorkflow?.ConfirmExactRulesAsync() ?? Task.CompletedTask);
         StartScanCommand = new AsyncCommand(() => photoWorkflow?.StartScanAsync() ?? Task.CompletedTask);
         CancelScanCommand = new AsyncCommand(() => photoWorkflow?.CancelScanAsync() ?? Task.CompletedTask);
@@ -120,6 +127,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
 
     public AsyncCommand ContinueCommand { get; }
+    public AsyncCommand ChangeNearDuplicateModeCommand { get; }
     public AsyncCommand ConfirmExactRulesCommand { get; }
     public AsyncCommand StartScanCommand { get; }
     public AsyncCommand CancelScanCommand { get; }
@@ -195,13 +203,23 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         { Status: ActionRecoveryStatus.Ready, ProbeOutstanding: false }
         && HasActionRecoveryDisclosure;
     public bool CanContinue => photoSnapshot?.Scope.ScopeState == ScopeSessionState.Ready;
-    public bool CanConfirmExactRules => CanContinue && IsConfirmRulesPhase && photoSnapshot?.Rules is null;
+    public bool CanChangeScanOptions => CanContinue && IsConfirmRulesPhase && !IsScanBusy;
+    public bool CanConfirmExactRules => CanChangeScanOptions
+        && photoSnapshot is { Rules: null, Options.IsValid: true };
     public bool CanStartScan => photoSnapshot is { } snapshot && ShellPhasePolicy.CanStart(snapshot.Scope, snapshot.Rules) && !IsScanBusy;
     public bool IsScanBusy => photoSnapshot?.Scan is
         { HasUnsettledWork: true } or
         { Status: ScanSessionStatus.Checking or ScanSessionStatus.Running };
     public bool CanOpenReview => photoSnapshot?.Scan.Pin is not null;
-    public string ExactPreset { get; } = "Exact duplicates only. Files must contain identical bytes. Rules are fixed for this scan.";
+    public bool NearDuplicatesEnabled => photoSnapshot?.Options.Near == NearDuplicateMode.Conservative;
+    public string ExactPreset { get; } = "Exact duplicates are always enabled. Files must contain identical bytes.";
+    public string ScanOptionsGuidance => photoSnapshot?.Options is { } options
+        ? options.IsValid
+            ? options.Near == NearDuplicateMode.Conservative
+                ? "Exact is always enabled. Near uses the fixed Conservative profile; ambiguous matches remain Uncertain. Selection stays manual."
+                : "Exact is always enabled. Near is disabled for the next Scan. Selection stays manual."
+            : options.ValidationGuidance
+        : "Exact is always enabled. Near defaults to the fixed Conservative profile. Selection stays manual.";
     public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";
     public string ScanStatus => photoSnapshot is { } snapshot
         ? $"{snapshot.Scan.Status}; Enumeration: {snapshot.Scan.Enumeration.State}; Exact: {(snapshot.Scan.Counts.Outstanding > 0 ? "Running" : snapshot.Scan.Status is ScanSessionStatus.Complete or ScanSessionStatus.Incomplete ? "Finished" : "Pending")}" : "Idle";
@@ -428,6 +446,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var previousStatus = ScanStatus;
         var previousBusy = IsScanBusy;
         var previousCanConfirm = CanConfirmExactRules;
+        var previousCanChangeOptions = CanChangeScanOptions;
+        var previousOptions = photoSnapshot?.Options;
         Apply(snapshot.Scope);
         photoSnapshot = snapshot;
         if (IsScanBusy && IsClearScanDataConfirmationPending)
@@ -435,7 +455,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ProjectAction(previousAction, previousActionReview, snapshot);
         ProjectActionRecovery(previousRecovery, snapshot.ActionRecovery);
         Phases = Project(snapshot.Phases);
-        RuleSetStatus = snapshot.Rules is null ? "Not configured" : "Exact duplicates only — confirmed";
+        RuleSetStatus = snapshot.Rules is null
+            ? "Scan options not confirmed"
+            : snapshot.Rules.Options.Near == NearDuplicateMode.Conservative
+                ? "Exact enabled; Near Conservative — confirmed"
+                : "Exact enabled; Near disabled — confirmed";
         if (!preserveReviewProjection)
         {
             ExactGroups = snapshot.Review.Pin is null
@@ -464,6 +488,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze),
             nameof(ScanOutcomeSummaries) })
             OnPropertyChanged(name);
+        if (previousOptions != snapshot.Options)
+        {
+            OnPropertyChanged(nameof(NearDuplicatesEnabled));
+            OnPropertyChanged(nameof(ScanOptionsGuidance));
+        }
         if (!preserveReviewProjection) OnPropertyChanged(nameof(ExactGroups));
         if (previousBusy != IsScanBusy)
         {
@@ -472,6 +501,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             OnPropertyChanged(nameof(IsScanBusy));
         }
         if (previousCanConfirm != CanConfirmExactRules) OnPropertyChanged(nameof(CanConfirmExactRules));
+        if (previousCanChangeOptions != CanChangeScanOptions)
+        {
+            ChangeNearDuplicateModeCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(CanChangeScanOptions));
+        }
         if (previousStatus != ScanStatus) OnPropertyChanged(nameof(ScanStatus));
         if (previousPhase != CurrentPhase) OnPropertyChanged(nameof(CurrentPhase));
     }

@@ -6,6 +6,7 @@ using PhotoSift.Application.Review;
 using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Review;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Workflow;
 using Xunit;
 
@@ -163,6 +164,7 @@ internal sealed class ActionShellFixture : IPhotoSiftWorkflow
     internal static ActionSnapshot Snapshot(params ActionItemSnapshot[] rows) =>
         new(RequestId, ActionStatus.Running, [.. rows], 0, 0, 0, 0, 0, ActionSafetyReason.None);
     public Task ContinueAsync() => Task.CompletedTask;
+    public Task SetScanOptionsAsync(ScanOptions options) => Task.CompletedTask;
     public Task ConfirmExactRulesAsync() => Task.CompletedTask;
     public Task StartScanAsync() => Task.CompletedTask;
     public Task CancelScanAsync() => Task.CompletedTask;

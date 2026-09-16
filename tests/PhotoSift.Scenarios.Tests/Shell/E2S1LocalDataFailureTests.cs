@@ -6,6 +6,7 @@ using PhotoSift.App.Shell;
 using PhotoSift.Application.Action;
 using PhotoSift.Application.Review;
 using PhotoSift.Application.Shell;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Workflow;
 using Xunit;
@@ -85,6 +86,7 @@ public sealed class E2S1LocalDataFailureTests
         public int ApprovalCalls { get; private set; }
         public event EventHandler<PhotoSiftSnapshot>? SnapshotChanged { add { } remove { } }
         public Task ContinueAsync() => Task.CompletedTask;
+        public Task SetScanOptionsAsync(ScanOptions options) => Task.CompletedTask;
         public Task ConfirmExactRulesAsync() => Task.CompletedTask;
         public Task StartScanAsync() => Task.CompletedTask;
         public Task CancelScanAsync() => Task.CompletedTask;

@@ -742,6 +742,7 @@ internal sealed class RecordingReviewWorkflow : IPhotoSiftWorkflow
     public event EventHandler<PhotoSiftSnapshot>? SnapshotChanged;
 
     public Task ContinueAsync() => Task.CompletedTask;
+    public Task SetScanOptionsAsync(ScanOptions options) => Task.CompletedTask;
     public Task ConfirmExactRulesAsync() => Task.CompletedTask;
     public Task StartScanAsync() => Task.CompletedTask;
     public Task CancelScanAsync() => Task.CompletedTask;

@@ -11,6 +11,43 @@ namespace PhotoSift.Application.Tests.Scan;
 public sealed class ScanCoordinatorTests
 {
     [Fact]
+    public async Task InvalidOptionsAreRejectedBeforeScanAdmission()
+    {
+        await using var fixture = new CoordinatorFixture();
+        var invalid = new ExactRuleConfirmation(1, 1,
+            new(ExactDuplicateMode.Disabled, NearDuplicateMode.Conservative));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Pump(fixture.Owner.StartAsync(fixture.Ready(), invalid, CancellationToken.None)));
+
+        Assert.Equal(ScanStatus.Idle, fixture.Owner.Current.Status);
+        Assert.Empty(fixture.Executor.Started);
+    }
+
+    [Theory]
+    [InlineData(NearDuplicateMode.Conservative, 1)]
+    [InlineData(NearDuplicateMode.Disabled, 0)]
+    public async Task PinnedNearModeControlsOnlyTheExistingNearPipeline(
+        NearDuplicateMode nearMode, int expectedCalls)
+    {
+        var near = new RecordingNearPipeline();
+        await using var fixture = new CoordinatorFixture(nearDuplicates: near);
+        var options = new ScanOptions(ExactDuplicateMode.Enabled, nearMode);
+
+        await fixture.Pump(fixture.Owner.StartAsync(fixture.Ready(),
+            new ExactRuleConfirmation(1, 1, options), CancellationToken.None));
+        var run = await fixture.Run();
+        await fixture.Pump(fixture.Owner.EnumerationEndedAsync(
+            run.Context,
+            ScanTestData.Success).AsTask());
+        run.Done.SetResult();
+        await fixture.Until(snapshot => snapshot.Status == ScanStatus.Complete);
+
+        Assert.Equal(options, run.Context.Options);
+        Assert.Equal(expectedCalls, near.Calls);
+    }
+
+    [Fact]
     public async Task StartAcceptsCheckingBeforePreflightAndCompletionRequiresRunSettlement()
     {
         await using var fixture = new CoordinatorFixture();
@@ -208,7 +245,8 @@ internal sealed class CoordinatorFixture : IAsyncDisposable
     public CoordinatorFixture(
         IScanExecutor? executor = null,
         CoordinatorIdentityStore? identities = null,
-        CoordinatorCheckpointStore? checkpoints = null)
+        CoordinatorCheckpointStore? checkpoints = null,
+        INearDuplicatePipeline? nearDuplicates = null)
     {
         Identities = identities ?? new CoordinatorIdentityStore();
         Checkpoints = checkpoints ?? new CoordinatorCheckpointStore();
@@ -218,7 +256,8 @@ internal sealed class CoordinatorFixture : IAsyncDisposable
             Preflight,
             executor ?? Executor,
             Identities,
-            Checkpoints);
+            Checkpoints,
+            nearDuplicates);
     }
     public Task Pump(Task task) => ScanTestData.Bound(Scheduler.PumpUntilAsync(task));
     public Task Start(long scope = 1, long rules = 1) => Pump(Owner.StartAsync(Ready(scope), new ExactRuleConfirmation(scope, rules), CancellationToken.None));
@@ -243,6 +282,23 @@ internal sealed class CoordinatorFixture : IAsyncDisposable
     {
         foreach (var run in Executor.Started) run.Done.TrySetResult();
         await Pump(Owner.DisposeAsync().AsTask());
+    }
+}
+
+internal sealed class RecordingNearPipeline : INearDuplicatePipeline
+{
+    public int Calls { get; private set; }
+
+    public Task<NearDuplicateBatch> AnalyzeAsync(
+        ScanRunContext context,
+        System.Collections.Immutable.ImmutableArray<ScanFileOccurrence> rows,
+        CancellationToken cancellationToken)
+    {
+        Calls++;
+        return Task.FromResult(new NearDuplicateBatch(
+            context.Pin,
+            BoundedNearDuplicatePipeline.ImplementationRevision,
+            []));
     }
 }
 

@@ -824,6 +824,52 @@ public sealed class PhotoSiftWorkflowTests
     }
 
     [Fact]
+    public async Task InvalidOptionsRemainVisibleAndCannotConfirmOrStart()
+    {
+        var scheduler = new ManualScheduler();
+        var scan = new ScanOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(Ready(1)), scan, scheduler);
+        await scheduler.Finish(workflow.ContinueAsync());
+        var invalid = new ScanOptions(ExactDuplicateMode.Disabled, NearDuplicateMode.Conservative);
+
+        await scheduler.Finish(workflow.SetScanOptionsAsync(invalid));
+        await scheduler.Finish(workflow.ConfirmExactRulesAsync());
+        await scheduler.Finish(workflow.StartScanAsync());
+
+        Assert.Equal(invalid, workflow.Current.Options);
+        Assert.False(workflow.Current.Options.IsValid);
+        Assert.Null(workflow.Current.Rules);
+        Assert.Empty(scan.Starts);
+        Assert.False(ShellPhasePolicy.CanStart(workflow.Current.Scope, workflow.Current.Rules));
+    }
+
+    [Fact]
+    public async Task OptionChangeRevokesPriorGroupsAndPinsFreshRevisionToNextScan()
+    {
+        var scheduler = new ManualScheduler();
+        var scan = new ScanOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(Ready(1)), scan, scheduler);
+        await scheduler.Finish(workflow.ContinueAsync());
+        await scheduler.Finish(workflow.ConfirmExactRulesAsync());
+        var oldRules = workflow.Current.Rules!;
+        scan.Publish(EmptyScan(new(Guid.NewGuid(), 1, oldRules.RuleSetRevision, 1), ScanStatus.Complete));
+        scheduler.Drain();
+        await scheduler.Finish(workflow.NavigateAsync(WorkflowPhase.ConfirmRules));
+
+        var exactOnly = new ScanOptions(ExactDuplicateMode.Enabled, NearDuplicateMode.Disabled);
+        await scheduler.Finish(workflow.SetScanOptionsAsync(exactOnly));
+
+        Assert.Null(workflow.Current.Rules);
+        Assert.Null(workflow.Current.Scan.Pin);
+        Assert.Equal([(1L, (long?)null)], scan.Invalidations);
+        await scheduler.Finish(workflow.ConfirmExactRulesAsync());
+        await scheduler.Finish(workflow.StartScanAsync());
+        var started = Assert.Single(scan.Starts);
+        Assert.Equal(exactOnly, started.Options);
+        Assert.True(started.RuleSetRevision > oldRules.RuleSetRevision);
+    }
+
+    [Fact]
     public async Task AcceptedScopeChangeRevokesRulesAndQueuedOldReviewCannotRestoreThem()
     {
         var scheduler = new ManualScheduler();
@@ -1191,6 +1237,7 @@ public sealed class PhotoSiftWorkflowTests
     {
         public ScanSnapshot Current { get; private set; } = EmptyScan();
         public List<ExactRuleConfirmation> Starts { get; } = [];
+        public List<(long ScopeRevision, long? RuleRevision)> Invalidations { get; } = [];
         public TaskCompletionSource? Cancellation { get; init; }
         internal int Cancellations { get; private set; }
         internal TaskCompletionSource<bool> CancellationEntered { get; } = ScanTestData.Signal<bool>();
@@ -1198,7 +1245,11 @@ public sealed class PhotoSiftWorkflowTests
         public void Publish(ScanSnapshot snapshot) { Current = snapshot; SnapshotChanged?.Invoke(this, snapshot); }
         internal void Replay(ScanSnapshot snapshot) => SnapshotChanged?.Invoke(this, snapshot);
         public Task StartAsync(ShellSnapshot scope, ExactRuleConfirmation rules, CancellationToken token) { Starts.Add(rules); return Task.CompletedTask; }
-        public Task InvalidateAsync(long scopeRevision, long? ruleRevision) => Task.CompletedTask;
+        public Task InvalidateAsync(long scopeRevision, long? ruleRevision)
+        {
+            Invalidations.Add((scopeRevision, ruleRevision));
+            return Task.CompletedTask;
+        }
         public Task CancelAsync() { Cancellations++; CancellationEntered.TrySetResult(true); return Cancellation?.Task ?? Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

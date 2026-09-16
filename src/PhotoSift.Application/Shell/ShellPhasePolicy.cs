@@ -7,5 +7,6 @@ public static class ShellPhasePolicy
     public static bool CanStart(ShellSnapshot scope, ExactRuleConfirmation? rules) =>
         scope.ScopeState == ScopeSessionState.Ready
         && rules is not null
-        && rules.ScopeRevision == scope.Revision;
+        && rules.ScopeRevision == scope.Revision
+        && rules.Options.IsValid;
 }

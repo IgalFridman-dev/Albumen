@@ -466,11 +466,33 @@
                              AutomationProperties.Name="Scope for Exact rules" />
                     <TextBlock Text="{Binding RecursionSummary}" Margin="0,8" />
                     <TextBlock Text="{Binding ExactPreset}" TextWrapping="Wrap" FontSize="17" FontWeight="SemiBold" />
-                    <TextBlock Text="Visual and semantic matching are unavailable in this milestone." TextWrapping="Wrap" Margin="0,10" />
+                    <CheckBox x:Name="ExactDuplicatesCheckBox"
+                              Margin="0,12,0,0"
+                              Content="Exact duplicates"
+                              IsChecked="True"
+                              IsEnabled="False"
+                              AutomationProperties.Name="Exact duplicates are always enabled"
+                              AutomationProperties.HelpText="Exact requires identical bytes and cannot be disabled." />
+                    <CheckBox x:Name="NearDuplicatesCheckBox"
+                              Margin="0,8,0,0"
+                              Content="Conservative Near duplicates"
+                              IsChecked="{Binding NearDuplicatesEnabled, Mode=OneWay}"
+                              IsEnabled="{Binding CanChangeScanOptions}"
+                              Command="{Binding ChangeNearDuplicateModeCommand}"
+                              CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                              AutomationProperties.Name="Conservative Near duplicates"
+                              AutomationProperties.HelpText="Uses the fixed precision-first Near profile. Ambiguous matches remain Uncertain." />
+                    <TextBlock x:Name="ScanOptionsGuidanceText"
+                               Margin="0,10,0,0"
+                               Text="{Binding ScanOptionsGuidance}"
+                               TextWrapping="Wrap"
+                               AutomationProperties.Name="Scan options guidance"
+                               AutomationProperties.ItemStatus="{Binding ScanOptionsGuidance}"
+                               AutomationProperties.LiveSetting="Polite" />
                     <TextBlock Text="{Binding RuleSetStatus}" TextWrapping="Wrap" />
                     <WrapPanel Margin="0,16,0,0">
-                        <Button x:Name="ConfirmExactRulesButton" Content="Confirm Exact rules" Padding="12,8" Margin="0,0,10,10"
-                                AutomationProperties.Name="Confirm Exact rules" Command="{Binding ConfirmExactRulesCommand}"
+                        <Button x:Name="ConfirmExactRulesButton" Content="Confirm Scan options" Padding="12,8" Margin="0,0,10,10"
+                                AutomationProperties.Name="Confirm Scan options" Command="{Binding ConfirmExactRulesCommand}"
                                 IsEnabled="{Binding CanConfirmExactRules}" />
                         <Button x:Name="StartScanButton" Content="Start Scan" Padding="12,8" Margin="0,0,10,10"
                                 AutomationProperties.Name="Start Scan" Command="{Binding StartScanCommand}" IsEnabled="{Binding CanStartScan}" />

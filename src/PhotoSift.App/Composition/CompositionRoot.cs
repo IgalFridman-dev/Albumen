@@ -11,6 +11,7 @@ using PhotoSift.Infrastructure.Windows.Scan;
 using PhotoSift.Application.Scope;
 using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Review;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Workflow;
 using PhotoSift.Infrastructure.Windows.Scope;
 using PhotoSift.Infrastructure.Windows.Preview;
@@ -93,6 +94,7 @@ public static class CompositionRoot
         }
 
         public Task ContinueAsync() => workflow.ContinueAsync();
+        public Task SetScanOptionsAsync(ScanOptions options) => workflow.SetScanOptionsAsync(options);
         public Task ConfirmExactRulesAsync() => workflow.ConfirmExactRulesAsync();
         public Task StartScanAsync() => workflow.StartScanAsync();
         public Task CancelScanAsync() => workflow.CancelScanAsync();

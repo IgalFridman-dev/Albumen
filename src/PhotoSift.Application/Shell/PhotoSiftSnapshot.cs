@@ -14,6 +14,7 @@ public sealed record PhotoSiftSnapshot(
     WorkflowPhase CurrentPhase,
     ImmutableArray<WorkflowPhaseState> Phases)
 {
+    public ScanOptions Options { get; init; } = ScanOptions.Default;
     public ReviewSnapshot Review { get; init; } = ReviewSnapshot.Closed;
     public ActionSnapshot Action { get; init; } = ActionSnapshot.Idle;
     public ActionRecoverySnapshot ActionRecovery { get; init; } = ActionRecoverySnapshot.NotLoaded;

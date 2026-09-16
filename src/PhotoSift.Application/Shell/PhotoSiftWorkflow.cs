@@ -121,13 +121,49 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
             Publish(current with { CurrentPhase = WorkflowPhase.ConfirmRules });
     }));
 
+    public Task SetScanOptionsAsync(ScanOptions options) => ObserveCommandAsync(async () =>
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var invalidateScopeRevision = await inbox.InvokeAsync<long?>(() =>
+        {
+            RefreshScope();
+            if (current.Scope.ScopeState != ScopeSessionState.Ready
+                || current.Scan.Status is ScanStatus.Checking or ScanStatus.Running
+                || current.Options == options)
+            {
+                return null;
+            }
+            var hadCurrentScan = current.Scan.Pin is not null;
+            Publish(current with
+            {
+                Options = options,
+                Rules = null,
+                Scan = EmptyScan(),
+                Review = ReviewSnapshot.Closed,
+                CurrentPhase = WorkflowPhase.ConfirmRules,
+            });
+            return hadCurrentScan ? current.Scope.Revision : null;
+        }).ConfigureAwait(false);
+        if (invalidateScopeRevision is not { } scopeRevision) return;
+        await scan.InvalidateAsync(scopeRevision, null).ConfigureAwait(false);
+        if (review is not null) await review.InvalidateAsync(null).ConfigureAwait(false);
+    });
+
     public Task ConfirmExactRulesAsync() => ObserveCommandAsync(() => inbox.InvokeAsync(() =>
     {
         RefreshScope();
-        if (current.CurrentPhase != WorkflowPhase.ConfirmRules || current.Scope.ScopeState != ScopeSessionState.Ready)
+        if (current.CurrentPhase != WorkflowPhase.ConfirmRules
+            || current.Scope.ScopeState != ScopeSessionState.Ready
+            || !current.Options.IsValid)
             return;
         if (current.Rules is null)
-            Publish(current with { Rules = new(current.Scope.Revision, checked(++nextRuleRevision)) });
+            Publish(current with
+            {
+                Rules = new(
+                    current.Scope.Revision,
+                    checked(++nextRuleRevision),
+                    current.Options),
+            });
     }));
 
     public Task StartScanAsync() => ObserveCommandAsync(StartScanCoreAsync);

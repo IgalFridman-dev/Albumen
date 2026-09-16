@@ -3,7 +3,10 @@ using PhotoSift.Domain.Scope;
 
 namespace PhotoSift.Application.Scan;
 
-public sealed record ScanRunContext(ScanPin Pin, ResolvedScope Scope);
+public sealed record ScanRunContext(ScanPin Pin, ResolvedScope Scope)
+{
+    public ScanOptions Options { get; init; } = ScanOptions.Default;
+}
 
 public sealed record EnumeratedFile(
     string DiscoveredPath,

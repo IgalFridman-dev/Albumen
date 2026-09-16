@@ -64,9 +64,11 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                 || scope.Preflight is not { Decision: ScopePreflightDecision.Ready, Scope: { } resolved }
                 || scope.Selection != resolved.Selection
                 || rules.ScopeRevision != scope.Revision
-                || rules.RuleSetRevision <= 0)
+                || rules.RuleSetRevision <= 0
+                || !rules.Options.IsValid)
             {
-                throw new InvalidOperationException("A Ready Scope and its confirmed Exact rules are required.");
+                throw new InvalidOperationException(
+                    "A Ready Scope and valid confirmed Scan options are required.");
             }
             if (scope.Revision < scopeWatermark
                 || rules.RuleSetRevision < ruleWatermark
@@ -78,7 +80,10 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             ruleWatermark = rules.RuleSetRevision;
             var previous = active;
             var context = new ScanRunContext(
-                new ScanPin(Guid.NewGuid(), scope.Revision, rules.RuleSetRevision, 1), resolved);
+                new ScanPin(Guid.NewGuid(), scope.Revision, rules.RuleSetRevision, 1), resolved)
+            {
+                Options = rules.Options,
+            };
             var operation = new Operation(context);
             active = operation;
             operations.Add(operation);
@@ -401,7 +406,9 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             run = executor.Start(operation.Context, this);
             operation.RunReady.TrySetResult(run);
             await run.Completion.ConfigureAwait(false);
-            if (nearDuplicates is not null && !operation.Token.IsCancellationRequested)
+            if (nearDuplicates is not null
+                && operation.Context.Options.Near == NearDuplicateMode.Conservative
+                && !operation.Token.IsCancellationRequested)
             {
                 var rows = await inbox.CommandAsync(() => operation.Store
                     .Snapshot(ScanStatus.Running, operation.Enumeration).Occurrences).ConfigureAwait(false);

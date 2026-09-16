@@ -243,4 +243,27 @@ public sealed record CandidateGroup(
             "Candidate group revision must be positive.");
 }
 
-public sealed record ExactRuleConfirmation(long ScopeRevision, long RuleSetRevision);
+public sealed record ExactRuleConfirmation
+{
+    public ExactRuleConfirmation(long scopeRevision, long ruleSetRevision)
+        : this(scopeRevision, ruleSetRevision, ScanOptions.Default)
+    {
+    }
+
+    public ExactRuleConfirmation(
+        long scopeRevision,
+        long ruleSetRevision,
+        ScanOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ScopeRevision = scopeRevision;
+        RuleSetRevision = ruleSetRevision;
+        Options = options;
+    }
+
+    public long ScopeRevision { get; init; }
+
+    public long RuleSetRevision { get; init; }
+
+    public ScanOptions Options { get; init; }
+}

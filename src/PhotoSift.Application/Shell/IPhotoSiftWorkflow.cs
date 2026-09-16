@@ -1,5 +1,6 @@
 using PhotoSift.Application.Review;
 using PhotoSift.Domain.Review;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Workflow;
 
 namespace PhotoSift.Application.Shell;
@@ -9,6 +10,7 @@ public interface IPhotoSiftWorkflow
     PhotoSiftSnapshot Current { get; }
     event EventHandler<PhotoSiftSnapshot>? SnapshotChanged;
     Task ContinueAsync();
+    Task SetScanOptionsAsync(ScanOptions options);
     Task ConfirmExactRulesAsync();
     Task StartScanAsync();
     Task CancelScanAsync();

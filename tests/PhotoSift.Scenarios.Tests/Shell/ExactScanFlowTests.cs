@@ -58,6 +58,22 @@ public sealed class ExactScanFlowTests
     }
 
     [Fact]
+    public async Task VisibleDefaultsCanDisableNearWithoutCreatingASelection()
+    {
+        var fixture = new ExactShellFixture();
+        fixture.PublishPhase(WorkflowPhase.ConfirmRules);
+
+        Assert.True(fixture.ViewModel.NearDuplicatesEnabled);
+        Assert.Contains("Exact is always enabled", fixture.ViewModel.ScanOptionsGuidance, StringComparison.Ordinal);
+        await fixture.ViewModel.ChangeNearDuplicateModeCommand.ExecuteAsync(false)
+            .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        Assert.Equal(NearDuplicateMode.Disabled, fixture.Workflow.Current.Options.Near);
+        Assert.DoesNotContain(fixture.Workflow.Current.Scan.Groups,
+            group => group.KeeperOccurrenceId is not null);
+    }
+
+    [Fact]
     public async Task OpenReviewCommandAdmitsTheFreshCompletedScanThroughTheRealWorkflow()
     {
         var scope = new ExactShellFixture.StaticScope();
@@ -210,6 +226,12 @@ internal sealed class ExactShellFixture
         private Task Act(string action) { Actions.Add(action); return Task.CompletedTask; }
         public Task ContinueAsync() => Act("continue");
         public Task ConfirmExactRulesAsync() => Act("confirm");
+        public Task SetScanOptionsAsync(ScanOptions options)
+        {
+            Current = Current with { Options = options, Rules = null };
+            SnapshotChanged?.Invoke(this, Current);
+            return Act($"options:{options.Near}");
+        }
         public Task StartScanAsync() => Act("start");
         public Task CancelScanAsync() => Act("cancel");
         public Task OpenReviewAsync() => Act("Review");
