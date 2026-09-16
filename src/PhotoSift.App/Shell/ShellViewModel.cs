@@ -10,6 +10,7 @@ using PhotoSift.Application.LocalData;
 using PhotoSift.Domain.Action;
 using PhotoSift.Application.Shell;
 using ScanSessionStatus = PhotoSift.Application.Scan.ScanStatus;
+using ReviewLevel = PhotoSift.App.Shell.ReviewNavigationLevel;
 using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
@@ -62,6 +63,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string actionRecoveryAnnouncement = string.Empty;
     private bool isClearScanDataConfirmationPending;
     private string localDataClearStatus = string.Empty;
+    private ImmutableArray<ReviewCategoryViewModel> reviewCategories = [];
+    private ReviewLevel reviewNavigationLevel = ReviewLevel.Categories;
+    private ImmutableArray<string> reviewBreadcrumbs = ["Review"];
+    private ReviewCategoryViewModel? activeReviewCategory;
+    private ReviewGroupViewModel? activeReviewGroup;
+    private ScanOccurrenceViewModel? activeReviewMember;
     private readonly ObservableCollection<ActionItemViewModel> actionRows = [];
     private readonly ObservableCollection<ActionRecordViewModel> actionRecoveryRecords = [];
     private readonly object lifetime = new();
@@ -108,6 +115,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 && !IsScanBusy && IsClearScanDataConfirmationPending);
         CancelClearScanDataCommand = new AsyncCommand(CancelClearScanDataAsync,
             canExecute: () => IsClearScanDataConfirmationPending);
+        OpenReviewCategoryCommand = new AsyncCommand(OpenReviewCategoryAsync);
+        OpenReviewGroupCommand = new AsyncCommand(OpenReviewGroupAsync);
+        OpenReviewMemberCommand = new AsyncCommand(OpenReviewMemberAsync);
+        ReviewBackCommand = new AsyncCommand(ReviewBackAsync,
+            canExecute: () => ReviewNavigationLevel != ReviewLevel.Categories);
         NavigateCommand = new AsyncCommand(parameter => photoWorkflow is not null && parameter is WorkflowPhase phase
             ? photoWorkflow.NavigateAsync(phase) : parameter is WorkflowPhase.ChooseScope
                 ? this.chooseScopeWorkflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None) : Task.CompletedTask);
@@ -137,6 +149,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand RequestClearScanDataCommand { get; }
     public AsyncCommand ConfirmClearScanDataCommand { get; }
     public AsyncCommand CancelClearScanDataCommand { get; }
+    public AsyncCommand OpenReviewCategoryCommand { get; }
+    public AsyncCommand OpenReviewGroupCommand { get; }
+    public AsyncCommand OpenReviewMemberCommand { get; }
+    public AsyncCommand ReviewBackCommand { get; }
     public AsyncCommand NavigateCommand { get; }
     public bool HasLocalScanDataControl => localScanDataControl is not null;
     public bool IsClearScanDataConfirmationPending
@@ -237,6 +253,36 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ImmutableArray<ExactGroupViewModel> ExactGroups { get; private set; } = [];
     public ImmutableArray<ScanOccurrenceViewModel> CouldNotAnalyze { get; private set; } = [];
     public ImmutableArray<ScanOutcomeSummaryItemViewModel> ScanOutcomeSummaries { get; private set; } = [];
+    public ImmutableArray<ReviewCategoryViewModel> ReviewCategories
+    {
+        get => reviewCategories;
+        private set => reviewCategories = value;
+    }
+    public ReviewLevel ReviewNavigationLevel
+    {
+        get => reviewNavigationLevel;
+        private set => reviewNavigationLevel = value;
+    }
+    public ImmutableArray<string> ReviewBreadcrumbs
+    {
+        get => reviewBreadcrumbs;
+        private set => reviewBreadcrumbs = value;
+    }
+    public ReviewCategoryViewModel? ActiveReviewCategory
+    {
+        get => activeReviewCategory;
+        private set => activeReviewCategory = value;
+    }
+    public ReviewGroupViewModel? ActiveReviewGroup
+    {
+        get => activeReviewGroup;
+        private set => activeReviewGroup = value;
+    }
+    public ScanOccurrenceViewModel? ActiveReviewMember
+    {
+        get => activeReviewMember;
+        private set => activeReviewMember = value;
+    }
 
     public string SelectionSummary
     {
@@ -468,6 +514,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                     snapshot.Review.Status == ReviewStatus.Ready && !snapshot.Review.Sealed,
                     snapshot.Review.SelectionRevision, index + 1, snapshot.Review.Groups.Length,
                     (kind, ids) => ChangeReviewSelectionAsync(group.Candidate.GroupId, kind, ids))).ToImmutableArray();
+            ReviewCategories = ProjectReviewCategories(snapshot);
+            ResetReviewNavigation();
         }
         CouldNotAnalyze = snapshot.Scan.Occurrences
             .Where(IsCouldNotAnalyze)
@@ -493,7 +541,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             OnPropertyChanged(nameof(NearDuplicatesEnabled));
             OnPropertyChanged(nameof(ScanOptionsGuidance));
         }
-        if (!preserveReviewProjection) OnPropertyChanged(nameof(ExactGroups));
+        if (!preserveReviewProjection)
+        {
+            OnPropertyChanged(nameof(ExactGroups));
+            OnPropertyChanged(nameof(ReviewCategories));
+        }
         if (previousBusy != IsScanBusy)
         {
             RequestClearScanDataCommand.NotifyCanExecuteChanged();
@@ -566,6 +618,125 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             or ScanStageState.Pending or ScanStageState.Running,
         _ => false,
     };
+
+    private ImmutableArray<ReviewCategoryViewModel> ProjectReviewCategories(PhotoSiftSnapshot snapshot) =>
+    [
+        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Exact, "Exact"),
+        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Near, "Near"),
+        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Uncertain, "Uncertain"),
+        ProjectCouldNotAnalyzeCategory(snapshot.Scan),
+    ];
+
+    private ReviewCategoryViewModel ProjectCandidateCategory(
+        PhotoSiftSnapshot snapshot,
+        ReviewCategoryKind category,
+        string name)
+    {
+        if (snapshot.Review.Pin is not null)
+        {
+            var groups = snapshot.Review.Groups
+                .Where(group => InCategory(group.Candidate, category))
+                .ToImmutableArray();
+            return new(category, name, groups.Length, index =>
+            {
+                var group = groups[index];
+                return new ReviewGroupViewModel(
+                    group,
+                    category,
+                    snapshot.Review.Status == ReviewStatus.Ready && !snapshot.Review.Sealed,
+                    (kind, ids) => ChangeReviewSelectionAsync(group.Candidate.GroupId, kind, ids));
+            });
+        }
+
+        var candidates = snapshot.Scan.Groups
+            .Where(group => InCategory(group, category))
+            .ToImmutableArray();
+        return new(category, name, candidates.Length,
+            index => new ReviewGroupViewModel(candidates[index], category));
+    }
+
+    private static ReviewCategoryViewModel ProjectCouldNotAnalyzeCategory(
+        PhotoSift.Application.Scan.ScanSnapshot scan)
+    {
+        var rows = scan.Occurrences.Where(IsCouldNotAnalyze).ToImmutableArray();
+        return new(ReviewCategoryKind.CouldNotAnalyze, "Could Not Analyze", rows.Length,
+            index => new ReviewGroupViewModel(rows[index]));
+    }
+
+    private static bool InCategory(CandidateGroup group, ReviewCategoryKind category) => category switch
+    {
+        ReviewCategoryKind.Exact => group.Category == CandidateCategory.Exact && !group.Uncertain,
+        ReviewCategoryKind.Near => group.Category == CandidateCategory.NearDuplicate && !group.Uncertain,
+        ReviewCategoryKind.Uncertain => group.Category == CandidateCategory.Uncertain || group.Uncertain,
+        _ => false,
+    };
+
+    private Task OpenReviewCategoryAsync(object? parameter)
+    {
+        if (parameter is not ReviewCategoryViewModel category
+            || !ReviewCategories.Any(row => ReferenceEquals(row, category)))
+            throw new ArgumentException("Review category navigation requires a current category row.", nameof(parameter));
+
+        SetReviewNavigation(ReviewLevel.Groups, category, null, null);
+        return Task.CompletedTask;
+    }
+
+    private Task OpenReviewGroupAsync(object? parameter)
+    {
+        if (parameter is not ReviewGroupViewModel group
+            || ActiveReviewCategory is null
+            || group.Category != ActiveReviewCategory.Category)
+            throw new ArgumentException("Review group navigation requires a group in the active category.", nameof(parameter));
+
+        SetReviewNavigation(ReviewLevel.Comparisons, ActiveReviewCategory, group, null);
+        return Task.CompletedTask;
+    }
+
+    private Task OpenReviewMemberAsync(object? parameter)
+    {
+        if (parameter is not ScanOccurrenceViewModel member || ActiveReviewGroup is null)
+            throw new ArgumentException("Review comparison navigation requires a member in the active group.", nameof(parameter));
+
+        SetReviewNavigation(ReviewLevel.Comparisons, ActiveReviewCategory, ActiveReviewGroup, member);
+        return Task.CompletedTask;
+    }
+
+    private Task ReviewBackAsync()
+    {
+        if (ReviewNavigationLevel == ReviewLevel.Comparisons)
+            SetReviewNavigation(ReviewLevel.Groups, ActiveReviewCategory, null, null);
+        else if (ReviewNavigationLevel == ReviewLevel.Groups)
+            ResetReviewNavigation();
+        return Task.CompletedTask;
+    }
+
+    private void ResetReviewNavigation() =>
+        SetReviewNavigation(ReviewLevel.Categories, null, null, null);
+
+    private void SetReviewNavigation(
+        ReviewLevel level,
+        ReviewCategoryViewModel? category,
+        ReviewGroupViewModel? group,
+        ScanOccurrenceViewModel? member)
+    {
+        ReviewNavigationLevel = level;
+        ActiveReviewCategory = category;
+        ActiveReviewGroup = group;
+        ActiveReviewMember = member;
+        ReviewBreadcrumbs = level switch
+        {
+            ReviewLevel.Categories => ["Review"],
+            ReviewLevel.Groups => ["Review", category!.Name],
+            ReviewLevel.Comparisons => ["Review", category!.Name, group!.Summary],
+            _ => throw new InvalidOperationException($"Unknown Review navigation level: {level}"),
+        };
+        OnPropertyChanged(nameof(ReviewNavigationLevel));
+        OnPropertyChanged(nameof(ActiveReviewCategory));
+        OnPropertyChanged(nameof(ActiveReviewGroup));
+        OnPropertyChanged(nameof(ActiveReviewMember));
+        OnPropertyChanged(nameof(ReviewBreadcrumbs));
+        ReviewBackCommand.NotifyCanExecuteChanged();
+    }
 
     private static ImmutableArray<ScanOutcomeSummaryItemViewModel> ProjectOutcomeSummaries(
         PhotoSift.Application.Scan.ScanSnapshot scan)
