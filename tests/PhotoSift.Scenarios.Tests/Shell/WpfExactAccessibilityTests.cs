@@ -11,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using PhotoSift.App;
 using PhotoSift.Application.Scan;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Workflow;
 using Xunit;
 
@@ -39,9 +40,15 @@ public sealed class WpfExactAccessibilityTests
                 Assert.True(exact.IsChecked);
                 Assert.False(exact.IsEnabled);
                 Assert.Equal("Exact duplicates are always enabled", AutomationProperties.GetName(exact));
+                Assert.Equal(
+                    "Exact requires identical bytes and cannot be disabled.",
+                    AutomationProperties.GetHelpText(exact));
                 Assert.True(near.IsChecked);
                 Assert.True(near.IsTabStop && near.Focusable && near.IsEnabled);
                 Assert.Equal("Conservative Near duplicates", AutomationProperties.GetName(near));
+                Assert.Equal(
+                    "Uses the fixed precision-first Near profile. Ambiguous matches remain Uncertain.",
+                    AutomationProperties.GetHelpText(near));
                 Assert.Contains("Exact is always enabled", guidance.Text, StringComparison.Ordinal);
                 Assert.Contains("Near", guidance.Text, StringComparison.Ordinal);
                 Assert.Equal("Confirm Scan options", AutomationProperties.GetName(confirm));
@@ -61,6 +68,41 @@ public sealed class WpfExactAccessibilityTests
                 fixture.PublishPhase(WorkflowPhase.ChooseScope);
                 Drain();
                 Assert.True(Assert.IsType<Button>(window.FindName("ChooseAnotherScopeButton")).IsKeyboardFocusWithin);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
+    public void InvalidOptionsExposeLiveGuidanceAndBlockConfirmationAndStart()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = new ExactShellFixture();
+            var invalid = new ScanOptions(
+                ExactDuplicateMode.Disabled,
+                NearDuplicateMode.Conservative);
+            fixture.PublishOptions(invalid);
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            try
+            {
+                window.Show();
+                Drain();
+                var guidance = Assert.IsType<TextBlock>(
+                    window.FindName("ScanOptionsGuidanceText"));
+                var confirm = Assert.IsType<Button>(
+                    window.FindName("ConfirmExactRulesButton"));
+                var start = Assert.IsType<Button>(window.FindName("StartScanButton"));
+
+                Assert.Equal(invalid.ValidationGuidance, guidance.Text);
+                Assert.Equal(
+                    invalid.ValidationGuidance,
+                    AutomationProperties.GetItemStatus(guidance));
+                Assert.Equal(
+                    AutomationLiveSetting.Polite,
+                    AutomationProperties.GetLiveSetting(guidance));
+                Assert.False(confirm.IsEnabled);
+                Assert.False(start.IsEnabled);
             }
             finally { window.Close(); }
         });

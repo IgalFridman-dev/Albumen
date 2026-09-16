@@ -61,14 +61,21 @@ public sealed class ExactScanFlowTests
     public async Task VisibleDefaultsCanDisableNearWithoutCreatingASelection()
     {
         var fixture = new ExactShellFixture();
+        fixture.PublishReview(ScanStatus.Complete);
         fixture.PublishPhase(WorkflowPhase.ConfirmRules);
 
         Assert.True(fixture.ViewModel.NearDuplicatesEnabled);
         Assert.Contains("Exact is always enabled", fixture.ViewModel.ScanOptionsGuidance, StringComparison.Ordinal);
+        Assert.All(fixture.Workflow.Current.Review.Groups,
+            group => Assert.Empty(group.SelectedOccurrenceIds));
         await fixture.ViewModel.ChangeNearDuplicateModeCommand.ExecuteAsync(false)
             .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         Assert.Equal(NearDuplicateMode.Disabled, fixture.Workflow.Current.Options.Near);
+        Assert.All(fixture.Workflow.Current.Review.Groups,
+            group => Assert.Empty(group.SelectedOccurrenceIds));
+        Assert.All(fixture.ViewModel.ExactGroups,
+            group => Assert.Empty(group.SelectedOccurrenceIds));
         Assert.DoesNotContain(fixture.Workflow.Current.Scan.Groups,
             group => group.KeeperOccurrenceId is not null);
     }
@@ -184,6 +191,15 @@ internal sealed class ExactShellFixture
     public void PublishPhase(WorkflowPhase phase, ScanStatus status = ScanStatus.Idle)
     {
         Workflow.Publish(Workflow.Current with { CurrentPhase = phase, Rules = new(1, 1), Scan = Workflow.Current.Scan with { Status = status } });
+    }
+    public void PublishOptions(ScanOptions options)
+    {
+        Workflow.Publish(Workflow.Current with
+        {
+            CurrentPhase = WorkflowPhase.ConfirmRules,
+            Options = options,
+            Rules = null,
+        });
     }
     public void PublishClosedScan(long occurrenceId, string path)
     {
