@@ -112,6 +112,27 @@ public sealed class GroupedReviewNavigationTests
     }
 
     [Fact]
+    public void NearFeatureFailureIsRoutedToCouldNotAnalyzeAfterExactSucceeded()
+    {
+        var fixture = new GroupedReviewFixture(
+            new GroupedReviewWorkflow(GroupedReviewData.NearFeatureFailureSnapshot));
+
+        var category = fixture.ViewModel.ReviewCategories.Single(
+            row => row.Category == ReviewCategoryKind.CouldNotAnalyze);
+        var baseline = GroupedReviewFixture.Create().ViewModel.ReviewCategories.Single(
+            row => row.Category == ReviewCategoryKind.CouldNotAnalyze).GroupCount;
+        Assert.Equal(baseline + 1, category.GroupCount);
+        var group = category.Groups.Single(candidate =>
+            candidate.Members.Any(member => member.OccurrenceId == 11));
+        var member = Assert.Single(group.Members);
+
+        Assert.Equal(11, member.OccurrenceId);
+        Assert.Equal(ReviewCategoryKind.CouldNotAnalyze, group.Category);
+        Assert.Empty(fixture.ViewModel.ReviewCategories.Single(
+            row => row.Category == ReviewCategoryKind.Near).Groups);
+    }
+
+    [Fact]
     public void TenThousandRowsMaterializeOnlyRequestedIndicesAndMemoizeThem()
     {
         var fixture = GroupedReviewFixture.CreateLarge(10_000);
@@ -152,7 +173,7 @@ public sealed class GroupedReviewNavigationTests
 
 internal sealed class GroupedReviewFixture
 {
-    private GroupedReviewFixture(GroupedReviewWorkflow workflow)
+    internal GroupedReviewFixture(GroupedReviewWorkflow workflow)
     {
         Workflow = workflow;
         ViewModel = new ShellViewModel(workflow.Scope, workflow);
@@ -280,6 +301,30 @@ internal static class GroupedReviewData
         return new PhotoSiftSnapshot(scope, new(scope.Revision, 3), scan, WorkflowPhase.Review,
             InitialWorkflow.Create()) { Review = review };
     };
+
+    internal static PhotoSiftSnapshot NearFeatureFailureSnapshot(ShellSnapshot scope)
+    {
+        var snapshot = Snapshot(scope, includeSecondFailure: false);
+        var failed = snapshot.Scan.Occurrences.Single(row => row.Token.OccurrenceId == 11) with
+        {
+            VisualFeatures = new(ScanStageState.FailedRetryable, ScanReason.ReadFailure),
+            NearDuplicate = new(ScanStageState.NotApplicable, ScanReason.ReadFailure),
+        };
+        var occurrences = snapshot.Scan.Occurrences
+            .Select(row => row.Token.OccurrenceId == failed.Token.OccurrenceId ? failed : row)
+            .ToImmutableArray();
+        var scanGroups = snapshot.Scan.Groups
+            .Where(group => group.Category != CandidateCategory.NearDuplicate)
+            .ToImmutableArray();
+        var reviewGroups = snapshot.Review.Groups
+            .Where(group => group.Candidate.Category != CandidateCategory.NearDuplicate)
+            .ToImmutableArray();
+        return snapshot with
+        {
+            Scan = snapshot.Scan with { Occurrences = occurrences, Groups = scanGroups },
+            Review = snapshot.Review with { Groups = reviewGroups },
+        };
+    }
 
     private static Guid GroupId(int index)
     {

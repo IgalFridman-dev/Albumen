@@ -72,6 +72,54 @@ public sealed class GroupedReviewEvidenceTests
         Assert.Equal("No recommendation; manual Selection.", evidence.Recommendation);
     }
 
+    [Fact]
+    public async Task ReopeningTheSameMemberCancelsTheOlderLoadAndPublishesOnlyTheNewest()
+    {
+        var source = new ControllableReviewPreviewSource();
+        var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
+        await using var viewModel = new ShellViewModel(
+            workflow.Scope, workflow, reviewPreviewSource: source);
+        var member = (await OpenGroupAsync(viewModel, ReviewCategoryKind.Exact)).Members[0];
+
+        var older = viewModel.OpenReviewMemberCommand.ExecuteAsync(member);
+        await source.WaitForRequestCountAsync(1);
+        var newer = viewModel.OpenReviewMemberCommand.ExecuteAsync(member);
+        await source.WaitForRequestCountAsync(2);
+
+        Assert.True(source.Requests[0].CancellationToken.IsCancellationRequested);
+        using var newestResult = ReviewPreviewResult.Failure(
+            member.ResolvedPath, PreviewAvailability.Unavailable, "newest result");
+        source.Complete(1, newestResult);
+        await newer;
+        using var olderResult = ReviewPreviewResult.Failure(
+            member.ResolvedPath, PreviewAvailability.Unavailable, "older result");
+        source.Complete(0, olderResult);
+        await older;
+
+        Assert.Equal("newest result", viewModel.ActiveReviewPreview?.StatusText);
+        Assert.True(olderResult.IsDisposed);
+    }
+
+    [Theory]
+    [InlineData(typeof(FileNotFoundException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    [InlineData(typeof(IOException))]
+    public async Task PreviewLoadFailureIsConvertedToUiSafeUnavailableEvidence(Type exceptionType)
+    {
+        var exception = (Exception)Activator.CreateInstance(exceptionType, "preview failed")!;
+        var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
+        await using var viewModel = new ShellViewModel(
+            workflow.Scope, workflow, reviewPreviewSource: new ThrowingPreviewSource(exception));
+        var member = (await OpenGroupAsync(viewModel, ReviewCategoryKind.Exact)).Members[0];
+
+        await viewModel.OpenReviewMemberCommand.ExecuteAsync(member);
+
+        var preview = Assert.IsType<PreviewItemViewModel>(viewModel.ActiveReviewPreview);
+        Assert.StartsWith("Preview unavailable:", preview.StatusText,
+            StringComparison.Ordinal);
+        Assert.Same(member, viewModel.ActiveReviewMember);
+    }
+
     private static async Task<ReviewGroupViewModel> OpenGroupAsync(
         ShellViewModel viewModel,
         ReviewCategoryKind category)
@@ -98,7 +146,7 @@ internal sealed class ControllableReviewPreviewSource(bool autoComplete = false)
     {
         var completion = new TaskCompletionSource<ReviewPreviewResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        requests.Add(new(context, occurrence, completion));
+        requests.Add(new(context, occurrence, completion, cancellationToken));
         requestChanged.TrySetResult(true);
         if (autoComplete)
             completion.SetResult(ReviewPreviewResult.Failure(
@@ -129,4 +177,15 @@ internal sealed class ControllableReviewPreviewSource(bool autoComplete = false)
 internal sealed record PendingPreviewRequest(
     ScanRunContext Context,
     ScanFileOccurrence Occurrence,
-    TaskCompletionSource<ReviewPreviewResult> Completion);
+    TaskCompletionSource<ReviewPreviewResult> Completion,
+    CancellationToken CancellationToken);
+
+internal sealed class ThrowingPreviewSource(Exception exception) : IReviewPreviewSource
+{
+    public Task<ReviewPreviewResult> LoadAsync(
+        ScanRunContext context,
+        ScanFileOccurrence occurrence,
+        CancellationToken cancellationToken) => Task.FromException<ReviewPreviewResult>(exception);
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}

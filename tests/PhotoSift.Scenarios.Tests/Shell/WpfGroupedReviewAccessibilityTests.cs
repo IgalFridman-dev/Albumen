@@ -18,9 +18,15 @@ public sealed class WpfGroupedReviewAccessibilityTests
 {
     private static readonly string[] EvidenceTextNames =
     [
+        "ReviewEvidenceFullPathText",
+        "ReviewEvidenceDimensionsText",
+        "ReviewEvidenceSizeText",
+        "ReviewEvidenceRelevantDateText",
         "ReviewEvidenceCategoryText",
         "ReviewEvidenceConfidenceText",
         "ReviewEvidenceUncertaintyText",
+        "ReviewEvidenceTransformationsText",
+        "ReviewEvidenceReasonText",
         "ReviewEvidenceRecommendationText",
     ];
 
@@ -61,6 +67,11 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 var comparisons = NamedList(window, "ReviewComparisonsList");
                 var openMember = Descendants<Button>(comparisons).First(button =>
                     AutomationProperties.GetAutomationId(button) == "open-review-member");
+                var member = Assert.IsType<ScanOccurrenceViewModel>(openMember.DataContext);
+                Assert.Equal(member.PositionInSet,
+                    AutomationProperties.GetPositionInSet(openMember));
+                Assert.Equal(fixture.ViewModel.ActiveReviewGroup!.MemberCount,
+                    AutomationProperties.GetSizeOfSet(openMember));
                 Click(openMember);
 
                 Assert.Equal(ReviewNavigationLevel.Comparisons,
@@ -82,6 +93,31 @@ public sealed class WpfGroupedReviewAccessibilityTests
                     StringComparison.Ordinal);
                 Assert.Contains("Uncertainty: Unavailable",
                     AutomationProperties.GetItemStatus(evidence), StringComparison.Ordinal);
+                var preview = Assert.Single(Descendants<PreviewStatusControl>(window));
+                Assert.True(preview.IsVisible);
+                Assert.Same(fixture.ViewModel.ActiveReviewPreview, preview.DataContext);
+                Assert.Contains("Unavailable",
+                    AutomationProperties.GetItemStatus(preview), StringComparison.Ordinal);
+                Assert.Equal(fixture.ViewModel.ActiveReviewMember!.ResolvedPath,
+                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceFullPathText")).Text);
+                Assert.Contains("Unavailable",
+                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceDimensionsText")).Text,
+                    StringComparison.Ordinal);
+                Assert.Contains("512 bytes",
+                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceSizeText")).Text,
+                    StringComparison.Ordinal);
+                Assert.Contains("Unavailable",
+                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceRelevantDateText")).Text,
+                    StringComparison.Ordinal);
+                Assert.Contains("Unavailable",
+                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceTransformationsText")).Text,
+                    StringComparison.Ordinal);
+                Assert.Contains("Unavailable",
+                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceReasonText")).Text,
+                    StringComparison.Ordinal);
+
+                Assert.Null(window.FindName("ExactGroupsList"));
+                Assert.Null(window.FindName("CouldNotAnalyzeList"));
 
                 var back = Assert.IsType<Button>(window.FindName("ReviewBackButton"));
                 Click(back);
@@ -204,9 +240,14 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 var categoriesPanel = NamedElement(window, "ReviewCategoriesPanel");
                 var groupsPanel = NamedElement(window, "ReviewGroupsPanel");
                 var comparisonsPanel = NamedElement(window, "ReviewComparisonsPanel");
+                var navigation = NamedElement(window, "ReviewNavigationGrid");
                 Assert.True(categoriesPanel.IsVisible);
                 Assert.True(groupsPanel.IsVisible);
                 Assert.True(comparisonsPanel.IsVisible);
+                Assert.All(new[] { categoriesPanel, groupsPanel, comparisonsPanel }, panel =>
+                    Assert.True(panel.ActualWidth >= navigation.ActualWidth / 3 - 12));
+                Assert.True(categoriesPanel.ActualWidth + groupsPanel.ActualWidth
+                    + comparisonsPanel.ActualWidth >= navigation.ActualWidth - 20);
 
                 Click(Descendants<Button>(categoriesPanel).First(button =>
                     AutomationProperties.GetAutomationId(button) == "open-review-category"));
@@ -215,12 +256,17 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 Assert.True(categoriesPanel.IsVisible);
                 Assert.True(groupsPanel.IsVisible);
                 Assert.False(comparisonsPanel.IsVisible);
+                Assert.True(categoriesPanel.ActualWidth >= navigation.ActualWidth / 2 - 12);
+                Assert.True(groupsPanel.ActualWidth >= navigation.ActualWidth / 2 - 12);
+                Assert.True(categoriesPanel.ActualWidth + groupsPanel.ActualWidth >=
+                    navigation.ActualWidth - 20);
 
                 window.Width = 680;
                 ShowAndDrain(window);
                 Assert.False(categoriesPanel.IsVisible);
                 Assert.True(groupsPanel.IsVisible);
                 Assert.False(comparisonsPanel.IsVisible);
+                Assert.True(groupsPanel.ActualWidth >= navigation.ActualWidth - 12);
 
                 var activeBorder = new SolidColorBrush(Color.FromRgb(12, 34, 56));
                 var windowBrush = new SolidColorBrush(Color.FromRgb(1, 2, 3));

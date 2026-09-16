@@ -182,6 +182,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
+            OpenFirstGroupedComparison(fixture.ViewModel);
             var neutral = new ReviewCommandResult(ReviewCommandOutcome.Neutral, fixture.Workflow.Current.Review);
             fixture.Workflow.NextSelectionResult = neutral;
             fixture.Workflow.NextSelectionResult = neutral;
@@ -258,18 +259,20 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready(twoGroups: true);
+            OpenFirstGroupedComparison(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
                 window.Show();
                 Drain();
-                var groups = Assert.IsType<ListBox>(window.FindName("ExactGroupsList"));
-                Assert.True(groups.ActualHeight > 0);
-                Assert.Equal(2, groups.Items.Count);
-                groups.ApplyTemplate();
+                var members = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
+                Assert.True(members.ActualHeight > 0);
+                Assert.Equal(4, members.Items.Count);
+                members.ApplyTemplate();
                 window.UpdateLayout();
-                var focusedContainer = RealizeContainer(groups, fixture.ViewModel.ExactGroups[0]);
-                Assert.Same(fixture.ViewModel.ExactGroups[0], focusedContainer.DataContext);
+                var focusedMember = fixture.ViewModel.ActiveReviewGroup!.Members[0];
+                var focusedContainer = RealizeContainer(members, focusedMember);
+                Assert.Same(focusedMember, focusedContainer.DataContext);
                 var focusedControl = Descendants<ToggleButton>(focusedContainer)
                     .First(control => AutomationProperties.GetAutomationId(control) == "selection-control");
                 focusedControl.BringIntoView();
@@ -316,6 +319,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
+            OpenFirstGroupedComparison(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -347,6 +351,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
+            OpenFirstGroupedComparison(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -360,9 +365,9 @@ public sealed class WpfReviewSelectionTests
                 fixture.Workflow.Publish(ReviewData.WithSelection(
                     fixture.Workflow.Current.Review, [1], 10));
                 window.UpdateLayout();
-                var members = Descendants<ListBox>(window).Single(control =>
-                    AutomationProperties.GetName(control) == "Review occurrences and selection controls");
-                var fourth = fixture.ViewModel.ExactGroups[0].Members.Single(member => member.OccurrenceId == 4);
+                var members = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
+                var fourth = fixture.ViewModel.ActiveReviewGroup!.Members.Single(
+                    member => member.OccurrenceId == 4);
                 _ = RealizeContainer(members, fourth, drain: false);
                 var deliberate = Descendants<ReviewSelectionCheckBox>(window)
                     .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 4 });
@@ -387,6 +392,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
+            OpenFirstGroupedComparison(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -420,6 +426,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
+            OpenFirstGroupedComparison(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -609,6 +616,14 @@ public sealed class WpfReviewSelectionTests
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,
             new Action(() => frame.Continue = false));
         Dispatcher.PushFrame(frame);
+    }
+
+    internal static void OpenFirstGroupedComparison(ShellViewModel viewModel)
+    {
+        var exact = viewModel.ReviewCategories.Single(
+            category => category.Category == ReviewCategoryKind.Exact);
+        viewModel.OpenReviewCategoryCommand.ExecuteAsync(exact).GetAwaiter().GetResult();
+        viewModel.OpenReviewGroupCommand.ExecuteAsync(exact.Groups[0]).GetAwaiter().GetResult();
     }
 
     internal static void Press(UIElement target, Key key)

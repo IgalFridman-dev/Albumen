@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using PhotoSift.Application.Review;
@@ -67,6 +68,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool isClearScanDataConfirmationPending;
     private string localDataClearStatus = string.Empty;
     private ImmutableArray<ReviewCategoryViewModel> reviewCategories = [];
+    private ImmutableArray<ExactGroupViewModel>? legacyExactGroups;
+    private ImmutableArray<ScanOccurrenceViewModel>? legacyCouldNotAnalyze;
     private ReviewLevel reviewNavigationLevel = ReviewLevel.Categories;
     private ImmutableArray<string> reviewBreadcrumbs = ["Review"];
     private ReviewCategoryViewModel? activeReviewCategory;
@@ -260,8 +263,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ? "Complete scope coverage. Unsupported, failed, and canceled/unprocessed files are reported separately."
         : "Partial results — incomplete scope coverage. Results do not represent every file in the Scope.";
     public string ReviewDisclaimer { get; } = "Analyzed revisions; scan again after files change. Results are memory-only and are not restored after restart.";
-    public ImmutableArray<ExactGroupViewModel> ExactGroups { get; private set; } = [];
-    public ImmutableArray<ScanOccurrenceViewModel> CouldNotAnalyze { get; private set; } = [];
+    public ImmutableArray<ExactGroupViewModel> ExactGroups =>
+        legacyExactGroups ??= ProjectLegacyExactGroups();
+    public ImmutableArray<ScanOccurrenceViewModel> CouldNotAnalyze =>
+        legacyCouldNotAnalyze ??= (photoSnapshot?.Scan.Occurrences ?? [])
+            .Where(IsCouldNotAnalyze)
+            .Select(row => new ScanOccurrenceViewModel(row)).ToImmutableArray();
     public ImmutableArray<ScanOutcomeSummaryItemViewModel> ScanOutcomeSummaries { get; private set; } = [];
     public ImmutableArray<ReviewCategoryViewModel> ReviewCategories
     {
@@ -536,19 +543,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             var previousCategory = ActiveReviewCategory?.Category;
             var previousGroupId = ActiveReviewGroup?.GroupId;
             var previousMemberId = ActiveReviewMember?.OccurrenceId;
-            ExactGroups = snapshot.Review.Pin is null
-                ? snapshot.Scan.Groups.Select(group => new ExactGroupViewModel(group)).ToImmutableArray()
-                : snapshot.Review.Groups.Select((group, index) => new ExactGroupViewModel(group,
-                    snapshot.Review.Status == ReviewStatus.Ready && !snapshot.Review.Sealed,
-                    snapshot.Review.SelectionRevision, index + 1, snapshot.Review.Groups.Length,
-                    (kind, ids) => ChangeReviewSelectionAsync(group.Candidate.GroupId, kind, ids))).ToImmutableArray();
+            legacyExactGroups = null;
             ReviewCategories = ProjectReviewCategories(snapshot);
             RestoreReviewNavigation(previousNavigationLevel, previousCategory,
                 previousGroupId, previousMemberId);
         }
-        CouldNotAnalyze = snapshot.Scan.Occurrences
-            .Where(IsCouldNotAnalyze)
-            .Select(row => new ScanOccurrenceViewModel(row)).ToImmutableArray();
+        legacyCouldNotAnalyze = null;
         ScanOutcomeSummaries = ProjectOutcomeSummaries(snapshot.Scan);
         ProjectReview(snapshot.Review);
         if (snapshot.Review.Pin is not null && snapshot.Review.Status == ReviewStatus.Faulted
@@ -638,15 +638,32 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         LocalDataClearStatus = ActiveScanClearStatus;
     }
 
-    private static bool IsCouldNotAnalyze(ScanFileOccurrence row) => row.Exact.State switch
+    private static bool IsCouldNotAnalyze(ScanFileOccurrence row) =>
+        row.Exact.State switch
+        {
+            ScanStageState.Unsupported or ScanStageState.FailedRetryable or ScanStageState.FailedTerminal
+                or ScanStageState.Canceled or ScanStageState.Pending or ScanStageState.Running => true,
+            ScanStageState.NotApplicable => row.Enumerate.State is ScanStageState.Unsupported
+                or ScanStageState.FailedRetryable or ScanStageState.FailedTerminal or ScanStageState.Canceled
+                or ScanStageState.Pending or ScanStageState.Running,
+            _ => IsAnalysisFailure(row.VisualFeatures) || IsAnalysisFailure(row.NearDuplicate),
+        };
+
+    private static bool IsAnalysisFailure(StageOutcome outcome) => outcome.State is
+        ScanStageState.Unsupported or ScanStageState.FailedRetryable
+        or ScanStageState.FailedTerminal or ScanStageState.Canceled;
+
+    private ImmutableArray<ExactGroupViewModel> ProjectLegacyExactGroups()
     {
-        ScanStageState.Unsupported or ScanStageState.FailedRetryable or ScanStageState.FailedTerminal
-            or ScanStageState.Canceled or ScanStageState.Pending or ScanStageState.Running => true,
-        ScanStageState.NotApplicable => row.Enumerate.State is ScanStageState.Unsupported
-            or ScanStageState.FailedRetryable or ScanStageState.FailedTerminal or ScanStageState.Canceled
-            or ScanStageState.Pending or ScanStageState.Running,
-        _ => false,
-    };
+        if (photoSnapshot is not { } snapshot) return [];
+        return snapshot.Review.Pin is null
+            ? snapshot.Scan.Groups.Select(group => new ExactGroupViewModel(group)).ToImmutableArray()
+            : snapshot.Review.Groups.Select((group, index) => new ExactGroupViewModel(group,
+                snapshot.Review.Status == ReviewStatus.Ready && !snapshot.Review.Sealed,
+                snapshot.Review.SelectionRevision, index + 1, snapshot.Review.Groups.Length,
+                (kind, ids) => ChangeReviewSelectionAsync(group.Candidate.GroupId, kind, ids)))
+                .ToImmutableArray();
+    }
 
     private ImmutableArray<ReviewCategoryViewModel> ProjectReviewCategories(PhotoSiftSnapshot snapshot) =>
     [
@@ -814,7 +831,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ScanOccurrenceViewModel? member,
         bool preservePreview = false)
     {
-        if (!preservePreview && !ReferenceEquals(ActiveReviewMember, member))
+        if (!preservePreview)
             ClearActiveReviewPreview();
         var navigationLevelChanged = ReviewNavigationLevel != level;
         ReviewNavigationLevel = level;
@@ -871,6 +888,20 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            if (request != Volatile.Read(ref activePreviewRequest)
+                || !ReferenceEquals(ActiveReviewMember, member))
+                return;
+            result = ReviewPreviewResult.Failure(
+                occurrence.ResolvedPath,
+                PreviewAvailability.Unavailable,
+                "Preview unavailable: the file could not be read.");
+            ActiveReviewPreview = new PreviewItemViewModel(result);
+            ActiveReviewEvidence = ProjectReviewEvidence(occurrence, result);
+            OnPropertyChanged(nameof(ActiveReviewPreview));
+            OnPropertyChanged(nameof(ActiveReviewEvidence));
         }
         finally
         {
@@ -964,6 +995,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             .ToHashSet();
         var acceptable = scan.Occurrences.LongCount(row =>
             row.Exact.State == ScanStageState.Succeeded
+            && !IsCouldNotAnalyze(row)
             && !candidateIds.Contains(row.Token.OccurrenceId)
             && !uncertainIds.Contains(row.Token.OccurrenceId));
         return

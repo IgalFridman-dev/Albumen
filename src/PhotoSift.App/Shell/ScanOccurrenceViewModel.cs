@@ -6,8 +6,12 @@ namespace PhotoSift.App.Shell;
 
 public sealed class ScanOccurrenceViewModel
 {
-    public ScanOccurrenceViewModel(ScanFileOccurrence occurrence, bool isAlias = false)
-        : this(occurrence, isAlias, null, false)
+    public ScanOccurrenceViewModel(
+        ScanFileOccurrence occurrence,
+        bool isAlias = false,
+        int positionInSet = 0,
+        int sizeOfSet = 0)
+        : this(occurrence, isAlias, null, false, positionInSet, sizeOfSet)
     {
     }
 
@@ -15,9 +19,12 @@ public sealed class ScanOccurrenceViewModel
         ReviewMemberSnapshot member,
         bool isAlias,
         bool selectionEnabled,
-        Func<Task> toggle)
+        Func<Task> toggle,
+        int positionInSet = 0,
+        int sizeOfSet = 0)
         : this(member.Occurrence, isAlias, new AsyncCommand(toggle,
-            canExecute: () => selectionEnabled && member.Eligibility == ReviewEligibilityState.Eligible), member.Selected)
+            canExecute: () => selectionEnabled && member.Eligibility == ReviewEligibilityState.Eligible),
+            member.Selected, positionInSet, sizeOfSet)
     {
         Eligibility = member.Eligibility;
         UnavailableReason = member.Reason;
@@ -39,7 +46,9 @@ public sealed class ScanOccurrenceViewModel
         ScanFileOccurrence occurrence,
         bool isAlias,
         AsyncCommand? toggle,
-        bool selected)
+        bool selected,
+        int positionInSet,
+        int sizeOfSet)
     {
         OccurrenceId = occurrence.Token.OccurrenceId;
         DiscoveredPath = occurrence.DiscoveredPath;
@@ -57,6 +66,8 @@ public sealed class ScanOccurrenceViewModel
         EligibilityText = "Not part of the active Review";
         AutomationName = $"Occurrence: {occurrence.DiscoveredPath}";
         ItemStatus = $"{PathKind}; {Allocation}";
+        PositionInSet = positionInSet;
+        SizeOfSet = sizeOfSet;
     }
 
     public long OccurrenceId { get; }
@@ -77,12 +88,15 @@ public sealed class ScanOccurrenceViewModel
     public string AutomationName { get; }
     public string ItemStatus { get; }
     public AsyncCommand? ToggleSelectionCommand { get; }
+    public int PositionInSet { get; }
+    public int SizeOfSet { get; }
 
     private static (string Label, string NextStep) DescribeOutcome(ScanFileOccurrence occurrence)
     {
-        var state = occurrence.Exact.State == ScanStageState.NotApplicable
-            ? occurrence.Enumerate.State
-            : occurrence.Exact.State;
+        var state = FirstFailure(occurrence.VisualFeatures, occurrence.NearDuplicate)?.State
+            ?? (occurrence.Exact.State == ScanStageState.NotApplicable
+                ? occurrence.Enumerate.State
+                : occurrence.Exact.State);
         return state switch
         {
             ScanStageState.Unsupported => (
@@ -102,4 +116,9 @@ public sealed class ScanOccurrenceViewModel
                 "No duplicate candidate was found. Keep it, or scan again after the file changes."),
         };
     }
+
+    private static StageOutcome? FirstFailure(params StageOutcome[] outcomes) =>
+        outcomes.FirstOrDefault(outcome => outcome.State is ScanStageState.Unsupported
+            or ScanStageState.FailedRetryable or ScanStageState.FailedTerminal
+            or ScanStageState.Canceled);
 }

@@ -22,7 +22,7 @@ public sealed class NearQualityCorpusTests
         "mirror",
         "rotation",
         "unrelated",
-        "decoder failure",
+        "invalid pixel buffer",
     ];
     private static readonly JsonSerializerOptions ManifestJson = new()
     {
@@ -94,7 +94,7 @@ internal enum QualityExpectedRelationship
     Near,
     Uncertain,
     NotRelated,
-    DecoderFailure,
+    InputValidationFailure,
 }
 
 internal static class NearQualityCorpusRunner
@@ -131,9 +131,9 @@ internal static class NearQualityCorpusRunner
                     };
                 }
             }
-            catch (ArgumentException) when (item.Transformation == "decoder failure")
+            catch (ArgumentException) when (item.Transformation == "invalid pixel buffer")
             {
-                relationship = QualityExpectedRelationship.DecoderFailure;
+                relationship = QualityExpectedRelationship.InputValidationFailure;
             }
 
             results.Add(item.Id, new(relationship, item.FailureSlice));
@@ -164,7 +164,7 @@ internal static class NearQualityCorpusRecipes
             "rotation" => new(new(24, 16, source),
                 new(16, 24, RotateClockwise(source, 24, 16))),
             "unrelated" => Pair(source, Checkerboard(24, 16), 24, 16),
-            "decoder failure" => new(new(24, 16, source), new(24, 16, [0x00])),
+            "invalid pixel buffer" => new(new(24, 16, source), new(24, 16, [0x00])),
             _ => throw new InvalidDataException($"Unknown quality transformation: {transformation}"),
         };
     }

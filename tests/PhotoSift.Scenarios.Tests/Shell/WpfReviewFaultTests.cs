@@ -118,6 +118,9 @@ public sealed class WpfReviewFaultTests
                         Assert.Equal(viewModel.ReviewAnnouncement, peer.GetItemStatus());
                         break;
                     case "selection-controls":
+                        WpfReviewSelectionTests.OpenFirstGroupedComparison(viewModel);
+                        window.UpdateLayout();
+                        WpfReviewSelectionTests.Drain();
                         var group = Assert.Single(viewModel.ExactGroups);
                         Assert.All(group.Members, member => Assert.False(member.CanSelect));
                         Assert.False(group.SelectAllCommand.CanExecute(null));
@@ -127,8 +130,7 @@ public sealed class WpfReviewFaultTests
                         var controls = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(window).ToArray();
                         Assert.NotEmpty(controls);
                         Assert.All(controls, control => Assert.False(control.IsEnabled));
-                        var members = WpfReviewSelectionTests.Descendants<ListBox>(window).Single(list =>
-                            AutomationProperties.GetName(list) == "Review occurrences and selection controls");
+                        var members = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
                         Assert.False(ApplicationCommands.SelectAll.CanExecute(null, members));
                         Assert.False(viewModel.CanApproveReview);
                         break;

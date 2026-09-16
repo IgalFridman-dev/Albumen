@@ -203,6 +203,7 @@ public sealed class WpfSurvivorOverrideDialogTests
             var owner = new MainWindow();
             var service = new WpfReviewDialogService(() => owner);
             var fixture = ReviewShellFixture.Ready(dialog: service);
+            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
             owner.DataContext = fixture.ViewModel;
             owner.Show();
             WpfReviewSelectionTests.Drain();
@@ -250,6 +251,7 @@ public sealed class WpfSurvivorOverrideDialogTests
             var owner = new MainWindow();
             var service = new WpfReviewDialogService(() => owner);
             var fixture = ReviewShellFixture.Ready(dialog: service);
+            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
             owner.DataContext = fixture.ViewModel;
             owner.Show();
             WpfReviewSelectionTests.Drain();
@@ -317,6 +319,7 @@ public sealed class WpfSurvivorOverrideDialogTests
             var owner = new MainWindow();
             var service = new WpfReviewDialogService(() => owner);
             var fixture = ReviewShellFixture.Ready();
+            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
             owner.DataContext = fixture.ViewModel;
             owner.Show();
             WpfReviewSelectionTests.Drain();

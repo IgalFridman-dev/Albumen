@@ -74,12 +74,12 @@
       "failureSlice": "non-near"
     },
     {
-      "id": "decoder-failure-v1",
+      "id": "invalid-pixel-buffer-v1",
       "version": 1,
       "consentProvenance": "generated-project-owned",
-      "transformation": "decoder failure",
-      "expectedRelationship": "DecoderFailure",
-      "failureSlice": "decoder-failure"
+      "transformation": "invalid pixel buffer",
+      "expectedRelationship": "InputValidationFailure",
+      "failureSlice": "managed-input-validation; real WIC failures are covered by WicPreviewDecoderTests"
     }
   ]
 }

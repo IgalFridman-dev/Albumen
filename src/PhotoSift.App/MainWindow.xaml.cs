@@ -269,6 +269,7 @@ public partial class MainWindow : Window
             ReviewCategoriesPanel.Visibility = Visibility.Visible;
             ReviewGroupsPanel.Visibility = Visibility.Visible;
             ReviewComparisonsPanel.Visibility = Visibility.Visible;
+            UpdateReviewColumnWidths();
             return;
         }
 
@@ -279,6 +280,7 @@ public partial class MainWindow : Window
                 ? Visibility.Visible : Visibility.Collapsed;
             ReviewComparisonsPanel.Visibility = level == ReviewNavigationLevel.Comparisons
                 ? Visibility.Visible : Visibility.Collapsed;
+            UpdateReviewColumnWidths();
             return;
         }
 
@@ -288,6 +290,17 @@ public partial class MainWindow : Window
             ? Visibility.Visible : Visibility.Collapsed;
         ReviewComparisonsPanel.Visibility = level == ReviewNavigationLevel.Comparisons
             ? Visibility.Visible : Visibility.Collapsed;
+        UpdateReviewColumnWidths();
+    }
+
+    private void UpdateReviewColumnWidths()
+    {
+        ReviewCategoriesColumn.Width = ReviewCategoriesPanel.Visibility == Visibility.Visible
+            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        ReviewGroupsColumn.Width = ReviewGroupsPanel.Visibility == Visibility.Visible
+            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        ReviewComparisonsColumn.Width = ReviewComparisonsPanel.Visibility == Visibility.Visible
+            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
     }
 
     private void QueueReviewNavigationFocus()
@@ -612,20 +625,15 @@ public partial class MainWindow : Window
     private ReviewSelectionCheckBox? FindCurrentSelectionControl(
         ReviewFocusIdentity identity)
     {
-        var root = identity.GroupedSurface
-            ? (DependencyObject)ReviewComparisonsList
-            : ExactGroupsList;
-        var active = identity.GroupedSurface
-            ? shellViewModel?.ActiveReviewMembers?.FirstOrDefault(member =>
-                member.OccurrenceId == identity.OccurrenceId)
-            : null;
+        var active = shellViewModel?.ActiveReviewMembers?.FirstOrDefault(member =>
+            member.OccurrenceId == identity.OccurrenceId);
         if (active is not null)
         {
             ReviewComparisonsList.ScrollIntoView(active);
             ReviewComparisonsList.ApplyTemplate();
             ReviewComparisonsList.UpdateLayout();
         }
-        foreach (var control in Descendants<ReviewSelectionCheckBox>(root))
+        foreach (var control in Descendants<ReviewSelectionCheckBox>(ReviewComparisonsList))
         {
             if (control.DataContext is not ScanOccurrenceViewModel member
                 || member.OccurrenceId != identity.OccurrenceId)

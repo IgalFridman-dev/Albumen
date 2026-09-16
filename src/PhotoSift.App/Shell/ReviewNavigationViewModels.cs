@@ -74,9 +74,11 @@ public sealed class ReviewGroupViewModel
             .Select((member, index) => (OccurrenceId: member.Token.OccurrenceId, Index: index))
             .ToDictionary(pair => pair.OccurrenceId, pair => pair.Index);
         Members = new(members.Length, index => new ScanOccurrenceViewModel(
-            members[index], IsAlias(members, index)));
+            members[index], IsAlias(members, index), index + 1, members.Length));
         MemberCount = members.Length;
         Summary = FormatSummary(category, MemberCount);
+        AutomationName = Summary;
+        ItemStatus = $"{category}; {MemberCount.ToString(CultureInfo.InvariantCulture)} comparison paths";
         SelectAllCommand = DisabledCommand();
         ReplaceSelectionCommand = DisabledCommand(parameterized: true);
     }
@@ -101,9 +103,18 @@ public sealed class ReviewGroupViewModel
         Members = new(members.Length, index => new ScanOccurrenceViewModel(
             members[index], IsAlias(members, index), canChangeSelection,
             () => changeSelection(SelectionCommandKind.Toggle,
-                ImmutableArray.Create(members[index].Occurrence.Token.OccurrenceId))));
+                ImmutableArray.Create(members[index].Occurrence.Token.OccurrenceId)),
+            index + 1, members.Length));
         MemberCount = members.Length;
         Summary = FormatSummary(category, MemberCount);
+        var physicalFileCount = members.Select(member => member.Occurrence.PhysicalFileKey)
+            .Where(key => key is not null).Distinct().Count();
+        AutomationName = category == ReviewCategoryKind.Exact
+            ? $"Exact group {positionInSet.ToString(CultureInfo.InvariantCulture)} of {sizeOfSet.ToString(CultureInfo.InvariantCulture)}; {MemberCount.ToString(CultureInfo.InvariantCulture)} paths; {physicalFileCount.ToString(CultureInfo.InvariantCulture)} physical files"
+            : Summary;
+        ItemStatus = category == ReviewCategoryKind.Exact
+            ? $"{group.SelectedOccurrenceIds.Count.ToString(CultureInfo.InvariantCulture)} selected; {ExactGroupViewModel.FormatSurvivor(group)}; {ExactGroupViewModel.FormatSelectionRecovery(group.Recovery)}"
+            : $"{category}; {MemberCount.ToString(CultureInfo.InvariantCulture)} comparison paths";
         var selectable = members
             .Where(member => member.Eligibility == ReviewEligibilityState.Eligible)
             .Select(member => member.Occurrence.Token.OccurrenceId)
@@ -124,9 +135,12 @@ public sealed class ReviewGroupViewModel
         PositionInSet = positionInSet;
         SizeOfSet = sizeOfSet;
         memberIndexes = new Dictionary<long, int> { [occurrence.Token.OccurrenceId] = 0 };
-        Members = new(1, _ => new ScanOccurrenceViewModel(occurrence));
+        Members = new(1, _ => new ScanOccurrenceViewModel(occurrence,
+            positionInSet: 1, sizeOfSet: 1));
         MemberCount = 1;
         Summary = $"Could Not Analyze: {occurrence.DiscoveredPath}";
+        AutomationName = Summary;
+        ItemStatus = "CouldNotAnalyze; 1 comparison path";
         SelectAllCommand = DisabledCommand();
         ReplaceSelectionCommand = DisabledCommand(parameterized: true);
     }
@@ -137,8 +151,8 @@ public sealed class ReviewGroupViewModel
     public int PositionInSet { get; }
     public int SizeOfSet { get; }
     public string Summary { get; }
-    public string AutomationName => Summary;
-    public string ItemStatus => $"{Category}; {MemberCount.ToString(CultureInfo.InvariantCulture)} comparison paths";
+    public string AutomationName { get; private init; }
+    public string ItemStatus { get; private init; }
     public LazyReviewCollection<ScanOccurrenceViewModel> Members { get; }
     public AsyncCommand SelectAllCommand { get; }
     public AsyncCommand ReplaceSelectionCommand { get; }

@@ -94,11 +94,11 @@ public sealed class ExactGroupViewModel
         ? $"Potential recovery: up to {bytes.ToString(CultureInfo.InvariantCulture)} bytes; no removal plan selected."
         : $"Potential recovery: unavailable ({recovery.Reason}).";
 
-    private static string FormatSelectionRecovery(SelectionRecovery recovery) => recovery.Bytes is { } bytes
+    internal static string FormatSelectionRecovery(SelectionRecovery recovery) => recovery.Bytes is { } bytes
         ? $"Estimated recovery for this Selection: {bytes.ToString(CultureInfo.InvariantCulture)} bytes."
         : $"Estimated recovery for this Selection: unavailable ({recovery.Reason}).";
 
-    private static string FormatSurvivor(ReviewGroupSnapshot group)
+    internal static string FormatSurvivor(ReviewGroupSnapshot group)
     {
         var eligible = group.Members
             .Where(member => member.Eligibility == ReviewEligibilityState.Eligible)

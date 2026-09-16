@@ -161,11 +161,18 @@
         <DataTemplate x:Key="ReviewComparisonTemplate">
             <StackPanel Margin="4,6">
                 <Button MinHeight="38" Padding="8,5" HorizontalContentAlignment="Left"
-                        Content="{Binding DiscoveredPath}"
+                        Content="Open comparison"
                         Click="OnOpenReviewMemberClick"
                         AutomationProperties.AutomationId="open-review-member"
                         AutomationProperties.Name="{Binding AutomationName}"
-                        AutomationProperties.ItemStatus="{Binding ItemStatus}" />
+                        AutomationProperties.ItemStatus="{Binding ItemStatus}"
+                        AutomationProperties.PositionInSet="{Binding PositionInSet}"
+                        AutomationProperties.SizeOfSet="{Binding SizeOfSet}" />
+                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True"
+                         IsTabStop="False" TextWrapping="Wrap"
+                         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                         AutomationProperties.Name="{Binding DiscoveredPath}" />
                 <app:ReviewSelectionCheckBox x:Name="ReviewSelectionCheckBox" MinHeight="34"
                         Padding="4" Margin="0,4,0,0"
                         IsChecked="{Binding IsSelected, Mode=OneWay}"
@@ -597,11 +604,11 @@
                                AutomationProperties.LiveSetting="Polite" />
                 </StackPanel>
 
-                <Grid Grid.Row="1" MinHeight="120" Margin="0,6,0,0">
+                <Grid x:Name="ReviewNavigationGrid" Grid.Row="1" MinHeight="120" Margin="0,6,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="ReviewCategoriesColumn" Width="*" />
+                        <ColumnDefinition x:Name="ReviewGroupsColumn" Width="*" />
+                        <ColumnDefinition x:Name="ReviewComparisonsColumn" Width="*" />
                     </Grid.ColumnDefinitions>
                     <Border x:Name="ReviewCategoriesPanel" Grid.Column="0" Margin="0,0,4,0" Padding="4"
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
@@ -635,42 +642,6 @@
                     </Border>
                 </Grid>
 
-                <!-- Preserve the established exact-review automation contract while the
-                     grouped surface above remains the only pointer interaction layer. -->
-                <Grid Grid.Row="1" Panel.ZIndex="-1" Opacity="0" IsHitTestVisible="False">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="3*" />
-                        <RowDefinition Height="2*" />
-                    </Grid.RowDefinitions>
-                    <ListBox x:Name="ExactGroupsList" ItemsSource="{Binding ExactGroups}"
-                             Style="{StaticResource ReviewListStyle}"
-                             AutomationProperties.Name="Exact duplicate groups">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <app:ReviewAutomationBorder Margin="4,8" Padding="6" BorderThickness="1"
-                                        BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
-                                        AutomationProperties.AutomationId="exact-group"
-                                        AutomationProperties.Name="{Binding AutomationName}"
-                                        AutomationProperties.ItemStatus="{Binding ItemStatus}">
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" FontWeight="SemiBold" />
-                                        <TextBlock Text="{Binding SurvivorText}" TextWrapping="Wrap" Margin="0,4" />
-                                        <TextBlock Text="{Binding PotentialRecovery}" TextWrapping="Wrap" Margin="0,4" />
-                                        <TextBlock Text="{Binding SelectionRecovery}" TextWrapping="Wrap" Margin="0,4" />
-                                        <ListBox ItemsSource="{Binding Members}" MaxHeight="220"
-                                                 Style="{StaticResource ReviewListStyle}"
-                                                 ItemTemplate="{StaticResource ReviewOccurrenceTemplate}"
-                                                 AutomationProperties.Name="Review occurrences and selection controls" />
-                                    </StackPanel>
-                                </app:ReviewAutomationBorder>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                    <ListBox x:Name="CouldNotAnalyzeList" Grid.Row="1" ItemsSource="{Binding CouldNotAnalyze}"
-                             Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource OccurrenceTemplate}"
-                             AutomationProperties.Name="Could Not Analyze" />
-                </Grid>
-
                 <app:ReviewAutomationBorder x:Name="ReviewEvidencePanel" Grid.Row="2" Margin="0,8,0,0" Padding="8"
                         BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                         AutomationProperties.AutomationId="review-evidence"
@@ -678,11 +649,18 @@
                         AutomationProperties.ItemStatus="{Binding ActiveReviewEvidence.ItemStatus}">
                     <StackPanel DataContext="{Binding ActiveReviewEvidence}">
                         <TextBlock Text="Evidence" FontWeight="SemiBold" />
+                        <app:PreviewStatusControl x:Name="ReviewPreviewStatusControl"
+                                DataContext="{Binding DataContext.ActiveReviewPreview, RelativeSource={RelativeSource AncestorType=Window}}" />
+                        <TextBlock x:Name="ReviewEvidenceFullPathText" Text="{Binding FullPath}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceDimensionsText" Text="{Binding Dimensions, StringFormat='Dimensions: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceSizeText" Text="{Binding Size, StringFormat='Size: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceRelevantDateText" Text="{Binding RelevantDate, StringFormat='Relevant date: {0}'}" TextWrapping="Wrap" />
                         <TextBlock x:Name="ReviewEvidenceCategoryText" Text="{Binding Category, StringFormat='Category: {0}'}" TextWrapping="Wrap" />
                         <TextBlock x:Name="ReviewEvidenceConfidenceText" Text="{Binding Confidence, StringFormat='Confidence: {0}'}" TextWrapping="Wrap" />
                         <TextBlock x:Name="ReviewEvidenceUncertaintyText" Text="{Binding Uncertainty, StringFormat='Uncertainty: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceTransformationsText" Text="{Binding Transformations, StringFormat='Transformations: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceReasonText" Text="{Binding Reason, StringFormat='Reason: {0}'}" TextWrapping="Wrap" />
                         <TextBlock x:Name="ReviewEvidenceRecommendationText" Text="{Binding Recommendation}" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding Reason}" TextWrapping="Wrap" />
                     </StackPanel>
                 </app:ReviewAutomationBorder>
 

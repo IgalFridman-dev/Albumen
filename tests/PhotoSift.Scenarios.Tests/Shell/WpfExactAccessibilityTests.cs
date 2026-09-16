@@ -10,6 +10,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using PhotoSift.App;
+using PhotoSift.App.Shell;
 using PhotoSift.Application.Scan;
 using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Workflow;
@@ -115,17 +116,25 @@ public sealed class WpfExactAccessibilityTests
         {
             var fixture = new ExactShellFixture();
             fixture.PublishReview(ScanStatus.Incomplete, 1000);
+            var exact = fixture.ViewModel.ReviewCategories.Single(
+                category => category.Category == ReviewCategoryKind.Exact);
+            fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(exact).GetAwaiter().GetResult();
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
                 window.Show();
                 Drain();
                 window.UpdateLayout();
-                var groups = Assert.IsType<ListBox>(window.FindName("ExactGroupsList"));
+                var groups = Assert.IsType<ListBox>(window.FindName("ReviewGroupsList"));
                 Assert.True(VirtualizingPanel.GetIsVirtualizing(groups));
                 Assert.Equal(1000, groups.Items.Count);
                 Assert.Null(groups.ItemContainerGenerator.ContainerFromIndex(999));
-                var paths = Descendants<TextBox>(groups).ToArray();
+                fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(exact.Groups[0])
+                    .GetAwaiter().GetResult();
+                Drain();
+                window.UpdateLayout();
+                var comparisons = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
+                var paths = Descendants<TextBox>(comparisons).ToArray();
                 Assert.NotEmpty(paths);
                 Assert.All(paths, path =>
                 {
@@ -133,7 +142,7 @@ public sealed class WpfExactAccessibilityTests
                     Assert.Equal(TextWrapping.Wrap, path.TextWrapping);
                     Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(path)));
                 });
-                var selectionControls = Descendants<ToggleButton>(groups)
+                var selectionControls = Descendants<ToggleButton>(comparisons)
                     .Where(control => AutomationProperties.GetAutomationId(control) == "selection-control").ToArray();
                 Assert.NotEmpty(selectionControls);
                 Assert.All(selectionControls, control => Assert.True(control.IsTabStop));
@@ -144,7 +153,8 @@ public sealed class WpfExactAccessibilityTests
                 window.Resources[SystemColors.WindowTextBrushKey] = textBrush;
                 Drain();
                 Assert.Same(textBrush, window.Foreground);
-                Assert.NotEmpty(Assert.IsType<ListBox>(window.FindName("CouldNotAnalyzeList")).Items);
+                Assert.True(fixture.ViewModel.ReviewCategories.Single(category =>
+                    category.Category == ReviewCategoryKind.CouldNotAnalyze).GroupCount > 0);
             }
             finally { window.Close(); }
         });
@@ -156,21 +166,22 @@ public sealed class WpfExactAccessibilityTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
+            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel, FontSize = 24 };
             try
             {
                 window.Show();
                 Drain();
                 window.UpdateLayout();
-                var groups = Assert.IsType<ListBox>(window.FindName("ExactGroupsList"));
-                Assert.True(VirtualizingPanel.GetIsVirtualizing(groups));
-                Assert.All(Descendants<TextBox>(groups), path =>
+                var comparisons = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
+                Assert.True(VirtualizingPanel.GetIsVirtualizing(comparisons));
+                Assert.All(Descendants<TextBox>(comparisons), path =>
                 {
                     Assert.True(path.IsReadOnly);
                     Assert.Equal(TextWrapping.Wrap, path.TextWrapping);
                     Assert.False(path.IsTabStop);
                 });
-                Assert.All(Descendants<TextBlock>(groups), metadata => Assert.False(metadata.Focusable));
+                Assert.All(Descendants<TextBlock>(comparisons), metadata => Assert.False(metadata.Focusable));
                 Assert.Contains("照片-very-long-name", fixture.ViewModel.ExactGroups[0].Members[0].DiscoveredPath);
             }
             finally { window.Close(); }
@@ -184,14 +195,14 @@ public sealed class WpfExactAccessibilityTests
         {
             var fixture = new ExactShellFixture();
             fixture.PublishReview(ScanStatus.Complete, memberCount: 2000);
+            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
                 window.Show();
                 Drain();
                 window.UpdateLayout();
-                var groups = Assert.IsType<ListBox>(window.FindName("ExactGroupsList"));
-                var members = Assert.Single(Descendants<ListBox>(groups));
+                var members = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
                 Assert.Equal(2000, members.Items.Count);
                 Assert.True(VirtualizingPanel.GetIsVirtualizing(members));
                 Assert.Null(members.ItemContainerGenerator.ContainerFromIndex(1999));

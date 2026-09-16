@@ -112,6 +112,7 @@ public sealed class WpfApprovalAccessibilityTests
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready(externalSurvivor: true, selected: [1]);
+            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -120,7 +121,7 @@ public sealed class WpfApprovalAccessibilityTests
                 window.UpdateLayout();
                 var root = UIElementAutomationPeer.CreatePeerForElement(window);
                 Assert.NotNull(root);
-                var group = FindPeer(root, "exact-group");
+                var group = FindPeer(root, "open-review-group");
                 var groupName = group.GetName();
                 var groupStatus = group.GetItemStatus();
                 Assert.Contains("group 1 of 1", groupName, StringComparison.OrdinalIgnoreCase);
@@ -131,7 +132,7 @@ public sealed class WpfApprovalAccessibilityTests
                 Assert.Contains("path is unknown to this Scan", groupStatus, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("Estimated recovery", groupStatus, StringComparison.OrdinalIgnoreCase);
 
-                var selection = FindPeer(group, "selection-control");
+                var selection = FindPeer(root, "selection-control");
                 Assert.Contains("Eligible", selection.GetItemStatus(), StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("selected", selection.GetName(), StringComparison.OrdinalIgnoreCase);
 
@@ -597,6 +598,7 @@ public sealed class WpfApprovalAccessibilityTests
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready(selected: [1]);
+            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             window.Show();
             WpfReviewSelectionTests.Drain();
@@ -627,6 +629,7 @@ public sealed class WpfApprovalAccessibilityTests
             var window = new MainWindow();
             var fixture = ReviewShellFixture.Ready(selected: [1],
                 dialog: new WpfReviewDialogService(() => window));
+            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
             window.DataContext = fixture.ViewModel;
             window.Show();
             WpfReviewSelectionTests.Drain();
@@ -664,6 +667,7 @@ public sealed class WpfApprovalAccessibilityTests
             var window = new MainWindow();
             var fixture = ReviewShellFixture.Ready(selected: [1],
                 dialog: new WpfReviewDialogService(() => window));
+            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
             window.DataContext = fixture.ViewModel;
             window.Show();
             WpfReviewSelectionTests.Drain();
