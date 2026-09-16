@@ -127,7 +127,8 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         var invalidateScopeRevision = await inbox.InvokeAsync<long?>(() =>
         {
             RefreshScope();
-            if (current.Scope.ScopeState != ScopeSessionState.Ready
+            if (current.CurrentPhase != WorkflowPhase.ConfirmRules
+                || current.Scope.ScopeState != ScopeSessionState.Ready
                 || current.Scan.Status is ScanStatus.Checking or ScanStatus.Running
                 || current.Options == options)
             {

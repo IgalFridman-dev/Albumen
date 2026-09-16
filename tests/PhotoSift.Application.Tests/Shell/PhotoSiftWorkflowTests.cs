@@ -870,6 +870,37 @@ public sealed class PhotoSiftWorkflowTests
     }
 
     [Fact]
+    public async Task ScanAdmissionRejectsOptionMutationAfterLeavingConfirmRules()
+    {
+        var scheduler = new ManualScheduler();
+        var releaseStart = ScanTestData.Signal<bool>();
+        var scan = new ScanOwner { StartRelease = releaseStart };
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(Ready(1)), scan, scheduler);
+        await scheduler.Finish(workflow.ContinueAsync());
+        await scheduler.Finish(workflow.ConfirmExactRulesAsync());
+        var confirmedRules = workflow.Current.Rules!;
+        var confirmedOptions = workflow.Current.Options;
+
+        var start = workflow.StartScanAsync();
+        scheduler.Drain();
+        var admittedRules = await scan.StartEntered.Task.WaitAsync(
+            TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        Assert.Equal(WorkflowPhase.Scan, workflow.Current.CurrentPhase);
+        Assert.Equal(confirmedRules, admittedRules);
+
+        await scheduler.Finish(workflow.SetScanOptionsAsync(new(
+            ExactDuplicateMode.Enabled,
+            NearDuplicateMode.Disabled)));
+
+        Assert.Equal(WorkflowPhase.Scan, workflow.Current.CurrentPhase);
+        Assert.Equal(confirmedOptions, workflow.Current.Options);
+        Assert.Equal(confirmedRules, workflow.Current.Rules);
+        Assert.Equal(confirmedRules, Assert.Single(scan.Starts));
+        releaseStart.SetResult(true);
+        await start.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task AcceptedScopeChangeRevokesRulesAndQueuedOldReviewCannotRestoreThem()
     {
         var scheduler = new ManualScheduler();
@@ -1238,13 +1269,21 @@ public sealed class PhotoSiftWorkflowTests
         public ScanSnapshot Current { get; private set; } = EmptyScan();
         public List<ExactRuleConfirmation> Starts { get; } = [];
         public List<(long ScopeRevision, long? RuleRevision)> Invalidations { get; } = [];
+        public TaskCompletionSource<ExactRuleConfirmation> StartEntered { get; } =
+            ScanTestData.Signal<ExactRuleConfirmation>();
+        public TaskCompletionSource<bool>? StartRelease { get; init; }
         public TaskCompletionSource? Cancellation { get; init; }
         internal int Cancellations { get; private set; }
         internal TaskCompletionSource<bool> CancellationEntered { get; } = ScanTestData.Signal<bool>();
         public event EventHandler<ScanSnapshot>? SnapshotChanged;
         public void Publish(ScanSnapshot snapshot) { Current = snapshot; SnapshotChanged?.Invoke(this, snapshot); }
         internal void Replay(ScanSnapshot snapshot) => SnapshotChanged?.Invoke(this, snapshot);
-        public Task StartAsync(ShellSnapshot scope, ExactRuleConfirmation rules, CancellationToken token) { Starts.Add(rules); return Task.CompletedTask; }
+        public async Task StartAsync(ShellSnapshot scope, ExactRuleConfirmation rules, CancellationToken token)
+        {
+            Starts.Add(rules);
+            StartEntered.TrySetResult(rules);
+            if (StartRelease is not null) await StartRelease.Task;
+        }
         public Task InvalidateAsync(long scopeRevision, long? ruleRevision)
         {
             Invalidations.Add((scopeRevision, ruleRevision));
