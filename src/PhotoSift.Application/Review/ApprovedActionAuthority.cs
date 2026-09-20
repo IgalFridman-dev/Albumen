@@ -122,9 +122,12 @@ public sealed partial class ReviewCoordinator
                 || !ValidPrecedingOutcomes(accepted.Request, item, precedingOutcomes))
                 return new RefreshStart(new(ApprovedActionClaimOutcome.Stale, null, ActionSafetyReason.StalePin), null, null);
             var canonicalItem = accepted.Request.Items.Single(value => value == item);
-            var group = operation.Store.CaptureActionGroups().Single(value => value.GroupId == item.GroupId);
+            var groups = operation.Store.CaptureActionGroups();
+            if (!groups.Any(value => value.GroupId == item.GroupId))
+                return new RefreshStart(new(ApprovedActionClaimOutcome.Stale, null,
+                    ActionSafetyReason.StalePin), null, null);
             var attempt = new ActionSafetyRefreshAttempt(Guid.NewGuid(), accepted, canonicalItem,
-                new(accepted.Request.Scan, accepted.Request.Scope), group, precedingOutcomes,
+                new(accepted.Request.Scan, accepted.Request.Scope), groups, precedingOutcomes,
                 operation.Store.ActionEvidence, new(TaskCreationOptions.RunContinuationsAsynchronously));
             safetyRefreshes.Add(attempt.AttemptId);
             var effect = new ActionEffect(operation);
@@ -145,11 +148,12 @@ public sealed partial class ReviewCoordinator
             return await RunActionEffectAsync(effect, async token =>
             {
                 var reads = await ReadActionEvidenceAsync(attempt.ExpectedEvidence, token).ConfigureAwait(false);
-                var recycled = attempt.PrecedingOutcomes.Where(outcome => outcome.GroupId == attempt.Group.GroupId
-                    && outcome.Disposition == PriorActionDisposition.Recycled).Select(outcome => outcome.OccurrenceId).ToImmutableHashSet();
+                var recycled = attempt.PrecedingOutcomes.Where(outcome =>
+                        outcome.Disposition == PriorActionDisposition.Recycled)
+                    .Select(outcome => outcome.OccurrenceId).ToImmutableHashSet();
                 if (actionSafety is null)
                     return new ActionSafetyRefreshResult(ApprovedActionClaimOutcome.UnsafeCurrentFacts, null, ActionSafetyReason.Unavailable);
-                return await actionSafety.ProbeAsync(attempt.Context, [attempt.Group], recycled,
+                return await actionSafety.ProbeAsync(attempt.Context, attempt.Groups, recycled,
                     (groups, reason) => inbox.ResultAsync(() =>
                     {
                         var rejection = ActionRejection(operation, attempt.Claim.Request);
@@ -163,13 +167,33 @@ public sealed partial class ReviewCoordinator
                             var failed = ProbeFailure(operation, reason);
                             return new(failed.Outcome, null, failed.Reason);
                         }
-                        var probe = groups.Single();
-                        var input = SafetyInput(attempt.Claim.Request, attempt.Group, probe, attempt.PrecedingOutcomes);
-                        var decision = ActionSafetyPolicy.Evaluate(input);
-                        if (decision.Kind != ActionSafetyDecisionKind.Allowed)
-                            return new(ApprovedActionClaimOutcome.UnsafeCurrentFacts, null, decision.Reason);
+                        ActionSafetyInput? input = null;
+                        ActionSafetyDecision? decision = null;
+                        ActionGroupProbeResult? probe = null;
+                        foreach (var candidate in attempt.Groups)
+                        {
+                            var candidateProbe = groups.Single(value =>
+                                value.GroupId == candidate.GroupId);
+                            var candidateInput = SafetyInput(attempt.Claim.Request,
+                                candidate, candidateProbe, attempt.PrecedingOutcomes);
+                            var candidateDecision = ActionSafetyPolicy.Evaluate(candidateInput);
+                            if (candidateDecision.Kind != ActionSafetyDecisionKind.Allowed)
+                                return new(ApprovedActionClaimOutcome.UnsafeCurrentFacts,
+                                    null, candidateDecision.Reason);
+                            if (candidate.GroupId == attempt.Item.GroupId)
+                            {
+                                input = candidateInput;
+                                decision = candidateDecision;
+                                probe = candidateProbe;
+                            }
+                        }
+                        if (input is null || decision is null || probe is null)
+                            return new(ApprovedActionClaimOutcome.Stale, null,
+                                ActionSafetyReason.StalePin);
                         return new(ApprovedActionClaimOutcome.Claimed,
-                            new(attempt.Claim, attempt.Item, input, decision, probe.Observations, attempt.PrecedingOutcomes), ActionSafetyReason.None);
+                            new(attempt.Claim, attempt.Item, input, decision,
+                                probe.Observations, attempt.PrecedingOutcomes),
+                            ActionSafetyReason.None);
                     }), token).ConfigureAwait(false);
             }, caller).ConfigureAwait(false);
         }
@@ -245,11 +269,12 @@ public sealed partial class ReviewCoordinator
     private static ActionSafetyInput SafetyInput(ApprovedActionRequest request, CandidateGroup group,
         ActionGroupProbeResult probe, ImmutableArray<PriorActionOutcome> outcomes)
     {
-        var dependent = outcomes.Where(outcome => outcome.GroupId == group.GroupId).ToArray();
+        var memberIds = group.Members.Select(member => member.Token.OccurrenceId)
+            .ToImmutableHashSet();
+        var dependent = outcomes.Where(outcome => memberIds.Contains(outcome.OccurrenceId)).ToArray();
         var completed = dependent.Where(outcome => outcome.Disposition != PriorActionDisposition.Pending)
             .Select(outcome => outcome.OccurrenceId).ToImmutableHashSet();
-        var approved = request.Items.Where(item => item.GroupId == group.GroupId)
-            .Select(item => item.Occurrence.OccurrenceId).ToImmutableHashSet();
+        var approved = request.SelectedOccurrenceIds.Where(memberIds.Contains).ToImmutableHashSet();
         var occurrences = probe.Observations.Select(observation =>
         {
             var original = observation.ApprovedOccurrence;

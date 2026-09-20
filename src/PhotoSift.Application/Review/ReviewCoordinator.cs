@@ -318,20 +318,128 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
             || pin.ScopeRevision <= 0 || request.Rules.ScopeRevision != pin.ScopeRevision
             || request.Rules.RuleSetRevision != pin.RuleSetRevision || pin.RuleSetRevision <= 0
             || request.Scan.Groups.IsDefault || request.Scan.Occurrences.IsDefault) return false;
-        var ids = new HashSet<long>();
+        var occurrences = new Dictionary<long, ScanFileOccurrence>();
+        foreach (var occurrence in request.Scan.Occurrences)
+            if (!occurrences.TryAdd(occurrence.Token.OccurrenceId, occurrence)) return false;
         var groups = new HashSet<Guid>();
         foreach (var group in request.Scan.Groups)
         {
-            if (group.Pin != pin || group.Category != CandidateCategory.Exact || group.GroupId == Guid.Empty
-                || !groups.Add(group.GroupId) || group.Members.IsDefault) return false;
+            if (group.Pin != pin || group.GroupId == Guid.Empty || !groups.Add(group.GroupId)
+                || group.Members.IsDefault || group.Members.Length < 2
+                || group.Equality.IsDefault || group.Similarity.IsDefault
+                || group.KeeperOccurrenceId is not null || !Enum.IsDefined(group.Category)) return false;
+            var members = new Dictionary<long, ScanFileOccurrence>();
             foreach (var member in group.Members)
             {
                 if (member.Token.Pin != pin || member.Token.OccurrenceRevision <= 0 || member.Token.Attempt <= 0
-                    || !ids.Add(member.Token.OccurrenceId) || member.Content is null || member.PhysicalFileKey is null
-                    || member.Exact.State != ScanStageState.Succeeded || !request.Scan.Occurrences.Contains(member)) return false;
+                    || !members.TryAdd(member.Token.OccurrenceId, member)
+                    || !occurrences.TryGetValue(member.Token.OccurrenceId, out var occurrence)
+                    || occurrence != member || member.Content is null || member.PhysicalFileKey is null
+                    || member.Content.PhysicalFileKey != member.PhysicalFileKey
+                    || member.Enumerate.State != ScanStageState.Succeeded
+                    || member.Exact.State != ScanStageState.Succeeded) return false;
             }
+            if (!ValidCategoryEvidence(group, members)) return false;
         }
         return true;
+    }
+
+    private static bool ValidCategoryEvidence(
+        CandidateGroup group,
+        IReadOnlyDictionary<long, ScanFileOccurrence> members) => group.Category switch
+    {
+        CandidateCategory.Exact => !group.Uncertain && group.Similarity.IsEmpty
+            && ValidEquality(group, members),
+        CandidateCategory.NearDuplicate => !group.Uncertain && group.Equality.IsEmpty
+            && ValidSimilarity(group, members, NearRelationshipKind.Near),
+        CandidateCategory.Uncertain => group.Uncertain && group.Equality.IsEmpty
+            && ValidSimilarity(group, members, NearRelationshipKind.Uncertain),
+        _ => false,
+    };
+
+    private static bool ValidEquality(
+        CandidateGroup group,
+        IReadOnlyDictionary<long, ScanFileOccurrence> members)
+    {
+        if (group.Equality.IsEmpty) return false;
+        var physical = group.Members.Select(member => member.PhysicalFileKey!.Value)
+            .Distinct().ToArray();
+        if (physical.Length < 2) return false;
+        var connected = new Dictionary<PhysicalFileKey, HashSet<PhysicalFileKey>>();
+        foreach (var key in physical) connected.Add(key, []);
+        var edges = new HashSet<(long Left, long Right)>();
+        foreach (var edge in group.Equality)
+        {
+            if (!members.TryGetValue(edge.Left.OccurrenceId, out var left)
+                || !members.TryGetValue(edge.Right.OccurrenceId, out var right)
+                || edge.Left != left.Token || edge.Right != right.Token
+                || edge.LeftContent != left.Content || edge.RightContent != right.Content
+                || edge.LeftContent.PhysicalFileKey == edge.RightContent.PhysicalFileKey
+                || edge.LeftContent.ByteLength != edge.RightContent.ByteLength
+                || !StringComparer.OrdinalIgnoreCase.Equals(
+                    edge.LeftContent.Sha256, edge.RightContent.Sha256)) return false;
+            var pair = edge.Left.OccurrenceId < edge.Right.OccurrenceId
+                ? (edge.Left.OccurrenceId, edge.Right.OccurrenceId)
+                : (edge.Right.OccurrenceId, edge.Left.OccurrenceId);
+            if (!edges.Add(pair)) return false;
+            connected[edge.LeftContent.PhysicalFileKey].Add(edge.RightContent.PhysicalFileKey);
+            connected[edge.RightContent.PhysicalFileKey].Add(edge.LeftContent.PhysicalFileKey);
+        }
+        return Connected(physical[0], connected) == physical.Length;
+    }
+
+    private static bool ValidSimilarity(
+        CandidateGroup group,
+        IReadOnlyDictionary<long, ScanFileOccurrence> members,
+        NearRelationshipKind expectedKind)
+    {
+        if (group.Similarity.IsEmpty || group.Members.Any(member =>
+                member.VisualFeatures.State != ScanStageState.Succeeded
+                || member.NearDuplicate.State != ScanStageState.Succeeded)) return false;
+        var connected = members.Keys.ToDictionary(id => id, _ => new HashSet<long>());
+        var edges = new HashSet<(long Left, long Right)>();
+        foreach (var edge in group.Similarity)
+        {
+            if (!members.TryGetValue(edge.Left.OccurrenceId, out var left)
+                || !members.TryGetValue(edge.Right.OccurrenceId, out var right)
+                || edge.Left != left.Token || edge.Right != right.Token
+                || edge.Left == edge.Right || edge.Kind != expectedKind
+                || SameBytes(left.Content!, right.Content!)
+                || !ValidDistance(edge, expectedKind)) return false;
+            var pair = edge.Left.OccurrenceId < edge.Right.OccurrenceId
+                ? (edge.Left.OccurrenceId, edge.Right.OccurrenceId)
+                : (edge.Right.OccurrenceId, edge.Left.OccurrenceId);
+            if (!edges.Add(pair)) return false;
+            connected[pair.Item1].Add(pair.Item2);
+            connected[pair.Item2].Add(pair.Item1);
+        }
+        return Connected(group.Members[0].Token.OccurrenceId, connected) == members.Count;
+    }
+
+    private static bool ValidDistance(NearDuplicateEvidence edge, NearRelationshipKind kind)
+    {
+        if (edge.HammingDistance < 0 || edge.ColorDistance < 0) return false;
+        var near = edge.HammingDistance <= NearDuplicateThresholds.NearHammingMaximum
+            && edge.ColorDistance <= NearDuplicateThresholds.NearColorMaximum;
+        return kind == NearRelationshipKind.Near ? near
+            : !near && edge.HammingDistance <= NearDuplicateThresholds.UncertainHammingMaximum
+                && edge.ColorDistance <= NearDuplicateThresholds.UncertainColorMaximum;
+    }
+
+    private static bool SameBytes(ContentRevision left, ContentRevision right) =>
+        left.ByteLength == right.ByteLength
+        && StringComparer.OrdinalIgnoreCase.Equals(left.Sha256, right.Sha256);
+
+    private static int Connected<T>(T start, IReadOnlyDictionary<T, HashSet<T>> graph)
+        where T : notnull
+    {
+        var visited = new HashSet<T> { start };
+        var pending = new Queue<T>();
+        pending.Enqueue(start);
+        while (pending.TryDequeue(out var current))
+            foreach (var peer in graph[current])
+                if (visited.Add(peer)) pending.Enqueue(peer);
+        return visited.Count;
     }
 
     private async Task RunOperationAsync(Operation operation, CancellationToken caller)

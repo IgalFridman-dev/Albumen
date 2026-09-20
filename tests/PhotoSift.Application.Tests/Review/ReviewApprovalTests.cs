@@ -149,11 +149,11 @@ internal sealed class ApprovalFixture : IAsyncDisposable
             .ToImmutableArray();
         var firstGroup = new CandidateGroup(
             Guid.Parse("75ad325f-78ed-4c94-aa49-7e30b70c36c8"), 3, context.Pin,
-            CandidateCategory.Exact, first, [], false, null,
+            CandidateCategory.Exact, first, ReviewFixture.ExactEvidence(first), false, null,
             new(99999, RecoveryUnavailableReason.None));
         var secondGroup = new CandidateGroup(
             Guid.Parse("ef4ce190-1cbd-407e-8f06-a6e913d647f1"), 7, context.Pin,
-            CandidateCategory.Exact, second, [], false, null,
+            CandidateCategory.Exact, second, ReviewFixture.ExactEvidence(second), false, null,
             new(99999, RecoveryUnavailableReason.None));
         var scopeEvidence = new ScopePreflightEvidence(context.Scope, ScopeVolumeKind.Fixed,
             ScopeCloudState.Local, ScopeTraversalState.Complete, new(1, 0, 0, 0), new(0, 0));

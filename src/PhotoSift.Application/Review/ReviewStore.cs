@@ -50,8 +50,14 @@ internal sealed class ReviewStore
         && !right.Items.IsDefault && !right.SelectedOccurrenceIds.IsDefault
         && left.Items.SequenceEqual(right.Items) && left.SelectedOccurrenceIds.SequenceEqual(right.SelectedOccurrenceIds);
 
-    internal ImmutableArray<CandidateGroup> CaptureActionGroups() => Current.Groups
-        .Where(group => group.SelectedOccurrenceIds.Count > 0).Select(ForPolicy).ToImmutableArray();
+    internal ImmutableArray<CandidateGroup> CaptureActionGroups()
+    {
+        var selected = Current.ApprovedRequest?.SelectedOccurrenceIds.ToImmutableHashSet()
+            ?? GlobalSelection(Current.Groups);
+        return Current.Groups.Where(group => group.Members.Any(member =>
+                selected.Contains(member.Occurrence.Token.OccurrenceId)))
+            .Select(ForPolicy).ToImmutableArray();
+    }
 
     internal ImmutableArray<DeliberateOverrideEvidence> ActionEvidence => attachedOverrideEvidence.Values
         .OrderBy(evidence => evidence.EvidenceId.Value).ToImmutableArray();
@@ -150,8 +156,35 @@ internal sealed class ReviewStore
         var proposed = command.Kind == SelectionCommandKind.ReplaceFocusedGroup ? command.OccurrenceIds.ToImmutableHashSet()
             : group.SelectedOccurrenceIds.SymmetricExcept(command.OccurrenceIds);
         if (proposed.SetEquals(group.SelectedOccurrenceIds)) return Result(ReviewCommandOutcome.Neutral);
+        var selectedElsewhere = Current.Groups.Where(candidate => candidate != group)
+            .SelectMany(candidate => candidate.SelectedOccurrenceIds).ToImmutableHashSet();
+        if (proposed.Overlaps(selectedElsewhere)) return Result(ReviewCommandOutcome.Invalid);
+        var projectedGroups = Current.Groups.Replace(group, group with
+        {
+            SelectedOccurrenceIds = proposed,
+        });
+        var globalSelection = GlobalSelection(projectedGroups);
         var candidate = ForPolicy(group);
-        var decision = SurvivorPolicy.Evaluate(candidate, eligible, proposed);
+        var combined = SelectionFor(group, globalSelection);
+        var decision = SurvivorPolicy.Evaluate(candidate, eligible, combined);
+        if (!combined.SetEquals(proposed) && decision.Kind != SurvivorDecisionKind.Allowed)
+            return Result(ReviewCommandOutcome.Invalid);
+        foreach (var other in Current.Groups.Where(candidateGroup => candidateGroup != group))
+        {
+            var otherCombined = SelectionFor(other, globalSelection);
+            if (otherCombined.SetEquals(other.SelectedOccurrenceIds)) continue;
+            var otherDecision = SurvivorPolicy.Evaluate(ForPolicy(other), Eligible(other),
+                otherCombined);
+            if (otherDecision.Kind == SurvivorDecisionKind.Allowed) continue;
+            if (otherDecision.Kind != SurvivorDecisionKind.OverrideRequired
+                || !otherCombined.SetEquals(other.SelectedOccurrenceIds)
+                || other.OverrideEvidenceId is not { } evidenceId
+                || !attachedOverrideEvidence.TryGetValue(other.Candidate.GroupId, out var evidence)
+                || evidence.EvidenceId != evidenceId
+                || Current.Pin is not { } currentPin
+                || !EvidenceMatchesSelection(evidence, currentPin, other, otherCombined))
+                return Result(ReviewCommandOutcome.Invalid);
+        }
         if (decision.Kind == SurvivorDecisionKind.OverrideRequired)
         {
             InvalidateProposal();
@@ -350,7 +383,20 @@ internal sealed class ReviewStore
                 .Select(member => (Group: group, Member: member)))
             .OrderBy(value => value.Member.Occurrence.Token.OccurrenceId)
             .ToArray();
-        var items = selected.Select(value => new ApprovedActionItem(
+        var canonical = new Dictionary<long, (ReviewGroupSnapshot Group, ReviewMemberSnapshot Member)>();
+        foreach (var value in selected)
+        {
+            var id = value.Member.Occurrence.Token.OccurrenceId;
+            if (canonical.TryGetValue(id, out var existing))
+            {
+                if (existing.Member.Occurrence != value.Member.Occurrence)
+                    return Result(ReviewCommandOutcome.Invalid);
+                continue;
+            }
+            canonical.Add(id, value);
+        }
+        var items = canonical.Values.OrderBy(value => value.Member.Occurrence.Token.OccurrenceId)
+            .Select(value => new ApprovedActionItem(
                 value.Group.Candidate.GroupId,
                 value.Group.Candidate.GroupRevision,
                 value.Member.Occurrence.Token,
@@ -389,18 +435,23 @@ internal sealed class ReviewStore
 
     private void Refresh(ImmutableArray<ReviewGroupSnapshot> groups)
     {
-        groups = groups.Select(g => g with { Recovery = SelectionAccounting.Calculate(ForPolicy(g), Eligible(g), g.SelectedOccurrenceIds) }).ToImmutableArray();
-        var members = groups.SelectMany(g => g.Members).ToArray();
-        var pending = members.LongCount(m => m.Eligibility == ReviewEligibilityState.PendingRevalidation);
+        var selected = GlobalSelection(groups);
+        groups = groups.Select(g => g with
+        {
+            Recovery = SelectionAccounting.Calculate(ForPolicy(g), Eligible(g),
+                SelectionFor(g, selected)),
+        }).ToImmutableArray();
+        var counts = ReviewMemberCounts(groups, selected);
         Current = Current with
         {
             Groups = groups,
-            Status = Current.Status == ReviewStatus.Faulted ? ReviewStatus.Faulted : pending == 0 ? ReviewStatus.Ready : ReviewStatus.Revalidating,
+            Status = Current.Status == ReviewStatus.Faulted ? ReviewStatus.Faulted
+                : counts.Pending == 0 ? ReviewStatus.Ready : ReviewStatus.Revalidating,
             Unresolved = Current.Unresolved with
             {
-                PendingReviewMembers = pending,
-                UnavailableReviewMembers = members.LongCount(m => m.Eligibility == ReviewEligibilityState.Unavailable),
-                UnselectedSurvivorMembers = members.LongCount(m => m.Eligibility == ReviewEligibilityState.Eligible && !m.Selected),
+                PendingReviewMembers = counts.Pending,
+                UnavailableReviewMembers = counts.Unavailable,
+                UnselectedSurvivorMembers = counts.Unselected,
             },
         };
     }
@@ -445,6 +496,18 @@ internal sealed class ReviewStore
         var expected = ImmutableArray.CreateBuilder<DeliberateOverrideEvidence>();
         var selectedCount = 0;
         var selectedIds = new HashSet<long>();
+        var globalSelection = GlobalSelection(Current.Groups);
+        foreach (var selectedId in globalSelection)
+        {
+            var copies = Current.Groups.SelectMany(group => group.Members)
+                .Where(member => member.Occurrence.Token.OccurrenceId == selectedId)
+                .ToArray();
+            if (copies.Length == 0 || copies.Any(member =>
+                    member.Eligibility != ReviewEligibilityState.Eligible
+                    || member.Reason != ReviewUnavailableReason.None
+                    || member.Occurrence != copies[0].Occurrence))
+                return Result(ReviewCommandOutcome.Invalid);
+        }
         foreach (var group in Current.Groups)
         {
             if (!originals.TryGetValue(group.Candidate.GroupId, out var original)
@@ -461,8 +524,9 @@ internal sealed class ReviewStore
 
             var eligible = Eligible(group);
             var selected = group.SelectedOccurrenceIds;
+            var combined = SelectionFor(group, globalSelection);
             if (!selected.IsSubsetOf(eligible)
-                || group.Recovery != SelectionAccounting.Calculate(ForPolicy(group), eligible, selected))
+                || group.Recovery != SelectionAccounting.Calculate(ForPolicy(group), eligible, combined))
             {
                 return Result(ReviewCommandOutcome.Invalid);
             }
@@ -494,7 +558,10 @@ internal sealed class ReviewStore
             if (selected.Count == 0)
             {
                 if (group.OverrideEvidenceId is not null
-                    || attachedOverrideEvidence.ContainsKey(group.Candidate.GroupId))
+                    || attachedOverrideEvidence.ContainsKey(group.Candidate.GroupId)
+                    || !combined.IsEmpty
+                    && SurvivorPolicy.Evaluate(ForPolicy(group), eligible, combined).Kind
+                        != SurvivorDecisionKind.Allowed)
                 {
                     return Result(ReviewCommandOutcome.Invalid);
                 }
@@ -502,7 +569,7 @@ internal sealed class ReviewStore
                 continue;
             }
 
-            var survivor = SurvivorPolicy.Evaluate(ForPolicy(group), eligible, selected);
+            var survivor = SurvivorPolicy.Evaluate(ForPolicy(group), eligible, combined);
             var hasEvidence = attachedOverrideEvidence.TryGetValue(
                 group.Candidate.GroupId, out var evidence);
             if (group.OverrideEvidenceId is not null || hasEvidence)
@@ -510,6 +577,7 @@ internal sealed class ReviewStore
                 if (group.OverrideEvidenceId is not { } attachedEvidenceId
                     || !hasEvidence
                     || evidence!.EvidenceId != attachedEvidenceId
+                    || !combined.SetEquals(selected)
                     || !EvidenceMatchesSelection(evidence, pin, group, selected)
                     || survivor.Kind is not (SurvivorDecisionKind.Allowed
                         or SurvivorDecisionKind.OverrideRequired))
@@ -562,18 +630,16 @@ internal sealed class ReviewStore
             return false;
         }
 
-        var members = Current.Groups.SelectMany(group => group.Members).ToArray();
+        var memberCounts = ReviewMemberCounts(Current.Groups,
+            GlobalSelection(Current.Groups));
         var expected = new ReviewUnresolvedSummary(
             openRequest.Scan.Enumeration.State == ScanStageState.Succeeded ? 0 : 1,
             openRequest.Scan.Counts.Failed,
             openRequest.Scan.Counts.Canceled,
             openRequest.Scan.Counts.Outstanding,
-            members.LongCount(member =>
-                member.Eligibility == ReviewEligibilityState.PendingRevalidation),
-            members.LongCount(member =>
-                member.Eligibility == ReviewEligibilityState.Unavailable),
-            members.LongCount(member =>
-                member.Eligibility == ReviewEligibilityState.Eligible && !member.Selected));
+            memberCounts.Pending,
+            memberCounts.Unavailable,
+            memberCounts.Unselected);
         if (Current.Unresolved != expected)
         {
             return false;
@@ -581,7 +647,6 @@ internal sealed class ReviewStore
 
         return Current.Coverage == ScanStatus.Complete
             ? openRequest.Scan.Enumeration.State == ScanStageState.Succeeded
-              && openRequest.Scan.Counts.Failed == 0
               && openRequest.Scan.Counts.Canceled == 0
               && openRequest.Scan.Counts.Outstanding == 0
             : expected.IncompleteEnumeration > 0
@@ -597,8 +662,16 @@ internal sealed class ReviewStore
         ScanPin scan,
         ImmutableHashSet<long> selected)
     {
-        var members = groups.SelectMany(group => group.Members)
-            .Select(member => member.Occurrence)
+        var membersById = new Dictionary<long, ScanFileOccurrence>();
+        foreach (var member in groups.SelectMany(group => group.Members)
+                     .Select(member => member.Occurrence))
+        {
+            var id = member.Token.OccurrenceId;
+            if (membersById.TryGetValue(id, out var existing) && existing != member)
+                return new(null, SelectionRecoveryUnavailableReason.InconsistentFacts);
+            membersById[id] = member;
+        }
+        var members = membersById.Values.OrderBy(member => member.Token.OccurrenceId)
             .ToImmutableArray();
         var eligible = groups.SelectMany(group => group.Members)
             .Where(member => member.Eligibility == ReviewEligibilityState.Eligible)
@@ -713,6 +786,32 @@ internal sealed class ReviewStore
         && left.ProposedSelectedOccurrenceIds.SequenceEqual(right.ProposedSelectedOccurrenceIds);
     private static ImmutableHashSet<long> Eligible(ReviewGroupSnapshot group) => group.Members
         .Where(m => m.Eligibility == ReviewEligibilityState.Eligible).Select(m => m.Occurrence.Token.OccurrenceId).ToImmutableHashSet();
+    private static ImmutableHashSet<long> GlobalSelection(
+        ImmutableArray<ReviewGroupSnapshot> groups) => groups
+        .SelectMany(group => group.SelectedOccurrenceIds).ToImmutableHashSet();
+    private static ImmutableHashSet<long> SelectionFor(
+        ReviewGroupSnapshot group,
+        ImmutableHashSet<long> selected) => group.Members
+        .Where(member => selected.Contains(member.Occurrence.Token.OccurrenceId))
+        .Select(member => member.Occurrence.Token.OccurrenceId).ToImmutableHashSet();
+    private static (long Pending, long Unavailable, long Unselected) ReviewMemberCounts(
+        ImmutableArray<ReviewGroupSnapshot> groups,
+        ImmutableHashSet<long> selected)
+    {
+        long pending = 0;
+        long unavailable = 0;
+        long unselected = 0;
+        foreach (var occurrence in groups.SelectMany(group => group.Members)
+                     .GroupBy(member => member.Occurrence.Token.OccurrenceId))
+        {
+            if (occurrence.Any(member => member.Eligibility == ReviewEligibilityState.PendingRevalidation))
+                pending++;
+            else if (occurrence.Any(member => member.Eligibility == ReviewEligibilityState.Unavailable))
+                unavailable++;
+            else if (!selected.Contains(occurrence.Key)) unselected++;
+        }
+        return (pending, unavailable, unselected);
+    }
     private static CandidateGroup ForPolicy(ReviewGroupSnapshot group) => group.Candidate with
     { Members = group.Members.Select(m => m.Occurrence).ToImmutableArray() };
 }

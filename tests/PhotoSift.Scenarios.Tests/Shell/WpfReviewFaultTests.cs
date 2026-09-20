@@ -166,7 +166,9 @@ public sealed class WpfReviewFaultTests
                 new(key, 17, new string('A', 64)), new(512, 1, true));
         }).ToImmutableArray();
         var group = new CandidateGroup(Guid.Parse("82000000-0000-0000-0000-000000000002"), 1, pin,
-            CandidateCategory.Exact, members, [], false, null, new(512, RecoveryUnavailableReason.None));
+            CandidateCategory.Exact, members,
+            [new(members[0].Token, members[1].Token, members[0].Content!, members[1].Content!)],
+            false, null, new(512, RecoveryUnavailableReason.None));
         return new(pin, ScanStatus.Complete, new(ScanStageState.Succeeded, ScanReason.None),
             members, [group], new(2, 2, 0, 0, 0, 0));
     }
