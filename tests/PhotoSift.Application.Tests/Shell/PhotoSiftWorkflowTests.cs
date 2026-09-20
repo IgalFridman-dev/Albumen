@@ -259,8 +259,12 @@ public sealed class PhotoSiftWorkflowTests
     }
 
     [Theory]
+    [InlineData("members")]
+    [InlineData("token")]
     [InlineData("discoveredPath")]
     [InlineData("resolvedPath")]
+    [InlineData("physicalKey")]
+    [InlineData("content")]
     [InlineData("allocation")]
     [InlineData("recovery")]
     [InlineData("recoveryReason")]
@@ -293,6 +297,73 @@ public sealed class PhotoSiftWorkflowTests
             Assert.Equal(WorkflowPhase.Review, workflow.Current.CurrentPhase);
         }
         finally { review.Release.TrySetResult(true); await f.Pump(opening); }
+    }
+
+    [Theory]
+    [InlineData("enumerate")]
+    [InlineData("equality")]
+    [InlineData("equalityEndpoint")]
+    [InlineData("equalityToken")]
+    [InlineData("equalityContent")]
+    [InlineData("equalityMultiplicity")]
+    [InlineData("uncertain")]
+    [InlineData("keeper")]
+    public async Task InvalidSameRevisionMutationCannotNavigateOrRetainOldReviewAuthority(string change)
+    {
+        await using var f = new ReviewFixture();
+        var scan = new ScanOwner();
+        var review = new AdmissionBarrierReview(f.Owner);
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(f.Request.Scope), scan, f.Scheduler, review);
+        await f.Pump(workflow.ContinueAsync());
+        await f.Pump(workflow.ConfirmExactRulesAsync());
+        var original = f.Request.Scan.Groups[0];
+        original = original with { Equality = ReviewFixture.ExactEvidence(original.Members) };
+        var changed = ChangeCandidate(original, change);
+        var newer = f.Request.Scan with { Groups = [changed], Occurrences = changed.Members };
+        var navigatedOld = false;
+        workflow.SnapshotChanged += (_, snapshot) => navigatedOld |= snapshot.CurrentPhase == WorkflowPhase.Review
+            && snapshot.Review.Groups.Any(group => ReferenceEquals(group.Candidate, original));
+        scan.Publish(f.Request.Scan with { Groups = [original] });
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.Scan));
+        var opening = workflow.OpenReviewAsync();
+        try
+        {
+            await f.Pump(review.Captured.Task);
+            scan.Publish(newer);
+            review.Release.TrySetResult(true);
+            await f.Pump(opening);
+
+            Assert.False(navigatedOld);
+            Assert.Equal(WorkflowPhase.Scan, workflow.Current.CurrentPhase);
+            Assert.Null(f.Owner.Current.Pin);
+            Assert.Equal(ReviewStatus.Closed, f.Owner.Current.Status);
+            Assert.Empty(workflow.Current.Review.Groups);
+        }
+        finally { review.Release.TrySetResult(true); await f.Pump(opening); }
+    }
+
+    [Theory]
+    [InlineData(CandidateCategory.NearDuplicate)]
+    [InlineData(CandidateCategory.Uncertain)]
+    public async Task ExactOnlyWorkflowCannotAdmitNearCategoryEvidence(CandidateCategory category)
+    {
+        await using var f = new ReviewFixture();
+        var request = ReviewCoordinatorTests.MixedRequest(f.Request, includeTerminalFailures: false);
+        var group = request.Scan.Groups.Single(candidate => candidate.Category == category);
+        var scan = new ScanOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(request.Scope), scan, f.Scheduler, f.Owner);
+        await f.Pump(workflow.ContinueAsync());
+        await f.Pump(workflow.SetScanOptionsAsync(new(
+            ExactDuplicateMode.Enabled, NearDuplicateMode.Disabled)));
+        await f.Pump(workflow.ConfirmExactRulesAsync());
+        scan.Publish(request.Scan with { Groups = [group] });
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.Scan));
+
+        await f.Pump(workflow.OpenReviewAsync());
+
+        Assert.Equal(WorkflowPhase.Scan, workflow.Current.CurrentPhase);
+        Assert.Equal(ReviewStatus.Closed, f.Owner.Current.Status);
+        Assert.Empty(f.Executor.Runs);
     }
 
     [Fact]
@@ -742,6 +813,17 @@ public sealed class PhotoSiftWorkflowTests
         Assert.Equal([1L], approved.ApprovedRequest!.SelectedOccurrenceIds);
         Assert.Single(approved.ApprovedRequest.Items);
         Assert.Equal(2, approved.ApprovedRequest.Disclosure.Unresolved.FailedScanRows);
+        var terminalFailures = request.Scan.Occurrences
+            .Where(row => row.VisualFeatures.State == ScanStageState.FailedRetryable
+                || row.NearDuplicate.State == ScanStageState.FailedRetryable)
+            .ToArray();
+        Assert.Collection(terminalFailures, _ => { }, _ => { });
+        Assert.All(terminalFailures, row =>
+        {
+            Assert.Equal(ScanStageState.Succeeded, row.Enumerate.State);
+            Assert.Equal(ScanStageState.Succeeded, row.Exact.State);
+            Assert.NotNull(row.Content);
+        });
         Assert.Equal(3, approved.ApprovedRequest.Disclosure.Unresolved.UnselectedSurvivorMembers);
         Assert.Equal(4096, approved.ApprovedRequest.Disclosure.Recovery.Bytes);
         Assert.True(workflow.Current.Review.Sealed);
@@ -1168,6 +1250,39 @@ public sealed class PhotoSiftWorkflowTests
     private static CandidateGroup ChangeCandidate(CandidateGroup group, string change)
     {
         var member = group.Members[0];
+        if (change == "members")
+        {
+            var members = group.Members.Take(2).ToImmutableArray();
+            return group with { Members = members, Equality = ReviewFixture.ExactEvidence(members) };
+        }
+        if (change == "token")
+        {
+            var changed = ReviewFixture.Copy(member,
+                token: member.Token with { Attempt = 2 });
+            var members = group.Members.SetItem(0, changed);
+            return group with { Members = members, Equality = ReviewFixture.ExactEvidence(members) };
+        }
+        if (change == "physicalKey")
+        {
+            var replacementKey = group.Members[1].PhysicalFileKey;
+            var replacementContent = new ContentRevision(
+                replacementKey!.Value,
+                member.Content!.ByteLength,
+                member.Content.Sha256);
+            var changed = ReviewFixture.Copy(member, key: replacementKey,
+                content: replacementContent);
+            var members = group.Members.SetItem(0, changed);
+            return group with { Members = members, Equality = ReviewFixture.ExactEvidence(members) };
+        }
+        if (change == "content")
+        {
+            var members = group.Members.Select(value => ReviewFixture.Copy(value,
+                content: new ContentRevision(
+                    value.Content!.PhysicalFileKey,
+                    value.Content.ByteLength,
+                    new string('F', 64)))).ToImmutableArray();
+            return group with { Members = members, Equality = ReviewFixture.ExactEvidence(members) };
+        }
         var key = change == "physicalKey" ? group.Members[1].PhysicalFileKey : member.PhysicalFileKey;
         var altered = new ScanFileOccurrence(change == "token" ? member.Token with { Attempt = 2 } : member.Token,
             change == "discoveredPath" ? member.DiscoveredPath + ".changed" : member.DiscoveredPath,
@@ -1178,8 +1293,9 @@ public sealed class PhotoSiftWorkflowTests
             change == "allocation" ? new(8192, 1, true) : member.Allocation);
         return change switch
         {
-            "members" => group with { Members = [.. group.Members.Take(2)] },
             "equality" => group with { Equality = [] },
+            "equalityEndpoint" => group with { Equality = [group.Equality[0] with
+                { Left = member.Token with { OccurrenceId = 999 } }] },
             "equalityToken" => group with { Equality = [group.Equality[0] with { Left = member.Token with { Attempt = 2 } }] },
             "equalityContent" => group with { Equality = [group.Equality[0] with
                 { LeftContent = new(member.PhysicalFileKey!.Value, 2, member.Content!.Sha256) }] },

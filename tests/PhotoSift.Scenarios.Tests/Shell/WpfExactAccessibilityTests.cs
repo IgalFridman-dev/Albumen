@@ -240,6 +240,46 @@ public sealed class WpfExactAccessibilityTests
         });
     }
 
+    [Fact]
+    public void OpenReviewFailureRaisesLiveAnnouncementWhilePhaseRemainsScan()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = new ExactShellFixture();
+            var failedPin = fixture.PublishFreshScan(ScanStatus.Complete);
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            try
+            {
+                window.Show();
+                window.Activate();
+                window.UpdateLayout();
+                Drain();
+                var handle = new WindowInteropHelper(window).Handle;
+                Assert.NotEqual(nint.Zero, handle);
+
+                VerifyReviewFailureAnnouncementOnMta(handle,
+                    () => fixture.ViewModel.OpenReviewCommand.ExecuteAsync());
+
+                Assert.True(fixture.ViewModel.IsScanPhase);
+                Assert.Contains("invalid, stale, or faulted", fixture.ViewModel.ReviewAnnouncement,
+                    StringComparison.Ordinal);
+
+                fixture.PublishScan(failedPin, ScanStatus.Incomplete, includeOccurrence: true);
+                Drain();
+
+                Assert.Contains("invalid, stale, or faulted", fixture.ViewModel.ReviewAnnouncement,
+                    StringComparison.Ordinal);
+
+                fixture.PublishFreshScan();
+                Drain();
+
+                Assert.True(fixture.ViewModel.IsScanPhase);
+                Assert.Empty(fixture.ViewModel.ReviewAnnouncement);
+            }
+            finally { window.Close(); }
+        });
+    }
+
     // UIA uses window messages, so a client inspecting its own UI must use a
     // windowless MTA while the window's STA continues pumping. Registration and
     // removal stay on that same MTA for the lifetime of both assertions.
@@ -318,6 +358,86 @@ public sealed class WpfExactAccessibilityTests
                 $"No {requiredStatus} live-region announcement arrived within four seconds. Last status: {observed ?? "none"}.");
             var status = Assert.IsType<string>(observed);
             if (status.StartsWith(requiredStatus + ";", StringComparison.Ordinal)) return status;
+        }
+    }
+
+    private static void VerifyReviewFailureAnnouncementOnMta(nint handle, Func<Task> publish)
+    {
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var frame = new DispatcherFrame();
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ExceptionDispatchInfo? failure = null;
+        var client = new Thread(() =>
+        {
+            try
+            {
+                var root = AutomationElement.FromHandle(handle);
+                var element = root.FindFirst(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.NameProperty, "Review command status"));
+                Assert.NotNull(element);
+                using var statuses = new BlockingCollection<string>();
+                AutomationEventHandler handler = (sender, _) =>
+                {
+                    if (sender is AutomationElement source)
+                        statuses.Add(source.Current.ItemStatus, cancellationToken);
+                };
+                Automation.AddAutomationEventHandler(AutomationElementIdentifiers.LiveRegionChangedEvent,
+                    element, TreeScope.Element, handler);
+                try
+                {
+                    Task? published = null;
+                    var operation = dispatcher.BeginInvoke(new Action(() => published = publish()));
+                    operation.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken)
+                        .GetAwaiter().GetResult();
+                    Assert.NotNull(published);
+                    published.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken)
+                        .GetAwaiter().GetResult();
+                    Assert.Contains("invalid, stale, or faulted",
+                        NextReviewFailureAnnouncement(statuses, cancellationToken),
+                        StringComparison.Ordinal);
+                }
+                finally
+                {
+                    Automation.RemoveAutomationEventHandler(AutomationElementIdentifiers.LiveRegionChangedEvent,
+                        element, handler);
+                }
+            }
+            catch (Exception error)
+            {
+                failure = ExceptionDispatchInfo.Capture(new InvalidOperationException(
+                    $"Review failure UIA MTA verification failed ({error.GetType().Name}, HRESULT 0x{error.HResult:X8}).", error));
+            }
+            finally
+            {
+                finished.SetResult();
+                dispatcher.BeginInvoke(new Action(() => frame.Continue = false));
+            }
+        }) { IsBackground = true };
+        client.SetApartmentState(ApartmentState.MTA);
+        var timeout = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(8) };
+        timeout.Tick += (_, _) => frame.Continue = false;
+        client.Start();
+        timeout.Start();
+        try { Dispatcher.PushFrame(frame); }
+        finally { timeout.Stop(); }
+        Assert.True(finished.Task.IsCompletedSuccessfully, "The Review failure UIA client exceeded eight seconds.");
+        failure?.Throw();
+    }
+
+    private static string NextReviewFailureAnnouncement(
+        BlockingCollection<string> statuses,
+        CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.GetTimestamp();
+        string? observed = null;
+        while (true)
+        {
+            var remaining = 4000 - (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            Assert.True(remaining > 0 && statuses.TryTake(out observed, remaining, cancellationToken),
+                $"No Review failure live-region announcement arrived within four seconds. Last status: {observed ?? "none"}.");
+            var status = Assert.IsType<string>(observed);
+            if (status.StartsWith("Review could not open", StringComparison.Ordinal)) return status;
         }
     }
     private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
