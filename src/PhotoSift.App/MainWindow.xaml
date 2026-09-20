@@ -597,10 +597,6 @@
                     <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
                                   ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
                                   AutomationProperties.Name="Scan outcome categories" />
-                    <app:ReviewAnnouncementTextBlock x:Name="ReviewAnnouncementText"
-                               Text="{Binding ReviewAnnouncement}" TextWrapping="Wrap"
-                               AutomationProperties.Name="Review command status"
-                               AutomationProperties.LiveSetting="Polite" />
                 </StackPanel>
                 </ScrollViewer>
 
@@ -783,9 +779,14 @@
             </app:ReviewAutomationBorder>
         </Grid>
 
-        <TextBlock x:Name="SourceMutationNoticeText" Grid.Row="2"
-                   Margin="0,16,0,0"
-                   TextWrapping="Wrap"
-                   Text="{Binding SourceMutationNotice}" />
+        <StackPanel Grid.Row="2" Margin="0,16,0,0">
+            <app:ReviewAnnouncementTextBlock x:Name="ReviewAnnouncementText"
+                       Text="{Binding ReviewAnnouncement}" TextWrapping="Wrap"
+                       AutomationProperties.Name="Review command status"
+                       AutomationProperties.LiveSetting="Polite" />
+            <TextBlock x:Name="SourceMutationNoticeText"
+                       TextWrapping="Wrap"
+                       Text="{Binding SourceMutationNotice}" />
+        </StackPanel>
     </Grid>
 </Window>

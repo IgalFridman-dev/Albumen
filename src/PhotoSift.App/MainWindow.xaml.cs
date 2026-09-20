@@ -533,7 +533,6 @@ public partial class MainWindow : Window
             else if (generation != dataContextGeneration) skipReason = "data-context-generation";
             else if (!ReferenceEquals(expected, shellViewModel)) skipReason = "data-context-identity";
             else if (expected?.ReviewSession != session) skipReason = "review-session";
-            else if (expected?.IsReviewPhase is not true) skipReason = "not-review-phase";
             else if (!ReviewAnnouncementText.IsVisible) skipReason = "not-visible";
             if (skipReason is not null)
             {
