@@ -148,3 +148,61 @@ These omissions are design constraints of the focused E2-S5 implementation, not 
 ### Evaluation rule
 
 Any later feature begins with a fresh product/design review based on shipped V1 evidence. It must justify its own scope and architecture rather than treating E2-S5 or this backlog entry as prior implementation authorization.
+
+## PM-005 — Complete accessibility hardening after the recruiter-demo V1
+
+**Status:** Backlog — accepted recruiter-demo V1 limitation
+
+**Priority:** Post-MVP accessibility hardening
+
+**Origin:** E5-S1 explicit product-owner scope waiver, 2026-09-20
+
+### Problem
+
+E5-S1 has strong deterministic WPF/UIA coverage, fresh NIC-free Core/Full
+evidence, and a focused Narrator pass for the corrected Near/Review admission
+path. The product owner closed the story for the bounded recruiter-facing MVP
+without representing the remaining manual accessibility matrix as complete.
+This is an accepted scope limitation, not a manual-tool pass and not evidence
+of accessibility compliance.
+
+### Deferred accessibility verification
+
+- Resolve the missing Narrator announcement for Scan completion, status, and
+  discovered/analyzed/unsupported/failed/canceled/outstanding counts.
+- Complete the Narrator keyboard walkthrough through Action Records and both
+  Local Data Control confirmation branches.
+- Run Accessibility Insights FastPass across the shipped workflow.
+- Run Windows SDK Inspect/UIA property checks for names, roles, values/states,
+  actions, position/set-size, focus, and live regions.
+- Record representative light, dark, high-contrast, reduced-animation, and
+  200% text observations.
+- Manually verify the current phase-independent failed-open Review announcement,
+  including its same-Scan retention and new-Scan clearing behavior.
+
+### Guardrails
+
+- Preserve all existing source-file safety, survivor protection, explicit
+  approval, Recycle Bin-only execution, truthful status, and keyboard behavior.
+- Do not add a custom narration or accessibility framework unless measured
+  evidence demonstrates that built-in WPF/UIA semantics cannot satisfy a
+  concrete requirement.
+- Do not describe E5-S1, V1, or the application as accessibility-complete or
+  accessibility-compliant until this ticket closes.
+- Keep every unavailable, partial, failed, and passed observation distinct; do
+  not infer a result from automated coverage or a different manual path.
+
+### Completion criteria
+
+Every deferred item above has reproducible evidence against one identified
+candidate; concrete defects are fixed without weakening safety or keyboard
+behavior; the complete manual record distinguishes PASS, failure, and
+not-performed states; and an independent review confirms the resulting
+accessibility-complete claim is supported.
+
+### MVP disposition
+
+PM-005 does not block the recruiter-demo V1 or E5-S2 through E5-S5. E5-S5 must
+record it as an accepted limitation in the release decision. PM-005 blocks any
+accessibility-complete or accessibility-compliance claim until its completion
+criteria are met.
