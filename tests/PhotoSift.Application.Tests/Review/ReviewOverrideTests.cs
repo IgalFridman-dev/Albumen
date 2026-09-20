@@ -236,7 +236,7 @@ internal sealed class ReviewOverrideFixture : IAsyncDisposable
             .Select(id => ReviewData.Request(id, context).Occurrence)
             .ToImmutableArray();
         var group = new CandidateGroup(Guid.Parse("540482d2-25bb-4e9e-ad4f-aed85c6fe354"), 1,
-            context.Pin, CandidateCategory.Exact, members, [], false, null,
+            context.Pin, CandidateCategory.Exact, members, ReviewFixture.ExactEvidence(members), false, null,
             new(99999, RecoveryUnavailableReason.None));
         var scopeEvidence = new ScopePreflightEvidence(context.Scope, ScopeVolumeKind.Fixed,
             ScopeCloudState.Local, ScopeTraversalState.Complete, new(1, 0, 0, 0), new(0, 0));

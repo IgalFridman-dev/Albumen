@@ -56,7 +56,7 @@ internal sealed record ActionClaimAttempt(Guid AttemptId, ApprovedActionRequest 
     ImmutableArray<OverrideReadResult> Reads,
     TaskCompletionSource<ApprovedActionClaimResult> Completion);
 internal sealed record ActionSafetyRefreshAttempt(Guid AttemptId, ApprovedActionClaim Claim,
-    ApprovedActionItem Item, ScanRunContext Context, CandidateGroup Group,
+    ApprovedActionItem Item, ScanRunContext Context, ImmutableArray<CandidateGroup> Groups,
     ImmutableArray<PriorActionOutcome> PrecedingOutcomes,
     ImmutableArray<DeliberateOverrideEvidence> ExpectedEvidence,
     TaskCompletionSource Settled);

@@ -211,7 +211,13 @@ internal sealed class ActionFileFixture : IDisposable
             return new ActionProbeObservation(occurrence, protectedFacts, protectedFacts, new(content.ByteLength, digest));
         }).ToImmutableArray();
         var members = observations.Select(value => value.ApprovedOccurrence).ToImmutableArray();
-        var group = new CandidateGroup(Guid.NewGuid(), 1, pin, CandidateCategory.Exact, members, [], false, null, new(0, RecoveryUnavailableReason.None));
+        var representatives = members.GroupBy(member => member.PhysicalFileKey!.Value)
+            .Select(group => group.First()).ToArray();
+        var equality = representatives.Skip(1).Select(member => new EqualityEvidence(
+            representatives[0].Token, member.Token,
+            representatives[0].Content!, member.Content!)).ToImmutableArray();
+        var group = new CandidateGroup(Guid.NewGuid(), 1, pin, CandidateCategory.Exact,
+            members, equality, false, null, new(0, RecoveryUnavailableReason.None));
         var first = members[0];
         var item = new ApprovedActionItem(group.GroupId, 1, first.Token, selected, selected, first.PhysicalFileKey!.Value, first.Content!, first.Allocation, null);
         var request = new ApprovedActionRequest(Guid.NewGuid(), DateTimeOffset.UtcNow, Guid.NewGuid(), 1, pin, scope, [item], [1],

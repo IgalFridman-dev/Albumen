@@ -121,27 +121,36 @@ public sealed class ApprovedActionAuthorityTests
     public async Task DisappearingExternalSurvivorBlocksClaimAndRefresh(bool refresh)
     {
         var reader = new ScanTestReader();
-        uint currentLinks = 3;
+        uint currentLinks = 2;
         reader.Create = (_, open) => new ScanTestLease(open)
         {
             OpenedFacts = new(open.ExpectedPhysicalFileKey, 1, open.ResolvedPath, null, new(4096, currentLinks, true)),
         };
         await using var fixture = new ApprovalFixture(new(), actionSafety: new(reader, new ScanTestAnalyzer()));
-        var members = fixture.Request.Scan.Groups[0].Members.Take(2)
-            .Select(member => ReviewFixture.Copy(member, allocation: new(4096, 3, true))).ToImmutableArray();
-        var group = fixture.Request.Scan.Groups[0] with { Members = members };
+        var members = new[]
+            {
+                fixture.Request.Scan.Groups[0].Members[0],
+                fixture.Request.Scan.Groups[0].Members[2],
+            }
+            .Select(member => ReviewFixture.Copy(member, allocation: new(4096, 2, true)))
+            .ToImmutableArray();
+        var group = fixture.Request.Scan.Groups[0] with
+        {
+            Members = members,
+            Equality = ReviewFixture.ExactEvidence(members),
+        };
         fixture.ReplaceRequest(fixture.Request with
         {
             Scan = fixture.Request.Scan with { Groups = [group], Occurrences = members, Counts = new(2, 2, 0, 0, 0, 0) },
         });
         await fixture.OpenAsync();
         await fixture.PumpAsync(fixture.Executor.Arrived.Task);
-        await fixture.RevalidateAsync(1, 2);
+        await fixture.RevalidateAsync(1, 3);
         Assert.Equal(ReviewCommandOutcome.Committed, (await fixture.ChangeAsync(fixture.SelectionCommand(0,
-            SelectionCommandKind.ReplaceFocusedGroup, 1, 2))).Outcome);
+            SelectionCommandKind.ReplaceFocusedGroup, 1, 3))).Outcome);
         var request = (await fixture.ApproveAsync(fixture.ApprovalCommand())).ApprovedRequest!;
         var claim = refresh ? (await ClaimAsync(fixture, request)).Claim : null;
-        currentLinks = 2;
+        currentLinks = 1;
         if (refresh)
         {
             var pending = fixture.Owner.RefreshSafetyAsync(claim!, request.Items[0], [], TestContext.Current.CancellationToken);
@@ -372,6 +381,73 @@ public sealed class ApprovedActionAuthorityTests
         Assert.Equal([2L], result.Envelope.Input.RemainingApprovedOccurrenceIds);
         Assert.Equal(5, reader.Leases.Count);
         Assert.Equal(ApprovedActionClaimOutcome.Existing, (await ClaimAsync(fixture, request)).Outcome);
+    }
+
+    [Fact]
+    public async Task OverlappingSelectionRefreshesEveryAffectedGroup()
+    {
+        var reader = new ScanTestReader();
+        var analyzer = new ScanTestAnalyzer();
+        await using var fixture = new ApprovalFixture(new(),
+            actionSafety: new(reader, analyzer));
+        var request = ReviewCoordinatorTests.MixedRequest(fixture.Request,
+            includeTerminalFailures: false);
+        reader.Create = (_, open) =>
+        {
+            var member = request.Scan.Occurrences.Single(value =>
+                value.PhysicalFileKey == open.ExpectedPhysicalFileKey);
+            return new ScanTestLease(open)
+            {
+                Content = new MemoryStream([checked((byte)member.Token.OccurrenceId)]),
+                OpenedFacts = new(open.ExpectedPhysicalFileKey, 1,
+                    open.ResolvedPath, null, new(4096, 1, true)),
+            };
+        };
+        analyzer.Hash = (content, _) =>
+        {
+            var occurrenceId = content.ReadByte();
+            var member = request.Scan.Occurrences.Single(value =>
+                value.Token.OccurrenceId == occurrenceId);
+            return ValueTask.FromResult(new StreamDigest(
+                member.Content!.ByteLength, member.Content.Sha256));
+        };
+        fixture.ReplaceRequest(request);
+        Assert.Equal(ReviewCommandOutcome.Committed,
+            (await fixture.OpenAsync()).Outcome);
+        await fixture.PumpAsync(fixture.Executor.Arrived.Task);
+        foreach (var group in request.Scan.Groups)
+        foreach (var member in group.Members)
+        {
+            var revalidation = new ReviewRevalidationRequest(fixture.Owner.Current.Pin!,
+                new(request.Scan.Pin!, request.Scope.Preflight!.Scope!), group.GroupId,
+                group.GroupRevision, member, 1);
+            var facts = new ProtectedFileFacts(member.PhysicalFileKey!.Value,
+                member.Content!.ByteLength, member.ResolvedPath, null,
+                member.Allocation);
+            var accepted = fixture.Owner.CommitRevalidationAsync(new(revalidation,
+                facts, facts, new(member.Content.ByteLength,
+                    member.Content.Sha256))).AsTask();
+            await fixture.PumpAsync(accepted);
+            Assert.True(await accepted);
+        }
+        Assert.Equal(ReviewCommandOutcome.Committed,
+            (await fixture.ChangeAsync(fixture.SelectionCommand(0,
+                SelectionCommandKind.Toggle, 1))).Outcome);
+        var approved = (await fixture.ApproveAsync(fixture.ApprovalCommand()))
+            .ApprovedRequest!;
+        var claim = await ClaimAsync(fixture, approved);
+        Assert.Equal(ApprovedActionClaimOutcome.Claimed, claim.Outcome);
+        Assert.Equal(5, reader.Leases.Count);
+
+        var refreshing = fixture.Owner.RefreshSafetyAsync(claim.Claim!,
+            approved.Items[0], [], TestContext.Current.CancellationToken);
+        await fixture.PumpAsync(refreshing);
+        var refreshed = await refreshing;
+
+        Assert.Equal(ApprovedActionClaimOutcome.Claimed, refreshed.Outcome);
+        Assert.Equal(10, reader.Leases.Count);
+        Assert.Equal(approved.Items[0].GroupId,
+            refreshed.Envelope!.Input.ApprovedGroup.GroupId);
     }
 
     [Fact]

@@ -14,6 +14,196 @@ namespace PhotoSift.Application.Tests.Review;
 public sealed class ReviewCoordinatorTests
 {
     [Fact]
+    public async Task CompleteConservativeNearScanWithTerminalFailuresOpensMixedReview()
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: true);
+
+        var opened = await f.Open(request);
+
+        Assert.Equal(ReviewCommandOutcome.Committed, opened.Outcome);
+        Assert.Equal(3, opened.Snapshot.Groups.Length);
+        Assert.Equal(2, request.Scan.Counts.Failed);
+        Assert.Equal(2, request.Scan.Counts.Unsupported);
+        await f.Run();
+    }
+
+    [Theory]
+    [InlineData("foreign-endpoint")]
+    [InlineData("wrong-kind")]
+    [InlineData("equality-content")]
+    public async Task MixedReviewRejectsMalformedCategoryEvidenceBeforeExecutorStart(string mismatch)
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        var groups = request.Scan.Groups;
+        if (mismatch == "foreign-endpoint")
+        {
+            var near = groups[1];
+            var edge = near.Similarity[0] with { Left = request.Scan.Occurrences[4].Token };
+            groups = groups.SetItem(1, near with { Similarity = near.Similarity.SetItem(0, edge) });
+        }
+        else if (mismatch == "wrong-kind")
+        {
+            var near = groups[1];
+            groups = groups.SetItem(1, near with
+            {
+                Similarity = near.Similarity.SetItem(0,
+                    near.Similarity[0] with { Kind = NearRelationshipKind.Uncertain }),
+            });
+        }
+        else
+        {
+            var exact = groups[0];
+            groups = groups.SetItem(0, exact with
+            {
+                Equality = exact.Equality.SetItem(0,
+                    exact.Equality[0] with { LeftContent = request.Scan.Occurrences[4].Content! }),
+            });
+        }
+        request = request with { Scan = request.Scan with { Groups = groups } };
+
+        var opened = await f.Open(request);
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, opened.Outcome);
+        Assert.Empty(f.Executor.Runs);
+    }
+
+    [Fact]
+    public async Task OverlappingSelectionUsesGlobalSurvivorsAndApprovalDeduplicatesOccurrences()
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Open(request)).Outcome);
+        await f.Run();
+        foreach (var group in request.Scan.Groups)
+        foreach (var member in group.Members)
+            await CommitEvidence(f, request, group, member);
+
+        var first = await Change(f, 0, SelectionCommandKind.Toggle, 1);
+        var duplicate = await Change(f, 1, SelectionCommandKind.Toggle, 1);
+        var hiddenFinalSurvivor = await Change(f, 1,
+            SelectionCommandKind.ReplaceFocusedGroup, 2, 3);
+        var second = await Change(f, 2, SelectionCommandKind.Toggle, 4);
+        var snapshot = f.Owner.Current;
+        var approval = f.Owner.ApproveAsync(new(snapshot.Pin!, snapshot.SelectionRevision,
+            Guid.NewGuid(), DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
+        await f.Pump(approval);
+        var approved = await approval;
+
+        Assert.Equal(ReviewCommandOutcome.Committed, first.Outcome);
+        Assert.Equal(ReviewCommandOutcome.Invalid, duplicate.Outcome);
+        Assert.Equal(ReviewCommandOutcome.Invalid, hiddenFinalSurvivor.Outcome);
+        Assert.Equal(ReviewCommandOutcome.Committed, second.Outcome);
+        Assert.Equal(ReviewCommandOutcome.Approved, approved.Outcome);
+        Assert.Equal([1L, 4L], approved.ApprovedRequest!.SelectedOccurrenceIds);
+        Assert.Equal(2, approved.ApprovedRequest.Items.Length);
+        Assert.Equal(2, approved.ApprovedRequest.Disclosure.SelectedOccurrenceCount);
+        Assert.Equal(2, approved.ApprovedRequest.Disclosure.Unresolved.UnselectedSurvivorMembers);
+        Assert.Equal(8192, approved.ApprovedRequest.Disclosure.Recovery.Bytes);
+    }
+
+    [Fact]
+    public async Task CompleteCoverageMayApproveWhileTerminalNearFailuresRemainDisclosed()
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: true);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Open(request)).Outcome);
+        await f.Run();
+        foreach (var group in request.Scan.Groups)
+        foreach (var member in group.Members)
+            await CommitEvidence(f, request, group, member);
+        Assert.Equal(ReviewCommandOutcome.Committed,
+            (await Change(f, 0, SelectionCommandKind.Toggle, 1)).Outcome);
+        var snapshot = f.Owner.Current;
+        var approval = f.Owner.ApproveAsync(new(snapshot.Pin!, snapshot.SelectionRevision,
+            Guid.NewGuid(), DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
+        await f.Pump(approval);
+
+        var approved = await approval;
+
+        Assert.Equal(ReviewCommandOutcome.Approved, approved.Outcome);
+        Assert.Equal(2, approved.ApprovedRequest!.Disclosure.Unresolved.FailedScanRows);
+        Assert.Equal(ScanStatus.Complete, approved.ApprovedRequest.Disclosure.Coverage);
+    }
+
+    [Fact]
+    public async Task ApprovalRejectsConflictingRevalidationFactsForAnOverlappingOccurrence()
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Open(request)).Outcome);
+        await f.Run();
+        foreach (var group in request.Scan.Groups)
+        foreach (var member in group.Members)
+        {
+            var allocation = group == request.Scan.Groups[1]
+                && member.Token.OccurrenceId == 1
+                    ? new AllocationEvidence(8192, 1, true)
+                    : member.Allocation;
+            await CommitEvidence(f, request, group, member, allocation);
+        }
+        Assert.Equal(ReviewCommandOutcome.Committed,
+            (await Change(f, 0, SelectionCommandKind.Toggle, 1)).Outcome);
+        var snapshot = f.Owner.Current;
+
+        var approval = f.Owner.ApproveAsync(new(snapshot.Pin!, snapshot.SelectionRevision,
+            Guid.NewGuid(), DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
+        await f.Pump(approval);
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, (await approval).Outcome);
+        Assert.False(f.Owner.Current.Sealed);
+        Assert.Null(f.Owner.Current.ApprovedRequest);
+    }
+
+    [Fact]
+    public async Task UnchangedAffirmedOverrideDoesNotBlockSelectionInAnotherGroup()
+    {
+        await using var f = new ReviewFixture();
+        var pin = f.Request.Scan.Pin!;
+        var context = new ScanRunContext(pin, f.Request.Scope.Preflight!.Scope!);
+        var additional = Enumerable.Range(4, 2)
+            .Select(id => ReviewData.Request(id, context).Occurrence)
+            .ToImmutableArray();
+        var second = new CandidateGroup(Guid.NewGuid(), 1, pin, CandidateCategory.Exact,
+            additional, ReviewFixture.ExactEvidence(additional), false, null,
+            new(4096, RecoveryUnavailableReason.None));
+        var request = f.Request with
+        {
+            Scan = f.Request.Scan with
+            {
+                Occurrences = [.. f.Request.Scan.Occurrences, .. additional],
+                Groups = [f.Request.Scan.Groups[0], second],
+                Counts = new(5, 5, 0, 0, 0, 0),
+            },
+        };
+        var session = new ReviewSessionPin(Guid.NewGuid(), pin);
+        var store = new ReviewStore(session, request);
+        foreach (var group in request.Scan.Groups)
+        foreach (var member in group.Members)
+            Assert.True(store.Accept(RevalidationEvidence(session, request, group, member)));
+        var first = store.Current.Groups[0].Candidate;
+        var proposalResult = store.ChangeSelection(new(new(session, first.GroupId,
+            first.GroupRevision, store.Current.SelectionRevision),
+            SelectionCommandKind.ReplaceFocusedGroup, [1, 2, 3], Guid.NewGuid()));
+        var proposal = Assert.IsType<OverrideProposalToken>(proposalResult.OverrideProposal);
+        var started = store.BeginAffirmation(new(proposal, new(Guid.NewGuid()),
+            DateTimeOffset.UtcNow));
+        var committed = store.CompleteAffirmation(Assert.IsType<OverridePersistenceAttempt>(started.Attempt),
+            new(OverridePersistOutcome.Persisted));
+        Assert.Equal(ReviewCommandOutcome.Committed, committed.Outcome);
+
+        var result = store.ChangeSelection(new(new(session, second.GroupId,
+            second.GroupRevision, store.Current.SelectionRevision),
+            SelectionCommandKind.Toggle, [4], Guid.NewGuid()));
+
+        Assert.Equal(ReviewCommandOutcome.Committed, result.Outcome);
+        Assert.Equal([1L, 2L, 3L], result.Snapshot.Groups[0].SelectedOccurrenceIds);
+        Assert.NotNull(result.Snapshot.Groups[0].OverrideEvidenceId);
+        Assert.Equal([4L], result.Snapshot.Groups[1].SelectedOccurrenceIds);
+    }
+
+    [Fact]
     public async Task DataSealPreventsMutationAndPreservesTheImmutableHandoff()
     {
         await using var f = new ReviewFixture();
@@ -263,6 +453,130 @@ public sealed class ReviewCoordinatorTests
         await f.Pump(late);
         Assert.False(await late);
     }
+
+    internal static ReviewOpenRequest MixedRequest(
+        ReviewOpenRequest template,
+        bool includeTerminalFailures)
+    {
+        var pin = template.Scan.Pin!;
+        var context = new ScanRunContext(pin, template.Scope.Preflight!.Scope!);
+        var analyzed = Enumerable.Range(1, 5)
+            .Select(id => ReviewData.Request(id, context).Occurrence)
+            .Select((member, index) => ReviewFixture.Copy(member,
+                content: new(member.PhysicalFileKey!.Value, 1,
+                    index < 2 ? ScanTestData.Digest : new string((char)('B' + index), 64))) with
+            {
+                VisualFeatures = ScanTestData.Success,
+                NearDuplicate = ScanTestData.Success,
+            })
+            .ToImmutableArray();
+        var exact = new CandidateGroup(Guid.NewGuid(), 1, pin, CandidateCategory.Exact,
+            [analyzed[0], analyzed[1]],
+            [new(analyzed[0].Token, analyzed[1].Token, analyzed[0].Content!, analyzed[1].Content!)],
+            false, null, new(4096, RecoveryUnavailableReason.None));
+        var near = new CandidateGroup(Guid.NewGuid(), 1, pin, CandidateCategory.NearDuplicate,
+            [analyzed[0], analyzed[1], analyzed[2]], [], false, null,
+            new(null, RecoveryUnavailableReason.InconsistentFacts))
+        {
+            Similarity =
+            [
+                new(analyzed[0].Token, analyzed[2].Token, 1, 2, NearRelationshipKind.Near),
+                new(analyzed[1].Token, analyzed[2].Token, 1, 2, NearRelationshipKind.Near),
+            ],
+        };
+        var uncertain = new CandidateGroup(Guid.NewGuid(), 1, pin, CandidateCategory.Uncertain,
+            [analyzed[2], analyzed[3]], [], true, null,
+            new(null, RecoveryUnavailableReason.InconsistentFacts))
+        {
+            Similarity =
+            [
+                new(analyzed[2].Token, analyzed[3].Token, 8, 20,
+                    NearRelationshipKind.Uncertain),
+            ],
+        };
+        var occurrences = analyzed;
+        var counts = new ScanCounts(5, 5, 0, 0, 0, 0);
+        if (includeTerminalFailures)
+        {
+            var unsupported = Enumerable.Range(6, 2).Select(id => TerminalRow(
+                ReviewData.Request(id, context).Occurrence,
+                ScanStageState.Unsupported,
+                ScanReason.UnsupportedExtension));
+            var failed = Enumerable.Range(8, 2).Select(id => TerminalRow(
+                ReviewData.Request(id, context).Occurrence,
+                ScanStageState.FailedRetryable,
+                ScanReason.ReadFailure));
+            occurrences = [.. analyzed, .. unsupported, .. failed];
+            counts = new(9, 5, 2, 2, 0, 0);
+        }
+        return template with
+        {
+            Scan = template.Scan with
+            {
+                Status = ScanStatus.Complete,
+                Occurrences = occurrences,
+                Groups = [exact, near, uncertain],
+                Counts = counts,
+            },
+        };
+    }
+
+    private static ScanFileOccurrence TerminalRow(
+        ScanFileOccurrence source,
+        ScanStageState state,
+        ScanReason reason) =>
+        new(source.Token, source.DiscoveredPath, source.ResolvedPath, source.PhysicalFileKey,
+            new(state, reason), new(ScanStageState.NotApplicable, reason), null,
+            new(null, null, false))
+        {
+            VisualFeatures = new(ScanStageState.NotApplicable, reason),
+            NearDuplicate = new(ScanStageState.NotApplicable, reason),
+        };
+
+    private static async Task CommitEvidence(
+        ReviewFixture fixture,
+        ReviewOpenRequest request,
+        CandidateGroup group,
+        ScanFileOccurrence member,
+        AllocationEvidence? allocation = null)
+    {
+        var accepted = fixture.Owner.CommitRevalidationAsync(RevalidationEvidence(
+            fixture.Owner.Current.Pin!, request, group, member, allocation)).AsTask();
+        await fixture.Pump(accepted);
+        Assert.True(await accepted);
+    }
+
+    private static ReviewRevalidationEvidence RevalidationEvidence(
+        ReviewSessionPin session,
+        ReviewOpenRequest request,
+        CandidateGroup group,
+        ScanFileOccurrence member,
+        AllocationEvidence? allocation = null)
+    {
+        var revalidation = new ReviewRevalidationRequest(session,
+            new(request.Scan.Pin!, request.Scope.Preflight!.Scope!), group.GroupId,
+            group.GroupRevision, member, 1);
+        var facts = new ProtectedFileFacts(member.PhysicalFileKey!.Value,
+            member.Content!.ByteLength, member.ResolvedPath, null,
+            allocation ?? member.Allocation);
+        return new(revalidation, facts, facts,
+            new(member.Content.ByteLength, member.Content.Sha256));
+    }
+
+    private static async Task<ReviewCommandResult> Change(
+        ReviewFixture fixture,
+        int groupIndex,
+        SelectionCommandKind kind,
+        params long[] occurrenceIds)
+    {
+        var snapshot = fixture.Owner.Current;
+        var group = snapshot.Groups[groupIndex].Candidate;
+        var changed = fixture.Owner.ChangeSelectionAsync(new(new(snapshot.Pin!, group.GroupId,
+            group.GroupRevision, snapshot.SelectionRevision), kind, [.. occurrenceIds],
+            Guid.NewGuid()), TestContext.Current.CancellationToken);
+        await fixture.Pump(changed);
+        return await changed;
+    }
 }
 
 internal sealed class ReviewFixture : IAsyncDisposable
@@ -281,7 +595,9 @@ internal sealed class ReviewFixture : IAsyncDisposable
             members = members.SetItem(1, Copy(members[1], key: members[0].PhysicalFileKey,
                 content: members[0].Content, allocation: members[0].Allocation));
         }
-        var group = new CandidateGroup(Guid.NewGuid(), 1, context.Pin, CandidateCategory.Exact, members, [], false, null, new(99999, RecoveryUnavailableReason.None));
+        var group = new CandidateGroup(Guid.NewGuid(), 1, context.Pin, CandidateCategory.Exact,
+            members, ExactEvidence(members), false, null,
+            new(99999, RecoveryUnavailableReason.None));
         var evidence = new ScopePreflightEvidence(context.Scope, ScopeVolumeKind.Fixed, ScopeCloudState.Local,
             ScopeTraversalState.Complete, new(1, 0, 0, 0), new(0, 0));
         var scope = new ShellSnapshot([], "Ready", ScopeSessionState.Ready, context.Scope.Selection,
@@ -294,6 +610,15 @@ internal sealed class ReviewFixture : IAsyncDisposable
         PhysicalFileKey? key = null, ContentRevision? content = null, AllocationEvidence? allocation = null) =>
         new(token ?? member.Token, member.DiscoveredPath, member.ResolvedPath, key ?? member.PhysicalFileKey,
             member.Enumerate, member.Exact, content ?? member.Content, allocation ?? member.Allocation);
+    internal static ImmutableArray<EqualityEvidence> ExactEvidence(
+        ImmutableArray<ScanFileOccurrence> members)
+    {
+        var representatives = members.GroupBy(member => member.PhysicalFileKey!.Value)
+            .Select(group => group.First()).ToArray();
+        return representatives.Skip(1).Select(member => new EqualityEvidence(
+            representatives[0].Token, member.Token,
+            representatives[0].Content!, member.Content!)).ToImmutableArray();
+    }
     internal async Task<ReviewCommandResult> Open(ReviewOpenRequest? request = null)
     {
         var task = Owner.OpenAsync(request ?? Request, TestContext.Current.CancellationToken);
@@ -326,6 +651,23 @@ internal sealed class ReviewFixture : IAsyncDisposable
         foreach (var id in ids)
         {
             var task = Owner.CommitRevalidationAsync(Evidence(id)).AsTask();
+            await Pump(task);
+            Assert.True(await task);
+        }
+    }
+    internal async Task Eligible(ReviewOpenRequest request)
+    {
+        await Run();
+        foreach (var group in request.Scan.Groups)
+        foreach (var member in group.Members)
+        {
+            var revalidation = new ReviewRevalidationRequest(Owner.Current.Pin!,
+                new(request.Scan.Pin!, request.Scope.Preflight!.Scope!), group.GroupId,
+                group.GroupRevision, member, 1);
+            var facts = new ProtectedFileFacts(member.PhysicalFileKey!.Value,
+                member.Content!.ByteLength, member.ResolvedPath, null, member.Allocation);
+            var task = Owner.CommitRevalidationAsync(new(revalidation, facts, facts,
+                new(member.Content.ByteLength, member.Content.Sha256))).AsTask();
             await Pump(task);
             Assert.True(await task);
         }

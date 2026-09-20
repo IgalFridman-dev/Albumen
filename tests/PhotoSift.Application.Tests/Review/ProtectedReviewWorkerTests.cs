@@ -318,9 +318,14 @@ internal static class ReviewData
         return new(new(Guid.NewGuid(), work.Context.Pin), work.Context, Guid.NewGuid(), 3, member, 2);
     }
 
-    internal static ImmutableArray<CandidateGroup> Groups(ScanRunContext context, int count) =>
-        [new(Guid.NewGuid(), 3, context.Pin, CandidateCategory.Exact,
-            Enumerable.Range(1, count).Select(id => Request(id, context).Occurrence).ToImmutableArray(), [], false, null, new(null, RecoveryUnavailableReason.UnknownAllocation))];
+    internal static ImmutableArray<CandidateGroup> Groups(ScanRunContext context, int count)
+    {
+        var members = Enumerable.Range(1, count)
+            .Select(id => Request(id, context).Occurrence).ToImmutableArray();
+        return [new(Guid.NewGuid(), 3, context.Pin, CandidateCategory.Exact,
+            members, ReviewFixture.ExactEvidence(members), false, null,
+            new(null, RecoveryUnavailableReason.UnknownAllocation))];
+    }
 }
 
 internal sealed class ReviewSink : IReviewResultSink

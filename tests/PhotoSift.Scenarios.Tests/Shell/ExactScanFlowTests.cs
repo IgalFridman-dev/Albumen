@@ -58,6 +58,18 @@ public sealed class ExactScanFlowTests
     }
 
     [Fact]
+    public async Task OpenReviewAdmissionFailureUsesTheExistingLiveAnnouncement()
+    {
+        var fixture = new ExactShellFixture();
+
+        await fixture.ViewModel.OpenReviewCommand.ExecuteAsync()
+            .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        Assert.Contains("invalid, stale, or faulted", fixture.ViewModel.ReviewAnnouncement,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task VisibleDefaultsCanDisableNearWithoutCreatingASelection()
     {
         var fixture = new ExactShellFixture();
@@ -86,20 +98,31 @@ public sealed class ExactScanFlowTests
         var scope = new ExactShellFixture.StaticScope();
         var scheduler = new ManualWorkflowScheduler();
         var scan = new CompletedScanOwner();
-        var review = new OpeningReviewOwner();
+        var executor = new CompletedReviewExecutor();
+        var review = new ReviewCoordinator(scheduler, executor,
+            new UnusedOverrideEvidenceStore());
         var workflow = new PhotoSiftWorkflow(scope, scan, scheduler, review);
         var viewModel = new ShellViewModel(scope, workflow);
+        try
+        {
+            await scheduler.Finish(viewModel.ContinueCommand.ExecuteAsync());
+            await scheduler.Finish(viewModel.ConfirmExactRulesCommand.ExecuteAsync());
+            scan.Publish(CompletedScanOwner.CreateCompleted());
+            scheduler.Drain();
+            await scheduler.Finish(viewModel.OpenReviewCommand.ExecuteAsync());
+            await executor.Started.Task.WaitAsync(TimeSpan.FromSeconds(10),
+                TestContext.Current.CancellationToken);
+            scheduler.Drain();
 
-        await scheduler.Finish(viewModel.ContinueCommand.ExecuteAsync());
-        await scheduler.Finish(viewModel.ConfirmExactRulesCommand.ExecuteAsync());
-        scan.Publish(CompletedScanOwner.CreateCompleted());
-        scheduler.Drain();
-        await scheduler.Finish(viewModel.OpenReviewCommand.ExecuteAsync());
-
-        Assert.Equal(1, review.OpenCount);
-        Assert.NotEqual(Guid.Empty, viewModel.ExactGroups.Single().GroupId);
-        Assert.NotNull(workflow.Current.Review.Pin);
-        Assert.True(viewModel.IsReviewPhase);
+            Assert.Equal(1, executor.StartCount);
+            Assert.NotEqual(Guid.Empty, viewModel.ExactGroups.Single().GroupId);
+            Assert.NotNull(workflow.Current.Review.Pin);
+            Assert.True(viewModel.IsReviewPhase);
+        }
+        finally
+        {
+            await scheduler.Finish(review.DisposeAsync().AsTask());
+        }
     }
 
     [Fact]
@@ -220,12 +243,22 @@ internal sealed class ExactShellFixture
     }
     internal sealed class StaticScope : IChooseScopeWorkflow
     {
-        public ShellSnapshot Current { get; } = new(InitialWorkflow.Create(), "Ready", ScopeSessionState.Ready,
-            new(@"C:\Photos", ScopeRecursion.TopLevelOnly), Revision: 1);
+        public ShellSnapshot Current { get; } = CreateReadyScope();
         public event EventHandler<ShellSnapshot>? SnapshotChanged { add { } remove { } }
         public Task HandleAsync(ChooseScopeCommand command, CancellationToken token) => Task.CompletedTask;
         public Task HandleAsync(ChangeScopeRecursionCommand command, CancellationToken token) => Task.CompletedTask;
         public Task HandleAsync(RetryScopePreflightCommand command, CancellationToken token) => Task.CompletedTask;
+
+        private static ShellSnapshot CreateReadyScope()
+        {
+            var selection = new ScopeSelection(@"C:\Photos", ScopeRecursion.TopLevelOnly);
+            var scope = new ResolvedScope(selection, @"C:\Photos", new(7, 0, 70));
+            var evidence = new ScopePreflightEvidence(scope, ScopeVolumeKind.Fixed,
+                ScopeCloudState.Local, ScopeTraversalState.Complete,
+                new(2, 0, 0, 0), new(0, 0));
+            return new(InitialWorkflow.Create(), "Ready", ScopeSessionState.Ready,
+                selection, ScopePreflightPolicy.Evaluate(evidence), Revision: 1);
+        }
     }
     internal sealed class PublishingWorkflow(ShellSnapshot scope) : IPhotoSiftWorkflow, IAsyncDisposable
     {
@@ -310,17 +343,56 @@ internal sealed class CompletedScanOwner : IScanCoordinator
     public static ScanSnapshot CreateCompleted()
     {
         var pin = new ScanPin(Guid.Parse("71000000-0000-0000-0000-000000000001"), 1, 1, 1);
-        var key = new PhysicalFileKey(7, new(0, 71));
-        var row = new ScanFileOccurrence(new(pin, 71, 1, 1), @"C:\Photos\fresh.jpg", @"C:\Photos\fresh.jpg", key,
+        var firstKey = new PhysicalFileKey(7, new(0, 71));
+        var secondKey = new PhysicalFileKey(7, new(0, 72));
+        var digest = new string('A', 64);
+        var first = new ScanFileOccurrence(new(pin, 71, 1, 1), @"C:\Photos\fresh.jpg", @"C:\Photos\fresh.jpg", firstKey,
             new(ScanStageState.Succeeded, ScanReason.None), new(ScanStageState.Succeeded, ScanReason.None),
-            new(key, 17, new string('A', 64)), new(17, 1, true));
+            new(firstKey, 17, digest), new(17, 1, true));
+        var second = new ScanFileOccurrence(new(pin, 72, 1, 1), @"C:\Photos\fresh-copy.jpg", @"C:\Photos\fresh-copy.jpg", secondKey,
+            new(ScanStageState.Succeeded, ScanReason.None), new(ScanStageState.Succeeded, ScanReason.None),
+            new(secondKey, 17, digest), new(17, 1, true));
         var group = new CandidateGroup(Guid.Parse("72000000-0000-0000-0000-000000000002"), 1, pin,
-            CandidateCategory.Exact, [row], [], false, null, new(17, RecoveryUnavailableReason.None));
-        return new(pin, ScanStatus.Complete, new(ScanStageState.Succeeded, ScanReason.None), [row], [group],
-            new(1, 1, 0, 0, 0, 0));
+            CandidateCategory.Exact, [first, second],
+            [new(first.Token, second.Token, first.Content!, second.Content!)], false, null,
+            new(17, RecoveryUnavailableReason.None));
+        return new(pin, ScanStatus.Complete, new(ScanStageState.Succeeded, ScanReason.None),
+            [first, second], [group], new(2, 2, 0, 0, 0, 0));
     }
 }
 
+internal sealed class CompletedReviewExecutor : IReviewRevalidationExecutor
+{
+    internal int StartCount { get; private set; }
+    internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public IReviewRun Start(ReviewSessionPin session, ScanRunContext context,
+        ImmutableArray<CandidateGroup> groups, IReviewResultSink sink)
+    {
+        StartCount++;
+        Started.TrySetResult();
+        return new CompletedReviewRun();
+    }
+}
+
+internal sealed class CompletedReviewRun : IReviewRun
+{
+    public Task Completion => Task.CompletedTask;
+    public Task CancelAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+internal sealed class UnusedOverrideEvidenceStore : IOverrideEvidenceStore
+{
+    public ValueTask<OverridePersistResult> PersistAsync(DeliberateOverrideEvidence evidence,
+        CancellationToken cancellationToken) => throw new InvalidOperationException("No override is expected.");
+    public ValueTask<OverrideReadResult> ReadAsync(OverrideEvidenceId evidenceId,
+        CancellationToken cancellationToken) => ValueTask.FromResult(
+            new OverrideReadResult(OverrideReadOutcome.Missing, null));
+}
+
+// WPF navigation tests use this controllable projection owner to publish a
+// sealed snapshot. Admission behavior itself is covered above with the real
+// ReviewCoordinator.
 internal sealed class OpeningReviewOwner : IReviewCoordinator
 {
     public ReviewSnapshot Current { get; private set; } = ReviewSnapshot.Closed;
@@ -331,26 +403,36 @@ internal sealed class OpeningReviewOwner : IReviewCoordinator
         Current = snapshot;
         SnapshotChanged?.Invoke(this, snapshot);
     }
-    public Task<ReviewCommandResult> OpenAsync(ReviewOpenRequest request, CancellationToken cancellationToken)
+    public Task<ReviewCommandResult> OpenAsync(ReviewOpenRequest request,
+        CancellationToken cancellationToken)
     {
         OpenCount++;
         var groups = request.Scan.Groups.Select(group => new ReviewGroupSnapshot(group,
-            group.Members.Select(member => new ReviewMemberSnapshot(member, ReviewEligibilityState.Eligible,
-                ReviewUnavailableReason.None, false)).ToImmutableArray(), [], new(0, SelectionRecoveryUnavailableReason.None),
-            false, null)).ToImmutableArray();
-        Current = new(new(Guid.Parse("73000000-0000-0000-0000-000000000003"), request.Scan.Pin!),
-            ReviewStatus.Ready, request.Scan.Status, 1, groups, new(0, 0, 0, 0, 0, 0, 1), false, null,
-            ReviewUnavailableReason.None);
+            group.Members.Select(member => new ReviewMemberSnapshot(member,
+                ReviewEligibilityState.Eligible, ReviewUnavailableReason.None,
+                false)).ToImmutableArray(), [],
+            new(0, SelectionRecoveryUnavailableReason.None), false, null))
+            .ToImmutableArray();
+        Current = new(new(Guid.NewGuid(), request.Scan.Pin!), ReviewStatus.Ready,
+            request.Scan.Status, 1, groups, new(0, 0, 0, 0, 0, 0,
+                groups.SelectMany(group => group.Members).LongCount()),
+            false, null, ReviewUnavailableReason.None);
         SnapshotChanged?.Invoke(this, Current);
-        return Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Committed, Current));
+        return Task.FromResult(new ReviewCommandResult(
+            ReviewCommandOutcome.Committed, Current));
     }
-    public Task<ReviewCommandResult> ChangeSelectionAsync(SelectionCommand command, CancellationToken cancellationToken) =>
-        Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current));
-    public Task<ReviewCommandResult> AffirmOverrideAsync(OverrideAffirmationCommand command, CancellationToken cancellationToken) =>
-        Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current));
-    public Task<ReviewCommandResult> ApproveAsync(ApproveSelectionCommand command, CancellationToken cancellationToken) =>
-        Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current));
-    public Task ReportObserverFaultAsync(ReviewSessionPin session) => Task.CompletedTask;
+    public Task<ReviewCommandResult> ChangeSelectionAsync(SelectionCommand command,
+        CancellationToken cancellationToken) => Task.FromResult(
+            new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current));
+    public Task<ReviewCommandResult> AffirmOverrideAsync(
+        OverrideAffirmationCommand command, CancellationToken cancellationToken) =>
+        Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral,
+            Current));
+    public Task<ReviewCommandResult> ApproveAsync(ApproveSelectionCommand command,
+        CancellationToken cancellationToken) => Task.FromResult(
+            new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current));
+    public Task ReportObserverFaultAsync(ReviewSessionPin session) =>
+        Task.CompletedTask;
     public Task InvalidateAsync(ScanPin? currentScan) => Task.CompletedTask;
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

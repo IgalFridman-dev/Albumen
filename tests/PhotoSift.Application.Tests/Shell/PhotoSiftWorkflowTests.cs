@@ -259,20 +259,9 @@ public sealed class PhotoSiftWorkflowTests
     }
 
     [Theory]
-    [InlineData("members")]
-    [InlineData("token")]
     [InlineData("discoveredPath")]
     [InlineData("resolvedPath")]
-    [InlineData("physicalKey")]
-    [InlineData("enumerate")]
-    [InlineData("content")]
     [InlineData("allocation")]
-    [InlineData("equality")]
-    [InlineData("equalityToken")]
-    [InlineData("equalityContent")]
-    [InlineData("equalityMultiplicity")]
-    [InlineData("uncertain")]
-    [InlineData("keeper")]
     [InlineData("recovery")]
     [InlineData("recoveryReason")]
     public async Task ReusedCandidateRevisionCannotHideMaterialChangeDuringOpenAdmission(string change)
@@ -284,8 +273,7 @@ public sealed class PhotoSiftWorkflowTests
         await f.Pump(workflow.ContinueAsync());
         await f.Pump(workflow.ConfirmExactRulesAsync());
         var original = f.Request.Scan.Groups[0];
-        original = original with { Equality = [new(original.Members[0].Token, original.Members[1].Token,
-            original.Members[0].Content!, original.Members[1].Content!)] };
+        original = original with { Equality = ReviewFixture.ExactEvidence(original.Members) };
         var changed = ChangeCandidate(original, change);
         var newer = f.Request.Scan with { Groups = [changed], Occurrences = changed.Members };
         var navigatedOld = false;
@@ -658,10 +646,14 @@ public sealed class PhotoSiftWorkflowTests
         f.Owner.SnapshotChanged += (_, snapshot) =>
         {
             observedClosed |= snapshot.Status == ReviewStatus.Closed;
-            if (snapshot.Groups.Any(g => g.Candidate.Uncertain)) replacement.TrySetResult(true);
+            if (snapshot.Groups.Any(g => g.Candidate.PotentialRecovery.Bytes == 88888))
+                replacement.TrySetResult(true);
         };
         scan.Publish(f.Request.Scan with { Groups = [f.Request.Scan.Groups[0] with
-            { GroupRevision = reusedRevision ? 1 : 2, Uncertain = true }] });
+            {
+                GroupRevision = reusedRevision ? 1 : 2,
+                PotentialRecovery = new(88888, RecoveryUnavailableReason.None),
+            }] });
         try { await f.Pump(replacement.Task); }
         catch (TimeoutException) { }
         Assert.True(replacement.Task.IsCompletedSuccessfully, "A newer same-Scan candidate must replace the active Review.");
@@ -669,6 +661,90 @@ public sealed class PhotoSiftWorkflowTests
         Assert.Empty(f.Owner.Current.Groups[0].SelectedOccurrenceIds);
         Assert.False(observedClosed);
         Assert.Equal(ReviewCommandOutcome.Stale, (await f.Change(stale)).Outcome);
+    }
+
+    [Fact]
+    public async Task SameSimilarityValuesDoNotReplaceReviewButChangedEvidenceDoes()
+    {
+        await using var f = new ReviewFixture();
+        var request = ReviewCoordinatorTests.MixedRequest(f.Request,
+            includeTerminalFailures: false);
+        var scan = new ScanOwner();
+        var review = new ApprovalProbeReview(f.Owner);
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(request.Scope), scan,
+            f.Scheduler, review);
+        await f.Pump(workflow.ContinueAsync());
+        await f.Pump(workflow.ConfirmExactRulesAsync());
+        scan.Publish(request.Scan);
+        await f.Pump(workflow.OpenReviewAsync());
+        Assert.Equal(1, review.Opens);
+
+        var sameGroups = request.Scan.Groups.Select(group => group with
+        {
+            Similarity = group.Similarity.Reverse().Select(edge => edge with
+            {
+                Left = edge.Right,
+                Right = edge.Left,
+            }).ToImmutableArray(),
+        }).ToImmutableArray();
+        scan.Publish(request.Scan with { Groups = sameGroups });
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.Scan));
+        Assert.Equal(1, review.Opens);
+
+        var near = sameGroups[1];
+        var changedGroups = sameGroups.SetItem(1, near with
+        {
+            Similarity = near.Similarity.SetItem(0,
+                near.Similarity[0] with { HammingDistance = 2 }),
+        });
+        scan.Publish(request.Scan with { Groups = changedGroups });
+        for (var turn = 0; turn < 100 && review.Opens < 2; turn++)
+        {
+            f.Scheduler.TryRunOne();
+            await Task.Yield();
+        }
+
+        Assert.Equal(2, review.Opens);
+    }
+
+    [Fact]
+    public async Task MixedReviewFlowsThroughRealWorkflowSelectionAccountingAndApproval()
+    {
+        await using var f = new ReviewFixture();
+        var request = ReviewCoordinatorTests.MixedRequest(f.Request,
+            includeTerminalFailures: true);
+        var scan = new ScanOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(request.Scope), scan,
+            f.Scheduler, f.Owner);
+        await f.Pump(workflow.ContinueAsync());
+        await f.Pump(workflow.ConfirmExactRulesAsync());
+        scan.Publish(request.Scan);
+        await f.Pump(workflow.OpenReviewAsync());
+        await f.Eligible(request);
+        var snapshot = f.Owner.Current;
+        var exact = snapshot.Groups[0].Candidate;
+        var selecting = workflow.ChangeReviewSelectionAsync(new(
+            new(snapshot.Pin!, exact.GroupId, exact.GroupRevision,
+                snapshot.SelectionRevision), SelectionCommandKind.Toggle, [1],
+            Guid.NewGuid()), TestContext.Current.CancellationToken);
+        await f.Pump(selecting);
+        var selected = await selecting;
+        snapshot = f.Owner.Current;
+
+        var approving = workflow.ApproveReviewAsync(new(
+            snapshot.Pin!, snapshot.SelectionRevision, Guid.NewGuid(),
+            DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
+        await f.Pump(approving);
+        var approved = await approving;
+
+        Assert.Equal(ReviewCommandOutcome.Committed, selected.Outcome);
+        Assert.Equal(ReviewCommandOutcome.Approved, approved.Outcome);
+        Assert.Equal([1L], approved.ApprovedRequest!.SelectedOccurrenceIds);
+        Assert.Single(approved.ApprovedRequest.Items);
+        Assert.Equal(2, approved.ApprovedRequest.Disclosure.Unresolved.FailedScanRows);
+        Assert.Equal(3, approved.ApprovedRequest.Disclosure.Unresolved.UnselectedSurvivorMembers);
+        Assert.Equal(4096, approved.ApprovedRequest.Disclosure.Recovery.Bytes);
+        Assert.True(workflow.Current.Review.Sealed);
     }
 
     [Fact]

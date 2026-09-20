@@ -113,7 +113,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ConfirmExactRulesCommand = new AsyncCommand(() => photoWorkflow?.ConfirmExactRulesAsync() ?? Task.CompletedTask);
         StartScanCommand = new AsyncCommand(() => photoWorkflow?.StartScanAsync() ?? Task.CompletedTask);
         CancelScanCommand = new AsyncCommand(() => photoWorkflow?.CancelScanAsync() ?? Task.CompletedTask);
-        OpenReviewCommand = new AsyncCommand(() => photoWorkflow?.OpenReviewAsync() ?? Task.CompletedTask);
+        OpenReviewCommand = new AsyncCommand(OpenReviewAsync);
         ApproveReviewCommand = new AsyncCommand(ApproveReviewAsync);
         RevalidateUnknownCommand = new AsyncCommand(RevalidateUnknownAsync,
             canExecute: () => CanRevalidateUnknownItems);
@@ -1140,6 +1140,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var affirmation = new OverrideAffirmationCommand(
             proposal, new OverrideEvidenceId(Guid.NewGuid()), DateTimeOffset.UtcNow);
         ApplyReviewResult(await workflow.AffirmReviewOverrideAsync(affirmation, CancellationToken.None));
+    }
+
+    private async Task OpenReviewAsync()
+    {
+        if (photoWorkflow is not { } workflow) return;
+        await workflow.OpenReviewAsync();
+        if (workflow.Current.CurrentPhase != WorkflowPhase.Review)
+            ReviewAnnouncement = workflow.Current.Review.Status == ReviewStatus.Faulted
+                ? ReviewStatusText
+                : "Review could not open because the current Scan evidence is invalid, stale, or faulted.";
     }
 
     private async Task ApproveReviewAsync()

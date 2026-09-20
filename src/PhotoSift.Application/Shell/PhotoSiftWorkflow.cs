@@ -36,6 +36,10 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     private static readonly IEqualityComparer<EqualityEvidence> equalityComparison =
         EqualityComparer<EqualityEvidence>.Create(SameEquality,
             edge => HashCode.Combine(edge.Left, edge.LeftContent) ^ HashCode.Combine(edge.Right, edge.RightContent));
+    private static readonly IEqualityComparer<NearDuplicateEvidence> similarityComparison =
+        EqualityComparer<NearDuplicateEvidence>.Create(SameSimilarity,
+            edge => edge.Left.GetHashCode() ^ edge.Right.GetHashCode()
+                ^ HashCode.Combine(edge.HammingDistance, edge.ColorDistance, edge.Kind));
     private static readonly IEqualityComparer<CandidateGroup> candidateComparison =
         EqualityComparer<CandidateGroup>.Create(SameCandidate, group => group.GroupId.GetHashCode());
 
@@ -445,14 +449,26 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
 
     private static bool SameCandidate(CandidateGroup? left, CandidateGroup? right) =>
         left is not null && right is not null
-        && left with { Members = right.Members, Equality = right.Equality } == right
+        && left with
+        {
+            Members = right.Members,
+            Equality = right.Equality,
+            Similarity = right.Similarity,
+        } == right
         && SameArray(left.Members, right.Members)
-        && SameArray(left.Equality, right.Equality, equalityComparison);
+        && SameArray(left.Equality, right.Equality, equalityComparison)
+        && SameArray(left.Similarity, right.Similarity, similarityComparison);
 
     private static bool SameEquality(EqualityEvidence? left, EqualityEvidence? right) =>
         left == right || (left is not null && right is not null
             && left.Left == right.Right && left.Right == right.Left
             && left.LeftContent == right.RightContent && left.RightContent == right.LeftContent);
+
+    private static bool SameSimilarity(NearDuplicateEvidence? left, NearDuplicateEvidence? right) =>
+        left == right || (left is not null && right is not null
+            && left.Left == right.Right && left.Right == right.Left
+            && left.HammingDistance == right.HammingDistance
+            && left.ColorDistance == right.ColorDistance && left.Kind == right.Kind);
 
     private static bool SameArray<T>(ImmutableArray<T> left, ImmutableArray<T> right,
         IEqualityComparer<T>? comparison = null) where T : notnull =>
