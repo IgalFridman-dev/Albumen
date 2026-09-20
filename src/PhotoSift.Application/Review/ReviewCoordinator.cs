@@ -51,7 +51,26 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
         {
             ObjectDisposedException.ThrowIf(disposed, this);
             cancellationToken.ThrowIfCancellationRequested();
-            if (!ValidOpen(request)) return (Result: new ReviewCommandResult(ReviewCommandOutcome.Invalid, current), Next: (Operation?)null, Old: (Operation?)null);
+            if (!ValidOpen(request))
+            {
+                var invalidated = active is { } existing
+                    && request.Scan.Pin is { } requestedPin
+                    && existing.Request.Scan.Pin == requestedPin
+                        ? existing
+                        : null;
+                if (invalidated is not null)
+                {
+                    invalidated.Invalidated = true;
+                    QueueActionCancellation(invalidated);
+                    revoked.Add(invalidated.Request.Scan.Pin!);
+                    admissionRestricted = true;
+                    requiredScan = null;
+                    active = null;
+                    Publish(ReviewSnapshot.Closed);
+                }
+                return (Result: new ReviewCommandResult(ReviewCommandOutcome.Invalid, current),
+                    Next: (Operation?)null, Old: invalidated);
+            }
             var pin = request.Scan.Pin!;
             if (IsOlder(pin) || revoked.Contains(pin) || (admissionRestricted && pin != requiredScan)
                 || request.Scan.Groups.Any(g => retiredGroups.Contains(g.GroupId)
@@ -317,6 +336,7 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
             || request.Scope.Selection != scope.Selection || request.Scope.Revision != pin.ScopeRevision
             || pin.ScopeRevision <= 0 || request.Rules.ScopeRevision != pin.ScopeRevision
             || request.Rules.RuleSetRevision != pin.RuleSetRevision || pin.RuleSetRevision <= 0
+            || request.Rules.Options is not { IsValid: true }
             || request.Scan.Groups.IsDefault || request.Scan.Occurrences.IsDefault) return false;
         var occurrences = new Dictionary<long, ScanFileOccurrence>();
         foreach (var occurrence in request.Scan.Occurrences)
@@ -327,7 +347,9 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
             if (group.Pin != pin || group.GroupId == Guid.Empty || !groups.Add(group.GroupId)
                 || group.Members.IsDefault || group.Members.Length < 2
                 || group.Equality.IsDefault || group.Similarity.IsDefault
-                || group.KeeperOccurrenceId is not null || !Enum.IsDefined(group.Category)) return false;
+                || group.KeeperOccurrenceId is not null || !Enum.IsDefined(group.Category)
+                || request.Rules.Options.Near != NearDuplicateMode.Conservative
+                    && (group.Category is CandidateCategory.NearDuplicate or CandidateCategory.Uncertain)) return false;
             var members = new Dictionary<long, ScanFileOccurrence>();
             foreach (var member in group.Members)
             {

@@ -215,6 +215,32 @@ internal sealed class ExactShellFixture
     {
         Workflow.Publish(Workflow.Current with { CurrentPhase = phase, Rules = new(1, 1), Scan = Workflow.Current.Scan with { Status = status } });
     }
+    public ScanPin PublishFreshScan(ScanStatus status = ScanStatus.Checking)
+    {
+        var pin = new ScanPin(Guid.NewGuid(), 1, 1, 1);
+        PublishScan(pin, status);
+        return pin;
+    }
+    public void PublishScan(ScanPin pin, ScanStatus status, bool includeOccurrence = false)
+    {
+        ImmutableArray<ScanFileOccurrence> occurrences = includeOccurrence
+            ? [Row(pin, 1, 1, @"C:\Photos\reconciled.jpg")]
+            : [];
+        var scan = new ScanSnapshot(pin, status,
+            status == ScanStatus.Checking
+                ? new(ScanStageState.Pending, ScanReason.None)
+                : new(ScanStageState.Succeeded, ScanReason.None),
+            occurrences, [], includeOccurrence
+                ? new(1, 1, 0, 0, 0, 0)
+                : new(0, 0, 0, 0, 0, 0));
+        Workflow.Publish(Workflow.Current with
+        {
+            CurrentPhase = WorkflowPhase.Scan,
+            Rules = new(1, 1),
+            Scan = scan,
+            Review = ReviewSnapshot.Closed,
+        });
+    }
     public void PublishOptions(ScanOptions options)
     {
         Workflow.Publish(Workflow.Current with

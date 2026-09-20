@@ -14,6 +14,81 @@ namespace PhotoSift.Application.Tests.Review;
 public sealed class ReviewCoordinatorTests
 {
     [Fact]
+    public async Task InvalidConfirmedOptionsCannotOpenReview()
+    {
+        await using var f = new ReviewFixture();
+        var request = f.Request with
+        {
+            Rules = f.Request.Rules with
+            {
+                Options = new(ExactDuplicateMode.Disabled, NearDuplicateMode.Conservative),
+            },
+        };
+
+        var opened = await f.Open(request);
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, opened.Outcome);
+        Assert.Null(f.Owner.Current.Pin);
+        Assert.Empty(f.Executor.Runs);
+    }
+
+    [Fact]
+    public async Task MalformedOptionsOnSameScanCloseRevokeAndCancelPriorReviewAuthority()
+    {
+        await using var f = new ReviewFixture();
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Open()).Outcome);
+        var run = await f.Run();
+        var cancellationRequested = ScanTestData.Signal<bool>();
+        run.OnCancel = () =>
+        {
+            cancellationRequested.TrySetResult(true);
+            return Task.CompletedTask;
+        };
+        var staleCommand = f.Command(SelectionCommandKind.Toggle, 1);
+        var malformed = f.Request with
+        {
+            Rules = f.Request.Rules with { Options = null! },
+        };
+
+        var opened = await f.Open(malformed);
+        await f.Pump(cancellationRequested.Task);
+        await f.Pump(run.Disposed.Task);
+        var late = await f.Change(staleCommand);
+        var reopened = await f.Open();
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, opened.Outcome);
+        Assert.Equal(ReviewStatus.Closed, opened.Snapshot.Status);
+        Assert.Null(f.Owner.Current.Pin);
+        Assert.Equal(ReviewCommandOutcome.Stale, late.Outcome);
+        Assert.Equal(ReviewCommandOutcome.Stale, reopened.Outcome);
+        Assert.Single(f.Executor.Runs);
+    }
+
+    [Theory]
+    [InlineData(CandidateCategory.NearDuplicate)]
+    [InlineData(CandidateCategory.Uncertain)]
+    public async Task ExactOnlyRulesRejectNearCategoryEvidence(CandidateCategory category)
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        var group = request.Scan.Groups.Single(candidate => candidate.Category == category);
+        request = request with
+        {
+            Rules = request.Rules with
+            {
+                Options = new(ExactDuplicateMode.Enabled, NearDuplicateMode.Disabled),
+            },
+            Scan = request.Scan with { Groups = [group] },
+        };
+
+        var opened = await f.Open(request);
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, opened.Outcome);
+        Assert.Null(f.Owner.Current.Pin);
+        Assert.Empty(f.Executor.Runs);
+    }
+
+    [Fact]
     public async Task CompleteConservativeNearScanWithTerminalFailuresOpensMixedReview()
     {
         await using var f = new ReviewFixture();
@@ -25,6 +100,22 @@ public sealed class ReviewCoordinatorTests
         Assert.Equal(3, opened.Snapshot.Groups.Length);
         Assert.Equal(2, request.Scan.Counts.Failed);
         Assert.Equal(2, request.Scan.Counts.Unsupported);
+        var unsupported = request.Scan.Occurrences.Skip(5).Take(2).ToArray();
+        Assert.All(unsupported, row =>
+        {
+            Assert.Equal(ScanStageState.Unsupported, row.Enumerate.State);
+            Assert.Equal(ScanStageState.NotApplicable, row.Exact.State);
+            Assert.Null(row.Content);
+        });
+        var failed = request.Scan.Occurrences.Skip(7).Take(2).ToArray();
+        Assert.All(failed, row =>
+        {
+            Assert.Equal(ScanStageState.Succeeded, row.Enumerate.State);
+            Assert.Equal(ScanStageState.Succeeded, row.Exact.State);
+            Assert.NotNull(row.Content);
+        });
+        Assert.Contains(failed, row => row.VisualFeatures.State == ScanStageState.FailedRetryable);
+        Assert.Contains(failed, row => row.NearDuplicate.State == ScanStageState.FailedRetryable);
         await f.Run();
     }
 
@@ -498,14 +589,13 @@ public sealed class ReviewCoordinatorTests
         var counts = new ScanCounts(5, 5, 0, 0, 0, 0);
         if (includeTerminalFailures)
         {
-            var unsupported = Enumerable.Range(6, 2).Select(id => TerminalRow(
-                ReviewData.Request(id, context).Occurrence,
-                ScanStageState.Unsupported,
-                ScanReason.UnsupportedExtension));
-            var failed = Enumerable.Range(8, 2).Select(id => TerminalRow(
-                ReviewData.Request(id, context).Occurrence,
-                ScanStageState.FailedRetryable,
-                ScanReason.ReadFailure));
+            var unsupported = Enumerable.Range(6, 2).Select(id => UnsupportedRow(
+                ReviewData.Request(id, context).Occurrence));
+            var failed = new[]
+            {
+                FailedNearRow(ReviewData.Request(8, context).Occurrence, failVisualFeatures: true),
+                FailedNearRow(ReviewData.Request(9, context).Occurrence, failVisualFeatures: false),
+            };
             occurrences = [.. analyzed, .. unsupported, .. failed];
             counts = new(9, 5, 2, 2, 0, 0);
         }
@@ -521,16 +611,26 @@ public sealed class ReviewCoordinatorTests
         };
     }
 
-    private static ScanFileOccurrence TerminalRow(
-        ScanFileOccurrence source,
-        ScanStageState state,
-        ScanReason reason) =>
+    private static ScanFileOccurrence UnsupportedRow(ScanFileOccurrence source) =>
         new(source.Token, source.DiscoveredPath, source.ResolvedPath, source.PhysicalFileKey,
-            new(state, reason), new(ScanStageState.NotApplicable, reason), null,
+            new(ScanStageState.Unsupported, ScanReason.UnsupportedExtension),
+            new(ScanStageState.NotApplicable, ScanReason.UnsupportedExtension), null,
             new(null, null, false))
         {
-            VisualFeatures = new(ScanStageState.NotApplicable, reason),
-            NearDuplicate = new(ScanStageState.NotApplicable, reason),
+            VisualFeatures = new(ScanStageState.NotApplicable, ScanReason.UnsupportedExtension),
+            NearDuplicate = new(ScanStageState.NotApplicable, ScanReason.UnsupportedExtension),
+        };
+
+    private static ScanFileOccurrence FailedNearRow(
+        ScanFileOccurrence source,
+        bool failVisualFeatures) => source with
+        {
+            VisualFeatures = failVisualFeatures
+                ? new(ScanStageState.FailedRetryable, ScanReason.ReadFailure)
+                : ScanTestData.Success,
+            NearDuplicate = failVisualFeatures
+                ? new(ScanStageState.NotApplicable, ScanReason.ReadFailure)
+                : new(ScanStageState.FailedRetryable, ScanReason.ReadFailure),
         };
 
     private static async Task CommitEvidence(

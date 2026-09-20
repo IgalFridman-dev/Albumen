@@ -50,6 +50,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool isCanceled;
     private string selectionSummary = "0 selected occurrences.";
     private string reviewAnnouncement = string.Empty;
+    private bool reviewOpenFailureAnnouncementActive;
+    private ScanPin? reviewOpenFailureScan;
     private string approvalSelectedOccurrenceText = "0 selected occurrences";
     private string approvalSelectedPathText = "0 selected paths";
     private string approvalSelectedPhysicalText = "0 distinct physical files";
@@ -331,6 +333,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
+    private void SetReviewAnnouncement(
+        string announcement,
+        bool failedOpen = false,
+        ScanPin? failedScan = null)
+    {
+        reviewOpenFailureAnnouncementActive = failedOpen;
+        reviewOpenFailureScan = failedOpen ? failedScan : null;
+        ReviewAnnouncement = announcement;
+    }
+
     public string ApprovalSelectedOccurrenceText
     {
         get => approvalSelectedOccurrenceText;
@@ -554,9 +566,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (snapshot.Review.Pin is not null && snapshot.Review.Status == ReviewStatus.Faulted
             && (previousReview is null || previousReview.Pin != snapshot.Review.Pin || previousReview.Status != ReviewStatus.Faulted
                 || previousReview.FaultReason != snapshot.Review.FaultReason))
-            ReviewAnnouncement = ReviewStatusText;
-        else if (previousReview?.Pin != snapshot.Review.Pin)
-            ReviewAnnouncement = string.Empty;
+            SetReviewAnnouncement(ReviewStatusText);
+        else if (previousReview?.Pin != snapshot.Review.Pin
+            || reviewOpenFailureAnnouncementActive
+                && (snapshot.CurrentPhase != WorkflowPhase.Scan
+                    || snapshot.Scan.Pin != reviewOpenFailureScan))
+            SetReviewAnnouncement(string.Empty);
         if (previousReview?.Status != snapshot.Review.Status) OnPropertyChanged(nameof(ReviewState));
         if (previousReview?.FaultReason != snapshot.Review.FaultReason) OnPropertyChanged(nameof(ReviewFaultReason));
         if (previousReviewStatusText != ReviewStatusText) OnPropertyChanged(nameof(ReviewStatusText));
@@ -1130,7 +1145,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (reviewDialog is null || invokingFocus is null)
         {
-            ReviewAnnouncement = "Final-survivor override requires an explicitly focused invoking control.";
+            SetReviewAnnouncement("Final-survivor override requires an explicitly focused invoking control.");
             return;
         }
 
@@ -1147,9 +1162,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (photoWorkflow is not { } workflow) return;
         await workflow.OpenReviewAsync();
         if (workflow.Current.CurrentPhase != WorkflowPhase.Review)
-            ReviewAnnouncement = workflow.Current.Review.Status == ReviewStatus.Faulted
-                ? ReviewStatusText
-                : "Review could not open because the current Scan evidence is invalid, stale, or faulted.";
+            SetReviewAnnouncement(workflow.Current.Review.Status == ReviewStatus.Faulted
+                    ? ReviewStatusText
+                    : "Review could not open because the current Scan evidence is invalid, stale, or faulted.",
+                failedOpen: true,
+                failedScan: workflow.Current.Scan.Pin);
     }
 
     private async Task ApproveReviewAsync()
@@ -1180,7 +1197,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             ReviewCommandOutcome.Sealed => "Selection is sealed by explicit approval.",
             _ => null,
         };
-        if (announcement is not null) ReviewAnnouncement = announcement;
+        if (announcement is not null) SetReviewAnnouncement(announcement);
     }
 
     private static bool ReviewProjectionUnchanged(ReviewSnapshot? current, ReviewSnapshot next) =>
