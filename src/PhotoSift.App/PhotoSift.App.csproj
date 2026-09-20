@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PhotoSift.Domain\PhotoSift.Domain.csproj" />
+    <ProjectReference Include="..\PhotoSift.Application\PhotoSift.Application.csproj" />
+    <ProjectReference Include="..\PhotoSift.Analysis\PhotoSift.Analysis.csproj" />
+    <ProjectReference Include="..\PhotoSift.Infrastructure.Sqlite\PhotoSift.Infrastructure.Sqlite.csproj" />
+    <ProjectReference Include="..\PhotoSift.Infrastructure.Windows\PhotoSift.Infrastructure.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="PhotoSift.Infrastructure.Tests" />
+  </ItemGroup>
+</Project>
