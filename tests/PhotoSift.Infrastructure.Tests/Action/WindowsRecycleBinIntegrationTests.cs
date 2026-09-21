@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Scan;
 using PhotoSift.Infrastructure.Windows.Action;
+using PhotoSift.Infrastructure.Windows.Scan;
 using PhotoSift.Infrastructure.Windows.Scope;
 using Xunit;
 

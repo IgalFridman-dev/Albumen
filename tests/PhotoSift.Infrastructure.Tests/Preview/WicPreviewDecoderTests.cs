@@ -7,6 +7,7 @@ using PhotoSift.Application.Scan;
 using PhotoSift.Domain.Scan;
 using PhotoSift.Domain.Scope;
 using PhotoSift.Infrastructure.Windows.Preview;
+using PhotoSift.Infrastructure.Windows.Scan;
 using PhotoSift.Infrastructure.Windows.Scope;
 using Xunit;
 

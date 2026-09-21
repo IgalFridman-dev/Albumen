@@ -79,7 +79,7 @@ public sealed class WindowsTraversalIntegrationTests
             Assert.Contains(files, file => file.ResolvedPath == deepPath);
             foreach (var source in sourceTruth)
             {
-                var file = Assert.Single(files.Where(candidate => candidate.ResolvedPath == source.Key));
+                var file = Assert.Single(files, candidate => candidate.ResolvedPath == source.Key);
                 Assert.Equal(source.Value.PhysicalFileKey, file.PhysicalFileKey);
                 Assert.Equal(source.Value, ReadSourceTruth(source.Key));
             }
