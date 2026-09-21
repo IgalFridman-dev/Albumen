@@ -49,7 +49,7 @@ function New-PhotoSiftReleaseManifest {
         'PhotoSift.App.exe',
         'Start-PhotoSift.cmd',
         'THIRD-PARTY-NOTICES.md',
-        'Verify-PhotoSiftRelease.ps1')
+        'Verify-PhotoSiftRelease.ps1') + $script:PhotoSiftApprovedNativePaths
     $filePaths = @($files | ForEach-Object { $_.Path })
     foreach ($requiredPath in $requiredPaths) {
         if ($filePaths -cnotcontains $requiredPath) {
@@ -65,6 +65,9 @@ function New-PhotoSiftReleaseManifest {
             if ($null -ne $forbiddenReason) {
                 throw "Release package contains forbidden $forbiddenReason`: $($_.Path)"
             }
+            Assert-PhotoSiftReleaseNativePathApproved `
+                -Path $_.Path `
+                -LiteralPath $_.FullName
             [pscustomobject][ordered]@{
                 path = $_.Path
                 length = [long]$_.Length
