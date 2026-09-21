@@ -6,6 +6,7 @@ $checkerPath = Join-Path $repositoryRoot 'eng\Verify-RuntimeBoundary.ps1'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
     'PhotoSift-RuntimeBoundary-Tests-' + [System.Guid]::NewGuid().ToString('N'))
 [System.IO.Directory]::CreateDirectory($testRoot) | Out-Null
+$script:passed = 26
 
 try {
     function Invoke-BoundaryChecker {
@@ -89,6 +90,67 @@ try {
             }
         } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifest -Encoding utf8
         return [pscustomobject]@{ Root = $root; Source = $source; Manifest = $manifest }
+    }
+
+    function New-SelfContainedRuntimeFixture {
+        param(
+            [Parameter(Mandatory)]
+            [string]$Name
+        )
+
+        $fixture = New-RuntimeArtifactFixture -Name $Name
+        [System.IO.File]::WriteAllBytes(
+            (Join-Path $fixture.Root 'PhotoSift.App.dll'),
+            [System.Text.Encoding]::ASCII.GetBytes('clean first-party binary fixture'))
+        [System.IO.File]::WriteAllBytes(
+            (Join-Path $fixture.Root 'PhotoSift.App.exe'),
+            [System.Text.Encoding]::ASCII.GetBytes('clean apphost fixture'))
+        '{"runtimeOptions":{"tfm":"net10.0-windows"}}' |
+            Set-Content -LiteralPath (
+                Join-Path $fixture.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+        $frameworkManifest = Join-Path $fixture.Root 'framework-closure.json'
+        [pscustomobject][ordered]@{
+            schemaVersion = 1
+            runtimeIdentifier = 'win-x64'
+            netCoreRuntimeVersion = '10.0.11'
+            windowsDesktopRuntimeVersion = '10.0.11'
+            frameworkPaths = @()
+        } | ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath $frameworkManifest -Encoding utf8
+        $fixture | Add-Member -NotePropertyName FrameworkManifest -NotePropertyValue $frameworkManifest
+        return $fixture
+    }
+
+    function Set-FrameworkClosurePaths {
+        param(
+            [Parameter(Mandatory)]
+            [string]$ManifestPath,
+
+            [Parameter(Mandatory)]
+            [string[]]$Paths
+        )
+
+        $manifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json
+        $manifest.frameworkPaths = @($Paths)
+        $manifest | ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath $ManifestPath -Encoding utf8
+    }
+
+    function Invoke-SelfContainedBoundaryChecker {
+        param(
+            [Parameter(Mandatory)]
+            $Fixture,
+
+            [Parameter(Mandatory)]
+            [string]$OutputPrefix
+        )
+
+        return Invoke-BoundaryChecker `
+            -Arguments @(
+                '-DependencyManifestPath', $Fixture.Manifest,
+                '-SourceRootPath', $Fixture.Source,
+                '-FrameworkClosureManifestPath', $Fixture.FrameworkManifest) `
+            -OutputPrefix $OutputPrefix
     }
 
     function Assert-RuntimeArtifactRejected {
@@ -175,6 +237,85 @@ try {
     if ($cleanRuntimeResult.ExitCode -ne 0) {
         throw "Clean runtime artifact fixture failed: $($cleanRuntimeResult.Output)"
     }
+
+    $frameworkDependent = New-SelfContainedRuntimeFixture -Name 'framework-dependent'
+    '{"runtimeOptions":{"tfm":"net10.0-windows","framework":{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}}}' |
+        Set-Content -LiteralPath (
+            Join-Path $frameworkDependent.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+    $frameworkDependentResult = Invoke-SelfContainedBoundaryChecker `
+        -Fixture $frameworkDependent `
+        -OutputPrefix 'framework-dependent'
+    if ($frameworkDependentResult.ExitCode -eq 0 -or
+        $frameworkDependentResult.Output -notmatch 'self-contained|framework-dependent') {
+        throw "Framework-dependent runtimeconfig was not rejected as non-self-contained: $($frameworkDependentResult.Output)"
+    }
+    $script:passed++
+
+    $singleFileShaped = New-SelfContainedRuntimeFixture -Name 'single-file-shaped'
+    Remove-Item -LiteralPath (Join-Path $singleFileShaped.Root 'PhotoSift.App.dll')
+    $singleFileResult = Invoke-SelfContainedBoundaryChecker `
+        -Fixture $singleFileShaped `
+        -OutputPrefix 'single-file-shaped'
+    if ($singleFileResult.ExitCode -eq 0 -or
+        $singleFileResult.Output -notmatch 'single-file|PhotoSift.App.dll') {
+        throw "Single-file-shaped output was not rejected: $($singleFileResult.Output)"
+    }
+    $script:passed++
+
+    $frameworkClosure = New-SelfContainedRuntimeFixture -Name 'framework-closure'
+    [System.IO.File]::WriteAllBytes(
+        (Join-Path $frameworkClosure.Root 'System.Net.Http.dll'),
+        [System.Text.Encoding]::ASCII.GetBytes(
+            'legitimate pinned framework binary with System.Net.Http and HttpClient markers'))
+    Set-FrameworkClosurePaths `
+        -ManifestPath $frameworkClosure.FrameworkManifest `
+        -Paths @('System.Net.Http.dll')
+    $frameworkClosureResult = Invoke-SelfContainedBoundaryChecker `
+        -Fixture $frameworkClosure `
+        -OutputPrefix 'framework-closure'
+    if ($frameworkClosureResult.ExitCode -ne 0) {
+        throw "Pinned framework closure was incorrectly rejected: $($frameworkClosureResult.Output)"
+    }
+    $script:passed++
+
+    $firstPartyBinary = New-SelfContainedRuntimeFixture -Name 'first-party-binary'
+    [System.IO.File]::WriteAllBytes(
+        (Join-Path $firstPartyBinary.Root 'PhotoSift.App.dll'),
+        [System.Text.Encoding]::ASCII.GetBytes('first-party System.Net.Http HttpClient marker'))
+    $firstPartyBinaryResult = Invoke-SelfContainedBoundaryChecker `
+        -Fixture $firstPartyBinary `
+        -OutputPrefix 'first-party-binary'
+    if ($firstPartyBinaryResult.ExitCode -eq 0 -or
+        $firstPartyBinaryResult.Output -notmatch 'PhotoSift.App.dll') {
+        throw "First-party network-capability marker was incorrectly accepted: $($firstPartyBinaryResult.Output)"
+    }
+    $script:passed++
+
+    $firstPartyConfig = New-SelfContainedRuntimeFixture -Name 'first-party-config'
+    '{"runtimeOptions":{"tfm":"net10.0-windows"},"telemetryUrl":"https://telemetry.invalid"}' |
+        Set-Content -LiteralPath (
+            Join-Path $firstPartyConfig.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+    $firstPartyConfigResult = Invoke-SelfContainedBoundaryChecker `
+        -Fixture $firstPartyConfig `
+        -OutputPrefix 'first-party-config'
+    if ($firstPartyConfigResult.ExitCode -eq 0 -or
+        $firstPartyConfigResult.Output -notmatch 'PhotoSift.App.runtimeconfig.json') {
+        throw "First-party remote-config marker was incorrectly accepted: $($firstPartyConfigResult.Output)"
+    }
+    $script:passed++
+
+    $unlistedFramework = New-SelfContainedRuntimeFixture -Name 'unlisted-framework'
+    [System.IO.File]::WriteAllBytes(
+        (Join-Path $unlistedFramework.Root 'System.Private.Unlisted.dll'),
+        [System.Text.Encoding]::ASCII.GetBytes('clean but unlisted framework-shaped fixture'))
+    $unlistedFrameworkResult = Invoke-SelfContainedBoundaryChecker `
+        -Fixture $unlistedFramework `
+        -OutputPrefix 'unlisted-framework'
+    if ($unlistedFrameworkResult.ExitCode -eq 0 -or
+        $unlistedFrameworkResult.Output -notmatch 'framework closure|System.Private.Unlisted.dll') {
+        throw "Unlisted framework-shaped artifact was incorrectly accepted: $($unlistedFrameworkResult.Output)"
+    }
+    $script:passed++
 
     $networkSourceRoot = Join-Path $testRoot 'network-source'
     [System.IO.Directory]::CreateDirectory($networkSourceRoot) | Out-Null
@@ -414,7 +555,7 @@ public static class AllowedAppFixture
         throw "Allowed path-policy fixture failed: $($allowedPathPolicyResult.Output)"
     }
 
-    Write-Output 'Passed: 26 Failed: 0'
+    Write-Output "Passed: $script:passed Failed: 0"
 }
 finally {
     Remove-Item -Recurse -Force -LiteralPath $testRoot -ErrorAction SilentlyContinue

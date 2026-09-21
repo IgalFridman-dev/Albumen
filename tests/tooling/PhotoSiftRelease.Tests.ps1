@@ -4,10 +4,18 @@ Set-StrictMode -Version Latest
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $modulePath = Join-Path $repositoryRoot 'eng\release\PhotoSiftRelease.psm1'
 $checkerPath = Join-Path $repositoryRoot 'eng\release\Test-PhotoSiftRelease.ps1'
+$builderPath = Join-Path $repositoryRoot 'eng\release\New-PhotoSiftRelease.ps1'
+$runtimeBoundaryPath = Join-Path $repositoryRoot 'eng\Verify-RuntimeBoundary.ps1'
 $launcherAssetPath = Join-Path $repositoryRoot 'eng\release\assets\Start-PhotoSift.cmd'
 $verifierAssetPath = Join-Path $repositoryRoot 'eng\release\assets\Verify-PhotoSiftRelease.ps1'
 
-foreach ($requiredPath in @($modulePath, $checkerPath, $launcherAssetPath, $verifierAssetPath)) {
+foreach ($requiredPath in @(
+        $modulePath,
+        $checkerPath,
+        $builderPath,
+        $runtimeBoundaryPath,
+        $launcherAssetPath,
+        $verifierAssetPath)) {
     if (-not [System.IO.File]::Exists($requiredPath)) {
         throw "Required release implementation does not exist: $requiredPath"
     }
@@ -138,6 +146,9 @@ function New-CleanPackage {
     [System.IO.Directory]::CreateDirectory((Join-Path $packagePath 'runtime')) | Out-Null
     Write-Utf8NoBom -Path (Join-Path $packagePath 'runtime\PhotoSift.Managed.dll') -Content 'managed fixture'
     Write-Utf8NoBom -Path (Join-Path $packagePath 'coreclr.dll') -Content 'named native fixture'
+    Write-Utf8NoBom `
+        -Path (Join-Path $packagePath 'release-native-paths.json') `
+        -Content '{"schemaVersion":1,"nativePaths":["coreclr.dll"]}'
     Write-Utf8NoBom -Path (Join-Path $packagePath 'THIRD-PARTY-NOTICES.md') -Content 'fixture notice'
     New-PhotoSiftReleaseManifest `
         -PackagePath $packagePath `
@@ -235,6 +246,167 @@ function Invoke-PackageLauncher {
     }
 }
 
+function New-SyntheticReleaseRepository {
+    param([string]$Name)
+
+    $root = Join-Path $testRoot $Name
+    foreach ($path in @(
+            'eng\release\assets',
+            'eng\release\licenses',
+            'src\PhotoSift.App')) {
+        [System.IO.Directory]::CreateDirectory((Join-Path $root $path)) | Out-Null
+    }
+    foreach ($source in @(
+            $modulePath,
+            $checkerPath,
+            $builderPath,
+            $runtimeBoundaryPath,
+            $launcherAssetPath,
+            $verifierAssetPath)) {
+        $relativePath = $source.Substring($repositoryRoot.Length).TrimStart('\', '/')
+        $destination = Join-Path $root $relativePath
+        [System.IO.Directory]::CreateDirectory(
+            [System.IO.Path]::GetDirectoryName($destination)) | Out-Null
+        [System.IO.File]::Copy($source, $destination)
+    }
+    Write-Utf8NoBom `
+        -Path (Join-Path $root 'global.json') `
+        -Content '{"sdk":{"version":"10.0.400","rollForward":"latestPatch"}}'
+    Write-Utf8NoBom `
+        -Path (Join-Path $root 'NuGet.Config') `
+        -Content '<configuration><packageSources><clear /></packageSources></configuration>'
+    Write-Utf8NoBom `
+        -Path (Join-Path $root 'src\PhotoSift.App\PhotoSift.App.csproj') `
+        -Content '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF></PropertyGroup></Project>'
+    Write-Utf8NoBom `
+        -Path (Join-Path $root 'src\PhotoSift.App\Clean.cs') `
+        -Content 'public static class Clean { }'
+    Write-Utf8NoBom `
+        -Path (Join-Path $root 'src\PhotoSift.App\packages.lock.json') `
+        -Content '{"version":2,"dependencies":{}}'
+    Write-Utf8NoBom `
+        -Path (Join-Path $root 'THIRD-PARTY-NOTICES.md') `
+        -Content '# Synthetic complete notices'
+    Write-Utf8NoBom `
+        -Path (Join-Path $root 'eng\release\licenses\MIT.txt') `
+        -Content 'Synthetic complete MIT license text'
+    return $root
+}
+
+function New-SyntheticPackagesRoot {
+    param([string]$Name)
+
+    $root = Join-Path $testRoot $Name
+    $netCorePath = Join-Path $root 'microsoft.netcore.app.runtime.win-x64\10.0.11\data'
+    $windowsDesktopPath = Join-Path $root 'microsoft.windowsdesktop.app.runtime.win-x64\10.0.11\data'
+    [System.IO.Directory]::CreateDirectory($netCorePath) | Out-Null
+    [System.IO.Directory]::CreateDirectory($windowsDesktopPath) | Out-Null
+    Write-Utf8NoBom `
+        -Path (Join-Path $netCorePath 'RuntimeList.xml') `
+        -Content @'
+<FileList Name="Microsoft.NETCore.App" TargetFrameworkVersion="10.0" RuntimeIdentifier="win-x64">
+  <File Type="Native" Path="coreclr.dll" />
+  <File Type="Managed" Path="System.Net.Http.dll" />
+</FileList>
+'@
+    Write-Utf8NoBom `
+        -Path (Join-Path $windowsDesktopPath 'RuntimeList.xml') `
+        -Content @'
+<FileList Name="Microsoft.WindowsDesktop.App" TargetFrameworkVersion="10.0" RuntimeIdentifier="win-x64">
+  <File Type="Managed" Path="PresentationCore.dll" />
+  <File Type="Native" Path="wpfgfx_cor3.dll" />
+</FileList>
+'@
+    return $root
+}
+
+function Write-SyntheticPublishOutput {
+    param(
+        [string]$OutputPath,
+        [bool]$Drift
+    )
+
+    [System.IO.Directory]::CreateDirectory($OutputPath) | Out-Null
+    $libraries = [ordered]@{
+        'PhotoSift.App/1.0.0' = @{ type = 'project' }
+        'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
+        'Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
+        'Microsoft.Data.Sqlite/10.0.11' = @{ type = 'package' }
+        'Microsoft.Data.Sqlite.Core/10.0.11' = @{ type = 'package' }
+        'SQLitePCLRaw.bundle_e_sqlite3/2.1.12' = @{ type = 'package' }
+        'SQLitePCLRaw.core/2.1.12' = @{ type = 'package' }
+        'SQLitePCLRaw.lib.e_sqlite3/2.1.12' = @{ type = 'package' }
+        'SQLitePCLRaw.provider.e_sqlite3/2.1.12' = @{ type = 'package' }
+    }
+    [pscustomobject]@{ libraries = $libraries } | ConvertTo-Json -Depth 8 |
+        Set-Content -LiteralPath (Join-Path $OutputPath 'PhotoSift.App.deps.json') -Encoding utf8
+    Write-Utf8NoBom `
+        -Path (Join-Path $OutputPath 'PhotoSift.App.runtimeconfig.json') `
+        -Content '{"runtimeOptions":{"tfm":"net10.0-windows"}}'
+    foreach ($file in @(
+            'PhotoSift.App.exe',
+            'PhotoSift.App.dll',
+            'Microsoft.Data.Sqlite.dll',
+            'SQLitePCLRaw.batteries_v2.dll',
+            'SQLitePCLRaw.core.dll',
+            'SQLitePCLRaw.provider.e_sqlite3.dll',
+            'e_sqlite3.dll',
+            'coreclr.dll',
+            'System.Net.Http.dll',
+            'PresentationCore.dll',
+            'wpfgfx_cor3.dll')) {
+        $content = "synthetic $file"
+        if ($Drift -and $file -ceq 'PhotoSift.App.dll') {
+            $content += ' drift'
+        }
+        Write-Utf8NoBom -Path (Join-Path $OutputPath $file) -Content $content
+    }
+}
+
+function New-SyntheticReleaseOperations {
+    param(
+        [System.Collections.Generic.List[object]]$Calls,
+        [bool]$DriftSecondPublish
+    )
+
+    $publishCount = 0
+    return @{
+        InvokeExternal = {
+            param($Name, $FilePath, $Arguments, $WorkingDirectory)
+
+            $Calls.Add([pscustomobject]@{
+                    Name = $Name
+                    FilePath = $FilePath
+                    Arguments = [string[]]@($Arguments)
+                    WorkingDirectory = $WorkingDirectory
+                })
+            if ($Name -ceq 'restore') {
+                $assetsPath = Join-Path $WorkingDirectory 'src\PhotoSift.App\obj\project.assets.json'
+                [System.IO.Directory]::CreateDirectory(
+                    [System.IO.Path]::GetDirectoryName($assetsPath)) | Out-Null
+                [pscustomobject]@{
+                    libraries = [ordered]@{
+                        'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
+                        'Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
+                    }
+                } | ConvertTo-Json -Depth 6 |
+                    Set-Content -LiteralPath $assetsPath -Encoding utf8
+            }
+            if ($Name -like 'publish-*') {
+                $publishCount++
+                $outputIndex = [Array]::IndexOf([object[]]$Arguments, '-o')
+                if ($outputIndex -lt 0) {
+                    throw "Synthetic publish invocation omitted -o: $($Arguments -join ' ')"
+                }
+                Write-SyntheticPublishOutput `
+                    -OutputPath $Arguments[$outputIndex + 1] `
+                    -Drift ($DriftSecondPublish -and $publishCount -eq 2)
+            }
+            return [pscustomobject]@{ ExitCode = 0; Output = "synthetic $Name" }
+        }.GetNewClosure()
+    }
+}
+
 try {
     $cleanPackage = New-CleanPackage -Name 'clean'
     Test-PhotoSiftRelease -PackagePath $cleanPackage | Out-Null
@@ -245,11 +417,11 @@ try {
     $manifest = Read-Manifest -PackagePath $cleanPackage
     Assert-Equal 1 $manifest.schemaVersion 'the schema version must be exact'
     Assert-Equal `
-        'PhotoSift.App.deps.json,PhotoSift.App.exe,PhotoSift.App.runtimeconfig.json,Start-PhotoSift.cmd,THIRD-PARTY-NOTICES.md,Verify-PhotoSiftRelease.ps1,coreclr.dll,runtime/PhotoSift.Managed.dll' `
+        'PhotoSift.App.deps.json,PhotoSift.App.exe,PhotoSift.App.runtimeconfig.json,Start-PhotoSift.cmd,THIRD-PARTY-NOTICES.md,Verify-PhotoSiftRelease.ps1,coreclr.dll,release-native-paths.json,runtime/PhotoSift.Managed.dll' `
         (($manifest.payload | ForEach-Object { $_.path }) -join ',') `
         'payload paths must be canonical slash-separated ordinal-sorted paths'
     Assert-Equal `
-        'managed-runtime,application,managed-runtime,launcher,notice,launcher,native-runtime,managed-runtime' `
+        'managed-runtime,application,managed-runtime,launcher,notice,launcher,native-runtime,managed-runtime,managed-runtime' `
         (($manifest.payload | ForEach-Object { $_.kind }) -join ',') `
         'each clean payload path must have its exact bounded kind'
     Assert-Equal 'coreclr.dll' ($manifest.nativePaths -join ',') 'the named native path must be explicit'
@@ -257,6 +429,26 @@ try {
         Assert-True ($entry.length -ge 0) "payload length must be nonnegative for $($entry.path)"
         Assert-True ($entry.sha256 -cmatch '^[0-9A-F]{64}$') "payload SHA-256 must be uppercase hex for $($entry.path)"
     }
+    $script:passed++
+
+    $expandedNativePackage = Copy-Package `
+        -SourcePath $cleanPackage `
+        -Name 'expanded-native-policy'
+    Write-Utf8NoBom `
+        -Path (Join-Path $expandedNativePackage 'hostfxr.dll') `
+        -Content 'second named native fixture'
+    Write-Utf8NoBom `
+        -Path (Join-Path $expandedNativePackage 'release-native-paths.json') `
+        -Content '{"schemaVersion":1,"nativePaths":["coreclr.dll","hostfxr.dll"]}'
+    New-PhotoSiftReleaseManifest `
+        -PackagePath $expandedNativePackage `
+        -OutputPath (Join-Path $expandedNativePackage 'release-manifest.json') | Out-Null
+    $expandedNativeManifest = Read-Manifest -PackagePath $expandedNativePackage
+    Assert-Equal `
+        'coreclr.dll,hostfxr.dll' `
+        ($expandedNativeManifest.nativePaths -join ',') `
+        'the package-local explicit native policy must support the exact pinned publish closure'
+    Test-PhotoSiftRelease -PackagePath $expandedNativePackage | Out-Null
     $script:passed++
 
     $correctionFailures = [System.Collections.Generic.List[string]]::new()
@@ -509,6 +701,91 @@ try {
         -Name 'supported-launcher' `
         -ApplicationArguments @('/d', '/c', '"exit /b 9"')
     Assert-Equal 9 $launcherResult.ExitCode 'the supported batch launcher must forward arguments and propagate the verified application exit code'
+    $script:passed++
+
+    $syntheticRepository = New-SyntheticReleaseRepository -Name 'builder-repository'
+    $syntheticPackages = New-SyntheticPackagesRoot -Name 'builder-packages'
+    $syntheticSdk = Join-Path $testRoot 'builder-sdk'
+    [System.IO.Directory]::CreateDirectory($syntheticSdk) | Out-Null
+    [System.IO.Directory]::CreateDirectory((Join-Path $syntheticSdk 'sdk\10.0.400')) | Out-Null
+    Write-Utf8NoBom -Path (Join-Path $syntheticSdk 'dotnet.exe') -Content 'never executed synthetic SDK'
+    $builderOutput = Join-Path $testRoot 'builder-output'
+    $builderCalls = [System.Collections.Generic.List[object]]::new()
+    $builderOperations = New-SyntheticReleaseOperations `
+        -Calls $builderCalls `
+        -DriftSecondPublish $false
+    $buildResult = & $builderPath `
+        -RepositoryRoot $syntheticRepository `
+        -OutputRoot $builderOutput `
+        -SdkRoot $syntheticSdk `
+        -PackagesRoot $syntheticPackages `
+        -SourceIdentity 'synthetic-source-identity' `
+        -Operations $builderOperations
+    Assert-Equal 3 $builderCalls.Count 'the builder must perform one locked restore and exactly two publishes'
+    Assert-Equal 'restore' $builderCalls[0].Name 'locked restore must precede both publishes'
+    foreach ($publishCall in @($builderCalls | Where-Object { $_.Name -like 'publish-*' })) {
+        $arguments = $publishCall.Arguments -join ' '
+        foreach ($requiredArgument in @(
+                'publish',
+                '-c Release',
+                '-r win-x64',
+                '--self-contained true',
+                '--no-restore',
+                '-p:PublishSingleFile=false',
+                '-p:RuntimeFrameworkVersion=10.0.11',
+                '-p:TargetLatestRuntimePatch=false',
+                '-p:DebugType=None',
+                '-p:DebugSymbols=false')) {
+            Assert-True `
+                ($arguments.Contains($requiredArgument)) `
+                "publish invocation must include '$requiredArgument'"
+        }
+    }
+    $restoreArguments = $builderCalls[0].Arguments -join ' '
+    foreach ($requiredArgument in @(
+            'restore',
+            '-r win-x64',
+            '--locked-mode',
+            '--configfile',
+            '-p:RuntimeFrameworkVersion=10.0.11',
+            '-p:TargetLatestRuntimePatch=false')) {
+        Assert-True `
+            ($restoreArguments.Contains($requiredArgument)) `
+            "restore invocation must include '$requiredArgument'"
+    }
+    $candidatePath = Join-Path $builderOutput 'candidate'
+    Assert-True ([System.IO.Directory]::Exists($candidatePath)) 'candidate must be copied only after two equal package inventories'
+    Test-PhotoSiftRelease -PackagePath $candidatePath | Out-Null
+    $candidateNativePolicy = Get-Content -Raw -LiteralPath (
+        Join-Path $candidatePath 'release-native-paths.json') | ConvertFrom-Json
+    Assert-Equal `
+        'coreclr.dll,e_sqlite3.dll,wpfgfx_cor3.dll' `
+        ($candidateNativePolicy.nativePaths -join ',') `
+        'the builder must derive the exact native closure from the pinned runtime packs plus SQLite'
+    Assert-Equal $true $buildResult.inventoriesEqual 'the successful builder result must report exact tuple equality'
+    Assert-Equal 'path,length,sha256' ($buildResult.comparedFields -join ',') 'determinism must be bounded to exact path, length, and SHA-256 tuples'
+    $script:passed++
+
+    $driftOutput = Join-Path $testRoot 'builder-drift-output'
+    $driftCalls = [System.Collections.Generic.List[object]]::new()
+    $driftOperations = New-SyntheticReleaseOperations `
+        -Calls $driftCalls `
+        -DriftSecondPublish $true
+    Assert-ThrowsLike `
+        -Action {
+            & $builderPath `
+                -RepositoryRoot $syntheticRepository `
+                -OutputRoot $driftOutput `
+                -SdkRoot $syntheticSdk `
+                -PackagesRoot $syntheticPackages `
+                -SourceIdentity 'synthetic-source-identity' `
+                -Operations $driftOperations | Out-Null
+        } `
+        -Pattern 'determin|differ|inventory' `
+        -Because 'the candidate must not be created when the two publish tuple inventories differ'
+    Assert-True `
+        (-not [System.IO.Directory]::Exists((Join-Path $driftOutput 'candidate'))) `
+        'a drifted second publish must leave no candidate directory'
     $script:passed++
 
     Write-Output "Passed: $script:passed Failed: 0"
