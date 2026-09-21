@@ -119,6 +119,59 @@ function Assert-OnlyApprovedSqliteLibraries {
     }
 }
 
+function Assert-NoForbiddenRuntimeArtifacts {
+    param(
+        [Parameter(Mandatory)]
+        [string]$DirectoryPath
+    )
+
+    $files = @(Get-ChildItem -File -LiteralPath $DirectoryPath | Sort-Object Name)
+    $violations = New-Object 'System.Collections.Generic.List[string]'
+    $testArtifactPattern = '(?i)(?:^testhost(?:\.|$)|\.Tests\.|^xunit\.|^Microsoft\.(?:TestPlatform|Testing|ApplicationInsights)\.|^(?:OpenTelemetry|Sentry)(?:\.|$))'
+    $modelArtifactPattern = '(?i)(?:\.onnx$|\.tflite$|(?:^|[._-])(?:tokenizer|vocab|model)(?:[._-]|$))'
+    $configPattern = '(?i)(?:https?|wss?)://|(?:telemetry|updater?|remote.?config|download)(?:url|uri|endpoint)'
+    $binaryPattern = '(?i)System\.Net\.(?:Http|Sockets)|HttpClient|WebView2?|ApplicationInsights|OpenTelemetry|Sentry|RemoteConfig|ModelDownloader'
+    $binaryCount = 0
+    $configCount = 0
+
+    foreach ($file in $files) {
+        if ($file.Name -match $testArtifactPattern) {
+            $violations.Add("$($file.Name) -> test/tooling artifact")
+        }
+        if ($file.Name -match $modelArtifactPattern) {
+            $violations.Add("$($file.Name) -> model artifact")
+        }
+
+        if ($file.Extension -in @('.json', '.config', '.xml')) {
+            $configCount++
+            $content = Get-Content -Raw -LiteralPath $file.FullName
+            if ($content -match $configPattern) {
+                $violations.Add("$($file.Name) -> remote endpoint/config marker")
+            }
+        }
+
+        if ($file.Extension -in @('.dll', '.exe')) {
+            $binaryCount++
+            $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+            $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
+            if ($ascii -match $binaryPattern) {
+                $violations.Add("$($file.Name) -> forbidden binary capability marker")
+            }
+        }
+    }
+
+    if ($violations.Count -gt 0) {
+        $distinctViolations = @($violations | Sort-Object -Unique)
+        throw "Forbidden runtime artifacts: $($distinctViolations -join ', ')"
+    }
+
+    return [pscustomobject]@{
+        Files = @($files.Name)
+        BinaryCount = $binaryCount
+        ConfigCount = $configCount
+    }
+}
+
 function Assert-NoForbiddenProductionApis {
     param(
         [Parameter(Mandatory)]
@@ -206,6 +259,8 @@ $dependencyManifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-
 $runtimeLibraries = Get-JsonPropertyNames -Value $dependencyManifest.libraries
 Assert-NoForbiddenDependencies -Names $runtimeLibraries
 Assert-OnlyApprovedSqliteLibraries -Names $runtimeLibraries
+$outputDirectory = Split-Path -Parent $manifestPath
+$artifactInspection = Assert-NoForbiddenRuntimeArtifacts -DirectoryPath $outputDirectory
 
 if ([string]::IsNullOrWhiteSpace($SourceRootPath)) {
     $resolvedSourceRootPath = Join-Path $repositoryRoot 'src'
@@ -218,6 +273,10 @@ $sourceFileCount = Assert-NoForbiddenProductionApis -RootPath $resolvedSourceRoo
 if (-not [string]::IsNullOrWhiteSpace($DependencyManifestPath)) {
     Write-Output "PHOTOSIFT_RUNTIME_BOUNDARY_OK manifest=$manifestPath"
     Write-Output "SourceFilesScanned=$sourceFileCount"
+    Write-Output "RuntimeFilesScanned=$($artifactInspection.Files.Count)"
+    Write-Output "RuntimeBinariesScanned=$($artifactInspection.BinaryCount)"
+    Write-Output "RuntimeConfigsScanned=$($artifactInspection.ConfigCount)"
+    Write-Output 'ForbiddenRuntimeArtifacts=0'
     Write-Output 'ForbiddenApiCalls=0'
     return
 }
@@ -320,8 +379,7 @@ if ($missingRuntimeLibraries.Count -gt 0) {
     throw "Missing runtime libraries: $($missingRuntimeLibraries -join ', ')"
 }
 
-$outputDirectory = Split-Path -Parent $manifestPath
-$outputFiles = @(Get-ChildItem -File -LiteralPath $outputDirectory | Select-Object -ExpandProperty Name | Sort-Object)
+$outputFiles = @($artifactInspection.Files)
 Assert-NoForbiddenDependencies -Names $outputFiles
 $requiredSqliteOutputFiles = @(
     'Microsoft.Data.Sqlite.dll',
@@ -352,5 +410,8 @@ Write-Output "SourceFilesScanned=$sourceFileCount"
 Write-Output "ProductionPackages=$($distinctPackageLibraries -join ',')"
 Write-Output "SQLiteNativeSha256=$nativeSqliteSha256"
 Write-Output "OutputFiles=$($outputFiles -join ',')"
+Write-Output "RuntimeBinariesScanned=$($artifactInspection.BinaryCount)"
+Write-Output "RuntimeConfigsScanned=$($artifactInspection.ConfigCount)"
 Write-Output 'ForbiddenDependencies=0'
+Write-Output 'ForbiddenRuntimeArtifacts=0'
 Write-Output 'ForbiddenApiCalls=0'

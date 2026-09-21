@@ -6,6 +6,11 @@ $repositoryRoot = [System.IO.Path]::GetFullPath(
 $modulePath = Join-Path $repositoryRoot 'eng\verification\PhotoSiftVerification.psm1'
 Import-Module $modulePath -Force
 
+$guestRunnerPath = Join-Path $repositoryRoot 'eng\verification\Run-PhotoSiftVerification.ps1'
+$guestRunnerSource = Get-Content -Raw -LiteralPath $guestRunnerPath
+$offlineSmokePath = Join-Path $repositoryRoot 'eng\Invoke-OfflineLaunchSmoke.ps1'
+$offlineSmokeSource = Get-Content -Raw -LiteralPath $offlineSmokePath
+
 $script:passed = 0
 
 function Assert-Equal {
@@ -508,6 +513,49 @@ $longTimeoutResult = Invoke-PhotoSiftProcess `
     -Arguments @('-NoProfile', '-NonInteractive', '-Command', 'exit 0') `
     -TimeoutSeconds 7200
 Assert-Equal 0 $longTimeoutResult.ExitCode 'the native process helper must accept the controller maximum of 7200 seconds'
+Assert-Equal $true ($longTimeoutResult.ProcessId -gt 0) 'the native process helper must return the observed process identity'
+Assert-Equal $true ($guestRunnerSource -match "DOTNET_CLI_TELEMETRY_OPTOUT\s*=\s*'1'") `
+    'the guest runner must disable dotnet CLI telemetry before restore/build/test'
+Assert-Equal $true ($guestRunnerSource -match "TESTINGPLATFORM_TELEMETRY_OPTOUT\s*=\s*'1'") `
+    'the guest runner must disable testing-platform telemetry before restore/build/test'
+Assert-Equal $true ($guestRunnerSource -match 'dotnetCliTelemetryOptOut') `
+    'the guest summary must record the dotnet telemetry opt-out'
+Assert-Equal $true ($guestRunnerSource -match 'testingPlatformTelemetryOptOut') `
+    'the guest summary must record the testing-platform telemetry opt-out'
+
+$networkAuditRecord = ConvertFrom-PhotoSiftNetworkAuditXml -Xml @'
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System><EventID>5157</EventID></System>
+  <EventData>
+    <Data Name="ProcessID">0x4d2</Data>
+    <Data Name="Application">\device\harddiskvolume3\photosift\PhotoSift.App.exe</Data>
+  </EventData>
+</Event>
+'@
+Assert-Equal 5157 $networkAuditRecord.EventId 'the WFP observer must retain the stable event code'
+Assert-Equal 1234 $networkAuditRecord.ProcessId 'the WFP observer must parse hexadecimal process identities'
+Assert-Equal 'PhotoSift.App.exe' $networkAuditRecord.ExecutableName `
+    'the WFP observer must retain only the executable leaf name for exact process filtering'
+Assert-Equal $null $networkAuditRecord.PSObject.Properties['Application'] `
+    'the WFP observer must not retain the Security log application path'
+Assert-Equal $true ($offlineSmokeSource -match 'auditpol\.exe.*?/backup') `
+    'the offline smoke must preserve the existing audit policy before observation'
+Assert-Equal $true ($offlineSmokeSource -match 'auditpol\.exe.*?/restore') `
+    'the offline smoke must restore the existing audit policy after observation'
+Assert-Equal $true ($offlineSmokeSource -match '0CCE9226-69AE-11D9-BED3-505054503030') `
+    'the offline smoke must enable Filtering Platform Connection auditing by stable GUID'
+Assert-Equal $true ($offlineSmokeSource -match 'NetworkObserverCanaryEvents') `
+    'the offline smoke must prove its observer with a positive connection-attempt canary'
+Assert-Equal $true ($offlineSmokeSource -match 'PhotoSiftNetworkAttemptEvents=0') `
+    'the offline smoke must fail unless the PhotoSift process produces no observed attempts'
+Assert-Equal $true ($offlineSmokeSource -match '\[System\.String\]::Equals\([^\r\n]+OrdinalIgnoreCase') `
+    'WFP application identity matching must tolerate device-path casing from the Security log'
+Assert-Equal $true ($offlineSmokeSource -match 'FreshProfile=true') `
+    'the offline smoke must identify the clean first-launch profile proof'
+Assert-Equal $true ($offlineSmokeSource -match '\$auditRestoreFailure\s*=') `
+    'audit-policy restore failure must be captured without interrupting other cleanup'
+Assert-Equal $true ($offlineSmokeSource -match '(?s)\$env:LOCALAPPDATA\s*=\s*\$previousLocalAppData.*throw\s+\$auditRestoreFailure') `
+    'profile environment restoration must complete before a captured audit-policy failure is rethrown'
 
 $boundedCommandStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 Assert-Throws {
@@ -810,6 +858,8 @@ try {
         success = $true
         stage = 'Architecture'
         networkingDisabled = $true
+        dotnetCliTelemetryOptOut = $true
+        testingPlatformTelemetryOptOut = $true
         sdkVersion = '10.0.400'
         desktopRuntimeVersion = '10.0.11'
         commands = $architectureCommandResults
@@ -830,6 +880,17 @@ try {
         -SummaryPath $passingSummaryPath `
         -ExpectedStage Architecture | Out-Null
     $script:passed++
+
+    $telemetryEnabledSummaryPath = Join-Path $evidenceRoot 'telemetry-enabled-summary.json'
+    $telemetryEnabledSummary = Get-Content -Raw -LiteralPath $passingSummaryPath | ConvertFrom-Json
+    $telemetryEnabledSummary.testingPlatformTelemetryOptOut = $false
+    $telemetryEnabledSummary | ConvertTo-Json -Depth 6 |
+        Set-Content -LiteralPath $telemetryEnabledSummaryPath -Encoding utf8
+    Assert-Throws {
+        Assert-PhotoSiftVerificationResult `
+            -SummaryPath $telemetryEnabledSummaryPath `
+            -ExpectedStage Architecture
+    } 'verification evidence must reject a missing test-platform telemetry opt-out'
 
     $missingLogSummaryPath = Join-Path $evidenceRoot 'missing-log-summary.json'
     $missingLogSummary = Get-Content -Raw -LiteralPath $passingSummaryPath | ConvertFrom-Json

@@ -69,6 +69,89 @@ try {
         throw 'Failure output did not identify System.Net.Http.'
     }
 
+    function New-RuntimeArtifactFixture {
+        param(
+            [Parameter(Mandatory)]
+            [string]$Name
+        )
+
+        $root = Join-Path $testRoot $Name
+        $source = Join-Path $root 'source'
+        [System.IO.Directory]::CreateDirectory($source) | Out-Null
+        'public static class CleanProductionFixture { }' |
+            Set-Content -LiteralPath (Join-Path $source 'CleanProductionFixture.cs') -Encoding utf8
+        $manifest = Join-Path $root 'PhotoSift.App.deps.json'
+        @{
+            libraries = @{
+                'PhotoSift.App/1.0.0' = @{ type = 'project' }
+            }
+        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifest -Encoding utf8
+        return [pscustomobject]@{ Root = $root; Source = $source; Manifest = $manifest }
+    }
+
+    function Assert-RuntimeArtifactRejected {
+        param(
+            [Parameter(Mandatory)]
+            [string]$CaseName,
+
+            [Parameter(Mandatory)]
+            [string]$ArtifactName,
+
+            [Parameter(Mandatory)]
+            [byte[]]$Content
+        )
+
+        $fixture = New-RuntimeArtifactFixture -Name $CaseName
+        [System.IO.File]::WriteAllBytes((Join-Path $fixture.Root $ArtifactName), $Content)
+        $result = Invoke-BoundaryChecker `
+            -Arguments @(
+                '-DependencyManifestPath', $fixture.Manifest,
+                '-SourceRootPath', $fixture.Source) `
+            -OutputPrefix $CaseName
+        if ($result.ExitCode -eq 0) {
+            throw "Forbidden runtime artifact '$ArtifactName' was incorrectly accepted."
+        }
+        if ($result.Output -notmatch [regex]::Escape($ArtifactName)) {
+            throw "Failure output did not identify forbidden runtime artifact '$ArtifactName'."
+        }
+    }
+
+    Assert-RuntimeArtifactRejected `
+        -CaseName 'test-assembly' `
+        -ArtifactName 'PhotoSift.Scenarios.Tests.dll' `
+        -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
+    Assert-RuntimeArtifactRejected `
+        -CaseName 'test-host' `
+        -ArtifactName 'testhost.exe' `
+        -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
+    Assert-RuntimeArtifactRejected `
+        -CaseName 'telemetry-library' `
+        -ArtifactName 'OpenTelemetry.dll' `
+        -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
+    Assert-RuntimeArtifactRejected `
+        -CaseName 'remote-config' `
+        -ArtifactName 'PhotoSift.App.runtimeconfig.json' `
+        -Content ([System.Text.Encoding]::UTF8.GetBytes('{"service":"https://telemetry.invalid"}'))
+    Assert-RuntimeArtifactRejected `
+        -CaseName 'binary-capability' `
+        -ArtifactName 'PhotoSift.App.dll' `
+        -Content ([System.Text.Encoding]::ASCII.GetBytes('binary-prefix System.Net.Http binary-suffix'))
+
+    $cleanRuntime = New-RuntimeArtifactFixture -Name 'clean-runtime'
+    [System.IO.File]::WriteAllBytes(
+        (Join-Path $cleanRuntime.Root 'PhotoSift.App.dll'),
+        [System.Text.Encoding]::ASCII.GetBytes('clean binary fixture'))
+    '{"runtimeOptions":{"tfm":"net10.0-windows"}}' |
+        Set-Content -LiteralPath (Join-Path $cleanRuntime.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+    $cleanRuntimeResult = Invoke-BoundaryChecker `
+        -Arguments @(
+            '-DependencyManifestPath', $cleanRuntime.Manifest,
+            '-SourceRootPath', $cleanRuntime.Source) `
+        -OutputPrefix 'clean-runtime'
+    if ($cleanRuntimeResult.ExitCode -ne 0) {
+        throw "Clean runtime artifact fixture failed: $($cleanRuntimeResult.Output)"
+    }
+
     $networkSourceRoot = Join-Path $testRoot 'network-source'
     [System.IO.Directory]::CreateDirectory($networkSourceRoot) | Out-Null
     @'
@@ -307,7 +390,7 @@ public static class AllowedAppFixture
         throw "Allowed path-policy fixture failed: $($allowedPathPolicyResult.Output)"
     }
 
-    Write-Output 'Passed: 15 Failed: 0'
+    Write-Output 'Passed: 21 Failed: 0'
 }
 finally {
     Remove-Item -Recurse -Force -LiteralPath $testRoot -ErrorAction SilentlyContinue
