@@ -1,4 +1,5 @@
 using System.Security.AccessControl;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using PhotoSift.Application.Scan;
 using PhotoSift.Domain.Scan;
@@ -29,6 +30,18 @@ public sealed class WindowsTraversalIntegrationTests
             Directory.CreateDirectory(deep);
             var deepPath = Path.Combine(deep, "deep.jpeg");
             File.WriteAllText(deepPath, "fixture-two");
+            var sourceTruth = new Dictionary<string, SourceTruth>(StringComparer.OrdinalIgnoreCase)
+            {
+                [unicodePath] = ReadSourceTruth(unicodePath),
+                [deepPath] = ReadSourceTruth(deepPath),
+            };
+            var drive = new DriveInfo(Path.GetPathRoot(root.FullName)!);
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"E5-S2 environment: os={Environment.OSVersion.VersionString}; " +
+                $"processors={Environment.ProcessorCount}; " +
+                $"availableMemory={GC.GetGCMemoryInfo().TotalAvailableMemoryBytes}; " +
+                $"driveType={drive.DriveType}; format={drive.DriveFormat}; " +
+                $"root={drive.RootDirectory.FullName}");
 
             var selection = new ScopeSelection(
                 root.FullName,
@@ -64,6 +77,12 @@ public sealed class WindowsTraversalIntegrationTests
             });
             Assert.Contains(files, file => Path.GetFileName(file.DiscoveredPath) == "רחוב-日本語.PNG");
             Assert.Contains(files, file => file.ResolvedPath == deepPath);
+            foreach (var source in sourceTruth)
+            {
+                var file = Assert.Single(files.Where(candidate => candidate.ResolvedPath == source.Key));
+                Assert.Equal(source.Value.PhysicalFileKey, file.PhysicalFileKey);
+                Assert.Equal(source.Value, ReadSourceTruth(source.Key));
+            }
             Assert.Equal(
                 new StageOutcome(ScanStageState.Succeeded, ScanReason.None),
                 Assert.Single(events.OfType<ScanEnumerationEnded>()).Outcome);
@@ -267,6 +286,15 @@ public sealed class WindowsTraversalIntegrationTests
         }
     }
 
+    private static SourceTruth ReadSourceTruth(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var facts = new WindowsFileNative().Read(stream.SafeFileHandle, path);
+        var key = facts.PhysicalFileKey
+            ?? throw new InvalidDataException($"Source identity was unavailable: {path}");
+        return new SourceTruth(key, Convert.ToHexString(SHA256.HashData(stream)));
+    }
+
     private static void DeleteDirectoryLink(string path) => Directory.Delete(path);
 
     private static void CleanupAll(params Action[] cleanupActions)
@@ -286,4 +314,6 @@ public sealed class WindowsTraversalIntegrationTests
             throw new AggregateException("Fixture cleanup failed.", failures);
         }
     }
+
+    private sealed record SourceTruth(PhysicalFileKey PhysicalFileKey, string Sha256);
 }
