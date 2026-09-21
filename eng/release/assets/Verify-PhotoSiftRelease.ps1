@@ -105,6 +105,47 @@ function Assert-PhotoSiftCanonicalReleasePath {
     }
 }
 
+function Set-PhotoSiftApprovedNativePaths {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PackagePath
+    )
+
+    $policyPath = Join-Path $PackagePath 'release-native-paths.json'
+    if (-not [System.IO.File]::Exists($policyPath)) {
+        throw 'Release package is missing release-native-paths.json.'
+    }
+    try {
+        $policy = [System.IO.File]::ReadAllText($policyPath) | ConvertFrom-Json
+    }
+    catch {
+        throw "Release native-path policy is not valid JSON: $($_.Exception.Message)"
+    }
+    Assert-PhotoSiftReleaseProperties `
+        -Value $policy `
+        -Expected @('schemaVersion', 'nativePaths') `
+        -Context 'Release native-path policy'
+    if (($policy.schemaVersion -isnot [int] -and
+            $policy.schemaVersion -isnot [long]) -or
+        $policy.schemaVersion -ne 1) {
+        throw 'Release native-path policy schemaVersion must be the integer 1.'
+    }
+    if ($policy.nativePaths -isnot [System.Array]) {
+        throw 'Release native-path policy nativePaths must be a JSON array.'
+    }
+    $paths = [string[]]@($policy.nativePaths)
+    if ($paths.Count -eq 0) {
+        throw 'Release native-path policy must contain the exact nonempty native closure.'
+    }
+    foreach ($path in $paths) {
+        Assert-PhotoSiftCanonicalReleasePath -Path $path -PackagePath $PackagePath
+    }
+    Assert-PhotoSiftReleaseSortedUniquePaths `
+        -Paths $paths `
+        -Context 'Release native-path policy'
+    $script:PhotoSiftApprovedNativePaths = $paths
+}
+
 function Test-PhotoSiftForbiddenReleasePath {
     param(
         [Parameter(Mandatory)]
@@ -358,6 +399,7 @@ function Test-PhotoSiftPackageIntegrity {
     if (-not [System.IO.Directory]::Exists($resolvedPackagePath)) {
         throw "Release package directory does not exist: $resolvedPackagePath"
     }
+    Set-PhotoSiftApprovedNativePaths -PackagePath $resolvedPackagePath
     Assert-PhotoSiftReleaseHasNoReparsePoints -PackagePath $resolvedPackagePath
     Assert-PhotoSiftReleaseDirectoriesAllowed -PackagePath $resolvedPackagePath
 
