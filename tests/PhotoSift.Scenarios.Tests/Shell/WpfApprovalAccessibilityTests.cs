@@ -26,10 +26,46 @@ namespace PhotoSift.Scenarios.Tests.Shell;
 [Collection("WPF UI Automation")]
 public sealed class WpfApprovalAccessibilityTests
 {
+    private const string DiagnosticPathCanary = @"C:\E5S3-PATH-CANARY\private-photo.jpg";
+    private const string DiagnosticPixelCanary = "E5S3-PIXEL-CANARY-255-0-127-64";
     private const string PersistenceFailureAnnouncement =
         "Override evidence persistence failed; Selection is unchanged.";
     private const string StaleFailureAnnouncement =
         "The Review changed; the stale command made no change.";
+
+    [Fact]
+    public void ProductionDiagnosticCaptureExcludesSensitiveAnnouncementTextAndClearsOnStop()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var status = new ReviewAnnouncementTextBlock();
+            var window = new Window { Content = status };
+            try
+            {
+                window.Show();
+                WpfReviewSelectionTests.Drain();
+                EnableProductionDiagnostics(status);
+                var announce = typeof(ReviewAnnouncementTextBlock).GetMethod(
+                    "Announce", BindingFlags.Instance | BindingFlags.NonPublic)
+                    ?? throw new InvalidOperationException("Could not find Announce.");
+                announce.Invoke(status, [1L, DiagnosticPathCanary + " " + DiagnosticPixelCanary]);
+
+                var snapshot = StopProductionDiagnostics(status);
+                var records = ReadDiagnosticRecords(snapshot);
+                Assert.NotEmpty(records);
+                Assert.All(records, record =>
+                {
+                    Assert.Null(record.GetType().GetProperty("Payload"));
+                    Assert.Null(record.GetType().GetProperty("Previous"));
+                    Assert.Null(record.GetType().GetProperty("Current"));
+                    Assert.DoesNotContain(DiagnosticPathCanary, record.ToString(), StringComparison.Ordinal);
+                    Assert.DoesNotContain(DiagnosticPixelCanary, record.ToString(), StringComparison.Ordinal);
+                });
+                Assert.Empty(ReadDiagnosticRecords(StopProductionDiagnostics(status)));
+            }
+            finally { window.Close(); }
+        });
+    }
 
     [Fact]
     public void ApprovalPanelDisclosesEveryCountRecoveryCoverageUnresolvedFactAndBoundaryInSourceOrder()
@@ -474,7 +510,8 @@ public sealed class WpfApprovalAccessibilityTests
                 var fixture = new ExactShellFixture();
                 var marker = $"faulted-close-{Guid.NewGuid():N}";
                 fixture.Workflow.DisposalFailure = new InvalidOperationException(marker);
-                using var listener = new MarkerTraceListener(marker);
+                using var listener = new MarkerTraceListener(
+                    "PHOTOSIFT_DIAGNOSTIC stage=shutdown code=lifetime_dispose_failed");
                 MainWindow? window = null;
                 Trace.Listeners.Add(listener);
                 try
@@ -502,7 +539,9 @@ public sealed class WpfApprovalAccessibilityTests
                         var observedFailure = Assert.IsType<InvalidOperationException>(lifetimeFailure);
                         Assert.Contains(marker, observedFailure.Message, StringComparison.Ordinal);
                         Assert.True(listener.SawMarker,
-                            "The asynchronous close owner did not observe and report its lifetime failure.");
+                            "The asynchronous close owner did not report its stable lifetime-failure code.");
+                        Assert.False(listener.Contains(marker),
+                            "The asynchronous close diagnostic exposed exception content.");
                     }
                     catch (Exception error)
                     {
@@ -1129,6 +1168,12 @@ public sealed class WpfApprovalAccessibilityTests
         GetDiagnosticMethod(nameof(StopProductionDiagnostics), "StopDiagnosticCapture").Invoke(status, null)
         ?? throw new InvalidOperationException("The production diagnostic snapshot was unavailable.");
 
+    private static object[] ReadDiagnosticRecords(object snapshot) =>
+        ((snapshot.GetType().GetProperty("Records")?.GetValue(snapshot) as Array)
+            ?? throw new InvalidOperationException("The production diagnostic records were unavailable."))
+        .Cast<object>()
+        .ToArray();
+
     private static MethodInfo GetDiagnosticMethod(string caller, string methodName) =>
         typeof(ReviewAnnouncementTextBlock).GetMethod(methodName,
             BindingFlags.Instance | BindingFlags.NonPublic)
@@ -1207,9 +1252,9 @@ public sealed class WpfApprovalAccessibilityTests
         diagnostics.Record("vm-notification", 1, "first");
         diagnostics.Record("vm-notification", 2, "second");
         var records = new List<ProductionProofFixtureRecord>();
-        foreach (var (sequence, payload) in new[] { (1L, "first"), (2L, "second") })
+        foreach (var sequence in new[] { 1L, 2L })
             foreach (var kind in new[] { "Queue", "Execute", "PropertyRaiseReturn", "LiveRaiseReturn" })
-                records.Add(new(kind, sequence, payload));
+                records.Add(new(kind, sequence));
 
         // Validate the unmodified fixture first so an unrelated fixture error cannot satisfy the negative case.
         AssertProductAnnouncementCapture(new { Records = records.ToArray() }, diagnostics, ["first", "second"]);
@@ -1220,7 +1265,7 @@ public sealed class WpfApprovalAccessibilityTests
             AssertProductAnnouncementCapture(new { Records = records.ToArray() }, diagnostics, ["first", "second"]));
     }
 
-    private sealed record ProductionProofFixtureRecord(string Stage, long NotificationSequence, string Payload);
+    private sealed record ProductionProofFixtureRecord(string Stage, long NotificationSequence);
 
     private static void AssertProductAnnouncementCapture(
         object? productionSnapshot,
@@ -1251,8 +1296,7 @@ public sealed class WpfApprovalAccessibilityTests
                 GetDiagnosticValue(recordType, record, "Stage")?.ToString()
                     ?? throw new InvalidOperationException("A production diagnostic stage was unavailable."),
                 (long)(GetDiagnosticValue(recordType, record, "NotificationSequence")
-                    ?? throw new InvalidOperationException("A production notification sequence was unavailable.")),
-                GetDiagnosticValue(recordType, record, "Payload") as string);
+                    ?? throw new InvalidOperationException("A production notification sequence was unavailable.")));
         }
 
         var queued = productionRecords.Where(record => record.Stage == "Queue").ToArray();
@@ -1270,17 +1314,12 @@ public sealed class WpfApprovalAccessibilityTests
         for (var index = 0; index < viewModelNotifications.Length; index++)
         {
             var notification = viewModelNotifications[index];
-            var payload = Assert.IsType<string>(notification.Payload);
             var sequence = notification.NotificationSequence;
             Assert.True(sequence > previousSequence, "View-model notification sequence was not FIFO.");
             Assert.Equal(sequence, queued[index].NotificationSequence);
             Assert.Equal(sequence, executed[index].NotificationSequence);
             Assert.Equal(sequence, propertyReturned[index].NotificationSequence);
             Assert.Equal(sequence, liveReturned[index].NotificationSequence);
-            Assert.Equal(payload, queued[index].Payload);
-            Assert.Equal(payload, executed[index].Payload);
-            Assert.Equal(payload, propertyReturned[index].Payload);
-            Assert.Equal(payload, liveReturned[index].Payload);
             Assert.True(queued[index].Index < executed[index].Index
                 && executed[index].Index < propertyReturned[index].Index
                 && propertyReturned[index].Index < liveReturned[index].Index,
@@ -1327,16 +1366,11 @@ public sealed class WpfApprovalAccessibilityTests
                     .Append(" notification=").Append(GetDiagnosticValue(recordType, record, "NotificationSequence"))
                     .Append(" ticks=").Append(GetDiagnosticValue(recordType, record, "Timestamp"))
                     .Append(" thread=").Append(GetDiagnosticValue(recordType, record, "ThreadId"))
-                    .Append(" payload=").Append(FormatDiagnosticValue(GetDiagnosticValue(recordType, record, "Payload")))
                     .Append(" dataContextGeneration=").Append(GetDiagnosticValue(recordType, record, "DataContextGeneration"))
-                    .Append(" previous=").Append(FormatDiagnosticValue(GetDiagnosticValue(recordType, record, "Previous")))
-                    .Append(" current=").Append(FormatDiagnosticValue(GetDiagnosticValue(recordType, record, "Current")))
                     .Append(" skipReason=").Append(FormatDiagnosticValue(GetDiagnosticValue(recordType, record, "SkipReason")))
-                    .Append(" peerType=").Append(FormatDiagnosticType(GetDiagnosticValue(recordType, record, "PeerType")))
-                    .Append('#').Append(GetDiagnosticValue(recordType, record, "PeerIdentity"))
-                    .Append(" expectedPeerType=").Append(FormatDiagnosticType(
-                        GetDiagnosticValue(recordType, record, "ExpectedPeerType")))
-                    .Append('#').AppendLine(GetDiagnosticValue(recordType, record, "ExpectedPeerIdentity")?.ToString());
+                    .Append(" peerId=").Append(GetDiagnosticValue(recordType, record, "PeerIdentity"))
+                    .Append(" expectedPeerId=").AppendLine(
+                        GetDiagnosticValue(recordType, record, "ExpectedPeerIdentity")?.ToString());
             }
         }
         text.AppendLine("TEST DIAGNOSTICS:");
@@ -1349,13 +1383,6 @@ public sealed class WpfApprovalAccessibilityTests
         ?? (type.GetProperty(propertyName) is null
             ? throw new InvalidOperationException($"The production diagnostic {propertyName} value was unavailable.")
             : null);
-
-    private static string FormatDiagnosticType(object? value) => value switch
-    {
-        null => "<null>",
-        Type type => type.FullName ?? type.Name,
-        _ => throw new InvalidOperationException("The production diagnostic peer type was invalid."),
-    };
 
     private sealed class UiaDiagnosticLedger
     {
@@ -1457,8 +1484,7 @@ public sealed class WpfApprovalAccessibilityTests
     private readonly record struct ProductionCaptureRecord(
         int Index,
         string Stage,
-        long NotificationSequence,
-        string? Payload);
+        long NotificationSequence);
 
     private readonly record struct LiveNativeDelivery(
         int[]? RuntimeId,
@@ -1536,6 +1562,8 @@ public sealed class WpfApprovalAccessibilityTests
     {
         private readonly ConcurrentQueue<string> messages = new();
         public bool SawMarker => messages.Any(message => message.Contains(marker, StringComparison.Ordinal));
+        public bool Contains(string value) =>
+            messages.Any(message => message.Contains(value, StringComparison.Ordinal));
         public override void Write(string? message)
         {
             if (message is not null) messages.Enqueue(message);
