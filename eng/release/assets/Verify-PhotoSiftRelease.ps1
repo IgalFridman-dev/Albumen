@@ -114,7 +114,6 @@ function Test-PhotoSiftForbiddenReleasePath {
     $normalized = '/' + $Path.Replace('\', '/').ToLowerInvariant() + '/'
     $leaf = [System.IO.Path]::GetFileName($Path).ToLowerInvariant()
     $extension = [System.IO.Path]::GetExtension($leaf).ToLowerInvariant()
-    $isRootPath = $Path.IndexOf('/') -lt 0
     $isApprovedLauncher = $Path -ceq 'Start-PhotoSift.cmd' -or
         $Path -ceq 'Verify-PhotoSiftRelease.ps1'
     $developmentExtensions = @(
@@ -140,8 +139,7 @@ function Test-PhotoSiftForbiddenReleasePath {
         $leaf -match '^pyvenv(?:[._-].*)?$' -or
         $leaf -match '^pip(?:[0-9]+)?(?:[._-].*)?$' -or
         $leaf -match '^export(?:er|tool)?(?:[._-].*)?$' -or
-        ($isRootPath -and -not $isApprovedLauncher -and
-            $extension -in $developmentExtensions)) {
+        (-not $isApprovedLauncher -and $extension -in $developmentExtensions)) {
         return 'Python or development tooling artifact'
     }
     if ($normalized -match '/(cache|caches|\.cache|obj|bin)/') {
