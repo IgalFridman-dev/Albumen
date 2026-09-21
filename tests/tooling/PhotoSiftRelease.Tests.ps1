@@ -303,14 +303,21 @@ try {
             @{ Path = 'python311._pth' },
             @{ Path = 'pyvenv.cfg' },
             @{ Path = 'export-data.exe' },
-            @{ Path = 'build.ps1' }
+            @{ Path = 'build.ps1' },
+            @{ Path = 'runtime\build.ps1' },
+            @{ Path = 'misc\project.csproj' },
+            @{ Path = 'runtime\Start-PhotoSift.cmd' },
+            @{ Path = 'runtime\Verify-PhotoSiftRelease.ps1' }
         )) {
         $fixture = Copy-Package `
             -SourcePath $cleanPackage `
-            -Name ('root-tooling-' + $toolingBypass.Path.Replace('.', '-'))
+            -Name ('tooling-' + $toolingBypass.Path.Replace('\', '-').Replace('/', '-').Replace('.', '-'))
+        $toolingPath = Join-Path $fixture $toolingBypass.Path
+        [System.IO.Directory]::CreateDirectory(
+            [System.IO.Path]::GetDirectoryName($toolingPath)) | Out-Null
         Write-Utf8NoBom `
-            -Path (Join-Path $fixture $toolingBypass.Path) `
-            -Content 'root-level tooling fixture'
+            -Path $toolingPath `
+            -Content 'development tooling fixture'
         Test-CorrectionRejection `
             -Action {
                 New-PhotoSiftReleaseManifest `
@@ -318,7 +325,7 @@ try {
                     -OutputPath (Join-Path $fixture 'release-manifest.json') | Out-Null
             } `
             -Pattern 'forbidden Python or development tooling artifact' `
-            -Because "root-level Python/export/development tooling must be rejected: $($toolingBypass.Path)" `
+            -Because "Python/export/development tooling must be rejected recursively: $($toolingBypass.Path)" `
             -Failures $correctionFailures
     }
     if ($correctionFailures.Count -gt 0) {
