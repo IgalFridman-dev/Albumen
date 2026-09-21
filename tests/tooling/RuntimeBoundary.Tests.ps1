@@ -43,7 +43,9 @@ try {
         }
     }
 
-    $cleanManifestPath = Join-Path $testRoot 'clean.deps.json'
+    $cleanManifestRoot = Join-Path $testRoot 'clean-manifest'
+    [System.IO.Directory]::CreateDirectory($cleanManifestRoot) | Out-Null
+    $cleanManifestPath = Join-Path $cleanManifestRoot 'clean.deps.json'
     @{
         libraries = @{
             'PhotoSift.App/1.0.0' = @{ type = 'project' }
@@ -102,7 +104,9 @@ try {
         )
 
         $fixture = New-RuntimeArtifactFixture -Name $CaseName
-        [System.IO.File]::WriteAllBytes((Join-Path $fixture.Root $ArtifactName), $Content)
+        $artifactPath = Join-Path $fixture.Root $ArtifactName
+        [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($artifactPath)) | Out-Null
+        [System.IO.File]::WriteAllBytes($artifactPath, $Content)
         $result = Invoke-BoundaryChecker `
             -Arguments @(
                 '-DependencyManifestPath', $fixture.Manifest,
@@ -121,12 +125,32 @@ try {
         -ArtifactName 'PhotoSift.Scenarios.Tests.dll' `
         -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
     Assert-RuntimeArtifactRejected `
+        -CaseName 'nested-test-assembly' `
+        -ArtifactName 'nested\PhotoSift.Scenarios.Tests.dll' `
+        -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
+    Assert-RuntimeArtifactRejected `
         -CaseName 'test-host' `
         -ArtifactName 'testhost.exe' `
         -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
     Assert-RuntimeArtifactRejected `
         -CaseName 'telemetry-library' `
         -ArtifactName 'OpenTelemetry.dll' `
+        -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
+    Assert-RuntimeArtifactRejected `
+        -CaseName 'alternate-telemetry-library' `
+        -ArtifactName 'Datadog.Trace.dll' `
+        -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
+    Assert-RuntimeArtifactRejected `
+        -CaseName 'tooling-assembly' `
+        -ArtifactName 'PhotoSift.Tooling.dll' `
+        -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
+    Assert-RuntimeArtifactRejected `
+        -CaseName 'updater-executable' `
+        -ArtifactName 'Updater.exe' `
+        -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
+    Assert-RuntimeArtifactRejected `
+        -CaseName 'model-weights' `
+        -ArtifactName 'weights.bin' `
         -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
     Assert-RuntimeArtifactRejected `
         -CaseName 'remote-config' `
@@ -390,7 +414,7 @@ public static class AllowedAppFixture
         throw "Allowed path-policy fixture failed: $($allowedPathPolicyResult.Output)"
     }
 
-    Write-Output 'Passed: 21 Failed: 0'
+    Write-Output 'Passed: 26 Failed: 0'
 }
 finally {
     Remove-Item -Recurse -Force -LiteralPath $testRoot -ErrorAction SilentlyContinue
