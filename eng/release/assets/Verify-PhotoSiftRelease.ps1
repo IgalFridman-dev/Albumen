@@ -114,6 +114,13 @@ function Test-PhotoSiftForbiddenReleasePath {
     $normalized = '/' + $Path.Replace('\', '/').ToLowerInvariant() + '/'
     $leaf = [System.IO.Path]::GetFileName($Path).ToLowerInvariant()
     $extension = [System.IO.Path]::GetExtension($leaf).ToLowerInvariant()
+    $isRootPath = $Path.IndexOf('/') -lt 0
+    $isApprovedLauncher = $Path -ceq 'Start-PhotoSift.cmd' -or
+        $Path -ceq 'Verify-PhotoSiftRelease.ps1'
+    $developmentExtensions = @(
+        '.bat', '.c', '.cmd', '.cpp', '.cs', '.csproj', '.fs', '.fsproj',
+        '.h', '.props', '.ps1', '.psd1', '.psm1', '.sh', '.sln', '.targets',
+        '.vb', '.vbproj')
 
     if ($normalized -match '/models?/' -or
         $leaf -match '(^|[._-])(model|weights?|tokenizer)([._-]|$)' -or
@@ -129,8 +136,12 @@ function Test-PhotoSiftForbiddenReleasePath {
     }
     if ($normalized -match '/(__pycache__|python|scripts?|tools?|exports?)/' -or
         $extension -in @('.py', '.pyc', '.pyo', '.whl') -or
-        $leaf -match '^python(?:w|[0-9]+)?\.(?:exe|dll)$' -or
-        $leaf -match '^export(?:er|tool)?\.(?:exe|dll|cmd|bat|ps1)$') {
+        $leaf -match '^python(?:w|[0-9]+)?(?:[._-].*)?$' -or
+        $leaf -match '^pyvenv(?:[._-].*)?$' -or
+        $leaf -match '^pip(?:[0-9]+)?(?:[._-].*)?$' -or
+        $leaf -match '^export(?:er|tool)?(?:[._-].*)?$' -or
+        ($isRootPath -and -not $isApprovedLauncher -and
+            $extension -in $developmentExtensions)) {
         return 'Python or development tooling artifact'
     }
     if ($normalized -match '/(cache|caches|\.cache|obj|bin)/') {
