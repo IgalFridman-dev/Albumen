@@ -1,8 +1,10 @@
 using PhotoSift.Application.Action;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using PhotoSift.Domain.Action;
+using PhotoSift.Domain.Scan;
 using PhotoSift.Infrastructure.Windows.Action;
 using PhotoSift.Infrastructure.Windows.Scope;
 using Xunit;
@@ -79,6 +81,9 @@ public sealed class WindowsRecycleBinIntegrationTests
         var selected = fixture.Create("recycle-" + Guid.NewGuid().ToString("N") + ".jpg");
         var witness = fixture.Create("witness.jpg");
         var envelope = fixture.Envelope(selected, witness);
+        var selectedBefore = ReadSourceTruth(selected);
+        var witnessBefore = ReadSourceTruth(witness);
+        Assert.Equal(envelope.Item.PhysicalFileKey, selectedBefore.PhysicalFileKey);
         var result = await new WindowsRecycleBinExecutor().ExecuteAsync(new(Guid.NewGuid(), envelope), CancellationToken.None);
         LogResult(result);
         Assert.Equal(RecycleBinOutcomeKind.Recycled, result.Outcome);
@@ -88,15 +93,22 @@ public sealed class WindowsRecycleBinIntegrationTests
         Assert.True(result.Evidence.PerformOperationsEntered);
         Assert.True(result.Evidence.SelectedHandleReleased);
         Assert.True(result.Evidence.PermissionGranted);
+        Assert.True(result.Evidence.PreparationHResult >= 0);
         Assert.True(result.Evidence.PerformOperationsHResult >= 0);
         Assert.False(result.Evidence.OperationsAborted);
+        Assert.True(result.Evidence.GetAbortedHResult >= 0);
         Assert.Equal(1, result.Evidence.MatchingPostDeleteCount);
         Assert.Equal(0, result.Evidence.UnexpectedPostDeleteCount);
         Assert.True(result.Evidence.DeleteHResult >= 0);
+        Assert.True(result.Evidence.FinishOperationsHResult >= 0);
         Assert.True(result.Evidence.NewlyCreatedItemPresent);
         Assert.False(result.Evidence.CallbackException);
         Assert.False(File.Exists(selected));
-        Assert.Equal("fixture", File.ReadAllText(witness));
+        Assert.Equal(witnessBefore, ReadSourceTruth(witness));
+        TestContext.Current.TestOutputHelper?.WriteLine(
+            $"Protected sources: selectedKey={selectedBefore.PhysicalFileKey}; " +
+            $"selectedSha256={selectedBefore.Sha256}; witnessKey={witnessBefore.PhysicalFileKey}; " +
+            $"witnessSha256={witnessBefore.Sha256}");
         TestContext.Current.TestOutputHelper?.WriteLine("Real shell: full one-item success tuple, non-null recycled shell item, original absent, witness intact. No Recycle Bin enumeration or cleanup.");
     }
 
@@ -107,17 +119,19 @@ public sealed class WindowsRecycleBinIntegrationTests
         var selected = fixture.Create("gated.jpg");
         var witness = fixture.Create("witness.jpg");
         var envelope = fixture.Envelope(selected, witness);
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var approvedKey = envelope.Item.PhysicalFileKey;
+        var entered = new TaskCompletionSource<PhysicalFileKey?>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var allowRelease = new ManualResetEventSlim();
         var output = TestContext.Current.TestOutputHelper;
         var inPreDelete = false;
         var source = new ActionObservedFacts((path, facts) =>
         {
-            if (inPreDelete && !entered.Task.IsCompleted)
+            if (inPreDelete && path == selected && !entered.Task.IsCompleted)
             {
                 // The production lease must reacquire strict selected protection
                 // before this first latest facts read, including its own identity read.
-                entered.SetResult();
+                entered.SetResult(facts.PhysicalFileKey);
+                Assert.Equal(approvedKey, facts.PhysicalFileKey);
                 if (!allowRelease.Wait(TimeSpan.FromSeconds(30))) throw new InvalidOperationException("PreDelete fixture gate timed out");
             }
             return facts;
@@ -126,7 +140,8 @@ public sealed class WindowsRecycleBinIntegrationTests
             () => new GatedLease(WindowsActionLease.OpenAsync(envelope, CancellationToken.None, source).GetAwaiter().GetResult(), () => inPreDelete = true), CancellationToken.None);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+            var observedKey = await entered.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+            Assert.Equal(approvedKey, observedKey);
             Assert.False(execution.IsCompleted);
             Assert.True(File.Exists(selected));
             fixture.AssertWriteDenied(selected);
@@ -159,6 +174,8 @@ public sealed class WindowsRecycleBinIntegrationTests
         var selected = fixture.Create("retained.jpg");
         var witness = fixture.Create("witness.jpg");
         var envelope = fixture.Envelope(selected, witness);
+        var selectedBefore = ReadSourceTruth(selected);
+        var witnessBefore = ReadSourceTruth(witness);
         FileStream? blocker = null;
         try
         {
@@ -170,7 +187,15 @@ public sealed class WindowsRecycleBinIntegrationTests
             Assert.Equal(expected, result.Reason);
             Assert.False(result.Evidence.PermissionGranted);
             Assert.Equal(scenario != "unavailable", File.Exists(selected));
-            Assert.Equal("fixture", File.ReadAllText(witness));
+            if (scenario == "unavailable")
+            {
+                Assert.False(File.Exists(selected));
+            }
+            else
+            {
+                Assert.Equal(selectedBefore, ReadSourceTruth(selected));
+            }
+            Assert.Equal(witnessBefore, ReadSourceTruth(witness));
         }
         finally
         {
@@ -178,6 +203,18 @@ public sealed class WindowsRecycleBinIntegrationTests
             if (File.Exists(selected)) fixture.Attributes(selected, FileAttributes.Normal);
         }
     }
+
+    private static SourceTruth ReadSourceTruth(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        var facts = new WindowsFileNative().Read(stream.SafeFileHandle, path);
+        var key = facts.PhysicalFileKey
+            ?? throw new InvalidDataException($"Source identity was unavailable: {path}");
+        return new SourceTruth(key, Convert.ToHexString(SHA256.HashData(stream)));
+    }
+
+    private sealed record SourceTruth(PhysicalFileKey PhysicalFileKey, string Sha256);
 
     private sealed class GatedLease(WindowsActionLease lease, System.Action enterPreDelete) : IRecycleBinLease
     {
