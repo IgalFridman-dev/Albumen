@@ -34,6 +34,8 @@ $failure = $null
 $networkingDisabled = $false
 $sdkVersion = $null
 $desktopRuntimeVersion = $null
+$dotnetCliTelemetryOptOut = $false
+$testingPlatformTelemetryOptOut = $false
 
 $modulePath = Join-Path $inputPath 'eng\verification\PhotoSiftVerification.psm1'
 Import-Module $modulePath -Force
@@ -163,6 +165,8 @@ try {
     $env:DOTNET_NOLOGO = '1'
     $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
     $env:NUGET_XMLDOC_MODE = 'skip'
+    $dotnetCliTelemetryOptOut = $env:DOTNET_CLI_TELEMETRY_OPTOUT -ceq '1'
+    $testingPlatformTelemetryOptOut = $env:TESTINGPLATFORM_TELEMETRY_OPTOUT -ceq '1'
     [System.IO.Directory]::CreateDirectory($env:DOTNET_CLI_HOME) | Out-Null
     [System.IO.Directory]::CreateDirectory($env:APPDATA) | Out-Null
 
@@ -288,6 +292,8 @@ finally {
         networkingDisabled = $networkingDisabled
         sdkVersion = $sdkVersion
         desktopRuntimeVersion = $desktopRuntimeVersion
+        dotnetCliTelemetryOptOut = $dotnetCliTelemetryOptOut
+        testingPlatformTelemetryOptOut = $testingPlatformTelemetryOptOut
         error = $failure
         commands = $commands
         tests = $testResults

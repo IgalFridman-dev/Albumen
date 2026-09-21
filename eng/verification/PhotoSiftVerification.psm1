@@ -269,6 +269,7 @@ function Invoke-PhotoSiftProcess {
         }
 
         return [pscustomobject]@{
+            ProcessId = $process.Id
             ExitCode = $process.ExitCode
             StandardOutput = $standardOutputTask.GetAwaiter().GetResult()
             StandardError = $standardErrorTask.GetAwaiter().GetResult()
@@ -277,6 +278,42 @@ function Invoke-PhotoSiftProcess {
     }
     finally {
         $process.Dispose()
+    }
+}
+
+function ConvertFrom-PhotoSiftNetworkAuditXml {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Xml
+    )
+
+    [xml]$document = $Xml
+    $namespace = New-Object System.Xml.XmlNamespaceManager($document.NameTable)
+    $namespace.AddNamespace('e', 'http://schemas.microsoft.com/win/2004/08/events/event')
+    $eventIdNode = $document.SelectSingleNode('/e:Event/e:System/e:EventID', $namespace)
+    if ($null -eq $eventIdNode) {
+        throw 'Network audit event has no EventID.'
+    }
+    $values = @{}
+    foreach ($node in @($document.SelectNodes('/e:Event/e:EventData/e:Data', $namespace))) {
+        $values[[string]$node.Name] = [string]$node.InnerText
+    }
+    if (-not $values.ContainsKey('ProcessID')) {
+        throw 'Network audit event has no ProcessID.'
+    }
+    $processText = [string]$values.ProcessID
+    $processId = if ($processText.StartsWith('0x', [System.StringComparison]::OrdinalIgnoreCase)) {
+        [System.Convert]::ToInt32($processText.Substring(2), 16)
+    }
+    else {
+        [int]$processText
+    }
+
+    return [pscustomobject]@{
+        EventId = [int]$eventIdNode.InnerText
+        ProcessId = $processId
+        ExecutableName = [System.IO.Path]::GetFileName([string]$values.Application)
     }
 }
 
@@ -1325,6 +1362,14 @@ function Assert-PhotoSiftVerificationResult {
         -not $networkingProperty.Value) {
         throw 'Golden VM evidence did not record networking as disabled.'
     }
+    foreach ($telemetryPropertyName in 'dotnetCliTelemetryOptOut', 'testingPlatformTelemetryOptOut') {
+        $telemetryProperty = $summary.PSObject.Properties[$telemetryPropertyName]
+        if ($null -eq $telemetryProperty -or
+            $telemetryProperty.Value -isnot [bool] -or
+            -not $telemetryProperty.Value) {
+            throw "Golden VM evidence did not record $telemetryPropertyName=true."
+        }
+    }
     $sdkVersionProperty = $summary.PSObject.Properties['sdkVersion']
     if ($null -eq $sdkVersionProperty -or
         $sdkVersionProperty.Value -isnot [string] -or
@@ -1501,6 +1546,7 @@ Export-ModuleMember -Function `
     Invoke-PhotoSiftPowerShellWithDeadline, `
     Get-PhotoSiftVerificationStage, `
     Invoke-PhotoSiftProcess, `
+    ConvertFrom-PhotoSiftNetworkAuditXml, `
     New-PhotoSiftSourceSnapshot, `
     Remove-PhotoSiftHostInputSnapshot, `
     Read-PhotoSiftTrxResult, `
