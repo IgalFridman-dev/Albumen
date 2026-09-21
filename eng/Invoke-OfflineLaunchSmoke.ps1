@@ -67,18 +67,48 @@ function Wait-NetworkAuditRecords {
         [int]$MinimumCount = 0
     )
 
-    $records = @()
-    for ($attempt = 0; $attempt -lt 20; $attempt++) {
-        $records = @(Get-NetworkAuditRecords `
-            -StartedUtc $StartedUtc `
-            -ProcessId $ProcessId `
-            -ExecutableName $ExecutableName)
-        if ($records.Count -ge $MinimumCount -and ($MinimumCount -gt 0 -or $attempt -ge 9)) {
-            break
-        }
-        Start-Sleep -Milliseconds 100
+    return @(Wait-PhotoSiftNetworkAuditRecords `
+        -ReadRecords {
+            Get-NetworkAuditRecords `
+                -StartedUtc $StartedUtc `
+                -ProcessId $ProcessId `
+                -ExecutableName $ExecutableName
+        } `
+        -MinimumCount $MinimumCount)
+}
+
+function Invoke-NetworkObservationCanary {
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorkingDirectory
+    )
+
+    $startedUtc = [System.DateTime]::UtcNow.AddSeconds(-1)
+    $canaryScript = @'
+$client = New-Object System.Net.Sockets.UdpClient
+try {
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes('PhotoSift network observer canary')
+    [void]$client.Send($bytes, $bytes.Length, '127.0.0.1', 9)
+}
+finally { $client.Dispose() }
+'@
+    $canary = Invoke-PhotoSiftProcess `
+        -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+        -Arguments @('-NoProfile', '-NonInteractive', '-Command', $canaryScript) `
+        -WorkingDirectory $WorkingDirectory `
+        -TimeoutSeconds 10
+    if ($canary.TimedOut -or $canary.ExitCode -ne 0) {
+        throw "Network observation canary failed with exit code $($canary.ExitCode)."
     }
-    return $records
+    $events = @(Wait-NetworkAuditRecords `
+        -StartedUtc $startedUtc `
+        -ProcessId $canary.ProcessId `
+        -ExecutableName 'powershell.exe' `
+        -MinimumCount 1)
+    if ($events.Count -lt 1) {
+        throw 'Network observer did not detect the known loopback connection attempt.'
+    }
+    return $events
 }
 
 $activeNetworkAdapters = @(
@@ -112,6 +142,7 @@ $auditPolicyBackedUp = $false
 $auditRestoreFailure = $null
 $result = $null
 $canaryEvents = @()
+$fenceEvents = @()
 $photoSiftEvents = @()
 
 try {
@@ -130,39 +161,17 @@ try {
         '/failure:enable' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "auditpol.exe /set failed with exit code $LASTEXITCODE." }
 
-    $observationStartedUtc = [System.DateTime]::UtcNow.AddSeconds(-1)
-    $canaryScript = @'
-$client = New-Object System.Net.Sockets.UdpClient
-try {
-    $bytes = [System.Text.Encoding]::ASCII.GetBytes('PhotoSift network observer canary')
-    [void]$client.Send($bytes, $bytes.Length, '127.0.0.1', 9)
-}
-finally { $client.Dispose() }
-'@
-    $canary = Invoke-PhotoSiftProcess `
-        -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-        -Arguments @('-NoProfile', '-NonInteractive', '-Command', $canaryScript) `
-        -WorkingDirectory $profileRoot `
-        -TimeoutSeconds 10
-    if ($canary.TimedOut -or $canary.ExitCode -ne 0) {
-        throw "Network observation canary failed with exit code $($canary.ExitCode)."
-    }
-    $canaryEvents = @(Wait-NetworkAuditRecords `
-        -StartedUtc $observationStartedUtc `
-        -ProcessId $canary.ProcessId `
-        -ExecutableName 'powershell.exe' `
-        -MinimumCount 1)
-    if ($canaryEvents.Count -lt 1) {
-        throw 'Network observer did not detect the known loopback connection attempt.'
-    }
+    $canaryEvents = @(Invoke-NetworkObservationCanary -WorkingDirectory $profileRoot)
 
+    $photoSiftStartedUtc = [System.DateTime]::UtcNow.AddSeconds(-1)
     $result = Invoke-PhotoSiftProcess `
         -FilePath $executablePath `
         -Arguments @('--smoke-test') `
         -WorkingDirectory (Split-Path -Parent $executablePath) `
         -TimeoutSeconds $TimeoutSeconds
-    $photoSiftEvents = @(Wait-NetworkAuditRecords `
-        -StartedUtc $observationStartedUtc `
+    $fenceEvents = @(Invoke-NetworkObservationCanary -WorkingDirectory $profileRoot)
+    $photoSiftEvents = @(Get-NetworkAuditRecords `
+        -StartedUtc $photoSiftStartedUtc `
         -ProcessId $result.ProcessId `
         -ExecutableName 'PhotoSift.App.exe')
     if ($photoSiftEvents.Count -ne 0) {
@@ -203,6 +212,7 @@ if (-not [string]::IsNullOrWhiteSpace($result.StandardError)) {
 }
 Write-Output 'NetworkAdaptersUp=0'
 Write-Output "NetworkObserverCanaryEvents=$($canaryEvents.Count)"
+Write-Output "NetworkObserverFenceEvents=$($fenceEvents.Count)"
 Write-Output 'PhotoSiftNetworkAttemptEvents=0'
 Write-Output 'FreshProfile=true'
 Write-Output "SmokeExitCode=$($result.ExitCode)"

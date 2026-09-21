@@ -317,6 +317,38 @@ function ConvertFrom-PhotoSiftNetworkAuditXml {
     }
 }
 
+function Wait-PhotoSiftNetworkAuditRecords {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [scriptblock]$ReadRecords,
+
+        [Parameter()]
+        [ValidateRange(0, [int]::MaxValue)]
+        [int]$MinimumCount = 0,
+
+        [Parameter()]
+        [ValidateRange(1, 1000)]
+        [int]$MaximumAttempts = 20,
+
+        [Parameter()]
+        [ValidateRange(0, 60000)]
+        [int]$DelayMilliseconds = 100
+    )
+
+    $records = @()
+    for ($attempt = 0; $attempt -lt $MaximumAttempts; $attempt++) {
+        $records = @(& $ReadRecords)
+        if ($MinimumCount -gt 0 -and $records.Count -ge $MinimumCount) {
+            break
+        }
+        if ($attempt -lt ($MaximumAttempts - 1) -and $DelayMilliseconds -gt 0) {
+            Start-Sleep -Milliseconds $DelayMilliseconds
+        }
+    }
+    return $records
+}
+
 function Get-PhotoSiftRemainingSeconds {
     [CmdletBinding()]
     param(
@@ -1547,6 +1579,7 @@ Export-ModuleMember -Function `
     Get-PhotoSiftVerificationStage, `
     Invoke-PhotoSiftProcess, `
     ConvertFrom-PhotoSiftNetworkAuditXml, `
+    Wait-PhotoSiftNetworkAuditRecords, `
     New-PhotoSiftSourceSnapshot, `
     Remove-PhotoSiftHostInputSnapshot, `
     Read-PhotoSiftTrxResult, `
