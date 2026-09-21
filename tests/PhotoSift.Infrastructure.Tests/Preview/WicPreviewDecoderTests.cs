@@ -39,7 +39,7 @@ public sealed class WicPreviewDecoderTests
         ushort orientation, int expectedWidth, int expectedHeight, int[] expectedCells)
     {
         using var fixture = JpegFixture.Create(orientation);
-        var before = SHA256.HashData(File.ReadAllBytes(fixture.Path));
+        var before = ReadSourceTruth(fixture.Path);
 
         using var result = await new WicPreviewDecoder().DecodeAsync(
             fixture.Path, 256, TestContext.Current.CancellationToken);
@@ -55,7 +55,7 @@ public sealed class WicPreviewDecoderTests
             var y = (index / expectedWidth) * JpegFixture.CellSize + (JpegFixture.CellSize / 2);
             AssertNearestColor(result.Frame, x, y, expectedCells[index]);
         }
-        Assert.Equal(before, SHA256.HashData(File.ReadAllBytes(fixture.Path)));
+        Assert.Equal(before, ReadSourceTruth(fixture.Path));
     }
 
     [Fact]
