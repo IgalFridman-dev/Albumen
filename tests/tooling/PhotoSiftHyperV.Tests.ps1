@@ -538,6 +538,18 @@ Assert-Equal 'PhotoSift.App.exe' $networkAuditRecord.ExecutableName `
     'the WFP observer must retain only the executable leaf name for exact process filtering'
 Assert-Equal $null $networkAuditRecord.PSObject.Properties['Application'] `
     'the WFP observer must not retain the Security log application path'
+$delayedAuditPolls = 0
+$delayedAuditRecords = @(Wait-PhotoSiftNetworkAuditRecords `
+    -ReadRecords {
+        $script:delayedAuditPolls++
+        if ($script:delayedAuditPolls -lt 3) { return @() }
+        return @([pscustomobject]@{ EventId = 5156; ProcessId = 1234; ExecutableName = 'canary.exe' })
+    } `
+    -MinimumCount 1 `
+    -MaximumAttempts 5 `
+    -DelayMilliseconds 0)
+Assert-Equal 3 $delayedAuditPolls 'the WFP fence must wait for delayed Security-log ingestion'
+Assert-Equal 1 $delayedAuditRecords.Count 'the WFP fence must return the delayed event after ingestion'
 Assert-Equal $true ($offlineSmokeSource -match 'auditpol\.exe.*?/backup') `
     'the offline smoke must preserve the existing audit policy before observation'
 Assert-Equal $true ($offlineSmokeSource -match 'auditpol\.exe.*?/restore') `
@@ -546,6 +558,13 @@ Assert-Equal $true ($offlineSmokeSource -match '0CCE9226-69AE-11D9-BED3-50505450
     'the offline smoke must enable Filtering Platform Connection auditing by stable GUID'
 Assert-Equal $true ($offlineSmokeSource -match 'NetworkObserverCanaryEvents') `
     'the offline smoke must prove its observer with a positive connection-attempt canary'
+Assert-Equal $true ($offlineSmokeSource -match 'NetworkObserverFenceEvents') `
+    'the offline smoke must expose a post-process ingestion fence before reporting zero attempts'
+$appLaunchIndex = $offlineSmokeSource.IndexOf('$result = Invoke-PhotoSiftProcess', [System.StringComparison]::Ordinal)
+$fenceIndex = $offlineSmokeSource.IndexOf('$fenceEvents = @(Invoke-NetworkObservationCanary', [System.StringComparison]::Ordinal)
+$finalNetworkQueryIndex = $offlineSmokeSource.IndexOf('$photoSiftEvents = @(Get-NetworkAuditRecords', [System.StringComparison]::Ordinal)
+Assert-Equal $true ($appLaunchIndex -ge 0 -and $appLaunchIndex -lt $fenceIndex -and $fenceIndex -lt $finalNetworkQueryIndex) `
+    'the post-process canary event must be observed before the final PhotoSift zero-attempt query'
 Assert-Equal $true ($offlineSmokeSource -match 'PhotoSiftNetworkAttemptEvents=0') `
     'the offline smoke must fail unless the PhotoSift process produces no observed attempts'
 Assert-Equal $true ($offlineSmokeSource -match '\[System\.String\]::Equals\([^\r\n]+OrdinalIgnoreCase') `

@@ -125,28 +125,42 @@ function Assert-NoForbiddenRuntimeArtifacts {
         [string]$DirectoryPath
     )
 
-    $files = @(Get-ChildItem -File -LiteralPath $DirectoryPath | Sort-Object Name)
+    $resolvedDirectoryPath = [System.IO.Path]::GetFullPath($DirectoryPath)
+    $directoryPrefix = $resolvedDirectoryPath.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) +
+        [System.IO.Path]::DirectorySeparatorChar
+    $files = @(Get-ChildItem -File -Force -Recurse -LiteralPath $resolvedDirectoryPath |
+        Sort-Object FullName)
     $violations = New-Object 'System.Collections.Generic.List[string]'
-    $testArtifactPattern = '(?i)(?:^testhost(?:\.|$)|\.Tests\.|^xunit\.|^Microsoft\.(?:TestPlatform|Testing|ApplicationInsights)\.|^(?:OpenTelemetry|Sentry)(?:\.|$))'
-    $modelArtifactPattern = '(?i)(?:\.onnx$|\.tflite$|(?:^|[._-])(?:tokenizer|vocab|model)(?:[._-]|$))'
+    $testArtifactPattern = '(?i)(?:^testhost(?:\.|$)|\.Tests\.|^xunit\.|^Microsoft\.(?:TestPlatform|Testing|ApplicationInsights)\.|^(?:OpenTelemetry|Sentry|Datadog\.Trace|NewRelic|Elastic\.Apm)(?:\.|$)|(?:^|[._-])Tool(?:ing|s)?(?:[._-]|$))'
+    $updaterArtifactPattern = '(?i)(?:^|[._-])(?:Updater?|UpdateService)(?:[._-]|$)'
+    $modelArtifactPattern = '(?i)(?:\.(?:onnx|tflite|safetensors|gguf|pt|pth|pb)$|(?:^|[._-])(?:tokenizer|vocab|model|weights)(?:[._-]|$))'
     $configPattern = '(?i)(?:https?|wss?)://|(?:telemetry|updater?|remote.?config|download)(?:url|uri|endpoint)'
     $binaryPattern = '(?i)System\.Net\.(?:Http|Sockets)|HttpClient|WebView2?|ApplicationInsights|OpenTelemetry|Sentry|RemoteConfig|ModelDownloader'
     $binaryCount = 0
     $configCount = 0
 
     foreach ($file in $files) {
+        if (-not $file.FullName.StartsWith($directoryPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Runtime artifact escaped the inspected directory: $($file.Name)"
+        }
+        $relativePath = $file.FullName.Substring($directoryPrefix.Length)
         if ($file.Name -match $testArtifactPattern) {
-            $violations.Add("$($file.Name) -> test/tooling artifact")
+            $violations.Add("$relativePath -> test/tooling/telemetry artifact")
+        }
+        if ($file.Name -match $updaterArtifactPattern) {
+            $violations.Add("$relativePath -> updater artifact")
         }
         if ($file.Name -match $modelArtifactPattern) {
-            $violations.Add("$($file.Name) -> model artifact")
+            $violations.Add("$relativePath -> model artifact")
         }
 
         if ($file.Extension -in @('.json', '.config', '.xml')) {
             $configCount++
             $content = Get-Content -Raw -LiteralPath $file.FullName
             if ($content -match $configPattern) {
-                $violations.Add("$($file.Name) -> remote endpoint/config marker")
+                $violations.Add("$relativePath -> remote endpoint/config marker")
             }
         }
 
@@ -155,7 +169,7 @@ function Assert-NoForbiddenRuntimeArtifacts {
             $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
             $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
             if ($ascii -match $binaryPattern) {
-                $violations.Add("$($file.Name) -> forbidden binary capability marker")
+                $violations.Add("$relativePath -> forbidden binary capability marker")
             }
         }
     }
@@ -166,7 +180,9 @@ function Assert-NoForbiddenRuntimeArtifacts {
     }
 
     return [pscustomobject]@{
-        Files = @($files.Name)
+        Files = @($files | ForEach-Object {
+            $_.FullName.Substring($directoryPrefix.Length)
+        })
         BinaryCount = $binaryCount
         ConfigCount = $configCount
     }
