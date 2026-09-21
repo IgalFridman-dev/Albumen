@@ -48,6 +48,10 @@ public sealed class ExactCorpusTests
                 path => Relative(corpus, path),
                 ReadSourceTruth,
                 StringComparer.Ordinal);
+        var heicPath = PathFor(corpus, "codec/conditional.heic");
+        var heicAvailable = new WicCodecCapability(new ComClassAvailability())
+            .IsAvailable(SupportedImageFormat.Heic);
+        var heicTruth = heicAvailable ? ReadSourceTruth(heicPath) : null;
         var reader = new ObservedProtectedFileReader(new WindowsProtectedFileReader());
         var executor = new BoundedScanExecutor(
             new WindowsScanEnumerator(), reader, new StreamingExactContentAnalyzer());
@@ -165,11 +169,13 @@ public sealed class ExactCorpusTests
         Assert.Equal(new StageOutcome(
             ScanStageState.NotApplicable, ScanReason.UnsupportedExtension), unsupported.Exact);
         var heic = Occurrence(snapshot, "codec/conditional.heic", corpus);
-        Assert.True(heic.Exact == new StageOutcome(ScanStageState.Succeeded, ScanReason.None)
-            || heic.Exact == new StageOutcome(ScanStageState.Unsupported, ScanReason.CodecUnavailable));
-        if (heic.Exact.State is ScanStageState.Succeeded)
+        Assert.Equal(
+            heicAvailable
+                ? new StageOutcome(ScanStageState.Succeeded, ScanReason.None)
+                : new StageOutcome(ScanStageState.Unsupported, ScanReason.CodecUnavailable),
+            heic.Exact);
+        if (heicTruth is not null)
         {
-            var heicTruth = ReadSourceTruth(heic.ResolvedPath);
             Assert.Equal(heicTruth.PhysicalFileKey, heic.PhysicalFileKey);
             Assert.Equal<uint?>(heicTruth.LinkCount, heic.Allocation.LinkCount);
             Assert.True(heic.Allocation.Stable);
@@ -180,6 +186,7 @@ public sealed class ExactCorpusTests
                 $"E5-S2 source: path={Relative(corpus, heic.DiscoveredPath)}; " +
                 $"key={heicTruth.PhysicalFileKey}; links={heicTruth.LinkCount}; " +
                 $"outcome={heic.Exact}; sha256={heicTruth.Sha256}");
+            Assert.Equal(heicTruth, ReadSourceTruth(heicPath));
         }
         Assert.Equal(ScanStageState.Succeeded, Occurrence(snapshot, "תמונות-日本語/רחוב-唯一.png", corpus).Exact.State);
         Assert.Equal(ScanStageState.Succeeded, Occurrence(snapshot,
