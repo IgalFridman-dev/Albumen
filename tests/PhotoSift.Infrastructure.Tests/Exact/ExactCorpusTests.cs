@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Threading.Channels;
 using PhotoSift.Analysis.Exact;
 using PhotoSift.Application.Scan;
@@ -41,6 +42,12 @@ public sealed class ExactCorpusTests
     {
         await using var corpus = await ExactCorpus.CreateAsync(
             Path.GetTempPath(), TestContext.Current.CancellationToken);
+        var sourceTruth = Directory.EnumerateFiles(corpus.Root, "*", SearchOption.AllDirectories)
+            .Where(IsSupportedSource)
+            .ToDictionary(
+                path => Relative(corpus, path),
+                ReadSourceTruth,
+                StringComparer.Ordinal);
         var reader = new ObservedProtectedFileReader(new WindowsProtectedFileReader());
         var executor = new BoundedScanExecutor(
             new WindowsScanEnumerator(), reader, new StreamingExactContentAnalyzer());
@@ -54,6 +61,23 @@ public sealed class ExactCorpusTests
         Assert.Equal(new StageOutcome(ScanStageState.Succeeded, ScanReason.None), snapshot.Enumeration);
         Assert.Equal(0, snapshot.Counts.Outstanding);
         Assert.Equal(0, reader.Live);
+        Assert.Equal(sourceTruth.Count, snapshot.Occurrences.Count(occurrence =>
+            IsSupportedSource(occurrence.DiscoveredPath)));
+        foreach (var source in sourceTruth.OrderBy(source => source.Key, StringComparer.Ordinal))
+        {
+            var occurrence = Occurrence(snapshot, source.Key, corpus);
+            Assert.Equal(source.Value.PhysicalFileKey, occurrence.PhysicalFileKey);
+            Assert.Equal<uint?>(source.Value.LinkCount, occurrence.Allocation.LinkCount);
+            Assert.True(occurrence.Allocation.Stable);
+            Assert.Equal(
+                new StageOutcome(ScanStageState.Succeeded, ScanReason.None),
+                occurrence.Exact);
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"E5-S2 source: path={source.Key}; key={source.Value.PhysicalFileKey}; " +
+                $"links={source.Value.LinkCount}; outcome={occurrence.Exact}; " +
+                $"sha256={source.Value.Sha256}");
+            Assert.Equal(source.Value, ReadSourceTruth(PathFor(corpus, source.Key)));
+        }
 
         var actual = snapshot.Groups
             .Select(group => group.Members
@@ -445,6 +469,24 @@ public sealed class ExactCorpusTests
     private static string PathFor(ExactCorpus corpus, string relative) =>
         Path.Combine(corpus.Root, relative.Replace('/', Path.DirectorySeparatorChar));
 
+    private static bool IsSupportedSource(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() is ".jpg" or ".jpeg" or ".png";
+
+    private static SourceTruth ReadSourceTruth(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var facts = new WindowsFileNative().Read(stream.SafeFileHandle, path);
+        var key = facts.PhysicalFileKey
+            ?? throw new InvalidDataException($"Source identity was unavailable: {path}");
+        var linkCount = facts.Allocation.LinkCount
+            ?? throw new InvalidDataException($"Source link count was unavailable: {path}");
+        if (!facts.Allocation.Stable)
+        {
+            throw new InvalidDataException($"Source allocation facts were unstable: {path}");
+        }
+        return new SourceTruth(key, linkCount, Convert.ToHexString(SHA256.HashData(stream)));
+    }
+
     private static TaskCompletionSource Signal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -459,6 +501,11 @@ public sealed class ExactCorpusTests
         UnknownAllocation,
         UnstableAllocation,
     }
+
+    private sealed record SourceTruth(
+        PhysicalFileKey PhysicalFileKey,
+        uint LinkCount,
+        string Sha256);
 }
 
 internal static class NearQualityExactCorpusRecipes

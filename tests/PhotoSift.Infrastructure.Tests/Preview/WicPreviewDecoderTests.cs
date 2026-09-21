@@ -62,6 +62,7 @@ public sealed class WicPreviewDecoderTests
     public async Task PngIsDecodedThroughWicAndBoundedToTheRequestedEdge()
     {
         using var fixture = PngFixture.Create(width: 320, height: 160);
+        var before = ReadSourceTruth(fixture.Path);
 
         using var result = await new WicPreviewDecoder().DecodeAsync(
             fixture.Path, 80, TestContext.Current.CancellationToken);
@@ -71,6 +72,7 @@ public sealed class WicPreviewDecoderTests
         Assert.Equal(80, result.Frame.Width);
         Assert.Equal(40, result.Frame.Height);
         Assert.Equal(80 * 40 * 4, result.Frame.ByteLength);
+        Assert.Equal(before, ReadSourceTruth(fixture.Path));
     }
 
     [Fact]
@@ -208,6 +210,9 @@ public sealed class WicPreviewDecoderTests
         if (!fileName.StartsWith("missing", StringComparison.Ordinal))
             await File.WriteAllTextAsync(
                 path, "not an image", TestContext.Current.CancellationToken);
+        var before = expected is PreviewAvailability.CouldNotAnalyze
+            ? ReadSourceTruth(path)
+            : null;
 
         using var result = await new WicPreviewDecoder().DecodeAsync(
             path, 128, TestContext.Current.CancellationToken);
@@ -216,6 +221,19 @@ public sealed class WicPreviewDecoderTests
         Assert.Equal(path, result.FullPath);
         Assert.Equal(expectedReason, result.Reason);
         Assert.Null(result.Frame);
+        if (before is not null)
+        {
+            Assert.Equal(before, ReadSourceTruth(path));
+        }
+    }
+
+    private static SourceTruth ReadSourceTruth(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var facts = new WindowsFileNative().Read(stream.SafeFileHandle, path);
+        var key = facts.PhysicalFileKey
+            ?? throw new InvalidDataException($"Source identity was unavailable: {path}");
+        return new SourceTruth(key, Convert.ToHexString(SHA256.HashData(stream)));
     }
 
     private static void AssertNearestColor(
@@ -280,6 +298,8 @@ public sealed class WicPreviewDecoderTests
 
         public void Dispose() => directory.Dispose();
     }
+
+    private sealed record SourceTruth(PhysicalFileKey PhysicalFileKey, string Sha256);
 
     private sealed class PngFixture : IDisposable
     {
