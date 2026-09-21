@@ -34,6 +34,7 @@ function New-PhotoSiftReleaseManifest {
     if (-not [System.IO.Directory]::Exists($resolvedPackagePath)) {
         throw "Release package directory does not exist: $resolvedPackagePath"
     }
+    Set-PhotoSiftApprovedNativePaths -PackagePath $resolvedPackagePath
     $resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
     $requiredOutputPath = Join-Path $resolvedPackagePath 'release-manifest.json'
     if (-not $resolvedOutputPath.Equals(
@@ -47,6 +48,7 @@ function New-PhotoSiftReleaseManifest {
     $files = @(Get-PhotoSiftReleaseFiles -PackagePath $resolvedPackagePath)
     $requiredPaths = @(
         'PhotoSift.App.exe',
+        'release-native-paths.json',
         'Start-PhotoSift.cmd',
         'THIRD-PARTY-NOTICES.md',
         'Verify-PhotoSiftRelease.ps1') + $script:PhotoSiftApprovedNativePaths

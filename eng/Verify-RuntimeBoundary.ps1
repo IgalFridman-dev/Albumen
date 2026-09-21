@@ -12,7 +12,10 @@ param(
     [string]$DependencyManifestPath,
 
     [Parameter()]
-    [string]$SourceRootPath
+    [string]$SourceRootPath,
+
+    [Parameter()]
+    [string]$FrameworkClosureManifestPath
 )
 
 Set-StrictMode -Version Latest
@@ -119,10 +122,122 @@ function Assert-OnlyApprovedSqliteLibraries {
     }
 }
 
+function Read-SelfContainedFrameworkClosure {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ManifestPath,
+
+        [Parameter(Mandatory)]
+        [string]$OutputDirectory
+    )
+
+    $resolvedManifestPath = [System.IO.Path]::GetFullPath($ManifestPath)
+    if (-not [System.IO.File]::Exists($resolvedManifestPath)) {
+        throw "Framework closure manifest does not exist: $resolvedManifestPath"
+    }
+
+    $manifest = Get-Content -Raw -LiteralPath $resolvedManifestPath | ConvertFrom-Json
+    $propertyNames = @(Get-JsonPropertyNames -Value $manifest | Sort-Object)
+    $expectedPropertyNames = @(
+        'frameworkPaths',
+        'netCoreRuntimeVersion',
+        'runtimeIdentifier',
+        'schemaVersion',
+        'windowsDesktopRuntimeVersion')
+    if ([string]::Join('|', $propertyNames) -cne
+        [string]::Join('|', $expectedPropertyNames)) {
+        throw 'Framework closure manifest has unexpected or missing properties.'
+    }
+    if ($manifest.schemaVersion -ne 1 -or
+        [string]$manifest.runtimeIdentifier -cne 'win-x64' -or
+        [string]$manifest.netCoreRuntimeVersion -cne '10.0.11' -or
+        [string]$manifest.windowsDesktopRuntimeVersion -cne '10.0.11') {
+        throw 'Framework closure manifest does not identify the pinned win-x64 .NET/Windows Desktop 10.0.11 closure.'
+    }
+    if ($manifest.frameworkPaths -isnot [System.Array]) {
+        throw 'Framework closure manifest frameworkPaths must be a JSON array.'
+    }
+
+    $paths = [string[]]@($manifest.frameworkPaths)
+    $seen = [System.Collections.Generic.Dictionary[string, bool]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in $paths) {
+        if ([string]::IsNullOrWhiteSpace($path) -or
+            $path -cne $path.Trim() -or
+            $path.Contains('\') -or
+            [System.IO.Path]::IsPathRooted($path) -or
+            @($path.Split('/') | Where-Object {
+                    [string]::IsNullOrWhiteSpace($_) -or $_ -in @('.', '..')
+                }).Count -gt 0) {
+            throw "Framework closure contains a noncanonical path: $path"
+        }
+        if ($seen.ContainsKey($path)) {
+            throw "Framework closure contains a duplicate or case-colliding path: $path"
+        }
+        $seen.Add($path, $true)
+    }
+
+    $sortedPaths = [string[]]@($paths)
+    [System.Array]::Sort($sortedPaths, [System.StringComparer]::Ordinal)
+    if ([string]::Join('|', $paths) -cne [string]::Join('|', $sortedPaths)) {
+        throw 'Framework closure paths are not in canonical ordinal order.'
+    }
+
+    $runtimeConfigPath = Join-Path $OutputDirectory 'PhotoSift.App.runtimeconfig.json'
+    $appAssemblyPath = Join-Path $OutputDirectory 'PhotoSift.App.dll'
+    $appHostPath = Join-Path $OutputDirectory 'PhotoSift.App.exe'
+    if (-not [System.IO.File]::Exists($runtimeConfigPath)) {
+        throw 'Self-contained folder publish is missing PhotoSift.App.runtimeconfig.json.'
+    }
+    if (-not [System.IO.File]::Exists($appAssemblyPath)) {
+        throw 'Single-file-shaped output is not allowed; folder publish must contain PhotoSift.App.dll.'
+    }
+    if (-not [System.IO.File]::Exists($appHostPath)) {
+        throw 'Self-contained folder publish is missing PhotoSift.App.exe.'
+    }
+    $runtimeConfig = Get-Content -Raw -LiteralPath $runtimeConfigPath | ConvertFrom-Json
+    if ($null -eq $runtimeConfig.runtimeOptions -or
+        [string]$runtimeConfig.runtimeOptions.tfm -cne 'net10.0-windows') {
+        throw 'PhotoSift.App.runtimeconfig.json does not target net10.0-windows.'
+    }
+    $runtimeOptionProperties = @(Get-JsonPropertyNames -Value $runtimeConfig.runtimeOptions)
+    if ($runtimeOptionProperties -contains 'framework' -or
+        $runtimeOptionProperties -contains 'frameworks' -or
+        $runtimeOptionProperties -contains 'includedFrameworks') {
+        throw 'Framework-dependent runtimeconfig is not an accepted self-contained folder publish.'
+    }
+
+    $resolvedOutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
+    foreach ($path in $paths) {
+        $literalPath = Join-Path $resolvedOutputDirectory $path.Replace(
+            '/', [System.IO.Path]::DirectorySeparatorChar)
+        if (-not [System.IO.File]::Exists($literalPath)) {
+            throw "Pinned framework closure path is missing from the self-contained publish: $path"
+        }
+    }
+
+    $frameworkShapedPattern = '(?i)^(?:System\.|Microsoft\.(?:CSharp|VisualBasic|Win32|WindowsDesktop)|Presentation|ReachFramework|UIAutomation|WindowsBase|coreclr|clrjit|hostfxr|hostpolicy|mscord|msquic|createdump|wpfgfx|PresentationNative|PenImc|vcruntime|D3DCompiler|DirectWriteForwarder)'
+    $outputPrefix = $resolvedOutputDirectory.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) +
+        [System.IO.Path]::DirectorySeparatorChar
+    foreach ($file in @(Get-ChildItem -File -Force -Recurse -LiteralPath $resolvedOutputDirectory)) {
+        $relativePath = $file.FullName.Substring($outputPrefix.Length).Replace('\', '/')
+        if ($file.Name -match $frameworkShapedPattern -and -not $seen.ContainsKey($relativePath)) {
+            throw "Runtime artifact is outside the exact pinned framework closure: $relativePath"
+        }
+    }
+
+    return $paths
+}
+
 function Assert-NoForbiddenRuntimeArtifacts {
     param(
         [Parameter(Mandatory)]
-        [string]$DirectoryPath
+        [string]$DirectoryPath,
+
+        [Parameter()]
+        [string[]]$FrameworkPaths = @()
     )
 
     $resolvedDirectoryPath = [System.IO.Path]::GetFullPath($DirectoryPath)
@@ -140,12 +255,19 @@ function Assert-NoForbiddenRuntimeArtifacts {
     $binaryPattern = '(?i)System\.Net\.(?:Http|Sockets)|HttpClient|WebView2?|ApplicationInsights|OpenTelemetry|Sentry|RemoteConfig|ModelDownloader'
     $binaryCount = 0
     $configCount = 0
+    $frameworkPathSet = [System.Collections.Generic.Dictionary[string, bool]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($frameworkPath in $FrameworkPaths) {
+        $frameworkPathSet[$frameworkPath] = $true
+    }
 
     foreach ($file in $files) {
         if (-not $file.FullName.StartsWith($directoryPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "Runtime artifact escaped the inspected directory: $($file.Name)"
         }
         $relativePath = $file.FullName.Substring($directoryPrefix.Length)
+        $canonicalRelativePath = $relativePath.Replace('\', '/')
+        $isFrameworkContent = $frameworkPathSet.ContainsKey($canonicalRelativePath)
         if ($file.Name -match $testArtifactPattern) {
             $violations.Add("$relativePath -> test/tooling/telemetry artifact")
         }
@@ -156,7 +278,7 @@ function Assert-NoForbiddenRuntimeArtifacts {
             $violations.Add("$relativePath -> model artifact")
         }
 
-        if ($file.Extension -in @('.json', '.config', '.xml')) {
+        if (-not $isFrameworkContent -and $file.Extension -in @('.json', '.config', '.xml')) {
             $configCount++
             $content = Get-Content -Raw -LiteralPath $file.FullName
             if ($content -match $configPattern) {
@@ -164,7 +286,7 @@ function Assert-NoForbiddenRuntimeArtifacts {
             }
         }
 
-        if ($file.Extension -in @('.dll', '.exe')) {
+        if (-not $isFrameworkContent -and $file.Extension -in @('.dll', '.exe')) {
             $binaryCount++
             $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
             $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
@@ -276,7 +398,15 @@ $runtimeLibraries = Get-JsonPropertyNames -Value $dependencyManifest.libraries
 Assert-NoForbiddenDependencies -Names $runtimeLibraries
 Assert-OnlyApprovedSqliteLibraries -Names $runtimeLibraries
 $outputDirectory = Split-Path -Parent $manifestPath
-$artifactInspection = Assert-NoForbiddenRuntimeArtifacts -DirectoryPath $outputDirectory
+$frameworkPaths = @()
+if (-not [string]::IsNullOrWhiteSpace($FrameworkClosureManifestPath)) {
+    $frameworkPaths = @(Read-SelfContainedFrameworkClosure `
+        -ManifestPath $FrameworkClosureManifestPath `
+        -OutputDirectory $outputDirectory)
+}
+$artifactInspection = Assert-NoForbiddenRuntimeArtifacts `
+    -DirectoryPath $outputDirectory `
+    -FrameworkPaths $frameworkPaths
 
 if ([string]::IsNullOrWhiteSpace($SourceRootPath)) {
     $resolvedSourceRootPath = Join-Path $repositoryRoot 'src'
