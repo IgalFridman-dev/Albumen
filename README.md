@@ -4,12 +4,13 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Development status: **16 of 26 stories are complete and 10 remain: 3 lean V1 stories, 2 deferred V1.1 stories, and 5 deferred V1.2 stories. E5-S2 is complete; E5-S3 is in progress. E5-S1 remains complete by explicit product-owner scope waiver for the recruiter-facing MVP, not by a complete accessibility pass.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); later completed work remains stacked locally pending integration decisions. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
+Development status: **17 of 26 stories are complete and 9 remain: 2 lean V1 stories, 2 deferred V1.1 stories, and 5 deferred V1.2 stories. E5-S3 is complete; E5-S4 is next and remains unstarted. E5-S1 remains complete by explicit product-owner scope waiver for the recruiter-facing MVP, not by a complete accessibility pass.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); later completed work remains stacked locally pending integration decisions. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
 
 Planning is complete and validated. E1-S1 through E1-S6 are done. E1-S6 adds restart-only Action Records, explicit read-only revalidation, accessible progress, and conservative unknown outcomes. Its user-facing safety behavior passed explicit manual verification after the approved two-attempt VM/timing cap stopped the real COM callback crash harness. The deferred automated edge coverage is [PM-001](docs/backlog/post-mvp.md#pm-001--harden-e1-s6-real-process-crash-boundary-automation).
 
-- Latest completed story: **E5-S2 — Windows file, codec, path, and location compatibility**
-- Active story: **E5-S3 — Prove offline privacy and privacy-minimized diagnostics**
+- Latest completed story: **E5-S3 — Offline privacy and privacy-minimized diagnostics**
+- Next eligible story: **E5-S4 — Package a self-contained licensed release candidate**
+- E5-S3 evidence: [`docs/evidence/e5-s3/verification.md`](docs/evidence/e5-s3/verification.md)
 - E5-S2 evidence: [`docs/evidence/e5-s2/golden-vm-results.md`](docs/evidence/e5-s2/golden-vm-results.md) and [`fixture-manifest.json`](docs/evidence/e5-s2/fixture-manifest.json)
 - E5-S1 evidence: [`docs/evidence/e5-s1/verification.md`](docs/evidence/e5-s1/verification.md)
 - Deferred E5-S1 accessibility hardening: [`PM-005`](docs/backlog/post-mvp.md#pm-005--complete-accessibility-hardening-after-the-recruiter-demo-v1)
@@ -62,7 +63,7 @@ The project deliberately excludes cloud inference, accounts, telemetry, automati
 3. Run its required automated, integration, and platform evidence.
 4. Review the change before marking the story done.
 5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
-6. Follow the YAGNI roadmap and `sprint-status.yaml`; E5-S3 is in progress after E5-S2 closure. E5-S1 is done only by the recorded recruiter-MVP scope waiver, with remaining accessibility work in PM-005 and no accessibility-complete claim. PM-001 and PM-002 retain their separate dispositions; PM-003 is closed.
+6. Follow the YAGNI roadmap and `sprint-status.yaml`; E5-S3 is complete and E5-S4 is next but unstarted. E5-S1 is done only by the recorded recruiter-MVP scope waiver, with remaining accessibility work in PM-005 and no accessibility-complete claim. PM-001 and PM-002 retain their separate dispositions; PM-003 is closed.
 
 The repository contains the .NET 10/C# 14/WPF `win-x64` application with exact local Scope selection/preflight, Exact duplicate detection, survivor-safe Review Selection, durable override evidence, one-item Recycle Bin execution through the sole Action owner, completed E1-S6 restart reconciliation, and an exact version-5 SQLite foundation with durable Scan identity, `Enumeration`/`Exact` checkpoints, and reconciled row-truth accounting, plus five test projects and a NIC-free Golden Hyper-V VM verification gate. Review approval supplies an exact sealed request; fresh authority/survivor checks and durable Requested/Executing commits must still precede every shell call. Uncertain or interrupted work is never automatically replayed.
 
