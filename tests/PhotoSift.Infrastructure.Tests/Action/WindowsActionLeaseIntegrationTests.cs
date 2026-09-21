@@ -128,7 +128,8 @@ internal sealed class ActionFileFixture : IDisposable
         Root = Path.Combine(run.FullName, "action-fixture-" + Guid.NewGuid().ToString("N"));
         Check(Root, allowRoot: true);
         Directory.CreateDirectory(Root);
-        TestContext.Current.TestOutputHelper?.WriteLine($"Disposable Action fixture: {Root}");
+        TestContext.Current.TestOutputHelper?.WriteLine(
+            $"Disposable Action fixture id={Path.GetFileName(Root)}");
     }
     internal string PathFor(string relative) { var path = Path.GetFullPath(Path.Combine(Root, relative)); Check(path); return path; }
     internal void Check(string path, bool allowRoot = false)

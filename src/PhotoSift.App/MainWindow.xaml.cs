@@ -525,7 +525,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(payload)) return;
         var sequence = ++reviewFailureAnnouncementSequence;
         ReviewAnnouncementText.CaptureDiagnostic(
-            ReviewAnnouncementDiagnosticStage.Queue, sequence, payload, generation);
+            ReviewAnnouncementDiagnosticStage.Queue, sequence, generation);
         Dispatcher.InvokeAsync(() =>
         {
             string? skipReason = null;
@@ -537,12 +537,12 @@ public partial class MainWindow : Window
             if (skipReason is not null)
             {
                 ReviewAnnouncementText.CaptureDiagnostic(
-                    ReviewAnnouncementDiagnosticStage.Skip, sequence, payload, generation,
+                    ReviewAnnouncementDiagnosticStage.Skip, sequence, generation,
                     skipReason: skipReason);
                 return;
             }
             ReviewAnnouncementText.CaptureDiagnostic(
-                ReviewAnnouncementDiagnosticStage.Execute, sequence, payload, generation);
+                ReviewAnnouncementDiagnosticStage.Execute, sequence, generation);
             ReviewAnnouncementText.Announce(sequence, payload);
         }, DispatcherPriority.Background);
     }
@@ -688,9 +688,10 @@ public partial class MainWindow : Window
         {
             await disposal;
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            System.Diagnostics.Trace.WriteLine(exception);
+            System.Diagnostics.Trace.WriteLine(
+                "PHOTOSIFT_DIAGNOSTIC stage=shutdown code=lifetime_dispose_failed");
         }
         finally
         {
@@ -712,9 +713,10 @@ public partial class MainWindow : Window
         {
             await disposal.ConfigureAwait(false);
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            System.Diagnostics.Trace.WriteLine(exception);
+            System.Diagnostics.Trace.WriteLine(
+                "PHOTOSIFT_DIAGNOSTIC stage=shutdown code=lifetime_dispose_failed");
         }
     }
 
@@ -794,10 +796,7 @@ public class ReviewAnnouncementTextBlock : TextBlock
     internal void CaptureDiagnostic(
         ReviewAnnouncementDiagnosticStage stage,
         long sequence,
-        string? payload,
         int dataContextGeneration = 0,
-        string? previous = null,
-        string? current = null,
         string? skipReason = null,
         AutomationPeer? peer = null)
     {
@@ -806,14 +805,9 @@ public class ReviewAnnouncementTextBlock : TextBlock
             sequence,
             System.Diagnostics.Stopwatch.GetTimestamp(),
             Environment.CurrentManagedThreadId,
-            payload,
             dataContextGeneration,
-            previous,
-            current,
             skipReason,
-            peer?.GetType(),
             peer is null ? 0 : RuntimeHelpers.GetHashCode(peer),
-            expectedDiagnosticPeer?.GetType(),
             expectedDiagnosticPeer is null ? 0 : RuntimeHelpers.GetHashCode(expectedDiagnosticPeer)));
     }
 
@@ -822,11 +816,11 @@ public class ReviewAnnouncementTextBlock : TextBlock
         var previous = itemStatus;
         itemStatus = payload;
         CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.OwnerStatusSet,
-            sequence, payload, previous: previous, current: itemStatus);
+            sequence);
         var peer = UIElementAutomationPeer.FromElement(this)
             ?? UIElementAutomationPeer.CreatePeerForElement(this);
         CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.PeerResolved,
-            sequence, payload, previous: previous, current: itemStatus, peer: peer);
+            sequence, peer: peer);
         if (peer is ReviewAnnouncementTextBlockAutomationPeer announcementPeer)
             announcementPeer.RaiseAnnouncement(sequence, previous, payload);
     }
@@ -847,23 +841,23 @@ internal sealed class ReviewAnnouncementTextBlockAutomationPeer(ReviewAnnounceme
     {
         var current = owner.ItemStatus;
         owner.CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.GetItemStatusCore,
-            sequence: 0, payload: current, current: current, peer: this);
+            sequence: 0, peer: this);
         return current;
     }
 
     internal void RaiseAnnouncement(long sequence, string previous, string current)
     {
         owner.CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.PropertyRaiseBegin,
-            sequence, current, previous: previous, current: current, peer: this);
+            sequence, peer: this);
         _ = GetItemStatus();
         RaisePropertyChangedEvent(AutomationElementIdentifiers.ItemStatusProperty, previous, current);
         owner.CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.PropertyRaiseReturn,
-            sequence, current, previous: previous, current: current, peer: this);
+            sequence, peer: this);
         owner.CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.LiveRaiseBegin,
-            sequence, current, previous: previous, current: current, peer: this);
+            sequence, peer: this);
         RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
         owner.CaptureDiagnostic(ReviewAnnouncementDiagnosticStage.LiveRaiseReturn,
-            sequence, current, previous: previous, current: current, peer: this);
+            sequence, peer: this);
     }
 }
 
@@ -886,14 +880,9 @@ internal readonly record struct ReviewAnnouncementDiagnosticRecord(
     long NotificationSequence,
     long Timestamp,
     int ThreadId,
-    string? Payload,
     int DataContextGeneration,
-    string? Previous,
-    string? Current,
     string? SkipReason,
-    Type? PeerType,
     int PeerIdentity,
-    Type? ExpectedPeerType,
     int ExpectedPeerIdentity);
 
 internal sealed record ReviewAnnouncementDiagnosticSnapshot(
