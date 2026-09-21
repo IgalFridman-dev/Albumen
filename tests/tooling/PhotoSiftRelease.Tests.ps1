@@ -57,6 +57,29 @@ function Assert-ThrowsLike {
     throw "Expected failure matching '$Pattern': $Because"
 }
 
+function Test-CorrectionRejection {
+    param(
+        [scriptblock]$Action,
+        [string]$Pattern,
+        [string]$Because,
+        [System.Collections.Generic.List[string]]$Failures
+    )
+
+    try {
+        & $Action
+        $Failures.Add("ACCEPTED: $Because")
+    }
+    catch {
+        if ($_.Exception.Message -notmatch $Pattern) {
+            $Failures.Add(
+                "WRONG FAILURE '$($_.Exception.Message)' (expected '$Pattern'): $Because")
+        }
+        else {
+            $script:passed++
+        }
+    }
+}
+
 function Get-Sha256 {
     param([string]$Path)
 
@@ -230,6 +253,63 @@ try {
     }
     $script:passed++
 
+    $correctionFailures = [System.Collections.Generic.List[string]]::new()
+    foreach ($nativeBypass in @(
+            @{ Name = 'unexpected-executable'; Path = 'unexpected.exe'; NativePe = $false },
+            @{ Name = 'unexpected-native-pe'; Path = 'unexpected.dll'; NativePe = $true }
+        )) {
+        $fixture = Copy-Package -SourcePath $cleanPackage -Name $nativeBypass.Name
+        $artifactPath = Join-Path $fixture $nativeBypass.Path
+        if ($nativeBypass.NativePe) {
+            [System.IO.File]::Copy((Join-Path $env:SystemRoot 'System32\cmd.exe'), $artifactPath)
+        }
+        else {
+            Write-Utf8NoBom -Path $artifactPath -Content 'unexpected executable fixture'
+        }
+        Test-CorrectionRejection `
+            -Action {
+                New-PhotoSiftReleaseManifest `
+                    -PackagePath $fixture `
+                    -OutputPath (Join-Path $fixture 'release-manifest.json') | Out-Null
+            } `
+            -Pattern 'approved native|unexpected native' `
+            -Because "an unapproved native-like payload must be rejected: $($nativeBypass.Path)" `
+            -Failures $correctionFailures
+    }
+    $missingApprovedNative = Copy-Package `
+        -SourcePath $cleanPackage `
+        -Name 'missing-approved-native'
+    Remove-Item -LiteralPath (Join-Path $missingApprovedNative 'coreclr.dll')
+    Test-CorrectionRejection `
+        -Action {
+            New-PhotoSiftReleaseManifest `
+                -PackagePath $missingApprovedNative `
+                -OutputPath (Join-Path $missingApprovedNative 'release-manifest.json') | Out-Null
+        } `
+        -Pattern 'approved native|required payload' `
+        -Because 'the independently approved native path set must be present exactly' `
+        -Failures $correctionFailures
+    foreach ($toolingBypass in @('python.exe', 'python311.dll', 'export.exe')) {
+        $fixture = Copy-Package `
+            -SourcePath $cleanPackage `
+            -Name ('root-tooling-' + $toolingBypass.Replace('.', '-'))
+        Write-Utf8NoBom `
+            -Path (Join-Path $fixture $toolingBypass) `
+            -Content 'root-level tooling fixture'
+        Test-CorrectionRejection `
+            -Action {
+                New-PhotoSiftReleaseManifest `
+                    -PackagePath $fixture `
+                    -OutputPath (Join-Path $fixture 'release-manifest.json') | Out-Null
+            } `
+            -Pattern 'Python|development tooling|export' `
+            -Because "root-level Python/export tooling must be rejected: $toolingBypass" `
+            -Failures $correctionFailures
+    }
+    if ($correctionFailures.Count -gt 0) {
+        throw "Correction rejection failures:`n$($correctionFailures -join [System.Environment]::NewLine)"
+    }
+
     foreach ($case in @(
             @{ Name = 'duplicate-path'; Pattern = 'duplicate|collision'; Mutate = {
                     param($value)
@@ -305,21 +385,6 @@ try {
         -Action { Test-PhotoSiftRelease -PackagePath $hashMutation | Out-Null } `
         -Pattern 'hash|SHA-256' `
         -Because 'same-length payload corruption must be rejected'
-
-    $unexpectedNative = Copy-Package -SourcePath $cleanPackage -Name 'unexpected-native'
-    Write-Utf8NoBom -Path (Join-Path $unexpectedNative 'unexpected.exe') -Content 'native fixture'
-    $unexpectedNativeManifest = Read-Manifest -PackagePath $unexpectedNative
-    $unexpectedNativeManifest.payload = @($unexpectedNativeManifest.payload) + @([pscustomobject][ordered]@{
-            path = 'unexpected.exe'
-            length = (Get-Item -LiteralPath (Join-Path $unexpectedNative 'unexpected.exe')).Length
-            sha256 = Get-Sha256 -Path (Join-Path $unexpectedNative 'unexpected.exe')
-            kind = 'managed-runtime'
-        })
-    Write-ManifestAndDigest -PackagePath $unexpectedNative -Manifest $unexpectedNativeManifest
-    Assert-ThrowsLike `
-        -Action { Test-PhotoSiftRelease -PackagePath $unexpectedNative | Out-Null } `
-        -Pattern 'native|kind' `
-        -Because 'a native executable absent from nativePaths must be rejected even if the manifest mislabels it'
 
     foreach ($forbidden in @(
             @{ Name = 'model'; Path = 'models\weights.onnx' },

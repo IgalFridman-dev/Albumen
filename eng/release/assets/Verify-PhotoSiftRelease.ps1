@@ -6,6 +6,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:PhotoSiftApprovedNativePaths = [string[]]@('coreclr.dll')
 
 function Get-PhotoSiftReleaseSha256 {
     param(
@@ -127,7 +128,9 @@ function Test-PhotoSiftForbiddenReleasePath {
         return 'test corpus'
     }
     if ($normalized -match '/(__pycache__|python|scripts?|tools?|exports?)/' -or
-        $extension -in @('.py', '.pyc', '.pyo', '.whl')) {
+        $extension -in @('.py', '.pyc', '.pyo', '.whl') -or
+        $leaf -match '^python(?:w|[0-9]+)?\.(?:exe|dll)$' -or
+        $leaf -match '^export(?:er|tool)?\.(?:exe|dll|cmd|bat|ps1)$') {
         return 'Python or development tooling artifact'
     }
     if ($normalized -match '/(cache|caches|\.cache|obj|bin)/') {
@@ -160,28 +163,90 @@ function Get-PhotoSiftReleasePayloadKind {
         return 'notice'
     }
 
-    $leaf = [System.IO.Path]::GetFileName($Path)
-    $nativeNames = @(
-        'clrjit.dll',
-        'coreclr.dll',
-        'createdump.exe',
-        'e_sqlite3.dll',
-        'hostfxr.dll',
-        'hostpolicy.dll',
-        'mscordaccore.dll',
-        'mscordbi.dll',
-        'System.Globalization.Native.dll',
-        'System.IO.Compression.Native.dll',
-        'System.Native.dll',
-        'System.Net.Security.Native.dll',
-        'System.Security.Cryptography.Native.OpenSsl.dll')
-    if ([System.IO.Path]::GetExtension($leaf) -ieq '.exe' -or
-        $leaf -imatch '_cor3\.dll$' -or
-        $nativeNames -icontains $leaf) {
+    if ($script:PhotoSiftApprovedNativePaths -icontains $Path) {
         return 'native-runtime'
     }
 
     return 'managed-runtime'
+}
+
+function Test-PhotoSiftNativePortableExecutable {
+    param(
+        [Parameter(Mandatory)]
+        [string]$LiteralPath
+    )
+
+    $stream = [System.IO.File]::OpenRead($LiteralPath)
+    try {
+        if ($stream.Length -lt 64) {
+            return $false
+        }
+        $reader = New-Object System.IO.BinaryReader($stream)
+        try {
+            if ($reader.ReadUInt16() -ne 0x5A4D) {
+                return $false
+            }
+
+            $stream.Position = 0x3C
+            $peOffset = $reader.ReadInt32()
+            if ($peOffset -lt 0 -or $peOffset -gt ($stream.Length - 24)) {
+                return $true
+            }
+            $stream.Position = $peOffset
+            if ($reader.ReadUInt32() -ne 0x00004550) {
+                return $true
+            }
+
+            $optionalHeaderOffset = $peOffset + 24
+            $stream.Position = $optionalHeaderOffset
+            $magic = $reader.ReadUInt16()
+            if ($magic -eq 0x10B) {
+                $dataDirectoryOffset = $optionalHeaderOffset + 96
+            }
+            elseif ($magic -eq 0x20B) {
+                $dataDirectoryOffset = $optionalHeaderOffset + 112
+            }
+            else {
+                return $true
+            }
+
+            $clrDirectoryOffset = $dataDirectoryOffset + (14 * 8)
+            if ($clrDirectoryOffset -gt ($stream.Length - 8)) {
+                return $true
+            }
+            $stream.Position = $clrDirectoryOffset
+            $clrHeaderRva = $reader.ReadUInt32()
+            $clrHeaderSize = $reader.ReadUInt32()
+            return $clrHeaderRva -eq 0 -or $clrHeaderSize -eq 0
+        }
+        finally {
+            $reader.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Assert-PhotoSiftReleaseNativePathApproved {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$LiteralPath
+    )
+
+    if ($Path -ieq 'PhotoSift.App.exe' -or
+        $script:PhotoSiftApprovedNativePaths -icontains $Path) {
+        return
+    }
+
+    $extension = [System.IO.Path]::GetExtension($Path)
+    if ($extension -ieq '.exe' -or
+        (Test-PhotoSiftNativePortableExecutable -LiteralPath $LiteralPath)) {
+        throw "Release package contains an unexpected native path outside the approved native set: $Path"
+    }
 }
 
 function Assert-PhotoSiftReleaseDirectoriesAllowed {
@@ -377,6 +442,10 @@ function Test-PhotoSiftPackageIntegrity {
         Assert-PhotoSiftCanonicalReleasePath -Path $nativePath -PackagePath $resolvedPackagePath
     }
     Assert-PhotoSiftReleaseSortedUniquePaths -Paths $nativePaths -Context 'Release nativePaths'
+    if (($nativePaths -join [char]0) -cne
+        ($script:PhotoSiftApprovedNativePaths -join [char]0)) {
+        throw 'Release nativePaths must exactly match the independently approved native path set.'
+    }
     $expectedNativePaths = [string[]]@($payload |
         Where-Object { $_.kind -ceq 'native-runtime' } |
         ForEach-Object { $_.path })
@@ -394,6 +463,9 @@ function Test-PhotoSiftPackageIntegrity {
     $fileByPath = [System.Collections.Generic.Dictionary[string, object]]::new(
         [System.StringComparer]::OrdinalIgnoreCase)
     foreach ($file in $files) {
+        Assert-PhotoSiftReleaseNativePathApproved `
+            -Path $file.Path `
+            -LiteralPath $file.FullName
         $fileByPath.Add($file.Path, $file)
     }
     if ($files.Count -ne $payload.Count) {
