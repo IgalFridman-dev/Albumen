@@ -129,6 +129,12 @@ function New-CleanPackage {
     [System.IO.File]::Copy($launcherAssetPath, (Join-Path $packagePath 'Start-PhotoSift.cmd'))
     [System.IO.File]::Copy($verifierAssetPath, (Join-Path $packagePath 'Verify-PhotoSiftRelease.ps1'))
     Write-Utf8NoBom -Path (Join-Path $packagePath 'PhotoSift.App.exe') -Content 'synthetic application'
+    Write-Utf8NoBom `
+        -Path (Join-Path $packagePath 'PhotoSift.App.deps.json') `
+        -Content '{"runtimeTarget":{"name":"win-x64"}}'
+    Write-Utf8NoBom `
+        -Path (Join-Path $packagePath 'PhotoSift.App.runtimeconfig.json') `
+        -Content '{"runtimeOptions":{"tfm":"net10.0-windows"}}'
     [System.IO.Directory]::CreateDirectory((Join-Path $packagePath 'runtime')) | Out-Null
     Write-Utf8NoBom -Path (Join-Path $packagePath 'runtime\PhotoSift.Managed.dll') -Content 'managed fixture'
     Write-Utf8NoBom -Path (Join-Path $packagePath 'coreclr.dll') -Content 'named native fixture'
@@ -239,11 +245,11 @@ try {
     $manifest = Read-Manifest -PackagePath $cleanPackage
     Assert-Equal 1 $manifest.schemaVersion 'the schema version must be exact'
     Assert-Equal `
-        'PhotoSift.App.exe,Start-PhotoSift.cmd,THIRD-PARTY-NOTICES.md,Verify-PhotoSiftRelease.ps1,coreclr.dll,runtime/PhotoSift.Managed.dll' `
+        'PhotoSift.App.deps.json,PhotoSift.App.exe,PhotoSift.App.runtimeconfig.json,Start-PhotoSift.cmd,THIRD-PARTY-NOTICES.md,Verify-PhotoSiftRelease.ps1,coreclr.dll,runtime/PhotoSift.Managed.dll' `
         (($manifest.payload | ForEach-Object { $_.path }) -join ',') `
         'payload paths must be canonical slash-separated ordinal-sorted paths'
     Assert-Equal `
-        'application,launcher,notice,launcher,native-runtime,managed-runtime' `
+        'managed-runtime,application,managed-runtime,launcher,notice,launcher,native-runtime,managed-runtime' `
         (($manifest.payload | ForEach-Object { $_.kind }) -join ',') `
         'each clean payload path must have its exact bounded kind'
     Assert-Equal 'coreclr.dll' ($manifest.nativePaths -join ',') 'the named native path must be explicit'
@@ -289,12 +295,21 @@ try {
         -Pattern 'approved native|required payload' `
         -Because 'the independently approved native path set must be present exactly' `
         -Failures $correctionFailures
-    foreach ($toolingBypass in @('python.exe', 'python311.dll', 'export.exe')) {
+    foreach ($toolingBypass in @(
+            @{ Path = 'python.exe' },
+            @{ Path = 'python311.dll' },
+            @{ Path = 'export.exe' },
+            @{ Path = 'python311.zip' },
+            @{ Path = 'python311._pth' },
+            @{ Path = 'pyvenv.cfg' },
+            @{ Path = 'export-data.exe' },
+            @{ Path = 'build.ps1' }
+        )) {
         $fixture = Copy-Package `
             -SourcePath $cleanPackage `
-            -Name ('root-tooling-' + $toolingBypass.Replace('.', '-'))
+            -Name ('root-tooling-' + $toolingBypass.Path.Replace('.', '-'))
         Write-Utf8NoBom `
-            -Path (Join-Path $fixture $toolingBypass) `
+            -Path (Join-Path $fixture $toolingBypass.Path) `
             -Content 'root-level tooling fixture'
         Test-CorrectionRejection `
             -Action {
@@ -302,8 +317,8 @@ try {
                     -PackagePath $fixture `
                     -OutputPath (Join-Path $fixture 'release-manifest.json') | Out-Null
             } `
-            -Pattern 'Python|development tooling|export' `
-            -Because "root-level Python/export tooling must be rejected: $toolingBypass" `
+            -Pattern 'forbidden Python or development tooling artifact' `
+            -Because "root-level Python/export/development tooling must be rejected: $($toolingBypass.Path)" `
             -Failures $correctionFailures
     }
     if ($correctionFailures.Count -gt 0) {
