@@ -1,3 +1,5 @@
+param([switch]$LoadHelpersOnly)
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -363,6 +365,21 @@ function New-SyntheticPackagesRoot {
   <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/WrongCaseProfile.dll" Profile="wpf" />
 </FileList>
 '@
+    foreach ($payload in @(
+            @{ Package = $netCorePath; Source = 'runtimes/win-x64/native/coreclr.dll'; Name = 'coreclr.dll' },
+            @{ Package = $netCorePath; Source = 'runtimes/win-x64/lib/net10.0/System.Net.Http.dll'; Name = 'System.Net.Http.dll' },
+            @{ Package = $netCorePath; Source = 'runtimes/win-x64/lib/net10.0/WindowsBase.dll'; Name = 'WindowsBase.dll' },
+            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/native/D3DCompiler_47_cor3.dll'; Name = 'D3DCompiler_47_cor3.dll' },
+            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/native/wpfgfx_cor3.dll'; Name = 'wpfgfx_cor3.dll' },
+            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/lib/net10.0/PresentationCore.dll'; Name = 'PresentationCore.dll' },
+            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/lib/net10.0/WindowsBase.dll'; Name = 'WindowsBase.dll' },
+            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/lib/net10.0/cs/PresentationCore.resources.dll'; Name = 'cs/PresentationCore.resources.dll' },
+            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/lib/net10.0/de/PresentationCore.resources.dll'; Name = 'de/PresentationCore.resources.dll' }
+        )) {
+        $payloadPath = Join-Path (Split-Path $payload.Package -Parent) $payload.Source
+        [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($payloadPath)) | Out-Null
+        Write-Utf8NoBom -Path $payloadPath -Content ('synthetic ' + $payload.Name)
+    }
     foreach ($package in @(
             @{ Id = 'Microsoft.NETCore.App.Runtime.win-x64'; Version = '10.0.11'; License = 'MIT' },
             @{ Id = 'Microsoft.WindowsDesktop.App.Runtime.win-x64'; Version = '10.0.11'; License = 'MIT' },
@@ -397,6 +414,12 @@ function New-SyntheticPackagesRoot {
                 -Content "synthetic third-party notices for $($package.Id)"
         }
     }
+    $hostPath = Join-Path $root 'microsoft.netcore.app.host.win-x64/10.0.11/runtimes/win-x64/native/apphost.exe'
+    [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($hostPath)) | Out-Null
+    Write-Utf8NoBom -Path $hostPath -Content 'synthetic apphost (never executed)'
+    $sqlitePath = Join-Path $root 'sqlitepclraw.lib.e_sqlite3/2.1.12/runtimes/win-x64/native/e_sqlite3.dll'
+    [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($sqlitePath)) | Out-Null
+    Write-Utf8NoBom -Path $sqlitePath -Content 'synthetic e_sqlite3.dll'
     return $root
 }
 
@@ -423,7 +446,7 @@ function Write-SyntheticPublishOutput {
         Set-Content -LiteralPath (Join-Path $OutputPath 'PhotoSift.App.deps.json') -Encoding utf8
     Write-Utf8NoBom `
         -Path (Join-Path $OutputPath 'PhotoSift.App.runtimeconfig.json') `
-        -Content '{"runtimeOptions":{"tfm":"net10.0-windows","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}'
+        -Content '{"runtimeOptions":{"tfm":"net10.0","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}'
     foreach ($file in @(
             'PhotoSift.App.exe',
             'PhotoSift.App.dll',
@@ -456,6 +479,7 @@ function New-SyntheticReleaseOperations {
         [bool]$DriftSecondPublish,
         [string]$ExtraRestoredPackage,
         [scriptblock]$AfterPublish,
+        [scriptblock]$AfterRestore,
         [bool]$InjectCaseCollision,
         [string]$SelectedSdkVersion = '10.0.400'
     )
@@ -489,9 +513,6 @@ function New-SyntheticReleaseOperations {
                 [System.IO.Directory]::CreateDirectory(
                     [System.IO.Path]::GetDirectoryName($assetsPath)) | Out-Null
                 $restoredLibraries = [ordered]@{
-                    'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
-                    'Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
-                    'Microsoft.NETCore.App.Host.win-x64/10.0.11' = @{ type = 'package' }
                     'Microsoft.Data.Sqlite/10.0.11' = @{ type = 'package' }
                     'Microsoft.Data.Sqlite.Core/10.0.11' = @{ type = 'package' }
                     'SQLitePCLRaw.bundle_e_sqlite3/2.1.12' = @{ type = 'package' }
@@ -504,8 +525,14 @@ function New-SyntheticReleaseOperations {
                 }
                 [pscustomobject]@{
                     libraries = $restoredLibraries
+                    project = @{ frameworks = @{ 'net10.0-windows7.0' = @{
+                        downloadDependencies = @(
+                            @{ name = 'Microsoft.NETCore.App.Runtime.win-x64'; version = '[10.0.11, 10.0.11]' },
+                            @{ name = 'Microsoft.WindowsDesktop.App.Runtime.win-x64'; version = '[10.0.11, 10.0.11]' })
+                    } } }
                 } | ConvertTo-Json -Depth 6 |
                     Set-Content -LiteralPath $assetsPath -Encoding utf8
+                if ($null -ne $AfterRestore) { & $AfterRestore $assetsPath }
             }
             if ($Name -like 'publish-*') {
                 $state.PublishCount++
@@ -539,6 +566,8 @@ function New-SyntheticReleaseOperations {
     }
     return $operations
 }
+
+if ($LoadHelpersOnly) { return }
 
 try {
     $cleanPackage = New-CleanPackage -Name 'clean'
@@ -862,6 +891,13 @@ try {
     [System.IO.Directory]::CreateDirectory((Join-Path $syntheticSdk 'sdk\10.0.400')) | Out-Null
     Write-Utf8NoBom -Path (Join-Path $syntheticSdk 'dotnet.exe') -Content 'never executed synthetic SDK'
 
+    $nestedCalls = [System.Collections.Generic.List[object]]::new()
+    $nestedOperations = New-SyntheticReleaseOperations -Calls $nestedCalls -DriftSecondPublish $false
+    Assert-ThrowsLike -Action {
+        & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot (Join-Path $syntheticRepository 'nested-output') -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $nestedOperations | Out-Null
+    } -Pattern 'outside.*repository' -Because 'output must not recursively enter the source copy'
+    Assert-Equal 0 $nestedCalls.Count 'nested output must be rejected before any external call'
+
     $wrongSdkOutput = Join-Path $testRoot 'wrong-sdk-output'
     $wrongSdkCalls = [System.Collections.Generic.List[object]]::new()
     $wrongSdkOperations = New-SyntheticReleaseOperations `
@@ -891,6 +927,32 @@ try {
         'the release workflow must disable SDK roll-forward in the repository pin'
     $script:passed++
 
+    foreach ($downloadCase in @(
+            @{ Name = 'runtime-download-range'; Mutate = { param($AssetsPath)
+                $json = (Get-Content -Raw -LiteralPath $AssetsPath).Replace('[10.0.11, 10.0.11]', '[10.0.11, 10.0.12]')
+                Write-Utf8NoBom -Path $AssetsPath -Content $json
+            } },
+            @{ Name = 'runtime-download-missing'; Mutate = { param($AssetsPath)
+                $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
+                $assets.project.frameworks.'net10.0-windows7.0'.downloadDependencies = @()
+                Write-Utf8NoBom -Path $AssetsPath -Content ($assets | ConvertTo-Json -Depth 8)
+            } },
+            @{ Name = 'runtime-download-extra'; Mutate = { param($AssetsPath)
+                $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
+                $assets.project.frameworks.'net10.0-windows7.0'.downloadDependencies += @{ name = 'Unexpected.Package'; version = '[10.0.11, 10.0.11]' }
+                Write-Utf8NoBom -Path $AssetsPath -Content ($assets | ConvertTo-Json -Depth 8)
+            } }
+        )) {
+        $downloadCalls = [System.Collections.Generic.List[object]]::new()
+        $downloadOperations = New-SyntheticReleaseOperations -Calls $downloadCalls -DriftSecondPublish $false -AfterRestore $downloadCase.Mutate
+        $downloadOutput = Join-Path $testRoot $downloadCase.Name
+        Assert-ThrowsLike -Action {
+            & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot $downloadOutput -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $downloadOperations | Out-Null
+        } -Pattern 'unpinned download|runtime download' -Because 'runtime PackageDownload must resolve only the exact closed pinned version'
+        Assert-True ([System.IO.File]::Exists((Join-Path $downloadOutput 'evidence/restore-1-project.assets.json'))) 'failed restore validation must retain the actual assets input'
+        Assert-Equal 'sdk-version,restore-1' ($downloadCalls.Name -join ',') 'unapproved downloads must stop before publish'
+    }
+
     $captureRepository = New-SyntheticReleaseRepository -Name 'capture-repository'
     Remove-Item -Force -LiteralPath (Join-Path $captureRepository 'THIRD-PARTY-NOTICES.md')
     Remove-Item -Recurse -Force -LiteralPath (Join-Path $captureRepository 'eng\release\licenses')
@@ -908,6 +970,9 @@ try {
         -CaptureOnly `
         -Operations $captureOperations
     Assert-Equal 'needs-license-inventory' $captureResult.status 'capture-only mode must stop before candidate packaging'
+    foreach ($diagnostic in @('sdk-version-command.json', 'restore-1-command.json', 'restore-2-command.json', 'publish-1-command.json', 'publish-2-command.json', 'restore-1-project.assets.json', 'restore-2-project.assets.json')) {
+        Assert-True ([System.IO.File]::Exists((Join-Path $captureOutput ('evidence/' + $diagnostic)))) 'successful command output and each actual restored assets file must survive work cleanup'
+    }
     $capturedFramework = Get-Content -Raw -LiteralPath (
         Join-Path $captureOutput 'evidence\framework-closure.json') | ConvertFrom-Json
     Assert-Equal `
@@ -959,6 +1024,7 @@ try {
             @{ Name = 'runtime-resource-missing-culture'; Replacement = '<File Type="Resources" Path="runtimes/win-x64/lib/net10.0/cs/Other.resources.dll" Profile="WPF" />'; Pattern = 'Culture' },
             @{ Name = 'runtime-resource-invalid-culture'; Replacement = '<File Type="Resources" Path="runtimes/win-x64/lib/net10.0/cs/Other.resources.dll" Culture="../escape" Profile="WPF" />'; Pattern = 'Culture' },
             @{ Name = 'runtime-resource-case-collision'; Replacement = '<File Type="Resources" Path="other/source/PresentationCore.resources.dll" Culture="CS" Profile="WPF" />'; Pattern = 'case-colliding' }
+            @{ Name = 'runtime-unknown-type'; Replacement = '<File Type="Mystery" Path="runtimes/win-x64/lib/net10.0/WindowsBase.dll" Profile="WPF" />'; Pattern = 'unsupported.*Type' }
         )) {
         $overlapPackages = Join-Path $testRoot ($overlapCase.Name + '-packages')
         Copy-Item -Recurse -LiteralPath $syntheticPackages -Destination $overlapPackages
@@ -985,6 +1051,14 @@ try {
     }
 
     foreach ($captureAuditCase in @(
+            @{
+                Name = 'capture-tampered-framework'
+                Pattern = 'pinned.*(hash|payload)|SHA256'
+                Mutate = {
+                    param($OutputPath, $PublishIndex)
+                    Write-Utf8NoBom -Path (Join-Path $OutputPath 'System.Net.Http.dll') -Content 'untrusted replacement at a legitimate framework path'
+                }
+            },
             @{
                 Name = 'capture-forbidden-artifact'
                 Pattern = 'forbidden|test|artifact'
@@ -1079,6 +1153,27 @@ try {
         Assert-True `
             (-not [System.IO.Directory]::Exists((Join-Path $auditOutput 'provisional-publish'))) `
             "a failed $($captureAuditCase.Name) audit must not preserve a provisional publish"
+        $failure = Get-Content -Raw -LiteralPath (Join-Path $auditOutput 'evidence/failure.json') | ConvertFrom-Json
+        Assert-True (-not [string]::IsNullOrWhiteSpace($failure.scriptStackTrace)) 'capture failure must retain its production script stack trace'
+    }
+
+    foreach ($sqliteCase in @(
+            @{ Name = 'missing-sqlite-version'; Bytes = 'no static version'; Pattern = 'missing.*SQLite' },
+            @{ Name = 'ambiguous-sqlite-version'; Bytes = ([char]0 + '3.53.3' + [char]0 + '3.53.4' + [char]0 + '2026-06-26 20:14:12 ' + ('a' * 64) + [char]0); Pattern = 'ambiguous.*SQLite' }
+        )) {
+        $sqlitePackages = Join-Path $testRoot ($sqliteCase.Name + '-packages')
+        Copy-Item -LiteralPath $syntheticPackages -Destination $sqlitePackages -Recurse
+        Write-Utf8NoBom -Path (Join-Path $sqlitePackages 'sqlitepclraw.lib.e_sqlite3/2.1.12/runtimes/win-x64/native/e_sqlite3.dll') -Content $sqliteCase.Bytes
+        $sqliteBytes = $sqliteCase.Bytes
+        $sqliteMutation = { param($OutputPath, $PublishIndex)
+            Write-Utf8NoBom -Path (Join-Path $OutputPath 'e_sqlite3.dll') -Content $sqliteBytes
+        }.GetNewClosure()
+        $sqliteCalls = [System.Collections.Generic.List[object]]::new()
+        $sqliteOperations = New-SyntheticReleaseOperations -Calls $sqliteCalls -DriftSecondPublish $false -AfterPublish $sqliteMutation
+        $sqliteOperations.Remove('GetFileVersion')
+        Assert-ThrowsLike -Action {
+            & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot (Join-Path $testRoot $sqliteCase.Name) -SdkRoot $syntheticSdk -PackagesRoot $sqlitePackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $sqliteOperations | Out-Null
+        } -Pattern $sqliteCase.Pattern -Because 'static native SQLite version evidence must be unique, delimited and complete'
     }
 
     $collisionOutput = Join-Path $testRoot 'capture-case-collision-output'
@@ -1260,6 +1355,7 @@ try {
                 'restore',
                 '-r win-x64',
                 '--locked-mode',
+                '-p:SelfContained=true',
                 '--configfile',
                 '-p:RuntimeFrameworkVersion=10.0.11',
                 '-p:TargetLatestRuntimePatch=false')) {
