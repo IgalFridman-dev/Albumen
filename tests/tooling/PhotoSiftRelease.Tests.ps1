@@ -298,7 +298,7 @@ function New-SyntheticReleaseRepository {
         -Content 'Synthetic SQLite blessing text'
     $componentSpecifications = @(
         @{ Name = '.NET Host'; Version = '10.0.11'; Paths = @('PhotoSift.App.exe'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
-        @{ Name = '.NET Runtime'; Version = '10.0.11'; Paths = @('coreclr.dll', 'System.Net.Http.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
+        @{ Name = '.NET Runtime'; Version = '10.0.11'; Paths = @('coreclr.dll', 'System.Net.Http.dll', 'WindowsBase.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Microsoft.Data.Sqlite'; Version = '10.0.11'; Paths = @(); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Microsoft.Data.Sqlite.Core'; Version = '10.0.11'; Paths = @('Microsoft.Data.Sqlite.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Native SQLite'; Version = '3.49.1'; Paths = @('e_sqlite3.dll'); License = 'blessing'; LicensePaths = @('licenses/SQLite-Blessing.txt') },
@@ -306,7 +306,7 @@ function New-SyntheticReleaseRepository {
         @{ Name = 'SQLitePCLRaw.core'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.core.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
         @{ Name = 'SQLitePCLRaw.lib.e_sqlite3'; Version = '2.1.12'; Paths = @('e_sqlite3.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
         @{ Name = 'SQLitePCLRaw.provider.e_sqlite3'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.provider.e_sqlite3.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
-        @{ Name = 'Windows Desktop / WPF'; Version = '10.0.11'; Paths = @('D3DCompiler_47_cor3.dll', 'PresentationCore.dll', 'wpfgfx_cor3.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') })
+        @{ Name = 'Windows Desktop / WPF'; Version = '10.0.11'; Paths = @('D3DCompiler_47_cor3.dll', 'PresentationCore.dll', 'WindowsBase.dll', 'cs/PresentationCore.resources.dll', 'de/PresentationCore.resources.dll', 'wpfgfx_cor3.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') })
     $inventory = [pscustomobject][ordered]@{
         schemaVersion = 1
         components = @($componentSpecifications | ForEach-Object {
@@ -340,17 +340,27 @@ function New-SyntheticPackagesRoot {
         -Path (Join-Path $netCorePath 'RuntimeList.xml') `
         -Content @'
 <FileList FrameworkName="Microsoft.NETCore.App" TargetFrameworkVersion="10.0">
-  <File Type="Native" Path="coreclr.dll" />
-  <File Type="Managed" Path="System.Net.Http.dll" />
+  <File Type="Native" Path="runtimes/win-x64/native/coreclr.dll" />
+  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/System.Net.Http.dll" />
+  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/WindowsBase.dll" />
 </FileList>
 '@
     Write-Utf8NoBom `
         -Path (Join-Path $windowsDesktopPath 'RuntimeList.xml') `
         -Content @'
 <FileList FrameworkName="Microsoft.WindowsDesktop.App" TargetFrameworkVersion="10.0">
-  <File Type="Native" Path="D3DCompiler_47_cor3.dll" />
-  <File Type="Managed" Path="PresentationCore.dll" />
-  <File Type="Native" Path="wpfgfx_cor3.dll" />
+  <File Type="Native" Path="runtimes/win-x64/native/D3DCompiler_47_cor3.dll" Profile="WindowsForms;WPF" />
+  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/PresentationCore.dll" Profile="WPF" />
+  <File Type="Native" Path="runtimes/win-x64/native/wpfgfx_cor3.dll" Profile="WPF" />
+  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/WindowsBase.dll" Profile="WPF" />
+  <File Type="Resources" Path="runtimes/win-x64/lib/net10.0/cs/PresentationCore.resources.dll" Culture="cs" Profile="WPF" />
+  <File Type="Resources" Path="runtimes/win-x64/lib/net10.0/de/PresentationCore.resources.dll" Culture="de" Profile="WPF" />
+  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/Microsoft.VisualBasic.dll" Profile="WindowsForms" />
+  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/System.Drawing.dll" Profile="WindowsForms" />
+  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/BlankProfile.dll" Profile="" />
+  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/AbsentProfile.dll" />
+  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/PartialProfile.dll" Profile="NotWPF" />
+  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/WrongCaseProfile.dll" Profile="wpf" />
 </FileList>
 '@
     foreach ($package in @(
@@ -426,12 +436,17 @@ function Write-SyntheticPublishOutput {
             'D3DCompiler_47_cor3.dll',
             'System.Net.Http.dll',
             'PresentationCore.dll',
+            'WindowsBase.dll',
+            'cs/PresentationCore.resources.dll',
+            'de/PresentationCore.resources.dll',
             'wpfgfx_cor3.dll')) {
         $content = "synthetic $file"
         if ($Drift -and $file -ceq 'PhotoSift.App.dll') {
             $content += ' drift'
         }
-        Write-Utf8NoBom -Path (Join-Path $OutputPath $file) -Content $content
+        $filePath = Join-Path $OutputPath $file
+        [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($filePath)) | Out-Null
+        Write-Utf8NoBom -Path $filePath -Content $content
     }
 }
 
@@ -893,6 +908,13 @@ try {
         -CaptureOnly `
         -Operations $captureOperations
     Assert-Equal 'needs-license-inventory' $captureResult.status 'capture-only mode must stop before candidate packaging'
+    $capturedFramework = Get-Content -Raw -LiteralPath (
+        Join-Path $captureOutput 'evidence\framework-closure.json') | ConvertFrom-Json
+    Assert-Equal `
+        'D3DCompiler_47_cor3.dll,PresentationCore.dll,System.Net.Http.dll,WindowsBase.dll,coreclr.dll,cs/PresentationCore.resources.dll,de/PresentationCore.resources.dll,wpfgfx_cor3.dll' `
+        ($capturedFramework.frameworkPaths -join ',') `
+        'WPF and WindowsForms;WPF entries must be included; WindowsForms, blank, absent, partial, and wrong-case profiles must be excluded without filtering NETCore'
+    $script:passed++
     $captureEvidence = Get-Content -Raw -LiteralPath (
         Join-Path $captureOutput 'evidence\capture-evidence.json') | ConvertFrom-Json
     Assert-Equal '10.0.400' `
@@ -911,6 +933,12 @@ try {
         '.NET Host,.NET Runtime,Microsoft.Data.Sqlite,Microsoft.Data.Sqlite.Core,Native SQLite,SQLitePCLRaw.bundle_e_sqlite3,SQLitePCLRaw.core,SQLitePCLRaw.lib.e_sqlite3,SQLitePCLRaw.provider.e_sqlite3,Windows Desktop / WPF' `
         (($dependencyCapture.components | ForEach-Object { $_.name }) -join ',') `
         'capture-only mode must enumerate every required shipped/runtime component'
+    foreach ($frameworkComponent in @('.NET Runtime', 'Windows Desktop / WPF')) {
+        $component = @($dependencyCapture.components | Where-Object { $_.name -ceq $frameworkComponent })[0]
+        Assert-Equal 1 @($component.shippedPaths | Where-Object { $_ -ceq 'WindowsBase.dll' }).Count `
+            'a deduplicated framework path must retain provenance in both pinned components'
+    }
+    $script:passed++
     $nativeSqliteCapture = @($dependencyCapture.components | Where-Object {
             $_.name -ceq 'Native SQLite'
         })[0]
@@ -923,6 +951,38 @@ try {
         ([System.IO.File]::Exists((Join-Path $captureOutput 'evidence\license-sources\microsoft.netcore.app.runtime.win-x64\10.0.11\LICENSE.txt'))) `
         'capture-only mode must preserve local package license sources for review without downloading anything'
     $script:passed++
+
+    foreach ($overlapCase in @(
+            @{ Name = 'runtime-case-collision'; Replacement = '<File Type="Managed" Path="other/source/windowsbase.dll" Profile="WPF" />'; Pattern = 'case-colliding' },
+            @{ Name = 'runtime-type-conflict'; Replacement = '<File Type="Native" Path="runtimes/win-x64/native/WindowsBase.dll" Profile="WPF" />'; Pattern = 'Type conflict' },
+            @{ Name = 'runtime-same-pack-duplicate'; Replacement = '<File Type="Managed" Path="other/source/PresentationCore.dll" Profile="WPF" />'; Pattern = 'duplicate' },
+            @{ Name = 'runtime-resource-missing-culture'; Replacement = '<File Type="Resources" Path="runtimes/win-x64/lib/net10.0/cs/Other.resources.dll" Profile="WPF" />'; Pattern = 'Culture' },
+            @{ Name = 'runtime-resource-invalid-culture'; Replacement = '<File Type="Resources" Path="runtimes/win-x64/lib/net10.0/cs/Other.resources.dll" Culture="../escape" Profile="WPF" />'; Pattern = 'Culture' },
+            @{ Name = 'runtime-resource-case-collision'; Replacement = '<File Type="Resources" Path="other/source/PresentationCore.resources.dll" Culture="CS" Profile="WPF" />'; Pattern = 'case-colliding' }
+        )) {
+        $overlapPackages = Join-Path $testRoot ($overlapCase.Name + '-packages')
+        Copy-Item -Recurse -LiteralPath $syntheticPackages -Destination $overlapPackages
+        $overlapManifestPath = Join-Path $overlapPackages `
+            'microsoft.windowsdesktop.app.runtime.win-x64\10.0.11\data\RuntimeList.xml'
+        $overlapManifest = Get-Content -Raw -LiteralPath $overlapManifestPath
+        Write-Utf8NoBom -Path $overlapManifestPath -Content $overlapManifest.Replace(
+            '<File Type="Managed" Path="runtimes/win-x64/lib/net10.0/WindowsBase.dll" Profile="WPF" />', $overlapCase.Replacement)
+        $overlapCalls = [System.Collections.Generic.List[object]]::new()
+        $overlapOperations = New-SyntheticReleaseOperations -Calls $overlapCalls -DriftSecondPublish $false
+        Assert-ThrowsLike -Action {
+            & $builderPath `
+                -RepositoryRoot $syntheticRepository `
+                -OutputRoot (Join-Path $testRoot ($overlapCase.Name + '-output')) `
+                -SdkRoot $syntheticSdk `
+                -PackagesRoot $overlapPackages `
+                -SourceIdentity 'synthetic-source-identity' `
+                -CaptureOnly `
+                -Operations $overlapOperations | Out-Null
+        } -Pattern $overlapCase.Pattern -Because 'only exact-case, same-Type overlap between the two pinned components is permitted'
+        Assert-Equal 'sdk-version' ($overlapCalls.Name -join ',') `
+            'invalid runtime manifest overlap must fail before restore or publish'
+        $script:passed++
+    }
 
     foreach ($captureAuditCase in @(
             @{
