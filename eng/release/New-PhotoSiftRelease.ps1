@@ -225,7 +225,7 @@ function Copy-CleanReleaseSource {
 }
 
 function Read-RuntimePackList {
-    param([string]$PackageId, [string]$ExpectedFrameworkName)
+    param([string]$PackageId, [string]$ExpectedFrameworkName, [string]$Profile)
 
     $packagePath = Join-Path $resolvedPackagesRoot ($PackageId + '\' + $runtimeVersion)
     $runtimeListPath = Join-Path $packagePath 'data\RuntimeList.xml'
@@ -240,15 +240,38 @@ function Read-RuntimePackList {
         throw "Runtime pack list does not match $ExpectedFrameworkName $runtimeIdentifier $runtimeVersion`: $runtimeListPath"
     }
 
+    $packPaths = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
     return @($runtimeList.FileList.File | ForEach-Object {
-            $path = ([string]$_.Path).Replace('\', '/')
-            if ([string]::IsNullOrWhiteSpace($path) -or
-                [System.IO.Path]::IsPathRooted($path) -or
-                $path.Contains('..')) {
-                throw "Runtime pack contains a noncanonical path: $path"
+            # Match the SDK's selected Windows Desktop profile, including shared entries.
+            if ($Profile -and @($_.GetAttribute('Profile') -split ';') -cnotcontains $Profile) {
+                return
+            }
+            $sourcePath = ([string]$_.Path).Replace('\', '/')
+            if ([string]::IsNullOrWhiteSpace($sourcePath) -or
+                [System.IO.Path]::IsPathRooted($sourcePath) -or
+                $sourcePath.Contains('..')) {
+                throw "Runtime pack contains a noncanonical path: $sourcePath"
+            }
+            # RuntimeList paths are package-relative; the SDK publishes by filename,
+            # except satellite resources, whose destination includes their Culture.
+            $path = [System.IO.Path]::GetFileName($sourcePath)
+            if ([string]::IsNullOrWhiteSpace($path) -or $path -cne $path.Trim()) {
+                throw "Runtime pack contains a noncanonical publish filename: $sourcePath"
+            }
+            if ([string]$_.Type -ceq 'Resources') {
+                $culture = $_.GetAttribute('Culture')
+                if ($culture -cnotmatch '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$') {
+                    throw "Runtime pack resource has a missing or noncanonical Culture: $sourcePath"
+                }
+                $path = $culture + '/' + $path
+            }
+            if (-not $packPaths.Add($path)) {
+                throw "Runtime pack contains a duplicate or case-colliding path: $path"
             }
             [pscustomobject]@{
                 Path = $path
+                SourcePath = $sourcePath
                 Type = [string]$_.Type
                 Framework = $ExpectedFrameworkName
             }
@@ -542,20 +565,30 @@ $netCoreFiles = @(Read-RuntimePackList `
     -ExpectedFrameworkName 'Microsoft.NETCore.App')
 $windowsDesktopFiles = @(Read-RuntimePackList `
     -PackageId 'microsoft.windowsdesktop.app.runtime.win-x64' `
-    -ExpectedFrameworkName 'Microsoft.WindowsDesktop.App')
+    -ExpectedFrameworkName 'Microsoft.WindowsDesktop.App' `
+    -Profile 'WPF')
 $runtimePackFiles = @($netCoreFiles + $windowsDesktopFiles)
-$frameworkPaths = [string[]]@($runtimePackFiles | ForEach-Object { $_.Path })
-[System.Array]::Sort($frameworkPaths, [System.StringComparer]::Ordinal)
-$frameworkPathSet = [System.Collections.Generic.Dictionary[string, bool]]::new(
+$frameworkPathSet = [System.Collections.Generic.Dictionary[string, object]]::new(
     [System.StringComparer]::OrdinalIgnoreCase)
-foreach ($frameworkPath in $frameworkPaths) {
-    if ($frameworkPathSet.ContainsKey($frameworkPath)) {
-        throw "Pinned runtime packs contain a duplicate or case-colliding publish path: $frameworkPath"
+foreach ($runtimePackFile in $runtimePackFiles) {
+    if ($frameworkPathSet.ContainsKey($runtimePackFile.Path)) {
+        $existingFile = $frameworkPathSet[$runtimePackFile.Path]
+        if ($existingFile.Path -cne $runtimePackFile.Path) {
+            throw "Pinned runtime packs contain a case-colliding publish path: $($runtimePackFile.Path)"
+        }
+        if ($existingFile.Type -cne $runtimePackFile.Type) {
+            throw "Pinned runtime packs contain a Type conflict for publish path: $($runtimePackFile.Path)"
+        }
+        # The exact pinned packs may share a path. Keep both component inventories
+        # for license provenance, but emit the canonical path only once.
+        continue
     }
-    $frameworkPathSet.Add($frameworkPath, $true)
+    $frameworkPathSet.Add($runtimePackFile.Path, $runtimePackFile)
 }
+$frameworkPaths = [string[]]@($frameworkPathSet.Keys)
+[System.Array]::Sort($frameworkPaths, [System.StringComparer]::Ordinal)
 $nativePaths = [string[]]@(
-    @($runtimePackFiles | Where-Object { $_.Type -ceq 'Native' } |
+    @($frameworkPathSet.Values | Where-Object { $_.Type -ceq 'Native' } |
         ForEach-Object { $_.Path }) + @('e_sqlite3.dll'))
 $nativePathSet = [System.Collections.Generic.Dictionary[string, bool]]::new(
     [System.StringComparer]::OrdinalIgnoreCase)
