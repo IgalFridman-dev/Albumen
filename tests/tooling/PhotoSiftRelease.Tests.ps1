@@ -290,6 +290,41 @@ function New-SyntheticReleaseRepository {
     Write-Utf8NoBom `
         -Path (Join-Path $root 'eng\release\licenses\MIT.txt') `
         -Content 'Synthetic complete MIT license text'
+    Write-Utf8NoBom `
+        -Path (Join-Path $root 'eng\release\licenses\Apache-2.0.txt') `
+        -Content 'Synthetic complete Apache 2.0 license text'
+    Write-Utf8NoBom `
+        -Path (Join-Path $root 'eng\release\licenses\SQLite-Blessing.txt') `
+        -Content 'Synthetic SQLite blessing text'
+    $componentSpecifications = @(
+        @{ Name = '.NET Host'; Version = '10.0.11'; Paths = @('PhotoSift.App.exe'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
+        @{ Name = '.NET Runtime'; Version = '10.0.11'; Paths = @('coreclr.dll', 'System.Net.Http.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
+        @{ Name = 'Microsoft.Data.Sqlite'; Version = '10.0.11'; Paths = @(); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
+        @{ Name = 'Microsoft.Data.Sqlite.Core'; Version = '10.0.11'; Paths = @('Microsoft.Data.Sqlite.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
+        @{ Name = 'Native SQLite'; Version = '3.49.1'; Paths = @('e_sqlite3.dll'); License = 'blessing'; LicensePaths = @('licenses/SQLite-Blessing.txt') },
+        @{ Name = 'SQLitePCLRaw.bundle_e_sqlite3'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.batteries_v2.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
+        @{ Name = 'SQLitePCLRaw.core'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.core.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
+        @{ Name = 'SQLitePCLRaw.lib.e_sqlite3'; Version = '2.1.12'; Paths = @('e_sqlite3.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
+        @{ Name = 'SQLitePCLRaw.provider.e_sqlite3'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.provider.e_sqlite3.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
+        @{ Name = 'Windows Desktop / WPF'; Version = '10.0.11'; Paths = @('D3DCompiler_47_cor3.dll', 'PresentationCore.dll', 'wpfgfx_cor3.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') })
+    $inventory = [pscustomobject][ordered]@{
+        schemaVersion = 1
+        components = @($componentSpecifications | ForEach-Object {
+                [pscustomobject][ordered]@{
+                    name = $_.Name
+                    version = $_.Version
+                    shippedPaths = $_.Paths
+                    licenseIdentifier = $_.License
+                    packagedLicensePaths = $_.LicensePaths
+                    officialSourceUrl = 'https://example.invalid/source/' + ($_.Name -replace ' ', '-')
+                    redistributionTermUrl = 'https://example.invalid/terms/' + ($_.Name -replace ' ', '-')
+                    redistributionApproval = 'pending-owner-approval'
+                }
+            })
+    }
+    Write-Utf8NoBom `
+        -Path (Join-Path $root 'eng\release\release-dependencies.json') `
+        -Content (($inventory | ConvertTo-Json -Depth 8) + [System.Environment]::NewLine)
     return $root
 }
 
@@ -313,10 +348,45 @@ function New-SyntheticPackagesRoot {
         -Path (Join-Path $windowsDesktopPath 'RuntimeList.xml') `
         -Content @'
 <FileList Name="Microsoft.WindowsDesktop.App" TargetFrameworkVersion="10.0" RuntimeIdentifier="win-x64">
+  <File Type="Native" Path="D3DCompiler_47_cor3.dll" />
   <File Type="Managed" Path="PresentationCore.dll" />
   <File Type="Native" Path="wpfgfx_cor3.dll" />
 </FileList>
 '@
+    foreach ($package in @(
+            @{ Id = 'Microsoft.NETCore.App.Runtime.win-x64'; Version = '10.0.11'; License = 'MIT' },
+            @{ Id = 'Microsoft.WindowsDesktop.App.Runtime.win-x64'; Version = '10.0.11'; License = 'MIT' },
+            @{ Id = 'Microsoft.NETCore.App.Host.win-x64'; Version = '10.0.11'; License = 'MIT' },
+            @{ Id = 'Microsoft.Data.Sqlite'; Version = '10.0.11'; License = 'MIT' },
+            @{ Id = 'Microsoft.Data.Sqlite.Core'; Version = '10.0.11'; License = 'MIT' },
+            @{ Id = 'SQLitePCLRaw.bundle_e_sqlite3'; Version = '2.1.12'; License = 'Apache-2.0' },
+            @{ Id = 'SQLitePCLRaw.core'; Version = '2.1.12'; License = 'Apache-2.0' },
+            @{ Id = 'SQLitePCLRaw.lib.e_sqlite3'; Version = '2.1.12'; License = 'Apache-2.0' },
+            @{ Id = 'SQLitePCLRaw.provider.e_sqlite3'; Version = '2.1.12'; License = 'Apache-2.0' }
+        )) {
+        $packagePath = Join-Path $root ($package.Id.ToLowerInvariant() + '\' + $package.Version)
+        [System.IO.Directory]::CreateDirectory($packagePath) | Out-Null
+        Write-Utf8NoBom `
+            -Path (Join-Path $packagePath ($package.Id.ToLowerInvariant() + '.nuspec')) `
+            -Content @"
+<?xml version="1.0"?>
+<package><metadata>
+  <id>$($package.Id)</id><version>$($package.Version)</version>
+  <license type="expression">$($package.License)</license>
+  <projectUrl>https://example.invalid/$($package.Id)</projectUrl>
+  <repository type="git" url="https://example.invalid/source/$($package.Id)" />
+</metadata></package>
+"@
+        Write-Utf8NoBom `
+            -Path (Join-Path $packagePath 'LICENSE.txt') `
+            -Content "synthetic $($package.License) license for $($package.Id)"
+        if ($package.Id -like 'Microsoft.*Runtime*' -or
+            $package.Id -like 'Microsoft.WindowsDesktop*') {
+            Write-Utf8NoBom `
+                -Path (Join-Path $packagePath 'THIRD-PARTY-NOTICES.TXT') `
+                -Content "synthetic third-party notices for $($package.Id)"
+        }
+    }
     return $root
 }
 
@@ -331,6 +401,7 @@ function Write-SyntheticPublishOutput {
         'PhotoSift.App/1.0.0' = @{ type = 'project' }
         'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
         'Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
+        'Microsoft.NETCore.App.Host.win-x64/10.0.11' = @{ type = 'package' }
         'Microsoft.Data.Sqlite/10.0.11' = @{ type = 'package' }
         'Microsoft.Data.Sqlite.Core/10.0.11' = @{ type = 'package' }
         'SQLitePCLRaw.bundle_e_sqlite3/2.1.12' = @{ type = 'package' }
@@ -342,7 +413,7 @@ function Write-SyntheticPublishOutput {
         Set-Content -LiteralPath (Join-Path $OutputPath 'PhotoSift.App.deps.json') -Encoding utf8
     Write-Utf8NoBom `
         -Path (Join-Path $OutputPath 'PhotoSift.App.runtimeconfig.json') `
-        -Content '{"runtimeOptions":{"tfm":"net10.0-windows"}}'
+        -Content '{"runtimeOptions":{"tfm":"net10.0-windows","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}'
     foreach ($file in @(
             'PhotoSift.App.exe',
             'PhotoSift.App.dll',
@@ -352,6 +423,7 @@ function Write-SyntheticPublishOutput {
             'SQLitePCLRaw.provider.e_sqlite3.dll',
             'e_sqlite3.dll',
             'coreclr.dll',
+            'D3DCompiler_47_cor3.dll',
             'System.Net.Http.dll',
             'PresentationCore.dll',
             'wpfgfx_cor3.dll')) {
@@ -366,11 +438,19 @@ function Write-SyntheticPublishOutput {
 function New-SyntheticReleaseOperations {
     param(
         [System.Collections.Generic.List[object]]$Calls,
-        [bool]$DriftSecondPublish
+        [bool]$DriftSecondPublish,
+        [string]$ExtraRestoredPackage
     )
 
-    $publishCount = 0
+    $state = [pscustomobject]@{ PublishCount = 0 }
     return @{
+        GetFileVersion = {
+            param($LiteralPath)
+            return [pscustomobject]@{
+                FileVersion = '3.49.1'
+                ProductVersion = '3.49.1'
+            }
+        }
         InvokeExternal = {
             param($Name, $FilePath, $Arguments, $WorkingDirectory)
 
@@ -384,23 +464,34 @@ function New-SyntheticReleaseOperations {
                 $assetsPath = Join-Path $WorkingDirectory 'src\PhotoSift.App\obj\project.assets.json'
                 [System.IO.Directory]::CreateDirectory(
                     [System.IO.Path]::GetDirectoryName($assetsPath)) | Out-Null
+                $restoredLibraries = [ordered]@{
+                    'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
+                    'Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
+                    'Microsoft.NETCore.App.Host.win-x64/10.0.11' = @{ type = 'package' }
+                    'Microsoft.Data.Sqlite/10.0.11' = @{ type = 'package' }
+                    'Microsoft.Data.Sqlite.Core/10.0.11' = @{ type = 'package' }
+                    'SQLitePCLRaw.bundle_e_sqlite3/2.1.12' = @{ type = 'package' }
+                    'SQLitePCLRaw.core/2.1.12' = @{ type = 'package' }
+                    'SQLitePCLRaw.lib.e_sqlite3/2.1.12' = @{ type = 'package' }
+                    'SQLitePCLRaw.provider.e_sqlite3/2.1.12' = @{ type = 'package' }
+                }
+                if (-not [string]::IsNullOrWhiteSpace($ExtraRestoredPackage)) {
+                    $restoredLibraries[$ExtraRestoredPackage] = @{ type = 'package' }
+                }
                 [pscustomobject]@{
-                    libraries = [ordered]@{
-                        'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
-                        'Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
-                    }
+                    libraries = $restoredLibraries
                 } | ConvertTo-Json -Depth 6 |
                     Set-Content -LiteralPath $assetsPath -Encoding utf8
             }
             if ($Name -like 'publish-*') {
-                $publishCount++
+                $state.PublishCount++
                 $outputIndex = [Array]::IndexOf([object[]]$Arguments, '-o')
                 if ($outputIndex -lt 0) {
                     throw "Synthetic publish invocation omitted -o: $($Arguments -join ' ')"
                 }
                 Write-SyntheticPublishOutput `
                     -OutputPath $Arguments[$outputIndex + 1] `
-                    -Drift ($DriftSecondPublish -and $publishCount -eq 2)
+                    -Drift ($DriftSecondPublish -and $state.PublishCount -eq 2)
             }
             return [pscustomobject]@{ ExitCode = 0; Output = "synthetic $Name" }
         }.GetNewClosure()
@@ -629,6 +720,25 @@ try {
         -Pattern 'forbidden|model' `
         -Because 'an empty model directory must not evade the recursive release-content policy'
 
+    $reparseBeforePolicyFixture = Copy-Package `
+        -SourcePath $cleanPackage `
+        -Name 'reparse-before-native-policy'
+    $reparseBeforePolicyTarget = Join-Path $testRoot 'reparse-before-native-policy-target'
+    [System.IO.Directory]::CreateDirectory($reparseBeforePolicyTarget) | Out-Null
+    $reparseBeforePolicyPath = Join-Path $reparseBeforePolicyFixture 'linked'
+    New-Item `
+        -ItemType Junction `
+        -Path $reparseBeforePolicyPath `
+        -Target $reparseBeforePolicyTarget | Out-Null
+    Write-Utf8NoBom `
+        -Path (Join-Path $reparseBeforePolicyFixture 'release-native-paths.json') `
+        -Content 'not valid JSON'
+    Assert-ThrowsLike `
+        -Action { Test-PhotoSiftRelease -PackagePath $reparseBeforePolicyFixture | Out-Null } `
+        -Pattern 'reparse' `
+        -Because 'reparse rejection must occur before any package payload, including native policy, is parsed'
+    Remove-Item -Force -LiteralPath $reparseBeforePolicyPath
+
     $reparseFixture = Copy-Package -SourcePath $cleanPackage -Name 'reparse'
     $reparseTarget = Join-Path $testRoot 'reparse-target'
     [System.IO.Directory]::CreateDirectory($reparseTarget) | Out-Null
@@ -709,6 +819,71 @@ try {
     [System.IO.Directory]::CreateDirectory($syntheticSdk) | Out-Null
     [System.IO.Directory]::CreateDirectory((Join-Path $syntheticSdk 'sdk\10.0.400')) | Out-Null
     Write-Utf8NoBom -Path (Join-Path $syntheticSdk 'dotnet.exe') -Content 'never executed synthetic SDK'
+
+    $captureRepository = New-SyntheticReleaseRepository -Name 'capture-repository'
+    Remove-Item -Force -LiteralPath (Join-Path $captureRepository 'THIRD-PARTY-NOTICES.md')
+    Remove-Item -Recurse -Force -LiteralPath (Join-Path $captureRepository 'eng\release\licenses')
+    $captureOutput = Join-Path $testRoot 'capture-output'
+    $captureCalls = [System.Collections.Generic.List[object]]::new()
+    $captureOperations = New-SyntheticReleaseOperations `
+        -Calls $captureCalls `
+        -DriftSecondPublish $false
+    $captureResult = & $builderPath `
+        -RepositoryRoot $captureRepository `
+        -OutputRoot $captureOutput `
+        -SdkRoot $syntheticSdk `
+        -PackagesRoot $syntheticPackages `
+        -SourceIdentity 'synthetic-source-identity' `
+        -CaptureOnly `
+        -Operations $captureOperations
+    Assert-Equal 'needs-license-inventory' $captureResult.status 'capture-only mode must stop before candidate packaging'
+    Assert-True `
+        ([System.IO.Directory]::Exists((Join-Path $captureOutput 'provisional-publish'))) `
+        'capture-only mode must retain one raw deterministic publish for exact inventory analysis'
+    Assert-True `
+        (-not [System.IO.Directory]::Exists((Join-Path $captureOutput 'candidate'))) `
+        'capture-only mode must not label an unlicensed folder as a release candidate'
+    $dependencyCapture = Get-Content -Raw -LiteralPath (
+        Join-Path $captureOutput 'evidence\dependency-capture.json') | ConvertFrom-Json
+    Assert-Equal 1 $dependencyCapture.schemaVersion 'dependency capture schema must be versioned'
+    Assert-Equal `
+        '.NET Host,.NET Runtime,Microsoft.Data.Sqlite,Microsoft.Data.Sqlite.Core,Native SQLite,SQLitePCLRaw.bundle_e_sqlite3,SQLitePCLRaw.core,SQLitePCLRaw.lib.e_sqlite3,SQLitePCLRaw.provider.e_sqlite3,Windows Desktop / WPF' `
+        (($dependencyCapture.components | ForEach-Object { $_.name }) -join ',') `
+        'capture-only mode must enumerate every required shipped/runtime component'
+    $nativeSqliteCapture = @($dependencyCapture.components | Where-Object {
+            $_.name -ceq 'Native SQLite'
+        })[0]
+    Assert-Equal '3.49.1' $nativeSqliteCapture.version 'native SQLite version must come from the shipped binary evidence'
+    Assert-Equal 'e_sqlite3.dll' ($nativeSqliteCapture.shippedPaths -join ',') 'native SQLite must map to its exact shipped path'
+    Assert-True `
+        (@($dependencyCapture.packages).Count -eq 9) `
+        'capture-only mode must retain exact local metadata for both runtime packs, host pack, and all SQLite NuGet packages'
+    Assert-True `
+        ([System.IO.File]::Exists((Join-Path $captureOutput 'evidence\license-sources\microsoft.netcore.app.runtime.win-x64\10.0.11\LICENSE.txt'))) `
+        'capture-only mode must preserve local package license sources for review without downloading anything'
+    $script:passed++
+
+    $unapprovedDependencyOutput = Join-Path $testRoot 'unapproved-dependency-output'
+    $unapprovedDependencyCalls = [System.Collections.Generic.List[object]]::new()
+    $unapprovedDependencyOperations = New-SyntheticReleaseOperations `
+        -Calls $unapprovedDependencyCalls `
+        -DriftSecondPublish $false `
+        -ExtraRestoredPackage 'Contoso.LocalHelper/1.0.0'
+    Assert-ThrowsLike `
+        -Action {
+            & $builderPath `
+                -RepositoryRoot $captureRepository `
+                -OutputRoot $unapprovedDependencyOutput `
+                -SdkRoot $syntheticSdk `
+                -PackagesRoot $syntheticPackages `
+                -SourceIdentity 'synthetic-source-identity' `
+                -CaptureOnly `
+                -Operations $unapprovedDependencyOperations | Out-Null
+        } `
+        -Pattern 'approved|dependency|package|Contoso.LocalHelper' `
+        -Because 'self-contained restore must retain the E5-S3 exact approved production package closure'
+    $script:passed++
+
     $builderOutput = Join-Path $testRoot 'builder-output'
     $builderCalls = [System.Collections.Generic.List[object]]::new()
     $builderOperations = New-SyntheticReleaseOperations `
@@ -759,11 +934,42 @@ try {
     $candidateNativePolicy = Get-Content -Raw -LiteralPath (
         Join-Path $candidatePath 'release-native-paths.json') | ConvertFrom-Json
     Assert-Equal `
-        'coreclr.dll,e_sqlite3.dll,wpfgfx_cor3.dll' `
+        'D3DCompiler_47_cor3.dll,coreclr.dll,e_sqlite3.dll,wpfgfx_cor3.dll' `
         ($candidateNativePolicy.nativePaths -join ',') `
         'the builder must derive the exact native closure from the pinned runtime packs plus SQLite'
     Assert-Equal $true $buildResult.inventoriesEqual 'the successful builder result must report exact tuple equality'
+    Assert-Equal 'pending-owner-approval' $buildResult.status 'a provisional candidate must stop at the redistribution owner gate'
     Assert-Equal 'path,length,sha256' ($buildResult.comparedFields -join ',') 'determinism must be bounded to exact path, length, and SHA-256 tuples'
+    $script:passed++
+
+    $mismatchedRepository = Join-Path $testRoot 'mismatched-inventory-repository'
+    Copy-Item -Recurse -LiteralPath $syntheticRepository -Destination $mismatchedRepository
+    $mismatchedInventoryPath = Join-Path $mismatchedRepository 'eng\release\release-dependencies.json'
+    $mismatchedInventory = Get-Content -Raw -LiteralPath $mismatchedInventoryPath | ConvertFrom-Json
+    @($mismatchedInventory.components | Where-Object { $_.name -ceq '.NET Runtime' })[0].shippedPaths = @('coreclr.dll')
+    Write-Utf8NoBom `
+        -Path $mismatchedInventoryPath `
+        -Content (($mismatchedInventory | ConvertTo-Json -Depth 8) + [System.Environment]::NewLine)
+    $mismatchedOutput = Join-Path $testRoot 'mismatched-inventory-output'
+    $mismatchedCalls = [System.Collections.Generic.List[object]]::new()
+    $mismatchedOperations = New-SyntheticReleaseOperations `
+        -Calls $mismatchedCalls `
+        -DriftSecondPublish $false
+    Assert-ThrowsLike `
+        -Action {
+            & $builderPath `
+                -RepositoryRoot $mismatchedRepository `
+                -OutputRoot $mismatchedOutput `
+                -SdkRoot $syntheticSdk `
+                -PackagesRoot $syntheticPackages `
+                -SourceIdentity 'synthetic-source-identity' `
+                -Operations $mismatchedOperations | Out-Null
+        } `
+        -Pattern 'inventory|shipped path|component' `
+        -Because 'a dependency inventory that omits one actually shipped framework file must block candidate creation'
+    Assert-True `
+        (-not [System.IO.Directory]::Exists((Join-Path $mismatchedOutput 'candidate'))) `
+        'an inventory mismatch must leave no provisional candidate'
     $script:passed++
 
     $driftOutput = Join-Path $testRoot 'builder-drift-output'
