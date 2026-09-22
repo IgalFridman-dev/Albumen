@@ -271,7 +271,7 @@ function New-SyntheticReleaseRepository {
     }
     Write-Utf8NoBom `
         -Path (Join-Path $root 'global.json') `
-        -Content '{"sdk":{"version":"10.0.400","rollForward":"latestPatch"}}'
+        -Content '{"sdk":{"version":"10.0.400","rollForward":"disable"}}'
     Write-Utf8NoBom `
         -Path (Join-Path $root 'NuGet.Config') `
         -Content '<configuration><packageSources><clear /></packageSources></configuration>'
@@ -439,11 +439,14 @@ function New-SyntheticReleaseOperations {
     param(
         [System.Collections.Generic.List[object]]$Calls,
         [bool]$DriftSecondPublish,
-        [string]$ExtraRestoredPackage
+        [string]$ExtraRestoredPackage,
+        [scriptblock]$AfterPublish,
+        [bool]$InjectCaseCollision,
+        [string]$SelectedSdkVersion = '10.0.400'
     )
 
     $state = [pscustomobject]@{ PublishCount = 0 }
-    return @{
+    $operations = @{
         GetFileVersion = {
             param($LiteralPath)
             return [pscustomobject]@{
@@ -460,7 +463,13 @@ function New-SyntheticReleaseOperations {
                     Arguments = [string[]]@($Arguments)
                     WorkingDirectory = $WorkingDirectory
                 })
-            if ($Name -ceq 'restore') {
+            if ($Name -ceq 'sdk-version') {
+                return [pscustomobject]@{
+                    ExitCode = 0
+                    Output = $SelectedSdkVersion
+                }
+            }
+            if ($Name -like 'restore-*') {
                 $assetsPath = Join-Path $WorkingDirectory 'src\PhotoSift.App\obj\project.assets.json'
                 [System.IO.Directory]::CreateDirectory(
                     [System.IO.Path]::GetDirectoryName($assetsPath)) | Out-Null
@@ -492,10 +501,28 @@ function New-SyntheticReleaseOperations {
                 Write-SyntheticPublishOutput `
                     -OutputPath $Arguments[$outputIndex + 1] `
                     -Drift ($DriftSecondPublish -and $state.PublishCount -eq 2)
+                if ($null -ne $AfterPublish) {
+                    & $AfterPublish $Arguments[$outputIndex + 1] $state.PublishCount
+                }
             }
             return [pscustomobject]@{ ExitCode = 0; Output = "synthetic $Name" }
         }.GetNewClosure()
     }
+    if ($InjectCaseCollision) {
+        $operations['GetRawPublishEntries'] = {
+            param($RootPath)
+
+            $entries = @(
+                Get-ChildItem -Force -Recurse -LiteralPath $RootPath)
+            return @($entries + @(
+                    [pscustomobject]@{
+                        FullName = Join-Path $RootPath 'CORECLR.dll'
+                        Attributes = [System.IO.FileAttributes]::Normal
+                        PSIsContainer = $false
+                    }))
+        }
+    }
+    return $operations
 }
 
 try {
@@ -820,6 +847,35 @@ try {
     [System.IO.Directory]::CreateDirectory((Join-Path $syntheticSdk 'sdk\10.0.400')) | Out-Null
     Write-Utf8NoBom -Path (Join-Path $syntheticSdk 'dotnet.exe') -Content 'never executed synthetic SDK'
 
+    $wrongSdkOutput = Join-Path $testRoot 'wrong-sdk-output'
+    $wrongSdkCalls = [System.Collections.Generic.List[object]]::new()
+    $wrongSdkOperations = New-SyntheticReleaseOperations `
+        -Calls $wrongSdkCalls `
+        -DriftSecondPublish $false `
+        -SelectedSdkVersion '10.0.401'
+    Assert-ThrowsLike `
+        -Action {
+            & $builderPath `
+                -RepositoryRoot $syntheticRepository `
+                -OutputRoot $wrongSdkOutput `
+                -SdkRoot $syntheticSdk `
+                -PackagesRoot $syntheticPackages `
+                -SourceIdentity 'synthetic-source-identity' `
+                -CaptureOnly `
+                -Operations $wrongSdkOperations | Out-Null
+        } `
+        -Pattern 'SDK|10\.0\.400|selected|version' `
+        -Because 'the supplied dotnet host must report exactly SDK 10.0.400 before any restore or publish'
+    Assert-Equal 'sdk-version' `
+        ($wrongSdkCalls.Name -join ',') `
+        'a wrong selected SDK must fail immediately after the version probe and before restore or publish'
+    $rootGlobalJson = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'global.json') |
+        ConvertFrom-Json
+    Assert-Equal 'disable' `
+        ([string]$rootGlobalJson.sdk.rollForward) `
+        'the release workflow must disable SDK roll-forward in the repository pin'
+    $script:passed++
+
     $captureRepository = New-SyntheticReleaseRepository -Name 'capture-repository'
     Remove-Item -Force -LiteralPath (Join-Path $captureRepository 'THIRD-PARTY-NOTICES.md')
     Remove-Item -Recurse -Force -LiteralPath (Join-Path $captureRepository 'eng\release\licenses')
@@ -837,6 +893,11 @@ try {
         -CaptureOnly `
         -Operations $captureOperations
     Assert-Equal 'needs-license-inventory' $captureResult.status 'capture-only mode must stop before candidate packaging'
+    $captureEvidence = Get-Content -Raw -LiteralPath (
+        Join-Path $captureOutput 'evidence\capture-evidence.json') | ConvertFrom-Json
+    Assert-Equal '10.0.400' `
+        ([string]$captureEvidence.sdkVersion) `
+        'capture evidence must record the SDK version observed from the supplied dotnet host'
     Assert-True `
         ([System.IO.Directory]::Exists((Join-Path $captureOutput 'provisional-publish'))) `
         'capture-only mode must retain one raw deterministic publish for exact inventory analysis'
@@ -861,6 +922,124 @@ try {
     Assert-True `
         ([System.IO.File]::Exists((Join-Path $captureOutput 'evidence\license-sources\microsoft.netcore.app.runtime.win-x64\10.0.11\LICENSE.txt'))) `
         'capture-only mode must preserve local package license sources for review without downloading anything'
+    $script:passed++
+
+    foreach ($captureAuditCase in @(
+            @{
+                Name = 'capture-forbidden-artifact'
+                Pattern = 'forbidden|test|artifact'
+                Mutate = {
+                    param($OutputPath, $PublishIndex)
+                    Write-Utf8NoBom `
+                        -Path (Join-Path $OutputPath 'PhotoSift.App.Tests.dll') `
+                        -Content 'forbidden test artifact'
+                }
+            },
+            @{
+                Name = 'capture-final-metadata'
+                Pattern = 'manifest|metadata|capture'
+                Mutate = {
+                    param($OutputPath, $PublishIndex)
+                    Write-Utf8NoBom `
+                        -Path (Join-Path $OutputPath 'release-manifest.json') `
+                        -Content '{"forbidden":"preexisting final metadata"}'
+                    Write-Utf8NoBom `
+                        -Path (Join-Path $OutputPath 'release-manifest.sha256') `
+                        -Content ('0' * 64)
+                }
+            },
+            @{
+                Name = 'capture-preexisting-candidate'
+                Pattern = 'candidate|capture'
+                Mutate = {
+                    param($OutputPath, $PublishIndex)
+                    $candidatePath = Join-Path (Split-Path -Parent $OutputPath) 'candidate'
+                    [System.IO.Directory]::CreateDirectory($candidatePath) | Out-Null
+                    Write-Utf8NoBom `
+                        -Path (Join-Path $candidatePath 'unexpected.txt') `
+                        -Content 'capture-only must not retain a candidate'
+                }
+            }
+        )) {
+        $auditOutput = Join-Path $testRoot ($captureAuditCase.Name + '-output')
+        $auditCalls = [System.Collections.Generic.List[object]]::new()
+        $mutator = $captureAuditCase.Mutate.GetNewClosure()
+        $auditOperations = New-SyntheticReleaseOperations `
+            -Calls $auditCalls `
+            -DriftSecondPublish $false `
+            -AfterPublish $mutator
+        Assert-ThrowsLike `
+            -Action {
+                & $builderPath `
+                    -RepositoryRoot $captureRepository `
+                    -OutputRoot $auditOutput `
+                    -SdkRoot $syntheticSdk `
+                    -PackagesRoot $syntheticPackages `
+                    -SourceIdentity 'synthetic-source-identity' `
+                    -CaptureOnly `
+                    -Operations $auditOperations | Out-Null
+            } `
+            -Pattern $captureAuditCase.Pattern `
+            -Because "capture-only must audit and reject $($captureAuditCase.Name) before preserving a provisional publish"
+        Assert-True `
+            (-not [System.IO.Directory]::Exists((Join-Path $auditOutput 'provisional-publish'))) `
+            "a failed $($captureAuditCase.Name) audit must not preserve a provisional publish"
+    }
+
+    $collisionOutput = Join-Path $testRoot 'capture-case-collision-output'
+    $collisionCalls = [System.Collections.Generic.List[object]]::new()
+    $collisionOperations = New-SyntheticReleaseOperations `
+        -Calls $collisionCalls `
+        -DriftSecondPublish $false `
+        -InjectCaseCollision $true
+    Assert-ThrowsLike `
+        -Action {
+            & $builderPath `
+                -RepositoryRoot $captureRepository `
+                -OutputRoot $collisionOutput `
+                -SdkRoot $syntheticSdk `
+                -PackagesRoot $syntheticPackages `
+                -SourceIdentity 'synthetic-source-identity' `
+                -CaptureOnly `
+                -Operations $collisionOperations | Out-Null
+        } `
+        -Pattern 'duplicate|collision|canonical' `
+        -Because 'capture-only must reject ordinal-ignore-case raw publish path collisions'
+
+    $reparseTarget = Join-Path $testRoot 'capture-reparse-target'
+    [System.IO.Directory]::CreateDirectory($reparseTarget) | Out-Null
+    $reparseOutput = Join-Path $testRoot 'capture-reparse-output'
+    $reparseCalls = [System.Collections.Generic.List[object]]::new()
+    $reparseMutator = {
+        param($OutputPath, $PublishIndex)
+        New-Item `
+            -ItemType Junction `
+            -Path (Join-Path $OutputPath 'linked') `
+            -Target $reparseTarget | Out-Null
+    }.GetNewClosure()
+    $reparseOperations = New-SyntheticReleaseOperations `
+        -Calls $reparseCalls `
+        -DriftSecondPublish $false `
+        -AfterPublish $reparseMutator
+    Assert-ThrowsLike `
+        -Action {
+            & $builderPath `
+                -RepositoryRoot $captureRepository `
+                -OutputRoot $reparseOutput `
+                -SdkRoot $syntheticSdk `
+                -PackagesRoot $syntheticPackages `
+                -SourceIdentity 'synthetic-source-identity' `
+                -CaptureOnly `
+                -Operations $reparseOperations | Out-Null
+        } `
+        -Pattern 'reparse' `
+        -Because 'capture-only must reject raw publish reparse points before traversal or preservation'
+    foreach ($rawIndex in 1..2) {
+        $linkedPath = Join-Path $reparseOutput ("publish-$rawIndex-raw\linked")
+        if ([System.IO.Directory]::Exists($linkedPath)) {
+            Remove-Item -Force -LiteralPath $linkedPath
+        }
+    }
     $script:passed++
 
     foreach ($runtimeListMismatch in @(
@@ -938,8 +1117,30 @@ try {
         -PackagesRoot $syntheticPackages `
         -SourceIdentity 'synthetic-source-identity' `
         -Operations $builderOperations
-    Assert-Equal 3 $builderCalls.Count 'the builder must perform one locked restore and exactly two publishes'
-    Assert-Equal 'restore' $builderCalls[0].Name 'locked restore must precede both publishes'
+    Assert-Equal 5 $builderCalls.Count 'the builder must probe the SDK and perform one locked restore for each of two clean publishes'
+    Assert-Equal 'publish-1,publish-2,restore-1,restore-2,sdk-version' `
+        (($builderCalls | ForEach-Object { $_.Name } | Sort-Object) -join ',') `
+        'the independent build workflow must contain one SDK probe, two restores, and two publishes'
+    Assert-Equal 'sdk-version' $builderCalls[0].Name 'the exact SDK selection must be observed before any restore or publish'
+    Assert-Equal '--version' ($builderCalls[0].Arguments -join ',') 'the SDK probe must request only dotnet --version'
+    $buildCalls = @($builderCalls | Where-Object { $_.Name -like 'restore-*' -or $_.Name -like 'publish-*' })
+    $buildWorkingRoots = @($buildCalls | ForEach-Object { $_.WorkingDirectory } | Sort-Object -Unique)
+    Assert-Equal 2 $buildWorkingRoots.Count 'the two clean builds must use distinct source and intermediate roots'
+    foreach ($buildWorkingRoot in $buildWorkingRoots) {
+        Assert-Equal 1 `
+            @($buildCalls | Where-Object {
+                    $_.Name -like 'restore-*' -and $_.WorkingDirectory -ceq $buildWorkingRoot
+                }).Count `
+            'each clean working root must receive exactly one locked restore'
+        Assert-Equal 1 `
+            @($buildCalls | Where-Object {
+                    $_.Name -like 'publish-*' -and $_.WorkingDirectory -ceq $buildWorkingRoot
+                }).Count `
+            'each clean working root must receive exactly one matching no-restore publish'
+    }
+    Assert-True `
+        (-not [System.IO.Directory]::Exists((Join-Path $builderOutput '.work'))) `
+        'transient independent source/intermediate roots must not remain in final build evidence'
     foreach ($publishCall in @($builderCalls | Where-Object { $_.Name -like 'publish-*' })) {
         $arguments = $publishCall.Arguments -join ' '
         foreach ($requiredArgument in @(
@@ -958,17 +1159,19 @@ try {
                 "publish invocation must include '$requiredArgument'"
         }
     }
-    $restoreArguments = $builderCalls[0].Arguments -join ' '
-    foreach ($requiredArgument in @(
-            'restore',
-            '-r win-x64',
-            '--locked-mode',
-            '--configfile',
-            '-p:RuntimeFrameworkVersion=10.0.11',
-            '-p:TargetLatestRuntimePatch=false')) {
-        Assert-True `
-            ($restoreArguments.Contains($requiredArgument)) `
-            "restore invocation must include '$requiredArgument'"
+    foreach ($restoreCall in @($builderCalls | Where-Object { $_.Name -like 'restore-*' })) {
+        $restoreArguments = $restoreCall.Arguments -join ' '
+        foreach ($requiredArgument in @(
+                'restore',
+                '-r win-x64',
+                '--locked-mode',
+                '--configfile',
+                '-p:RuntimeFrameworkVersion=10.0.11',
+                '-p:TargetLatestRuntimePatch=false')) {
+            Assert-True `
+                ($restoreArguments.Contains($requiredArgument)) `
+                "each restore invocation must include '$requiredArgument'"
+        }
     }
     $candidatePath = Join-Path $builderOutput 'candidate'
     Assert-True ([System.IO.Directory]::Exists($candidatePath)) 'candidate must be copied only after two equal package inventories'

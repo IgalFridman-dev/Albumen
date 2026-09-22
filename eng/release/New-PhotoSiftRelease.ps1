@@ -47,6 +47,7 @@ $packagePaths = @(
     (Join-Path $resolvedOutputRoot 'publish-1-package'),
     (Join-Path $resolvedOutputRoot 'publish-2-package'))
 $candidatePath = Join-Path $resolvedOutputRoot 'candidate'
+$workPath = Join-Path $resolvedOutputRoot '.work'
 
 function Write-ReleaseUtf8NoBom {
     param([string]$LiteralPath, [string]$Content)
@@ -115,6 +116,61 @@ function Get-ReleaseInventory {
             Sort-Object path)
 }
 
+function Get-RawPublishEntries {
+    param([string]$RootPath)
+
+    if ($null -ne $Operations -and $Operations.ContainsKey('GetRawPublishEntries')) {
+        return @(& $Operations.GetRawPublishEntries -RootPath $RootPath)
+    }
+    return @(Get-ChildItem -Force -Recurse -LiteralPath $RootPath)
+}
+
+function Assert-RawPublishContentPolicy {
+    param([string]$RootPath)
+
+    $resolvedRootPath = [System.IO.Path]::GetFullPath($RootPath)
+    $rootItem = Get-Item -Force -LiteralPath $resolvedRootPath
+    if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Raw publish root is a reparse point: $resolvedRootPath"
+    }
+    $prefix = $resolvedRootPath.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) +
+        [System.IO.Path]::DirectorySeparatorChar
+    $seen = [System.Collections.Generic.Dictionary[string, bool]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @(Get-RawPublishEntries -RootPath $resolvedRootPath)) {
+        if (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Raw publish contains a reparse point: $($entry.FullName)"
+        }
+        $fullName = [System.IO.Path]::GetFullPath([string]$entry.FullName)
+        if (-not $fullName.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Raw publish entry escaped its root: $fullName"
+        }
+        $relativePath = $fullName.Substring($prefix.Length).Replace('\', '/')
+        if ([string]::IsNullOrWhiteSpace($relativePath) -or
+            $relativePath -cne $relativePath.Trim() -or
+            $relativePath.Contains('\') -or
+            [System.IO.Path]::IsPathRooted($relativePath) -or
+            @($relativePath.Split('/') | Where-Object {
+                    [string]::IsNullOrWhiteSpace($_) -or $_ -in @('.', '..')
+                }).Count -gt 0) {
+            throw "Raw publish contains a noncanonical relative path: $relativePath"
+        }
+        if ($seen.ContainsKey($relativePath)) {
+            throw "Raw publish contains a duplicate or case-colliding path: $relativePath"
+        }
+        $seen.Add($relativePath, $true)
+
+        if (-not [bool]$entry.PSIsContainer -and
+            [System.IO.Path]::GetFileName($relativePath) -in @(
+                'release-manifest.json',
+                'release-manifest.sha256')) {
+            throw "Raw capture contains forbidden final release metadata: $relativePath"
+        }
+    }
+}
+
 function Assert-ReleaseInventoriesEqual {
     param($First, $Second, [string]$Context)
 
@@ -135,6 +191,36 @@ function Copy-ReleaseDirectoryContents {
     [System.IO.Directory]::CreateDirectory($DestinationPath) | Out-Null
     foreach ($item in @(Get-ChildItem -Force -LiteralPath $SourcePath)) {
         Copy-Item -Force -Recurse -LiteralPath $item.FullName -Destination $DestinationPath
+    }
+}
+
+function Copy-CleanReleaseSource {
+    param([string]$SourcePath, [string]$DestinationPath)
+
+    $resolvedSourcePath = [System.IO.Path]::GetFullPath($SourcePath)
+    $sourcePrefix = $resolvedSourcePath.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) +
+        [System.IO.Path]::DirectorySeparatorChar
+    [System.IO.Directory]::CreateDirectory($DestinationPath) | Out-Null
+    foreach ($entry in @(Get-ChildItem -Force -Recurse -LiteralPath $resolvedSourcePath)) {
+        $relativePath = $entry.FullName.Substring($sourcePrefix.Length)
+        $segments = @($relativePath -split '[\\/]')
+        if (@($segments | Where-Object { $_ -in @('.git', 'bin', 'obj') }).Count -gt 0) {
+            continue
+        }
+        if (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Release source contains a reparse point: $($entry.FullName)"
+        }
+        $destination = Join-Path $DestinationPath $relativePath
+        if ($entry.PSIsContainer) {
+            [System.IO.Directory]::CreateDirectory($destination) | Out-Null
+        }
+        else {
+            [System.IO.Directory]::CreateDirectory(
+                [System.IO.Path]::GetDirectoryName($destination)) | Out-Null
+            [System.IO.File]::Copy($entry.FullName, $destination)
+        }
     }
 }
 
@@ -425,6 +511,23 @@ $globalJson = Get-Content -Raw -LiteralPath (
 if ([string]$globalJson.sdk.version -cne $sdkVersion) {
     throw "global.json must pin SDK $sdkVersion."
 }
+if ([string]$globalJson.sdk.rollForward -cne 'disable') {
+    throw 'global.json must disable SDK roll-forward for the release workflow.'
+}
+$sdkSelection = Invoke-ReleaseExternal `
+    -Name 'sdk-version' `
+    -FilePath $dotnetPath `
+    -Arguments @('--version') `
+    -WorkingDirectory $resolvedRepositoryRoot
+$observedSdkVersions = @(
+    ([string]$sdkSelection.Output -split '\r?\n') |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+if ($observedSdkVersions.Count -ne 1 -or
+    [string]$observedSdkVersions[0] -cne $sdkVersion) {
+    throw "Supplied dotnet host selected SDK '$($observedSdkVersions -join ',')'; required exact SDK is $sdkVersion."
+}
+$observedSdkVersion = [string]$observedSdkVersions[0]
 if ([System.IO.Directory]::Exists($resolvedOutputRoot) -and
     @(Get-ChildItem -Force -LiteralPath $resolvedOutputRoot).Count -gt 0) {
     throw "Release output root must be absent or empty: $resolvedOutputRoot"
@@ -462,63 +565,69 @@ foreach ($nativePath in $nativePaths) {
 }
 [System.Array]::Sort($nativePaths, [System.StringComparer]::Ordinal)
 
-$restoreArguments = @(
-    'restore', 'src\PhotoSift.App\PhotoSift.App.csproj',
-    '-r', $runtimeIdentifier,
-    '--locked-mode',
-    '--configfile', 'NuGet.Config',
-    '--packages', $resolvedPackagesRoot,
-    '-p:RuntimeFrameworkVersion=10.0.11',
-    '-p:TargetLatestRuntimePatch=false',
-    '-p:NuGetAudit=false')
-Invoke-ReleaseExternal `
-    -Name 'restore' `
-    -FilePath $dotnetPath `
-    -Arguments $restoreArguments `
-    -WorkingDirectory $resolvedRepositoryRoot | Out-Null
-Assert-RuntimePackResolution -AssetsPath (
-    Join-Path $resolvedRepositoryRoot 'src\PhotoSift.App\obj\project.assets.json')
-
+$restoreArguments = New-Object 'System.Collections.Generic.List[object]'
 $publishArguments = New-Object 'System.Collections.Generic.List[object]'
-for ($index = 0; $index -lt 2; $index++) {
-    [System.IO.Directory]::CreateDirectory($rawPublishPaths[$index]) | Out-Null
-    $arguments = @(
-        'publish', 'src\PhotoSift.App\PhotoSift.App.csproj',
-        '-c', 'Release',
-        '-r', $runtimeIdentifier,
-        '--self-contained', 'true',
-        '--no-restore',
-        '-p:PublishSingleFile=false',
-        '-p:RuntimeFrameworkVersion=10.0.11',
-        '-p:TargetLatestRuntimePatch=false',
-        '-p:DebugType=None',
-        '-p:DebugSymbols=false',
-        '-o', $rawPublishPaths[$index])
-    $publishArguments.Add($arguments)
-    Invoke-ReleaseExternal `
-        -Name ('publish-' + ($index + 1)) `
-        -FilePath $dotnetPath `
-        -Arguments $arguments `
-        -WorkingDirectory $resolvedRepositoryRoot | Out-Null
-    foreach ($frameworkPath in $frameworkPaths) {
-        if (-not [System.IO.File]::Exists((Join-Path $rawPublishPaths[$index] $frameworkPath))) {
-            throw "Published framework closure is missing pinned path: $frameworkPath"
+try {
+    for ($index = 0; $index -lt 2; $index++) {
+        $cleanSourcePath = Join-Path $workPath ('source-' + ($index + 1))
+        Copy-CleanReleaseSource `
+            -SourcePath $resolvedRepositoryRoot `
+            -DestinationPath $cleanSourcePath
+
+        $currentRestoreArguments = @(
+            'restore', 'src\PhotoSift.App\PhotoSift.App.csproj',
+            '-r', $runtimeIdentifier,
+            '--locked-mode',
+            '--configfile', 'NuGet.Config',
+            '--packages', $resolvedPackagesRoot,
+            '-p:RuntimeFrameworkVersion=10.0.11',
+            '-p:TargetLatestRuntimePatch=false',
+            '-p:NuGetAudit=false')
+        $restoreArguments.Add($currentRestoreArguments)
+        Invoke-ReleaseExternal `
+            -Name ('restore-' + ($index + 1)) `
+            -FilePath $dotnetPath `
+            -Arguments $currentRestoreArguments `
+            -WorkingDirectory $cleanSourcePath | Out-Null
+        Assert-RuntimePackResolution -AssetsPath (
+            Join-Path $cleanSourcePath 'src\PhotoSift.App\obj\project.assets.json')
+
+        [System.IO.Directory]::CreateDirectory($rawPublishPaths[$index]) | Out-Null
+        $arguments = @(
+            'publish', 'src\PhotoSift.App\PhotoSift.App.csproj',
+            '-c', 'Release',
+            '-r', $runtimeIdentifier,
+            '--self-contained', 'true',
+            '--no-restore',
+            '-p:PublishSingleFile=false',
+            '-p:RuntimeFrameworkVersion=10.0.11',
+            '-p:TargetLatestRuntimePatch=false',
+            '-p:DebugType=None',
+            '-p:DebugSymbols=false',
+            '-o', $rawPublishPaths[$index])
+        $publishArguments.Add($arguments)
+        Invoke-ReleaseExternal `
+            -Name ('publish-' + ($index + 1)) `
+            -FilePath $dotnetPath `
+            -Arguments $arguments `
+            -WorkingDirectory $cleanSourcePath | Out-Null
+        foreach ($frameworkPath in $frameworkPaths) {
+            if (-not [System.IO.File]::Exists((Join-Path $rawPublishPaths[$index] $frameworkPath))) {
+                throw "Published framework closure is missing pinned path: $frameworkPath"
+            }
         }
-    }
-    foreach ($nativePath in $nativePaths) {
-        if (-not [System.IO.File]::Exists((Join-Path $rawPublishPaths[$index] $nativePath))) {
-            throw "Published native closure is missing pinned path: $nativePath"
+        foreach ($nativePath in $nativePaths) {
+            if (-not [System.IO.File]::Exists((Join-Path $rawPublishPaths[$index] $nativePath))) {
+                throw "Published native closure is missing pinned path: $nativePath"
+            }
         }
     }
 }
-
-$rawInventories = @(
-    @(Get-ReleaseInventory -RootPath $rawPublishPaths[0]),
-    @(Get-ReleaseInventory -RootPath $rawPublishPaths[1]))
-Assert-ReleaseInventoriesEqual `
-    -First $rawInventories[0] `
-    -Second $rawInventories[1] `
-    -Context 'Raw publish'
+finally {
+    if ([System.IO.Directory]::Exists($workPath)) {
+        Remove-Item -Recurse -Force -LiteralPath $workPath
+    }
+}
 
 $frameworkManifest = [pscustomobject][ordered]@{
     schemaVersion = 1
@@ -531,6 +640,23 @@ $frameworkManifestPath = Join-Path $evidencePath 'framework-closure.json'
 Write-ReleaseUtf8NoBom `
     -LiteralPath $frameworkManifestPath `
     -Content (($frameworkManifest | ConvertTo-Json -Depth 6) + [System.Environment]::NewLine)
+$runtimeBoundaryPath = Join-Path $resolvedRepositoryRoot 'eng\Verify-RuntimeBoundary.ps1'
+for ($index = 0; $index -lt 2; $index++) {
+    Assert-RawPublishContentPolicy -RootPath $rawPublishPaths[$index]
+    & $runtimeBoundaryPath `
+        -DependencyManifestPath (Join-Path $rawPublishPaths[$index] 'PhotoSift.App.deps.json') `
+        -SourceRootPath (Join-Path $resolvedRepositoryRoot 'src') `
+        -FrameworkClosureManifestPath $frameworkManifestPath | Out-Null
+}
+
+$rawInventories = @(
+    @(Get-ReleaseInventory -RootPath $rawPublishPaths[0]),
+    @(Get-ReleaseInventory -RootPath $rawPublishPaths[1]))
+Assert-ReleaseInventoriesEqual `
+    -First $rawInventories[0] `
+    -Second $rawInventories[1] `
+    -Context 'Raw publish'
+
 $nativePolicy = [pscustomobject][ordered]@{
     schemaVersion = 1
     nativePaths = $nativePaths
@@ -653,6 +779,9 @@ for ($index = 0; $index -lt 2; $index++) {
 
 if ($CaptureOnly) {
     $provisionalPublishPath = Join-Path $resolvedOutputRoot 'provisional-publish'
+    if (Test-Path -LiteralPath $candidatePath) {
+        throw "Capture-only output must not contain a candidate path: $candidatePath"
+    }
     Copy-ReleaseDirectoryContents `
         -SourcePath $rawPublishPaths[0] `
         -DestinationPath $provisionalPublishPath
@@ -660,7 +789,7 @@ if ($CaptureOnly) {
         schemaVersion = 1
         status = 'needs-license-inventory'
         sourceIdentity = $SourceIdentity
-        sdkVersion = $sdkVersion
+        sdkVersion = $observedSdkVersion
         runtimeIdentifier = $runtimeIdentifier
         netCoreRuntimeVersion = $runtimeVersion
         windowsDesktopRuntimeVersion = $runtimeVersion
@@ -754,7 +883,7 @@ Write-ReleaseUtf8NoBom `
 $buildEvidence = [pscustomobject][ordered]@{
     schemaVersion = 1
     sourceIdentity = $SourceIdentity
-    sdkVersion = $sdkVersion
+    sdkVersion = $observedSdkVersion
     runtimeIdentifier = $runtimeIdentifier
     netCoreRuntimeVersion = $runtimeVersion
     windowsDesktopRuntimeVersion = $runtimeVersion
