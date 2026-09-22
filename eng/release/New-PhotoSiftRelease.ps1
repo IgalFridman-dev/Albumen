@@ -233,8 +233,10 @@ function Read-RuntimePackList {
         throw "Pinned runtime pack list does not exist: $runtimeListPath"
     }
     [xml]$runtimeList = Get-Content -Raw -LiteralPath $runtimeListPath
+    $manifestRuntimeIdentifier = $runtimeList.FileList.GetAttributeNode('RuntimeIdentifier')
     if ([string]$runtimeList.FileList.FrameworkName -cne $ExpectedFrameworkName -or
-        [string]$runtimeList.FileList.RuntimeIdentifier -cne $runtimeIdentifier) {
+        ($null -ne $manifestRuntimeIdentifier -and
+            [string]$manifestRuntimeIdentifier.Value -cne $runtimeIdentifier)) {
         throw "Runtime pack list does not match $ExpectedFrameworkName $runtimeIdentifier $runtimeVersion`: $runtimeListPath"
     }
 
