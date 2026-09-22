@@ -49,6 +49,28 @@ $packagePaths = @(
 $candidatePath = Join-Path $resolvedOutputRoot 'candidate'
 $workPath = Join-Path $resolvedOutputRoot '.work'
 
+trap {
+    $failureRecord = $_
+    try {
+        if ([System.IO.Directory]::Exists($evidencePath)) {
+            Write-ReleaseUtf8NoBom -LiteralPath (Join-Path $evidencePath 'failure.json') -Content (
+                [pscustomobject]@{
+                    exceptionType = $failureRecord.Exception.GetType().FullName
+                    message = $failureRecord.Exception.Message
+                    positionMessage = $failureRecord.InvocationInfo.PositionMessage
+                    scriptStackTrace = $failureRecord.ScriptStackTrace
+                } | ConvertTo-Json -Depth 4)
+        }
+    } catch { }
+    throw $failureRecord
+}
+
+$sourcePrefix = $resolvedRepositoryRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+if ($resolvedOutputRoot -ieq $resolvedRepositoryRoot -or
+    $resolvedOutputRoot.StartsWith($sourcePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Release output root must be outside the source repository.'
+}
+
 function Write-ReleaseUtf8NoBom {
     param([string]$LiteralPath, [string]$Content)
 
@@ -73,27 +95,25 @@ function Invoke-ReleaseExternal {
             -FilePath $FilePath `
             -Arguments $Arguments `
             -WorkingDirectory $WorkingDirectory
-        if ($null -eq $result -or [int]$result.ExitCode -ne 0) {
-            throw "Release command '$Name' failed through the injected operation."
+    }
+    else {
+        Push-Location -LiteralPath $WorkingDirectory
+        try {
+            $output = @(& $FilePath @Arguments 2>&1)
+            $exitCode = $LASTEXITCODE
         }
-        return $result
+        finally {
+            Pop-Location
+        }
+        $result = [pscustomobject]@{ ExitCode = $exitCode; Output = $output -join [System.Environment]::NewLine }
     }
-
-    Push-Location -LiteralPath $WorkingDirectory
-    try {
-        $output = @(& $FilePath @Arguments 2>&1)
-        $exitCode = $LASTEXITCODE
+    if ($null -eq $result) { throw "Release command '$Name' returned no result." }
+    Write-ReleaseUtf8NoBom -LiteralPath (Join-Path $evidencePath ($Name + '-command.json')) -Content (
+        [pscustomobject]@{ name = $Name; executable = $FilePath; arguments = $Arguments; workingDirectory = $WorkingDirectory; exitCode = $result.ExitCode; output = $result.Output; injected = ($null -ne $Operations) } | ConvertTo-Json -Depth 5)
+    if ([int]$result.ExitCode -ne 0) {
+        throw "Release command '$Name' exited $($result.ExitCode): $($result.Output)"
     }
-    finally {
-        Pop-Location
-    }
-    if ($exitCode -ne 0) {
-        throw "Release command '$Name' exited $exitCode`: $($output -join [System.Environment]::NewLine)"
-    }
-    return [pscustomobject]@{
-        ExitCode = $exitCode
-        Output = $output -join [System.Environment]::NewLine
-    }
+    return $result
 }
 
 function Get-ReleaseInventory {
@@ -206,7 +226,7 @@ function Copy-CleanReleaseSource {
     foreach ($entry in @(Get-ChildItem -Force -Recurse -LiteralPath $resolvedSourcePath)) {
         $relativePath = $entry.FullName.Substring($sourcePrefix.Length)
         $segments = @($relativePath -split '[\\/]')
-        if (@($segments | Where-Object { $_ -in @('.git', 'bin', 'obj') }).Count -gt 0) {
+        if (@($segments | Where-Object { $_ -in @('.git', '.superpowers', '.codex', '.agents', 'bin', 'obj') }).Count -gt 0) {
             continue
         }
         if (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -247,6 +267,9 @@ function Read-RuntimePackList {
             if ($Profile -and @($_.GetAttribute('Profile') -split ';') -cnotcontains $Profile) {
                 return
             }
+            if ([string]$_.Type -cnotin @('Managed', 'Native', 'Resources')) {
+                throw "Runtime pack contains an unsupported asset Type: $($_.Type)"
+            }
             $sourcePath = ([string]$_.Path).Replace('\', '/')
             if ([string]::IsNullOrWhiteSpace($sourcePath) -or
                 [System.IO.Path]::IsPathRooted($sourcePath) -or
@@ -272,6 +295,7 @@ function Read-RuntimePackList {
             [pscustomobject]@{
                 Path = $path
                 SourcePath = $sourcePath
+                PackageId = $PackageId
                 Type = [string]$_.Type
                 Framework = $ExpectedFrameworkName
             }
@@ -301,11 +325,66 @@ function Get-NuspecElementText {
     return [string]$node.InnerText
 }
 
+function Get-NativeSqliteIdentity {
+    param([string]$LiteralPath)
+
+    $packagePayload = Join-Path $resolvedPackagesRoot 'sqlitepclraw.lib.e_sqlite3/2.1.12/runtimes/win-x64/native/e_sqlite3.dll'
+    $hash = (Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256).Hash
+    if (-not [System.IO.File]::Exists($packagePayload) -or
+        $hash -cne (Get-FileHash -LiteralPath $packagePayload -Algorithm SHA256).Hash) {
+        throw 'Published native SQLite SHA256 differs from the exact pinned package payload.'
+    }
+    $peVersion = Get-ReleaseFileVersion -LiteralPath $LiteralPath
+    $version = [string]$peVersion.ProductVersion
+    if ([string]::IsNullOrWhiteSpace($version)) { $version = [string]$peVersion.FileVersion }
+    $versionSource = 'pe-version-resource'
+    $sourceId = $null
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        # The pinned SQLite PE has no version resource. Inspect its NUL-delimited
+        # sqlite3_libversion/sqlite3_sourceid constants without loading the DLL.
+        $bytes = [System.IO.File]::ReadAllBytes($LiteralPath)
+        $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+        $versions = @([regex]::Matches($text, '(?<=\x00)3\.[0-9]+\.[0-9]+(?=\x00)') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+        $sourceIds = @([regex]::Matches($text, '(?<=\x00)20[0-9]{2}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} [a-f0-9]{64}(?=\x00)') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+        if ($versions.Count -eq 0 -or $sourceIds.Count -eq 0) { throw 'Missing static native SQLite version/source-id evidence.' }
+        if ($versions.Count -ne 1 -or $sourceIds.Count -ne 1) { throw 'Ambiguous static native SQLite version/source-id evidence.' }
+        $version = $versions[0]
+        $sourceId = $sourceIds[0]
+        $versionSource = 'embedded-utf8'
+    }
+    return [pscustomobject]@{
+        version = $version; versionSource = $versionSource; sqliteSourceId = $sourceId; sha256 = $hash
+        fileVersion = [string]$peVersion.FileVersion; productVersion = [string]$peVersion.ProductVersion
+    }
+}
+
 function Get-ReleasePackageMetadata {
     param([string]$PackageId, [string]$Version)
 
     $packagePath = Join-Path $resolvedPackagesRoot (
         $PackageId.ToLowerInvariant() + '\' + $Version)
+    if ($PackageId -ceq 'Microsoft.NETCore.App.Host.win-x64' -and
+        -not [System.IO.Directory]::Exists($packagePath)) {
+        $hostRelativePath = 'packs/Microsoft.NETCore.App.Host.win-x64/' + $Version + '/runtimes/win-x64/native/apphost.exe'
+        $hostPath = Join-Path $resolvedSdkRoot $hostRelativePath
+        if (-not [System.IO.File]::Exists($hostPath)) {
+            throw "Pinned apphost is absent from both the sealed NuGet cache and SDK packs: $Version"
+        }
+        $hostLicenses = @(
+            foreach ($licenseName in @('LICENSE.txt', 'ThirdPartyNotices.txt')) {
+                $source = Join-Path $resolvedSdkRoot $licenseName
+                if (-not [System.IO.File]::Exists($source)) { throw "SDK apphost license source missing: $source" }
+                $destination = Join-Path $evidencePath ('license-sources/' + $PackageId.ToLowerInvariant() + '/' + $Version + '/' + $licenseName)
+                [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($destination)) | Out-Null
+                [System.IO.File]::Copy($source, $destination, $true)
+                [pscustomobject]@{ path = $licenseName; length = (Get-Item -LiteralPath $source).Length; sha256 = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash }
+            })
+        return [pscustomobject][ordered]@{
+            id = $PackageId; version = $Version; sourceKind = 'sdk-pack'
+            sourcePath = $hostRelativePath; sourceSha256 = (Get-FileHash -LiteralPath $hostPath -Algorithm SHA256).Hash
+            sdkVersion = $sdkVersion; licenseSources = $hostLicenses
+        }
+    }
     if (-not [System.IO.Directory]::Exists($packagePath)) {
         throw "Required sealed NuGet package does not exist: $PackageId/$Version"
     }
@@ -361,6 +440,7 @@ function Get-ReleasePackageMetadata {
     return [pscustomobject][ordered]@{
         id = $PackageId
         version = $Version
+        sourceKind = 'nuget'
         licenseType = $licenseType
         licenseValue = $licenseValue
         projectUrl = $projectUrl
@@ -379,9 +459,6 @@ function Assert-RuntimePackResolution {
     $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
     $libraries = @($assets.libraries.PSObject.Properties | ForEach-Object { $_.Name })
     $requiredPackageLibraries = @(
-        'Microsoft.NETCore.App.Runtime.win-x64/10.0.11',
-        'Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.11',
-        'Microsoft.NETCore.App.Host.win-x64/10.0.11',
         'Microsoft.Data.Sqlite/10.0.11',
         'Microsoft.Data.Sqlite.Core/10.0.11',
         'SQLitePCLRaw.bundle_e_sqlite3/2.1.12',
@@ -392,6 +469,34 @@ function Assert-RuntimePackResolution {
         if ($libraries -cnotcontains $requiredLibrary) {
             throw "Locked restore did not resolve the exact approved package: $requiredLibrary"
         }
+    }
+    # SDK Core uses PackageDownload for runtime packs, so they are not ordinary
+    # libraries. Apphost can be resolved directly from the exact installed SDK pack.
+    $packIds = @('Microsoft.NETCore.App.Runtime.win-x64', 'Microsoft.WindowsDesktop.App.Runtime.win-x64', 'Microsoft.NETCore.App.Host.win-x64')
+    $resolvedPacks = @($libraries | Where-Object { ($_ -split '/')[0] -cin $packIds })
+    if ($null -ne $assets.PSObject.Properties['project'] -and
+        $null -ne $assets.project.PSObject.Properties['frameworks']) {
+        foreach ($framework in $assets.project.frameworks.PSObject.Properties) {
+            if ($null -eq $framework.Value.PSObject.Properties['downloadDependencies']) { continue }
+            foreach ($download in $framework.Value.downloadDependencies) {
+                if ([string]$download.name -cnotin $packIds -or
+                    [string]$download.version -cnotmatch '^\[10\.0\.11(?:,\s*10\.0\.11)?\]$') {
+                    throw "Locked restore contains an unapproved or unpinned download dependency: $($download.name)/$($download.version)"
+                }
+                $resolvedPacks += [string]$download.name + '/10.0.11'
+            }
+        }
+    }
+    foreach ($runtimePack in $packIds[0..1]) {
+        if ($resolvedPacks -cnotcontains ($runtimePack + '/10.0.11')) {
+            throw "Locked restore did not resolve the exact approved runtime download: $runtimePack/10.0.11"
+        }
+    }
+    $sdkApphost = Join-Path $resolvedSdkRoot 'packs/Microsoft.NETCore.App.Host.win-x64/10.0.11/runtimes/win-x64/native/apphost.exe'
+    if ($resolvedPacks -cnotcontains 'Microsoft.NETCore.App.Host.win-x64/10.0.11' -and
+        -not [System.IO.File]::Exists($sdkApphost) -and
+        -not [System.IO.File]::Exists((Join-Path $resolvedPackagesRoot 'microsoft.netcore.app.host.win-x64/10.0.11/runtimes/win-x64/native/apphost.exe'))) {
+        throw 'The pinned SDK/NuGet apphost pack is missing.'
     }
     $wrongRuntimePacks = @($libraries | Where-Object {
             $_ -match '^Microsoft\.(?:NETCore\.App\.(?:Runtime|Host)|WindowsDesktop\.App\.Runtime)\.win-x64/' -and
@@ -404,7 +509,7 @@ function Assert-RuntimePackResolution {
         Where-Object { [string]$_.Value.type -ceq 'package' } |
         ForEach-Object { $_.Name })
     $unexpectedPackageLibraries = @($actualPackageLibraries | Where-Object {
-            $requiredPackageLibraries -cnotcontains $_
+            $requiredPackageLibraries -cnotcontains $_ -and $resolvedPacks -cnotcontains $_
         })
     if ($unexpectedPackageLibraries.Count -gt 0) {
         throw "Locked restore contains a package outside the exact approved production dependency closure: $($unexpectedPackageLibraries -join ', ')"
@@ -539,6 +644,11 @@ if ([string]$globalJson.sdk.version -cne $sdkVersion) {
 if ([string]$globalJson.sdk.rollForward -cne 'disable') {
     throw 'global.json must disable SDK roll-forward for the release workflow.'
 }
+if ([System.IO.Directory]::Exists($resolvedOutputRoot) -and
+    @(Get-ChildItem -Force -LiteralPath $resolvedOutputRoot).Count -gt 0) {
+    throw "Release output root must be absent or empty: $resolvedOutputRoot"
+}
+[System.IO.Directory]::CreateDirectory($evidencePath) | Out-Null
 $sdkSelection = Invoke-ReleaseExternal `
     -Name 'sdk-version' `
     -FilePath $dotnetPath `
@@ -553,12 +663,6 @@ if ($observedSdkVersions.Count -ne 1 -or
     throw "Supplied dotnet host selected SDK '$($observedSdkVersions -join ',')'; required exact SDK is $sdkVersion."
 }
 $observedSdkVersion = [string]$observedSdkVersions[0]
-if ([System.IO.Directory]::Exists($resolvedOutputRoot) -and
-    @(Get-ChildItem -Force -LiteralPath $resolvedOutputRoot).Count -gt 0) {
-    throw "Release output root must be absent or empty: $resolvedOutputRoot"
-}
-[System.IO.Directory]::CreateDirectory($resolvedOutputRoot) | Out-Null
-[System.IO.Directory]::CreateDirectory($evidencePath) | Out-Null
 
 $netCoreFiles = @(Read-RuntimePackList `
     -PackageId 'microsoft.netcore.app.runtime.win-x64' `
@@ -600,6 +704,20 @@ foreach ($nativePath in $nativePaths) {
 }
 [System.Array]::Sort($nativePaths, [System.StringComparer]::Ordinal)
 
+$frameworkPayloadHashes = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
+$frameworkPayloadSources = @(
+    foreach ($file in $runtimePackFiles) {
+        $source = Join-Path $resolvedPackagesRoot ($file.PackageId + '/' + $runtimeVersion + '/' + $file.SourcePath)
+        if (-not [System.IO.File]::Exists($source)) { throw "Pinned runtime payload is missing: $source" }
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        if (-not $frameworkPayloadHashes.ContainsKey($file.Path)) {
+            $frameworkPayloadHashes.Add($file.Path, [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal))
+        }
+        $frameworkPayloadHashes[$file.Path].Add($hash) | Out-Null
+        [pscustomobject]@{ path = $file.Path; packageId = $file.PackageId; version = $runtimeVersion; sourcePath = $file.SourcePath; sha256 = $hash }
+    })
+Write-ReleaseUtf8NoBom -LiteralPath (Join-Path $evidencePath 'framework-payload-sources.json') -Content ($frameworkPayloadSources | ConvertTo-Json -Depth 5)
+
 $restoreArguments = New-Object 'System.Collections.Generic.List[object]'
 $publishArguments = New-Object 'System.Collections.Generic.List[object]'
 try {
@@ -615,6 +733,7 @@ try {
             '--locked-mode',
             '--configfile', 'NuGet.Config',
             '--packages', $resolvedPackagesRoot,
+            '-p:SelfContained=true',
             '-p:RuntimeFrameworkVersion=10.0.11',
             '-p:TargetLatestRuntimePatch=false',
             '-p:NuGetAudit=false')
@@ -624,8 +743,11 @@ try {
             -FilePath $dotnetPath `
             -Arguments $currentRestoreArguments `
             -WorkingDirectory $cleanSourcePath | Out-Null
-        Assert-RuntimePackResolution -AssetsPath (
-            Join-Path $cleanSourcePath 'src\PhotoSift.App\obj\project.assets.json')
+        $restoredAssetsPath = Join-Path $cleanSourcePath 'src\PhotoSift.App\obj\project.assets.json'
+        if ([System.IO.File]::Exists($restoredAssetsPath)) {
+            [System.IO.File]::Copy($restoredAssetsPath, (Join-Path $evidencePath ('restore-' + ($index + 1) + '-project.assets.json')), $true)
+        }
+        Assert-RuntimePackResolution -AssetsPath $restoredAssetsPath
 
         [System.IO.Directory]::CreateDirectory($rawPublishPaths[$index]) | Out-Null
         $arguments = @(
@@ -647,8 +769,13 @@ try {
             -Arguments $arguments `
             -WorkingDirectory $cleanSourcePath | Out-Null
         foreach ($frameworkPath in $frameworkPaths) {
-            if (-not [System.IO.File]::Exists((Join-Path $rawPublishPaths[$index] $frameworkPath))) {
+            $publishedFrameworkPath = Join-Path $rawPublishPaths[$index] $frameworkPath
+            if (-not [System.IO.File]::Exists($publishedFrameworkPath)) {
                 throw "Published framework closure is missing pinned path: $frameworkPath"
+            }
+            $publishedHash = (Get-FileHash -LiteralPath $publishedFrameworkPath -Algorithm SHA256).Hash
+            if (-not $frameworkPayloadHashes[$frameworkPath].Contains($publishedHash)) {
+                throw "Published framework SHA256 differs from every pinned runtime payload: $frameworkPath"
             }
         }
         foreach ($nativePath in $nativePaths) {
@@ -713,15 +840,8 @@ $packageSpecifications = @(
 $packageCaptures = @($packageSpecifications | ForEach-Object {
         Get-ReleasePackageMetadata -PackageId $_.Id -Version $_.Version
     })
-$nativeSqliteVersion = Get-ReleaseFileVersion -LiteralPath (
+$nativeSqliteIdentity = Get-NativeSqliteIdentity -LiteralPath (
     Join-Path $rawPublishPaths[0] 'e_sqlite3.dll')
-$nativeSqliteEngineVersion = [string]$nativeSqliteVersion.ProductVersion
-if ([string]::IsNullOrWhiteSpace($nativeSqliteEngineVersion)) {
-    $nativeSqliteEngineVersion = [string]$nativeSqliteVersion.FileVersion
-}
-if ([string]::IsNullOrWhiteSpace($nativeSqliteEngineVersion)) {
-    throw 'Could not identify the native SQLite engine version from the shipped e_sqlite3.dll.'
-}
 
 $components = @(
     [pscustomobject][ordered]@{
@@ -750,11 +870,14 @@ $components = @(
     },
     [pscustomobject][ordered]@{
         name = 'Native SQLite'
-        version = $nativeSqliteEngineVersion
+        version = $nativeSqliteIdentity.version
+        versionSource = $nativeSqliteIdentity.versionSource
+        sqliteSourceId = $nativeSqliteIdentity.sqliteSourceId
+        sha256 = $nativeSqliteIdentity.sha256
         shippedPaths = @('e_sqlite3.dll')
         packageId = 'SQLitePCLRaw.lib.e_sqlite3'
-        fileVersion = [string]$nativeSqliteVersion.FileVersion
-        productVersion = [string]$nativeSqliteVersion.ProductVersion
+        fileVersion = $nativeSqliteIdentity.fileVersion
+        productVersion = $nativeSqliteIdentity.productVersion
     },
     [pscustomobject][ordered]@{
         name = 'SQLitePCLRaw.bundle_e_sqlite3'
