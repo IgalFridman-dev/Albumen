@@ -641,8 +641,10 @@ Write-ReleaseUtf8NoBom `
     -LiteralPath $frameworkManifestPath `
     -Content (($frameworkManifest | ConvertTo-Json -Depth 6) + [System.Environment]::NewLine)
 $runtimeBoundaryPath = Join-Path $resolvedRepositoryRoot 'eng\Verify-RuntimeBoundary.ps1'
+Import-Module (Join-Path $resolvedRepositoryRoot 'eng\release\PhotoSiftRelease.psm1') -Force
 for ($index = 0; $index -lt 2; $index++) {
     Assert-RawPublishContentPolicy -RootPath $rawPublishPaths[$index]
+    Assert-PhotoSiftReleaseContentPolicy -PackagePath $rawPublishPaths[$index]
     & $runtimeBoundaryPath `
         -DependencyManifestPath (Join-Path $rawPublishPaths[$index] 'PhotoSift.App.deps.json') `
         -SourceRootPath (Join-Path $resolvedRepositoryRoot 'src') `
@@ -820,7 +822,6 @@ Assert-ReleaseDependencyInventory `
     -InventoryPath (Join-Path $resolvedRepositoryRoot 'eng\release\release-dependencies.json') `
     -CapturedComponents $components | Out-Null
 
-Import-Module (Join-Path $resolvedRepositoryRoot 'eng\release\PhotoSiftRelease.psm1') -Force
 for ($index = 0; $index -lt 2; $index++) {
     Copy-ReleaseDirectoryContents `
         -SourcePath $rawPublishPaths[$index] `

@@ -936,6 +936,41 @@ try {
                 }
             },
             @{
+                Name = 'capture-development-build-script'
+                Pattern = 'development|tooling|build\.ps1'
+                Mutate = {
+                    param($OutputPath, $PublishIndex)
+                    $developmentPath = Join-Path $OutputPath 'nested\release\build.ps1'
+                    [System.IO.Directory]::CreateDirectory(
+                        [System.IO.Path]::GetDirectoryName($developmentPath)) | Out-Null
+                    Write-Utf8NoBom `
+                        -Path $developmentPath `
+                        -Content 'forbidden generic development script'
+                }
+            },
+            @{
+                Name = 'capture-development-project'
+                Pattern = 'development|tooling|csproj'
+                Mutate = {
+                    param($OutputPath, $PublishIndex)
+                    $projectPath = Join-Path $OutputPath 'nested\source\Unexpected.csproj'
+                    [System.IO.Directory]::CreateDirectory(
+                        [System.IO.Path]::GetDirectoryName($projectPath)) | Out-Null
+                    Write-Utf8NoBom `
+                        -Path $projectPath `
+                        -Content '<Project />'
+                }
+            },
+            @{
+                Name = 'capture-empty-model-directory'
+                Pattern = 'model|forbidden|directory'
+                Mutate = {
+                    param($OutputPath, $PublishIndex)
+                    [System.IO.Directory]::CreateDirectory(
+                        (Join-Path $OutputPath 'nested\models')) | Out-Null
+                }
+            },
+            @{
                 Name = 'capture-final-metadata'
                 Pattern = 'manifest|metadata|capture'
                 Mutate = {
