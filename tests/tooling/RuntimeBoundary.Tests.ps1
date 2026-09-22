@@ -105,7 +105,7 @@ try {
         [System.IO.File]::WriteAllBytes(
             (Join-Path $fixture.Root 'PhotoSift.App.exe'),
             [System.Text.Encoding]::ASCII.GetBytes('clean apphost fixture'))
-        '{"runtimeOptions":{"tfm":"net10.0-windows"}}' |
+        '{"runtimeOptions":{"tfm":"net10.0-windows","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}' |
             Set-Content -LiteralPath (
                 Join-Path $fixture.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
         $frameworkManifest = Join-Path $fixture.Root 'framework-closure.json'
@@ -262,6 +262,19 @@ try {
     }
     $script:passed++
 
+    $wrongIncludedFramework = New-SelfContainedRuntimeFixture -Name 'wrong-included-framework'
+    '{"runtimeOptions":{"tfm":"net10.0-windows","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.10"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}' |
+        Set-Content -LiteralPath (
+            Join-Path $wrongIncludedFramework.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+    $wrongIncludedFrameworkResult = Invoke-SelfContainedBoundaryChecker `
+        -Fixture $wrongIncludedFramework `
+        -OutputPrefix 'wrong-included-framework'
+    if ($wrongIncludedFrameworkResult.ExitCode -eq 0 -or
+        $wrongIncludedFrameworkResult.Output -notmatch 'included framework|10.0.11|self-contained') {
+        throw "Wrong self-contained included-framework version was not rejected: $($wrongIncludedFrameworkResult.Output)"
+    }
+    $script:passed++
+
     $frameworkClosure = New-SelfContainedRuntimeFixture -Name 'framework-closure'
     [System.IO.File]::WriteAllBytes(
         (Join-Path $frameworkClosure.Root 'System.Net.Http.dll'),
@@ -292,7 +305,7 @@ try {
     $script:passed++
 
     $firstPartyConfig = New-SelfContainedRuntimeFixture -Name 'first-party-config'
-    '{"runtimeOptions":{"tfm":"net10.0-windows"},"telemetryUrl":"https://telemetry.invalid"}' |
+    '{"runtimeOptions":{"tfm":"net10.0-windows","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]},"telemetryUrl":"https://telemetry.invalid"}' |
         Set-Content -LiteralPath (
             Join-Path $firstPartyConfig.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
     $firstPartyConfigResult = Invoke-SelfContainedBoundaryChecker `

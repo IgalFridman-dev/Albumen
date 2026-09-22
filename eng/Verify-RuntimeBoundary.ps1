@@ -202,9 +202,28 @@ function Read-SelfContainedFrameworkClosure {
     }
     $runtimeOptionProperties = @(Get-JsonPropertyNames -Value $runtimeConfig.runtimeOptions)
     if ($runtimeOptionProperties -contains 'framework' -or
-        $runtimeOptionProperties -contains 'frameworks' -or
-        $runtimeOptionProperties -contains 'includedFrameworks') {
+        $runtimeOptionProperties -contains 'frameworks') {
         throw 'Framework-dependent runtimeconfig is not an accepted self-contained folder publish.'
+    }
+    if ($runtimeOptionProperties -notcontains 'includedFrameworks' -or
+        $runtimeConfig.runtimeOptions.includedFrameworks -isnot [System.Array]) {
+        throw 'Self-contained runtimeconfig must contain the exact included framework array.'
+    }
+    $includedFrameworks = @($runtimeConfig.runtimeOptions.includedFrameworks |
+        ForEach-Object {
+            $properties = @(Get-JsonPropertyNames -Value $_ | Sort-Object)
+            if ([string]::Join('|', $properties) -cne 'name|version' -or
+                $_.name -isnot [string] -or $_.version -isnot [string]) {
+                throw 'Self-contained runtimeconfig included framework entry is malformed.'
+            }
+            "$($_.name)/$($_.version)"
+        } | Sort-Object)
+    $expectedIncludedFrameworks = @(
+        'Microsoft.NETCore.App/10.0.11',
+        'Microsoft.WindowsDesktop.App/10.0.11')
+    if ([string]::Join('|', $includedFrameworks) -cne
+        [string]::Join('|', $expectedIncludedFrameworks)) {
+        throw 'Self-contained runtimeconfig included frameworks must be exactly Microsoft.NETCore.App and Microsoft.WindowsDesktop.App 10.0.11.'
     }
 
     $resolvedOutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)

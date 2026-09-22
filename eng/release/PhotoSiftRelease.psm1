@@ -34,6 +34,7 @@ function New-PhotoSiftReleaseManifest {
     if (-not [System.IO.Directory]::Exists($resolvedPackagePath)) {
         throw "Release package directory does not exist: $resolvedPackagePath"
     }
+    Assert-PhotoSiftReleaseHasNoReparsePoints -PackagePath $resolvedPackagePath
     Set-PhotoSiftApprovedNativePaths -PackagePath $resolvedPackagePath
     $resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
     $requiredOutputPath = Join-Path $resolvedPackagePath 'release-manifest.json'
@@ -43,7 +44,6 @@ function New-PhotoSiftReleaseManifest {
         throw "Release manifest output must be the package-local path: $requiredOutputPath"
     }
 
-    Assert-PhotoSiftReleaseHasNoReparsePoints -PackagePath $resolvedPackagePath
     Assert-PhotoSiftReleaseDirectoriesAllowed -PackagePath $resolvedPackagePath
     $files = @(Get-PhotoSiftReleaseFiles -PackagePath $resolvedPackagePath)
     $requiredPaths = @(

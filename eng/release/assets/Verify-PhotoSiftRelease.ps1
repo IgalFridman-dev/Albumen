@@ -399,8 +399,8 @@ function Test-PhotoSiftPackageIntegrity {
     if (-not [System.IO.Directory]::Exists($resolvedPackagePath)) {
         throw "Release package directory does not exist: $resolvedPackagePath"
     }
-    Set-PhotoSiftApprovedNativePaths -PackagePath $resolvedPackagePath
     Assert-PhotoSiftReleaseHasNoReparsePoints -PackagePath $resolvedPackagePath
+    Set-PhotoSiftApprovedNativePaths -PackagePath $resolvedPackagePath
     Assert-PhotoSiftReleaseDirectoriesAllowed -PackagePath $resolvedPackagePath
 
     $manifestPath = Join-Path $resolvedPackagePath 'release-manifest.json'
