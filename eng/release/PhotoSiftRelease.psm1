@@ -18,6 +18,31 @@ function Write-PhotoSiftReleaseUtf8NoBom {
     [System.IO.File]::WriteAllText($LiteralPath, $Content, $encoding)
 }
 
+function Assert-PhotoSiftReleaseContentPolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$PackagePath
+    )
+
+    $resolvedPackagePath = [System.IO.Path]::GetFullPath($PackagePath)
+    if (-not [System.IO.Directory]::Exists($resolvedPackagePath)) {
+        throw "Release content directory does not exist: $resolvedPackagePath"
+    }
+    Assert-PhotoSiftReleaseHasNoReparsePoints -PackagePath $resolvedPackagePath
+    Assert-PhotoSiftReleaseDirectoriesAllowed -PackagePath $resolvedPackagePath
+    foreach ($file in @(Get-PhotoSiftReleaseFiles -PackagePath $resolvedPackagePath)) {
+        Assert-PhotoSiftCanonicalReleasePath `
+            -Path $file.Path `
+            -PackagePath $resolvedPackagePath
+        $forbiddenReason = Test-PhotoSiftForbiddenReleasePath -Path $file.Path
+        if ($null -ne $forbiddenReason) {
+            throw "Release content contains forbidden $forbiddenReason`: $($file.Path)"
+        }
+    }
+}
+
 function New-PhotoSiftReleaseManifest {
     [CmdletBinding()]
     param(
@@ -115,4 +140,7 @@ function Test-PhotoSiftRelease {
     return Test-PhotoSiftPackageIntegrity -PackagePath $PackagePath
 }
 
-Export-ModuleMember -Function New-PhotoSiftReleaseManifest, Test-PhotoSiftRelease
+Export-ModuleMember -Function `
+    Assert-PhotoSiftReleaseContentPolicy, `
+    New-PhotoSiftReleaseManifest, `
+    Test-PhotoSiftRelease
