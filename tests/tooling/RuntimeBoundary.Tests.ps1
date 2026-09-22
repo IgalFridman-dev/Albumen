@@ -99,13 +99,21 @@ try {
         )
 
         $fixture = New-RuntimeArtifactFixture -Name $Name
+        [pscustomobject]@{
+            libraries = [ordered]@{
+                'PhotoSift.App/1.0.0' = @{ type = 'project' }
+                'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
+                'Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
+            }
+        } | ConvertTo-Json -Depth 6 |
+            Set-Content -LiteralPath $fixture.Manifest -Encoding utf8
         [System.IO.File]::WriteAllBytes(
             (Join-Path $fixture.Root 'PhotoSift.App.dll'),
             [System.Text.Encoding]::ASCII.GetBytes('clean first-party binary fixture'))
         [System.IO.File]::WriteAllBytes(
             (Join-Path $fixture.Root 'PhotoSift.App.exe'),
             [System.Text.Encoding]::ASCII.GetBytes('clean apphost fixture'))
-        '{"runtimeOptions":{"tfm":"net10.0-windows","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}' |
+        '{"runtimeOptions":{"tfm":"net10.0","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}' |
             Set-Content -LiteralPath (
                 Join-Path $fixture.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
         $frameworkManifest = Join-Path $fixture.Root 'framework-closure.json'
@@ -227,7 +235,7 @@ try {
     [System.IO.File]::WriteAllBytes(
         (Join-Path $cleanRuntime.Root 'PhotoSift.App.dll'),
         [System.Text.Encoding]::ASCII.GetBytes('clean binary fixture'))
-    '{"runtimeOptions":{"tfm":"net10.0-windows"}}' |
+    '{"runtimeOptions":{"tfm":"net10.0"}}' |
         Set-Content -LiteralPath (Join-Path $cleanRuntime.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
     $cleanRuntimeResult = Invoke-BoundaryChecker `
         -Arguments @(
@@ -238,8 +246,30 @@ try {
         throw "Clean runtime artifact fixture failed: $($cleanRuntimeResult.Output)"
     }
 
+    $runtimeTfm = New-SelfContainedRuntimeFixture -Name 'runtime-tfm'
+    $runtimeTfmResult = Invoke-SelfContainedBoundaryChecker `
+        -Fixture $runtimeTfm `
+        -OutputPrefix 'runtime-tfm'
+    if ($runtimeTfmResult.ExitCode -ne 0) {
+        throw "SDK-emitted net10.0 runtime TFM was incorrectly rejected: $($runtimeTfmResult.Output)"
+    }
+    $script:passed++
+
+    $projectAliasTfm = New-SelfContainedRuntimeFixture -Name 'project-alias-tfm'
+    '{"runtimeOptions":{"tfm":"net10.0-windows","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}' |
+        Set-Content -LiteralPath (
+            Join-Path $projectAliasTfm.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+    $projectAliasTfmResult = Invoke-SelfContainedBoundaryChecker `
+        -Fixture $projectAliasTfm `
+        -OutputPrefix 'project-alias-tfm'
+    if ($projectAliasTfmResult.ExitCode -eq 0 -or
+        $projectAliasTfmResult.Output -notmatch 'net10\.0|runtime TFM') {
+        throw "Project alias net10.0-windows was not rejected as the runtime TFM: $($projectAliasTfmResult.Output)"
+    }
+    $script:passed++
+
     $frameworkDependent = New-SelfContainedRuntimeFixture -Name 'framework-dependent'
-    '{"runtimeOptions":{"tfm":"net10.0-windows","framework":{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}}}' |
+    '{"runtimeOptions":{"tfm":"net10.0","framework":{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}}}' |
         Set-Content -LiteralPath (
             Join-Path $frameworkDependent.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
     $frameworkDependentResult = Invoke-SelfContainedBoundaryChecker `
@@ -263,7 +293,7 @@ try {
     $script:passed++
 
     $wrongIncludedFramework = New-SelfContainedRuntimeFixture -Name 'wrong-included-framework'
-    '{"runtimeOptions":{"tfm":"net10.0-windows","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.10"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}' |
+    '{"runtimeOptions":{"tfm":"net10.0","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.10"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}' |
         Set-Content -LiteralPath (
             Join-Path $wrongIncludedFramework.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
     $wrongIncludedFrameworkResult = Invoke-SelfContainedBoundaryChecker `
@@ -280,14 +310,31 @@ try {
         (Join-Path $frameworkClosure.Root 'System.Net.Http.dll'),
         [System.Text.Encoding]::ASCII.GetBytes(
             'legitimate pinned framework binary with System.Net.Http and HttpClient markers'))
+    [System.IO.File]::WriteAllBytes(
+        (Join-Path $frameworkClosure.Root 'System.Diagnostics.Tools.dll'),
+        [System.Text.Encoding]::ASCII.GetBytes(
+            'legitimate pinned framework binary with a tooling-shaped filename'))
     Set-FrameworkClosurePaths `
         -ManifestPath $frameworkClosure.FrameworkManifest `
-        -Paths @('System.Net.Http.dll')
+        -Paths @('System.Diagnostics.Tools.dll', 'System.Net.Http.dll')
     $frameworkClosureResult = Invoke-SelfContainedBoundaryChecker `
         -Fixture $frameworkClosure `
         -OutputPrefix 'framework-closure'
     if ($frameworkClosureResult.ExitCode -ne 0) {
         throw "Pinned framework closure was incorrectly rejected: $($frameworkClosureResult.Output)"
+    }
+    $script:passed++
+
+    $unlistedFrameworkTool = New-SelfContainedRuntimeFixture -Name 'unlisted-framework-tool'
+    [System.IO.File]::WriteAllBytes(
+        (Join-Path $unlistedFrameworkTool.Root 'System.Diagnostics.Tools.dll'),
+        [System.Text.Encoding]::ASCII.GetBytes('unlisted tooling-shaped framework fixture'))
+    $unlistedFrameworkToolResult = Invoke-SelfContainedBoundaryChecker `
+        -Fixture $unlistedFrameworkTool `
+        -OutputPrefix 'unlisted-framework-tool'
+    if ($unlistedFrameworkToolResult.ExitCode -eq 0 -or
+        $unlistedFrameworkToolResult.Output -notmatch 'System\.Diagnostics\.Tools\.dll') {
+        throw "Unlisted tooling-shaped framework artifact was incorrectly accepted: $($unlistedFrameworkToolResult.Output)"
     }
     $script:passed++
 
@@ -305,7 +352,7 @@ try {
     $script:passed++
 
     $firstPartyConfig = New-SelfContainedRuntimeFixture -Name 'first-party-config'
-    '{"runtimeOptions":{"tfm":"net10.0-windows","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]},"telemetryUrl":"https://telemetry.invalid"}' |
+    '{"runtimeOptions":{"tfm":"net10.0","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]},"telemetryUrl":"https://telemetry.invalid"}' |
         Set-Content -LiteralPath (
             Join-Path $firstPartyConfig.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
     $firstPartyConfigResult = Invoke-SelfContainedBoundaryChecker `
