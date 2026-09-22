@@ -339,7 +339,7 @@ function New-SyntheticPackagesRoot {
     Write-Utf8NoBom `
         -Path (Join-Path $netCorePath 'RuntimeList.xml') `
         -Content @'
-<FileList FrameworkName="Microsoft.NETCore.App" TargetFrameworkVersion="10.0" RuntimeIdentifier="win-x64">
+<FileList FrameworkName="Microsoft.NETCore.App" TargetFrameworkVersion="10.0">
   <File Type="Native" Path="coreclr.dll" />
   <File Type="Managed" Path="System.Net.Http.dll" />
 </FileList>
@@ -347,7 +347,7 @@ function New-SyntheticPackagesRoot {
     Write-Utf8NoBom `
         -Path (Join-Path $windowsDesktopPath 'RuntimeList.xml') `
         -Content @'
-<FileList FrameworkName="Microsoft.WindowsDesktop.App" TargetFrameworkVersion="10.0" RuntimeIdentifier="win-x64">
+<FileList FrameworkName="Microsoft.WindowsDesktop.App" TargetFrameworkVersion="10.0">
   <File Type="Native" Path="D3DCompiler_47_cor3.dll" />
   <File Type="Managed" Path="PresentationCore.dll" />
   <File Type="Native" Path="wpfgfx_cor3.dll" />
@@ -1085,8 +1085,8 @@ try {
             },
             @{
                 Name = 'wrong-runtime-identifier'
-                Attribute = 'RuntimeIdentifier="win-x64"'
-                Replacement = 'RuntimeIdentifier="linux-x64"'
+                Attribute = 'TargetFrameworkVersion="10.0"'
+                Replacement = 'TargetFrameworkVersion="10.0" RuntimeIdentifier="linux-x64"'
             }
         )) {
         $mismatchedPackages = Join-Path $testRoot $runtimeListMismatch.Name
