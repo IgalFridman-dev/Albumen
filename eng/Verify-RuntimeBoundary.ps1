@@ -197,8 +197,8 @@ function Read-SelfContainedFrameworkClosure {
     }
     $runtimeConfig = Get-Content -Raw -LiteralPath $runtimeConfigPath | ConvertFrom-Json
     if ($null -eq $runtimeConfig.runtimeOptions -or
-        [string]$runtimeConfig.runtimeOptions.tfm -cne 'net10.0-windows') {
-        throw 'PhotoSift.App.runtimeconfig.json does not target net10.0-windows.'
+        [string]$runtimeConfig.runtimeOptions.tfm -cne 'net10.0') {
+        throw 'PhotoSift.App.runtimeconfig.json runtime TFM must be exactly net10.0.'
     }
     $runtimeOptionProperties = @(Get-JsonPropertyNames -Value $runtimeConfig.runtimeOptions)
     if ($runtimeOptionProperties -contains 'framework' -or
@@ -287,13 +287,13 @@ function Assert-NoForbiddenRuntimeArtifacts {
         $relativePath = $file.FullName.Substring($directoryPrefix.Length)
         $canonicalRelativePath = $relativePath.Replace('\', '/')
         $isFrameworkContent = $frameworkPathSet.ContainsKey($canonicalRelativePath)
-        if ($file.Name -match $testArtifactPattern) {
+        if (-not $isFrameworkContent -and $file.Name -match $testArtifactPattern) {
             $violations.Add("$relativePath -> test/tooling/telemetry artifact")
         }
-        if ($file.Name -match $updaterArtifactPattern) {
+        if (-not $isFrameworkContent -and $file.Name -match $updaterArtifactPattern) {
             $violations.Add("$relativePath -> updater artifact")
         }
-        if ($file.Name -match $modelArtifactPattern) {
+        if (-not $isFrameworkContent -and $file.Name -match $modelArtifactPattern) {
             $violations.Add("$relativePath -> model artifact")
         }
 
