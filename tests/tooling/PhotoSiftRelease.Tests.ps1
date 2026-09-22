@@ -339,7 +339,7 @@ function New-SyntheticPackagesRoot {
     Write-Utf8NoBom `
         -Path (Join-Path $netCorePath 'RuntimeList.xml') `
         -Content @'
-<FileList Name="Microsoft.NETCore.App" TargetFrameworkVersion="10.0" RuntimeIdentifier="win-x64">
+<FileList FrameworkName="Microsoft.NETCore.App" TargetFrameworkVersion="10.0" RuntimeIdentifier="win-x64">
   <File Type="Native" Path="coreclr.dll" />
   <File Type="Managed" Path="System.Net.Http.dll" />
 </FileList>
@@ -347,7 +347,7 @@ function New-SyntheticPackagesRoot {
     Write-Utf8NoBom `
         -Path (Join-Path $windowsDesktopPath 'RuntimeList.xml') `
         -Content @'
-<FileList Name="Microsoft.WindowsDesktop.App" TargetFrameworkVersion="10.0" RuntimeIdentifier="win-x64">
+<FileList FrameworkName="Microsoft.WindowsDesktop.App" TargetFrameworkVersion="10.0" RuntimeIdentifier="win-x64">
   <File Type="Native" Path="D3DCompiler_47_cor3.dll" />
   <File Type="Managed" Path="PresentationCore.dll" />
   <File Type="Native" Path="wpfgfx_cor3.dll" />
@@ -861,6 +861,48 @@ try {
     Assert-True `
         ([System.IO.File]::Exists((Join-Path $captureOutput 'evidence\license-sources\microsoft.netcore.app.runtime.win-x64\10.0.11\LICENSE.txt'))) `
         'capture-only mode must preserve local package license sources for review without downloading anything'
+    $script:passed++
+
+    foreach ($runtimeListMismatch in @(
+            @{
+                Name = 'wrong-runtime-framework'
+                Attribute = 'FrameworkName="Microsoft.NETCore.App"'
+                Replacement = 'FrameworkName="Contoso.NotNetCore"'
+            },
+            @{
+                Name = 'wrong-runtime-identifier'
+                Attribute = 'RuntimeIdentifier="win-x64"'
+                Replacement = 'RuntimeIdentifier="linux-x64"'
+            }
+        )) {
+        $mismatchedPackages = Join-Path $testRoot $runtimeListMismatch.Name
+        Copy-Item -Recurse -LiteralPath $syntheticPackages -Destination $mismatchedPackages
+        $mismatchedRuntimeListPath = Join-Path $mismatchedPackages `
+            'microsoft.netcore.app.runtime.win-x64\10.0.11\data\RuntimeList.xml'
+        $mismatchedRuntimeList = Get-Content -Raw -LiteralPath $mismatchedRuntimeListPath
+        Write-Utf8NoBom `
+            -Path $mismatchedRuntimeListPath `
+            -Content $mismatchedRuntimeList.Replace(
+                $runtimeListMismatch.Attribute,
+                $runtimeListMismatch.Replacement)
+        $mismatchCalls = [System.Collections.Generic.List[object]]::new()
+        $mismatchOperations = New-SyntheticReleaseOperations `
+            -Calls $mismatchCalls `
+            -DriftSecondPublish $false
+        Assert-ThrowsLike `
+            -Action {
+                & $builderPath `
+                    -RepositoryRoot $captureRepository `
+                    -OutputRoot (Join-Path $testRoot ($runtimeListMismatch.Name + '-output')) `
+                    -SdkRoot $syntheticSdk `
+                    -PackagesRoot $mismatchedPackages `
+                    -SourceIdentity 'synthetic-source-identity' `
+                    -CaptureOnly `
+                    -Operations $mismatchOperations | Out-Null
+            } `
+            -Pattern 'runtime pack list does not match' `
+            -Because "the builder must reject a RuntimeList.xml with $($runtimeListMismatch.Name)"
+    }
     $script:passed++
 
     $unapprovedDependencyOutput = Join-Path $testRoot 'unapproved-dependency-output'
