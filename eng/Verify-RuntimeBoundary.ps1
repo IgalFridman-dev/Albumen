@@ -15,7 +15,10 @@ param(
     [string]$SourceRootPath,
 
     [Parameter()]
-    [string]$FrameworkClosureManifestPath
+    [string]$FrameworkClosureManifestPath,
+
+    [Parameter()]
+    [switch]$FrameworkDependentRelease
 )
 
 Set-StrictMode -Version Latest
@@ -250,6 +253,59 @@ function Read-SelfContainedFrameworkClosure {
     return $paths
 }
 
+function Assert-FrameworkDependentRelease {
+    param([string]$OutputDirectory, [object]$DependencyManifest)
+
+    if (-not [string]::IsNullOrWhiteSpace($FrameworkClosureManifestPath)) {
+        throw 'Framework-dependent release cannot include a bundled framework closure.'
+    }
+    foreach ($name in @('PhotoSift.App.exe', 'PhotoSift.App.dll', 'PhotoSift.App.runtimeconfig.json')) {
+        if (-not [System.IO.File]::Exists((Join-Path $OutputDirectory $name))) {
+            throw "Framework-dependent folder release is missing $name."
+        }
+    }
+    $config = Get-Content -Raw -LiteralPath (Join-Path $OutputDirectory 'PhotoSift.App.runtimeconfig.json') | ConvertFrom-Json
+    $options = $config.runtimeOptions
+    $properties = @(Get-JsonPropertyNames -Value $options)
+    if ($null -eq $options -or [string]$options.tfm -cne 'net10.0' -or
+        $properties -contains 'includedFrameworks' -or $properties -contains 'framework' -or
+        $properties -notcontains 'frameworks' -or $options.frameworks -isnot [System.Array]) {
+        throw 'Framework-dependent runtimeconfig must request the two net10.0 shared frameworks.'
+    }
+    foreach ($property in @('applyPatches', 'rollForwardOnNoCandidateFx')) {
+        if ($properties -contains $property) { throw "Runtimeconfig must not override ordinary patch roll-forward: $property" }
+    }
+    if ($properties -contains 'rollForward' -and [string]$options.rollForward -cne 'LatestPatch') {
+        throw 'Runtimeconfig rollForward must allow compatible 10.0 patches using LatestPatch.'
+    }
+    $frameworks = @($options.frameworks | ForEach-Object {
+        if ([string]::Join('|', @(Get-JsonPropertyNames -Value $_ | Sort-Object)) -cne 'name|version') {
+            throw 'Framework-dependent runtimeconfig framework entry is malformed.'
+        }
+        "$($_.name)/$($_.version)"
+    } | Sort-Object)
+    if (($frameworks -join '|') -cne 'Microsoft.NETCore.App/10.0.11|Microsoft.WindowsDesktop.App/10.0.11') {
+        throw 'Framework-dependent runtimeconfig must request exactly NETCore and WindowsDesktop 10.0.11.'
+    }
+    $firstPartyNames = @('PhotoSift.App', 'PhotoSift.Analysis', 'PhotoSift.Application',
+        'PhotoSift.Domain', 'PhotoSift.Infrastructure.Sqlite', 'PhotoSift.Infrastructure.Windows')
+    foreach ($library in $DependencyManifest.libraries.PSObject.Properties) {
+        $projectName = ($library.Name -split '/')[0]
+        if ($approvedPackageLibraries -ccontains $library.Name) { continue }
+        if ($library.Value.type -ceq 'project' -and $firstPartyNames -ccontains $projectName) { continue }
+        throw "Unexpected framework-dependent runtime library: $($library.Name)"
+    }
+    $allowedBinaries = @($firstPartyNames | ForEach-Object { $_ + '.dll' }) + @(
+        'PhotoSift.App.exe', 'Microsoft.Data.Sqlite.dll', 'SQLitePCLRaw.batteries_v2.dll',
+        'SQLitePCLRaw.core.dll', 'SQLitePCLRaw.provider.e_sqlite3.dll', 'e_sqlite3.dll')
+    foreach ($file in @(Get-ChildItem -Force -File -Recurse -LiteralPath $OutputDirectory)) {
+        if ($file.Extension -in @('.dll', '.exe') -and
+            ($allowedBinaries -cnotcontains $file.Name -or $file.DirectoryName -ine $OutputDirectory)) {
+            throw "Bundled framework or unapproved binary is forbidden in the framework-dependent release: $($file.Name)"
+        }
+    }
+}
+
 function Assert-NoForbiddenRuntimeArtifacts {
     param(
         [Parameter(Mandatory)]
@@ -417,6 +473,9 @@ $runtimeLibraries = Get-JsonPropertyNames -Value $dependencyManifest.libraries
 Assert-NoForbiddenDependencies -Names $runtimeLibraries
 Assert-OnlyApprovedSqliteLibraries -Names $runtimeLibraries
 $outputDirectory = Split-Path -Parent $manifestPath
+if ($FrameworkDependentRelease) {
+    Assert-FrameworkDependentRelease -OutputDirectory $outputDirectory -DependencyManifest $dependencyManifest
+}
 $frameworkPaths = @()
 if (-not [string]::IsNullOrWhiteSpace($FrameworkClosureManifestPath)) {
     $frameworkPaths = @(Read-SelfContainedFrameworkClosure `
