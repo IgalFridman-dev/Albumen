@@ -466,6 +466,18 @@ function Assert-FrameworkDependentResolution {
     }
 }
 
+function Assert-FrameworkDependentProjectConfiguration {
+    param([string]$ProjectPath)
+
+    [xml]$project = Get-Content -Raw -LiteralPath $ProjectPath
+    $declaredRuntimeIdentifiers = @(
+        $project.SelectNodes('/Project/PropertyGroup/RuntimeIdentifiers') |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.InnerText) })
+    if ($declaredRuntimeIdentifiers.Count -gt 0) {
+        throw 'Framework-dependent release project must not declare RuntimeIdentifiers: the builder supplies the exact win-x64 RID, while a project-wide RID list makes the SDK pre-download runtime packs.'
+    }
+}
+
 function Assert-ReleaseDependencyInventory {
     param(
         [string]$InventoryPath,
@@ -573,6 +585,7 @@ foreach ($requiredFile in @(
         throw "Required release input does not exist: $requiredFile"
     }
 }
+Assert-FrameworkDependentProjectConfiguration -ProjectPath $projectPath
 $licensesPath = Join-Path $resolvedRepositoryRoot 'eng\release\licenses'
 if (-not $CaptureOnly) {
     $noticesPath = Join-Path $resolvedRepositoryRoot 'THIRD-PARTY-NOTICES.md'
