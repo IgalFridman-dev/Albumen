@@ -466,8 +466,11 @@ function New-SyntheticReleaseOperations {
                 }
                 [pscustomobject]@{
                     libraries = $restoredLibraries
-                    project = @{ frameworks = @{ 'net10.0-windows7.0' = @{
-                        downloadDependencies = @()
+                    project = @{ frameworks = @{ 'net10.0-windows' = @{
+                        downloadDependencies = @(
+                            @{ name = 'Microsoft.NETCore.App.Runtime.win-x64'; version = '[10.0.11, 10.0.11]' },
+                            @{ name = 'Microsoft.WindowsDesktop.App.Runtime.win-x64'; version = '[10.0.11, 10.0.11]' },
+                            @{ name = 'Microsoft.AspNetCore.App.Runtime.win-x64'; version = '[10.0.11, 10.0.11]' })
                     } } }
                 } | ConvertTo-Json -Depth 6 |
                     Set-Content -LiteralPath $assetsPath -Encoding utf8
@@ -838,20 +841,6 @@ try {
     } -Pattern 'outside.*repository' -Because 'output must not recursively enter the source copy'
     Assert-Equal 0 $nestedCalls.Count 'nested output must be rejected before any external call'
 
-    $multiRidRepository = New-SyntheticReleaseRepository -Name 'multi-rid-repository'
-    $multiRidProjectPath = Join-Path $multiRidRepository 'src\PhotoSift.App\PhotoSift.App.csproj'
-    [xml]$multiRidProject = Get-Content -Raw -LiteralPath $multiRidProjectPath
-    $runtimeIdentifiers = $multiRidProject.CreateElement('RuntimeIdentifiers')
-    $runtimeIdentifiers.InnerText = 'win-x64'
-    $multiRidProject.Project.PropertyGroup.AppendChild($runtimeIdentifiers) | Out-Null
-    $multiRidProject.Save($multiRidProjectPath)
-    $multiRidCalls = [System.Collections.Generic.List[object]]::new()
-    $multiRidOperations = New-SyntheticReleaseOperations -Calls $multiRidCalls -DriftSecondPublish $false
-    Assert-ThrowsLike -Action {
-        & $builderPath -RepositoryRoot $multiRidRepository -OutputRoot (Join-Path $testRoot 'multi-rid-output') -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $multiRidOperations | Out-Null
-    } -Pattern 'RuntimeIdentifiers|runtime-pack downloads' -Because 'a project-wide RID list makes the SDK pre-download runtime packs even for a framework-dependent publish'
-    Assert-Equal 0 $multiRidCalls.Count 'project-wide RuntimeIdentifiers must fail before SDK selection or restore'
-
     $wrongSdkOutput = Join-Path $testRoot 'wrong-sdk-output'
     $wrongSdkCalls = [System.Collections.Generic.List[object]]::new()
     $wrongSdkOperations = New-SyntheticReleaseOperations `
@@ -881,20 +870,66 @@ try {
         'the release workflow must disable SDK roll-forward in the repository pin'
     $script:passed++
 
-    foreach ($downloadId in @('Microsoft.NETCore.App.Runtime.win-x64', 'Microsoft.WindowsDesktop.App.Runtime.win-x64', 'Unexpected.Package')) {
-        $downloadMutation = { param($AssetsPath)
-            $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
-            $assets.project.frameworks.'net10.0-windows7.0'.downloadDependencies = @(@{ name = $downloadId; version = '[10.0.11, 10.0.11]' })
-            Write-Utf8NoBom -Path $AssetsPath -Content ($assets | ConvertTo-Json -Depth 8)
-        }.GetNewClosure()
+    foreach ($downloadCase in @(
+            @{
+                Name = 'missing-runtime-download'
+                Mutate = {
+                    param($AssetsPath)
+                    $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
+                    $assets.project.frameworks.'net10.0-windows'.downloadDependencies = @(
+                        $assets.project.frameworks.'net10.0-windows'.downloadDependencies |
+                            Where-Object { [string]$_.name -cne 'Microsoft.AspNetCore.App.Runtime.win-x64' })
+                    Write-Utf8NoBom -Path $AssetsPath -Content ($assets | ConvertTo-Json -Depth 8)
+                }
+            },
+            @{
+                Name = 'unexpected-runtime-download'
+                Mutate = {
+                    param($AssetsPath)
+                    $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
+                    $assets.project.frameworks.'net10.0-windows'.downloadDependencies +=
+                        @{ name = 'Unexpected.Package'; version = '[10.0.11, 10.0.11]' }
+                    Write-Utf8NoBom -Path $AssetsPath -Content ($assets | ConvertTo-Json -Depth 8)
+                }
+            },
+            @{
+                Name = 'wrong-runtime-download-version'
+                Mutate = {
+                    param($AssetsPath)
+                    $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
+                    @($assets.project.frameworks.'net10.0-windows'.downloadDependencies |
+                        Where-Object { [string]$_.name -ceq 'Microsoft.NETCore.App.Runtime.win-x64' })[0].version = '[10.0.12, 10.0.12]'
+                    Write-Utf8NoBom -Path $AssetsPath -Content ($assets | ConvertTo-Json -Depth 8)
+                }
+            },
+            @{
+                Name = 'duplicate-runtime-download'
+                Mutate = {
+                    param($AssetsPath)
+                    $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
+                    $assets.project.frameworks.'net10.0-windows'.downloadDependencies +=
+                        @{ name = 'Microsoft.NETCore.App.Runtime.win-x64'; version = '[10.0.11, 10.0.11]' }
+                    Write-Utf8NoBom -Path $AssetsPath -Content ($assets | ConvertTo-Json -Depth 8)
+                }
+            })) {
         $downloadCalls = [System.Collections.Generic.List[object]]::new()
-        $downloadOperations = New-SyntheticReleaseOperations -Calls $downloadCalls -DriftSecondPublish $false -AfterRestore $downloadMutation
-        $downloadOutput = Join-Path $testRoot $downloadId
+        $downloadOperations = New-SyntheticReleaseOperations -Calls $downloadCalls -DriftSecondPublish $false -AfterRestore $downloadCase.Mutate
+        $downloadOutput = Join-Path $testRoot $downloadCase.Name
         Assert-ThrowsLike -Action {
             & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot $downloadOutput -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $downloadOperations | Out-Null
-        } -Pattern 'download|framework-dependent' -Because 'framework-dependent restore must reject runtime-pack and unapproved downloads'
-        Assert-Equal 'sdk-version,restore-1' ($downloadCalls.Name -join ',') 'unapproved downloads must stop before publish'
+        } -Pattern 'download|framework-dependent|exact' -Because 'framework-dependent restore must require the exact pinned build-only SDK download set'
+        Assert-Equal 'sdk-version,restore-1' ($downloadCalls.Name -join ',') 'download metadata drift must stop before publish'
     }
+
+    $runtimeLibraryCalls = [System.Collections.Generic.List[object]]::new()
+    $runtimeLibraryOperations = New-SyntheticReleaseOperations `
+        -Calls $runtimeLibraryCalls `
+        -DriftSecondPublish $false `
+        -ExtraRestoredPackage 'Microsoft.NETCore.App.Runtime.win-x64/10.0.11'
+    Assert-ThrowsLike -Action {
+        & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot (Join-Path $testRoot 'runtime-pack-library') -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $runtimeLibraryOperations | Out-Null
+    } -Pattern 'package|dependency closure|runtime' -Because 'build-only PackageDownload metadata must never make a runtime pack an approved application library'
+    Assert-Equal 'sdk-version,restore-1' ($runtimeLibraryCalls.Name -join ',') 'a restored runtime-pack library must stop before publish'
 
     $captureRepository = New-SyntheticReleaseRepository -Name 'capture-repository'
     Remove-Item -Force -LiteralPath (Join-Path $captureRepository 'THIRD-PARTY-NOTICES.md')

@@ -426,24 +426,43 @@ function Assert-FrameworkDependentResolution {
             throw "Locked restore did not resolve the exact approved package: $requiredLibrary"
         }
     }
-    # A framework-dependent publish needs only the apphost, never runtime packs.
-    $packIds = @('Microsoft.NETCore.App.Host.win-x64')
-    $resolvedPacks = @($libraries | Where-Object { ($_ -split '/')[0] -cin $packIds })
+    # SDK 10.0.400 records these exact pinned packs as build-only downloads for
+    # a RID restore. They must never become approved application libraries or
+    # candidate contents.
+    $expectedBuildOnlyDownloads = @(
+        'Microsoft.NETCore.App.Runtime.win-x64',
+        'Microsoft.WindowsDesktop.App.Runtime.win-x64',
+        'Microsoft.AspNetCore.App.Runtime.win-x64')
+    $observedBuildOnlyDownloads = [System.Collections.Generic.List[string]]::new()
     if ($null -ne $assets.PSObject.Properties['project'] -and
         $null -ne $assets.project.PSObject.Properties['frameworks']) {
         foreach ($framework in $assets.project.frameworks.PSObject.Properties) {
             if ($null -eq $framework.Value.PSObject.Properties['downloadDependencies']) { continue }
             foreach ($download in $framework.Value.downloadDependencies) {
-                if ([string]$download.name -cne 'Microsoft.NETCore.App.Host.win-x64' -or
-                    [string]$download.version -cnotmatch '^\[10\.0\.11(?:,\s*10\.0\.11)?\]$') {
+                $downloadName = [string]$download.name
+                if ($expectedBuildOnlyDownloads -cnotcontains $downloadName -or
+                    [string]$download.version -cnotmatch '^\[10\.0\.11,\s*10\.0\.11\]$') {
                     throw "Framework-dependent restore contains an unapproved or unpinned download dependency: $($download.name)/$($download.version)"
                 }
-                $resolvedPacks += [string]$download.name + '/10.0.11'
+                $observedBuildOnlyDownloads.Add($downloadName)
             }
         }
     }
+    foreach ($expectedDownload in $expectedBuildOnlyDownloads) {
+        if (@($observedBuildOnlyDownloads | Where-Object { $_ -ceq $expectedDownload }).Count -ne 1) {
+            throw "Framework-dependent restore must contain the exact pinned build-only download dependency once: $expectedDownload/[10.0.11, 10.0.11]"
+        }
+    }
+    if ($observedBuildOnlyDownloads.Count -ne $expectedBuildOnlyDownloads.Count) {
+        throw 'Framework-dependent restore contains duplicate or unexpected build-only download dependencies.'
+    }
+
+    # A framework-dependent candidate needs only the apphost, never runtime
+    # pack libraries. The apphost can be resolved from assets or the SDK/cache.
+    $apphostPackId = 'Microsoft.NETCore.App.Host.win-x64'
+    $resolvedApphostPacks = @($libraries | Where-Object { ($_ -split '/')[0] -ceq $apphostPackId })
     $sdkApphost = Join-Path $resolvedSdkRoot 'packs/Microsoft.NETCore.App.Host.win-x64/10.0.11/runtimes/win-x64/native/apphost.exe'
-    if ($resolvedPacks -cnotcontains 'Microsoft.NETCore.App.Host.win-x64/10.0.11' -and
+    if ($resolvedApphostPacks -cnotcontains 'Microsoft.NETCore.App.Host.win-x64/10.0.11' -and
         -not [System.IO.File]::Exists($sdkApphost) -and
         -not [System.IO.File]::Exists((Join-Path $resolvedPackagesRoot 'microsoft.netcore.app.host.win-x64/10.0.11/runtimes/win-x64/native/apphost.exe'))) {
         throw 'The pinned SDK/NuGet apphost pack is missing.'
@@ -459,22 +478,10 @@ function Assert-FrameworkDependentResolution {
         Where-Object { [string]$_.Value.type -ceq 'package' } |
         ForEach-Object { $_.Name })
     $unexpectedPackageLibraries = @($actualPackageLibraries | Where-Object {
-            $requiredPackageLibraries -cnotcontains $_ -and $resolvedPacks -cnotcontains $_
+            $requiredPackageLibraries -cnotcontains $_ -and $resolvedApphostPacks -cnotcontains $_
         })
     if ($unexpectedPackageLibraries.Count -gt 0) {
         throw "Locked restore contains a package outside the exact approved production dependency closure: $($unexpectedPackageLibraries -join ', ')"
-    }
-}
-
-function Assert-FrameworkDependentProjectConfiguration {
-    param([string]$ProjectPath)
-
-    [xml]$project = Get-Content -Raw -LiteralPath $ProjectPath
-    $declaredRuntimeIdentifiers = @(
-        $project.SelectNodes('/Project/PropertyGroup/RuntimeIdentifiers') |
-            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.InnerText) })
-    if ($declaredRuntimeIdentifiers.Count -gt 0) {
-        throw 'Framework-dependent release project must not declare RuntimeIdentifiers: the builder supplies the exact win-x64 RID, while a project-wide RID list makes the SDK pre-download runtime packs.'
     }
 }
 
@@ -585,7 +592,6 @@ foreach ($requiredFile in @(
         throw "Required release input does not exist: $requiredFile"
     }
 }
-Assert-FrameworkDependentProjectConfiguration -ProjectPath $projectPath
 $licensesPath = Join-Path $resolvedRepositoryRoot 'eng\release\licenses'
 if (-not $CaptureOnly) {
     $noticesPath = Join-Path $resolvedRepositoryRoot 'THIRD-PARTY-NOTICES.md'
