@@ -570,6 +570,7 @@ function New-SyntheticReleaseOperations {
 if ($LoadHelpersOnly) { return }
 
 try {
+    & (Join-Path $PSScriptRoot 'ReleaseNativeCommand.Tests.ps1')
     $cleanPackage = New-CleanPackage -Name 'clean'
     Test-PhotoSiftRelease -PackagePath $cleanPackage | Out-Null
     $cleanCheckerResult = Invoke-ReleaseChecker -PackagePath $cleanPackage -Name 'clean-checker'
