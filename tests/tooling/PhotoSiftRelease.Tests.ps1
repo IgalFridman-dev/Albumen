@@ -1225,6 +1225,16 @@ try {
         (-not [System.IO.Directory]::Exists((Join-Path $builderOutput '.work'))) `
         'transient independent source/intermediate roots must not remain in final build evidence'
     foreach ($publishCall in @($builderCalls | Where-Object { $_.Name -like 'publish-*' })) {
+        $pathMapArguments = @($publishCall.Arguments | Where-Object {
+                [string]$_ -like '-p:PathMap=*'
+            })
+        Assert-Equal 1 `
+            $pathMapArguments.Count `
+            'each independent publish must provide one compiler path map'
+        Assert-Equal `
+            ('-p:PathMap=' + $publishCall.WorkingDirectory + '=C:\PhotoSift\canonical-source') `
+            ([string]$pathMapArguments[0]) `
+            'distinct clean physical roots must map to the same canonical source root so generated file-local metadata is reproducible'
         $arguments = $publishCall.Arguments -join ' '
         foreach ($requiredArgument in @(
                 'publish',
