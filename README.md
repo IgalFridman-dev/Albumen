@@ -4,12 +4,13 @@ PhotoSift is a privacy-first Windows 11 desktop application for safely finding a
 
 ## Project status
 
-Development status: **17 of 26 stories are complete and 9 remain: E5-S4 is in progress, E5-S5 is the one later V1 story, 2 stories are deferred to V1.1, and 5 are deferred to V1.2. E5-S1 remains complete by explicit product-owner scope waiver for the recruiter-facing MVP, not by a complete accessibility pass.** E1-S5 was merged into `develop` through [PR #1](https://github.com/IgalFridman-dev/PhotoSift/pull/1); later completed work remains stacked locally pending integration decisions. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
+Development status: **17 of 26 stories are complete and 9 remain: E5-S4 is in progress, E5-S5 is the one later V1 story, 2 stories are deferred to V1.1, and 5 are deferred to V1.2. E5-S1 remains complete by explicit product-owner scope waiver for the recruiter-facing MVP, not by a complete accessibility pass.** Completed work through E5-S3 and the current E5-S4 progress checkpoint were integrated and pushed to `develop` on 2026-09-23. This integration does not close E5-S4. GitHub's default `main` branch is a separate integration state; use the [`develop` branch](https://github.com/IgalFridman-dev/PhotoSift/tree/develop) for integrated progress.
 
 Planning is complete and validated. E1-S1 through E1-S6 are done. E1-S6 adds restart-only Action Records, explicit read-only revalidation, accessible progress, and conservative unknown outcomes. Its user-facing safety behavior passed explicit manual verification after the approved two-attempt VM/timing cap stopped the real COM callback crash harness. The deferred automated edge coverage is [PM-001](docs/backlog/post-mvp.md#pm-001--harden-e1-s6-real-process-crash-boundary-automation).
 
 - Latest completed story: **E5-S3 — Offline privacy and privacy-minimized diagnostics**
 - Active story: **E5-S4 — Package a framework-dependent licensed release candidate**
+- Continuing on another computer: [START-HERE-LAPTOP.md](START-HERE-LAPTOP.md), including the fresh-task prompt and VM readiness checklist.
 - V1 prerequisite: **Windows 11 x64 and .NET 10 Desktop Runtime x64 (10.0.11 or a later compatible 10.0 patch)**, installed separately. No SDK is required; PhotoSift runs offline after prerequisite installation.
 - E5-S4 design: [`docs/superpowers/specs/2026-09-23-e5-s4-framework-dependent-release-design.md`](docs/superpowers/specs/2026-09-23-e5-s4-framework-dependent-release-design.md)
 - E5-S4 implementation plan: [`docs/superpowers/plans/2026-09-23-e5-s4-framework-dependent-release.md`](docs/superpowers/plans/2026-09-23-e5-s4-framework-dependent-release.md)
