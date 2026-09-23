@@ -668,6 +668,7 @@ try {
         Assert-FrameworkDependentResolution -AssetsPath $restoredAssetsPath
 
         [System.IO.Directory]::CreateDirectory($rawPublishPaths[$index]) | Out-Null
+        $pathMapSource = $cleanSourcePath.Replace('=', '==').Replace(',', ',,')
         $arguments = @(
             'publish', 'src\PhotoSift.App\PhotoSift.App.csproj',
             '-c', 'Release',
@@ -680,6 +681,7 @@ try {
             '-p:TargetLatestRuntimePatch=false',
             '-p:DebugType=None',
             '-p:DebugSymbols=false',
+            ('-p:PathMap=' + $pathMapSource + '=C:\PhotoSift\canonical-source'),
             '-o', $rawPublishPaths[$index])
         $publishArguments.Add($arguments)
         Invoke-ReleaseExternal `
