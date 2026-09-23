@@ -98,12 +98,26 @@ function Invoke-ReleaseExternal {
     }
     else {
         Push-Location -LiteralPath $WorkingDirectory
+        $previousErrorActionPreference = $ErrorActionPreference
         try {
-            $output = @(& $FilePath @Arguments 2>&1)
-            $exitCode = $LASTEXITCODE
+            # Resolve while errors are still terminating: a failed launch must
+            # never reuse an earlier process's successful exit code.
+            $nativeCommand = Get-Command -Name $FilePath -CommandType Application -ErrorAction Stop
+            $global:LASTEXITCODE = $null
+            # Windows PowerShell turns redirected stderr into ErrorRecords.
+            # Capture those as text and judge the process by its exit code.
+            # This preference is function-local (including on PowerShell 7).
+            $PSNativeCommandUseErrorActionPreference = $false
+            $ErrorActionPreference = 'Continue'
+            $output = @(& $nativeCommand.Path @Arguments 2>&1)
+            $exitCode = $global:LASTEXITCODE
         }
         finally {
+            $ErrorActionPreference = $previousErrorActionPreference
             Pop-Location
+        }
+        if ($null -eq $exitCode) {
+            throw "Release command '$Name' did not return a native exit code: $($output -join [Environment]::NewLine)"
         }
         $result = [pscustomobject]@{ ExitCode = $exitCode; Output = $output -join [System.Environment]::NewLine }
     }
