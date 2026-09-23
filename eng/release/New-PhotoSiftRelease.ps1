@@ -258,64 +258,6 @@ function Copy-CleanReleaseSource {
     }
 }
 
-function Read-RuntimePackList {
-    param([string]$PackageId, [string]$ExpectedFrameworkName, [string]$Profile)
-
-    $packagePath = Join-Path $resolvedPackagesRoot ($PackageId + '\' + $runtimeVersion)
-    $runtimeListPath = Join-Path $packagePath 'data\RuntimeList.xml'
-    if (-not [System.IO.File]::Exists($runtimeListPath)) {
-        throw "Pinned runtime pack list does not exist: $runtimeListPath"
-    }
-    [xml]$runtimeList = Get-Content -Raw -LiteralPath $runtimeListPath
-    $manifestRuntimeIdentifier = $runtimeList.FileList.GetAttributeNode('RuntimeIdentifier')
-    if ([string]$runtimeList.FileList.FrameworkName -cne $ExpectedFrameworkName -or
-        ($null -ne $manifestRuntimeIdentifier -and
-            [string]$manifestRuntimeIdentifier.Value -cne $runtimeIdentifier)) {
-        throw "Runtime pack list does not match $ExpectedFrameworkName $runtimeIdentifier $runtimeVersion`: $runtimeListPath"
-    }
-
-    $packPaths = [System.Collections.Generic.HashSet[string]]::new(
-        [System.StringComparer]::OrdinalIgnoreCase)
-    return @($runtimeList.FileList.File | ForEach-Object {
-            # Match the SDK's selected Windows Desktop profile, including shared entries.
-            if ($Profile -and @($_.GetAttribute('Profile') -split ';') -cnotcontains $Profile) {
-                return
-            }
-            if ([string]$_.Type -cnotin @('Managed', 'Native', 'Resources')) {
-                throw "Runtime pack contains an unsupported asset Type: $($_.Type)"
-            }
-            $sourcePath = ([string]$_.Path).Replace('\', '/')
-            if ([string]::IsNullOrWhiteSpace($sourcePath) -or
-                [System.IO.Path]::IsPathRooted($sourcePath) -or
-                $sourcePath.Contains('..')) {
-                throw "Runtime pack contains a noncanonical path: $sourcePath"
-            }
-            # RuntimeList paths are package-relative; the SDK publishes by filename,
-            # except satellite resources, whose destination includes their Culture.
-            $path = [System.IO.Path]::GetFileName($sourcePath)
-            if ([string]::IsNullOrWhiteSpace($path) -or $path -cne $path.Trim()) {
-                throw "Runtime pack contains a noncanonical publish filename: $sourcePath"
-            }
-            if ([string]$_.Type -ceq 'Resources') {
-                $culture = $_.GetAttribute('Culture')
-                if ($culture -cnotmatch '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$') {
-                    throw "Runtime pack resource has a missing or noncanonical Culture: $sourcePath"
-                }
-                $path = $culture + '/' + $path
-            }
-            if (-not $packPaths.Add($path)) {
-                throw "Runtime pack contains a duplicate or case-colliding path: $path"
-            }
-            [pscustomobject]@{
-                Path = $path
-                SourcePath = $sourcePath
-                PackageId = $PackageId
-                Type = [string]$_.Type
-                Framework = $ExpectedFrameworkName
-            }
-        })
-}
-
 function Get-ReleaseFileVersion {
     param([string]$LiteralPath)
 
@@ -464,7 +406,7 @@ function Get-ReleasePackageMetadata {
     }
 }
 
-function Assert-RuntimePackResolution {
+function Assert-FrameworkDependentResolution {
     param([string]$AssetsPath)
 
     if (-not [System.IO.File]::Exists($AssetsPath)) {
@@ -484,26 +426,20 @@ function Assert-RuntimePackResolution {
             throw "Locked restore did not resolve the exact approved package: $requiredLibrary"
         }
     }
-    # SDK Core uses PackageDownload for runtime packs, so they are not ordinary
-    # libraries. Apphost can be resolved directly from the exact installed SDK pack.
-    $packIds = @('Microsoft.NETCore.App.Runtime.win-x64', 'Microsoft.WindowsDesktop.App.Runtime.win-x64', 'Microsoft.NETCore.App.Host.win-x64')
+    # A framework-dependent publish needs only the apphost, never runtime packs.
+    $packIds = @('Microsoft.NETCore.App.Host.win-x64')
     $resolvedPacks = @($libraries | Where-Object { ($_ -split '/')[0] -cin $packIds })
     if ($null -ne $assets.PSObject.Properties['project'] -and
         $null -ne $assets.project.PSObject.Properties['frameworks']) {
         foreach ($framework in $assets.project.frameworks.PSObject.Properties) {
             if ($null -eq $framework.Value.PSObject.Properties['downloadDependencies']) { continue }
             foreach ($download in $framework.Value.downloadDependencies) {
-                if ([string]$download.name -cnotin $packIds -or
+                if ([string]$download.name -cne 'Microsoft.NETCore.App.Host.win-x64' -or
                     [string]$download.version -cnotmatch '^\[10\.0\.11(?:,\s*10\.0\.11)?\]$') {
-                    throw "Locked restore contains an unapproved or unpinned download dependency: $($download.name)/$($download.version)"
+                    throw "Framework-dependent restore contains an unapproved or unpinned download dependency: $($download.name)/$($download.version)"
                 }
                 $resolvedPacks += [string]$download.name + '/10.0.11'
             }
-        }
-    }
-    foreach ($runtimePack in $packIds[0..1]) {
-        if ($resolvedPacks -cnotcontains ($runtimePack + '/10.0.11')) {
-            throw "Locked restore did not resolve the exact approved runtime download: $runtimePack/10.0.11"
         }
     }
     $sdkApphost = Join-Path $resolvedSdkRoot 'packs/Microsoft.NETCore.App.Host.win-x64/10.0.11/runtimes/win-x64/native/apphost.exe'
@@ -517,7 +453,7 @@ function Assert-RuntimePackResolution {
             $_ -notmatch '/10\.0\.11$'
         })
     if ($wrongRuntimePacks.Count -gt 0) {
-        throw "Locked restore resolved an unpinned self-contained runtime pack: $($wrongRuntimePacks -join ', ')"
+        throw "Locked restore resolved an unpinned apphost pack: $($wrongRuntimePacks -join ', ')"
     }
     $actualPackageLibraries = @($assets.libraries.PSObject.Properties |
         Where-Object { [string]$_.Value.type -ceq 'package' } |
@@ -630,6 +566,7 @@ foreach ($requiredFile in @(
         (Join-Path $resolvedRepositoryRoot 'global.json'),
         (Join-Path $resolvedRepositoryRoot 'NuGet.Config'),
         (Join-Path $resolvedRepositoryRoot 'eng\release\PhotoSiftRelease.psm1'),
+        (Join-Path $resolvedRepositoryRoot 'eng\release\assets\README.txt'),
         (Join-Path $resolvedRepositoryRoot 'eng\release\assets\Start-PhotoSift.cmd'),
         (Join-Path $resolvedRepositoryRoot 'eng\release\assets\Verify-PhotoSiftRelease.ps1'))) {
     if (-not [System.IO.File]::Exists($requiredFile)) {
@@ -678,59 +615,7 @@ if ($observedSdkVersions.Count -ne 1 -or
 }
 $observedSdkVersion = [string]$observedSdkVersions[0]
 
-$netCoreFiles = @(Read-RuntimePackList `
-    -PackageId 'microsoft.netcore.app.runtime.win-x64' `
-    -ExpectedFrameworkName 'Microsoft.NETCore.App')
-$windowsDesktopFiles = @(Read-RuntimePackList `
-    -PackageId 'microsoft.windowsdesktop.app.runtime.win-x64' `
-    -ExpectedFrameworkName 'Microsoft.WindowsDesktop.App' `
-    -Profile 'WPF')
-$runtimePackFiles = @($netCoreFiles + $windowsDesktopFiles)
-$frameworkPathSet = [System.Collections.Generic.Dictionary[string, object]]::new(
-    [System.StringComparer]::OrdinalIgnoreCase)
-foreach ($runtimePackFile in $runtimePackFiles) {
-    if ($frameworkPathSet.ContainsKey($runtimePackFile.Path)) {
-        $existingFile = $frameworkPathSet[$runtimePackFile.Path]
-        if ($existingFile.Path -cne $runtimePackFile.Path) {
-            throw "Pinned runtime packs contain a case-colliding publish path: $($runtimePackFile.Path)"
-        }
-        if ($existingFile.Type -cne $runtimePackFile.Type) {
-            throw "Pinned runtime packs contain a Type conflict for publish path: $($runtimePackFile.Path)"
-        }
-        # The exact pinned packs may share a path. Keep both component inventories
-        # for license provenance, but emit the canonical path only once.
-        continue
-    }
-    $frameworkPathSet.Add($runtimePackFile.Path, $runtimePackFile)
-}
-$frameworkPaths = [string[]]@($frameworkPathSet.Keys)
-[System.Array]::Sort($frameworkPaths, [System.StringComparer]::Ordinal)
-$nativePaths = [string[]]@(
-    @($frameworkPathSet.Values | Where-Object { $_.Type -ceq 'Native' } |
-        ForEach-Object { $_.Path }) + @('e_sqlite3.dll'))
-$nativePathSet = [System.Collections.Generic.Dictionary[string, bool]]::new(
-    [System.StringComparer]::OrdinalIgnoreCase)
-foreach ($nativePath in $nativePaths) {
-    if ($nativePathSet.ContainsKey($nativePath)) {
-        throw "Pinned native closure contains a duplicate or case-colliding path: $nativePath"
-    }
-    $nativePathSet.Add($nativePath, $true)
-}
-[System.Array]::Sort($nativePaths, [System.StringComparer]::Ordinal)
-
-$frameworkPayloadHashes = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
-$frameworkPayloadSources = @(
-    foreach ($file in $runtimePackFiles) {
-        $source = Join-Path $resolvedPackagesRoot ($file.PackageId + '/' + $runtimeVersion + '/' + $file.SourcePath)
-        if (-not [System.IO.File]::Exists($source)) { throw "Pinned runtime payload is missing: $source" }
-        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
-        if (-not $frameworkPayloadHashes.ContainsKey($file.Path)) {
-            $frameworkPayloadHashes.Add($file.Path, [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal))
-        }
-        $frameworkPayloadHashes[$file.Path].Add($hash) | Out-Null
-        [pscustomobject]@{ path = $file.Path; packageId = $file.PackageId; version = $runtimeVersion; sourcePath = $file.SourcePath; sha256 = $hash }
-    })
-Write-ReleaseUtf8NoBom -LiteralPath (Join-Path $evidencePath 'framework-payload-sources.json') -Content ($frameworkPayloadSources | ConvertTo-Json -Depth 5)
+$nativePaths = [string[]]@('e_sqlite3.dll')
 
 $restoreArguments = New-Object 'System.Collections.Generic.List[object]'
 $publishArguments = New-Object 'System.Collections.Generic.List[object]'
@@ -747,7 +632,7 @@ try {
             '--locked-mode',
             '--configfile', 'NuGet.Config',
             '--packages', $resolvedPackagesRoot,
-            '-p:SelfContained=true',
+            '-p:SelfContained=false',
             '-p:RuntimeFrameworkVersion=10.0.11',
             '-p:TargetLatestRuntimePatch=false',
             '-p:NuGetAudit=false')
@@ -761,15 +646,16 @@ try {
         if ([System.IO.File]::Exists($restoredAssetsPath)) {
             [System.IO.File]::Copy($restoredAssetsPath, (Join-Path $evidencePath ('restore-' + ($index + 1) + '-project.assets.json')), $true)
         }
-        Assert-RuntimePackResolution -AssetsPath $restoredAssetsPath
+        Assert-FrameworkDependentResolution -AssetsPath $restoredAssetsPath
 
         [System.IO.Directory]::CreateDirectory($rawPublishPaths[$index]) | Out-Null
         $arguments = @(
             'publish', 'src\PhotoSift.App\PhotoSift.App.csproj',
             '-c', 'Release',
             '-r', $runtimeIdentifier,
-            '--self-contained', 'true',
+            '--self-contained', 'false',
             '--no-restore',
+            '-p:RollForward=LatestPatch',
             '-p:PublishSingleFile=false',
             '-p:RuntimeFrameworkVersion=10.0.11',
             '-p:TargetLatestRuntimePatch=false',
@@ -782,16 +668,6 @@ try {
             -FilePath $dotnetPath `
             -Arguments $arguments `
             -WorkingDirectory $cleanSourcePath | Out-Null
-        foreach ($frameworkPath in $frameworkPaths) {
-            $publishedFrameworkPath = Join-Path $rawPublishPaths[$index] $frameworkPath
-            if (-not [System.IO.File]::Exists($publishedFrameworkPath)) {
-                throw "Published framework closure is missing pinned path: $frameworkPath"
-            }
-            $publishedHash = (Get-FileHash -LiteralPath $publishedFrameworkPath -Algorithm SHA256).Hash
-            if (-not $frameworkPayloadHashes[$frameworkPath].Contains($publishedHash)) {
-                throw "Published framework SHA256 differs from every pinned runtime payload: $frameworkPath"
-            }
-        }
         foreach ($nativePath in $nativePaths) {
             if (-not [System.IO.File]::Exists((Join-Path $rawPublishPaths[$index] $nativePath))) {
                 throw "Published native closure is missing pinned path: $nativePath"
@@ -805,17 +681,6 @@ finally {
     }
 }
 
-$frameworkManifest = [pscustomobject][ordered]@{
-    schemaVersion = 1
-    runtimeIdentifier = $runtimeIdentifier
-    netCoreRuntimeVersion = $runtimeVersion
-    windowsDesktopRuntimeVersion = $runtimeVersion
-    frameworkPaths = $frameworkPaths
-}
-$frameworkManifestPath = Join-Path $evidencePath 'framework-closure.json'
-Write-ReleaseUtf8NoBom `
-    -LiteralPath $frameworkManifestPath `
-    -Content (($frameworkManifest | ConvertTo-Json -Depth 6) + [System.Environment]::NewLine)
 $runtimeBoundaryPath = Join-Path $resolvedRepositoryRoot 'eng\Verify-RuntimeBoundary.ps1'
 Import-Module (Join-Path $resolvedRepositoryRoot 'eng\release\PhotoSiftRelease.psm1') -Force
 for ($index = 0; $index -lt 2; $index++) {
@@ -824,7 +689,7 @@ for ($index = 0; $index -lt 2; $index++) {
     & $runtimeBoundaryPath `
         -DependencyManifestPath (Join-Path $rawPublishPaths[$index] 'PhotoSift.App.deps.json') `
         -SourceRootPath (Join-Path $resolvedRepositoryRoot 'src') `
-        -FrameworkClosureManifestPath $frameworkManifestPath | Out-Null
+        -FrameworkDependentRelease | Out-Null
 }
 
 $rawInventories = @(
@@ -842,8 +707,6 @@ $nativePolicy = [pscustomobject][ordered]@{
 $nativePolicyJson = ($nativePolicy | ConvertTo-Json -Depth 5) + [System.Environment]::NewLine
 
 $packageSpecifications = @(
-    @{ Id = 'Microsoft.NETCore.App.Runtime.win-x64'; Version = '10.0.11' },
-    @{ Id = 'Microsoft.WindowsDesktop.App.Runtime.win-x64'; Version = '10.0.11' },
     @{ Id = 'Microsoft.NETCore.App.Host.win-x64'; Version = '10.0.11' },
     @{ Id = 'Microsoft.Data.Sqlite'; Version = '10.0.11' },
     @{ Id = 'Microsoft.Data.Sqlite.Core'; Version = '10.0.11' },
@@ -863,12 +726,6 @@ $components = @(
         version = $runtimeVersion
         shippedPaths = @('PhotoSift.App.exe')
         packageId = 'Microsoft.NETCore.App.Host.win-x64'
-    },
-    [pscustomobject][ordered]@{
-        name = '.NET Runtime'
-        version = $runtimeVersion
-        shippedPaths = @($netCoreFiles | ForEach-Object { $_.Path })
-        packageId = 'Microsoft.NETCore.App.Runtime.win-x64'
     },
     [pscustomobject][ordered]@{
         name = 'Microsoft.Data.Sqlite'
@@ -916,12 +773,6 @@ $components = @(
         version = '2.1.12'
         shippedPaths = @('SQLitePCLRaw.provider.e_sqlite3.dll')
         packageId = 'SQLitePCLRaw.provider.e_sqlite3'
-    },
-    [pscustomobject][ordered]@{
-        name = 'Windows Desktop / WPF'
-        version = $runtimeVersion
-        shippedPaths = @($windowsDesktopFiles | ForEach-Object { $_.Path })
-        packageId = 'Microsoft.WindowsDesktop.App.Runtime.win-x64'
     })
 $rawPathSet = [System.Collections.Generic.Dictionary[string, bool]]::new(
     [System.StringComparer]::OrdinalIgnoreCase)
@@ -967,7 +818,8 @@ if ($CaptureOnly) {
         runtimeIdentifier = $runtimeIdentifier
         netCoreRuntimeVersion = $runtimeVersion
         windowsDesktopRuntimeVersion = $runtimeVersion
-        selfContained = $true
+        selfContained = $false
+        rollForward = 'LatestPatch'
         publishSingleFile = $false
         targetLatestRuntimePatch = $false
         restoreArguments = $restoreArguments
@@ -986,7 +838,6 @@ if ($CaptureOnly) {
         inventoriesEqual = $true
         comparedFields = @('path', 'length', 'sha256')
         nativePaths = $nativePaths
-        frameworkClosurePath = $frameworkManifestPath
     }
 }
 
@@ -1005,6 +856,9 @@ for ($index = 0; $index -lt 2; $index++) {
         (Join-Path $resolvedRepositoryRoot 'eng\release\assets\Verify-PhotoSiftRelease.ps1'),
         (Join-Path $packagePaths[$index] 'Verify-PhotoSiftRelease.ps1'))
     [System.IO.File]::Copy(
+        (Join-Path $resolvedRepositoryRoot 'eng\release\assets\README.txt'),
+        (Join-Path $packagePaths[$index] 'README.txt'))
+    [System.IO.File]::Copy(
         (Join-Path $resolvedRepositoryRoot 'THIRD-PARTY-NOTICES.md'),
         (Join-Path $packagePaths[$index] 'THIRD-PARTY-NOTICES.md'))
     Copy-Item `
@@ -1018,7 +872,7 @@ for ($index = 0; $index -lt 2; $index++) {
     & (Join-Path $resolvedRepositoryRoot 'eng\Verify-RuntimeBoundary.ps1') `
         -DependencyManifestPath (Join-Path $packagePaths[$index] 'PhotoSift.App.deps.json') `
         -SourceRootPath (Join-Path $resolvedRepositoryRoot 'src') `
-        -FrameworkClosureManifestPath $frameworkManifestPath | Out-Null
+        -FrameworkDependentRelease | Out-Null
     New-PhotoSiftReleaseManifest `
         -PackagePath $packagePaths[$index] `
         -OutputPath (Join-Path $packagePaths[$index] 'release-manifest.json') | Out-Null
@@ -1060,7 +914,8 @@ $buildEvidence = [pscustomobject][ordered]@{
     runtimeIdentifier = $runtimeIdentifier
     netCoreRuntimeVersion = $runtimeVersion
     windowsDesktopRuntimeVersion = $runtimeVersion
-    selfContained = $true
+    selfContained = $false
+    rollForward = 'LatestPatch'
     publishSingleFile = $false
     targetLatestRuntimePatch = $false
     restoreArguments = $restoreArguments
@@ -1082,5 +937,4 @@ return [pscustomobject]@{
     comparedFields = @('path', 'length', 'sha256')
     fileCount = $packageInventories[0].Count
     nativePaths = $nativePaths
-    frameworkClosurePath = $frameworkManifestPath
 }

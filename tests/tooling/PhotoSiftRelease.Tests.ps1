@@ -271,6 +271,7 @@ function New-SyntheticReleaseRepository {
             [System.IO.Path]::GetDirectoryName($destination)) | Out-Null
         [System.IO.File]::Copy($source, $destination)
     }
+    Write-Utf8NoBom -Path (Join-Path $root 'eng\release\assets\README.txt') -Content 'Requires .NET Desktop Runtime 10.0.11 or later 10.0 patch (x64).'
     Write-Utf8NoBom `
         -Path (Join-Path $root 'global.json') `
         -Content '{"sdk":{"version":"10.0.400","rollForward":"disable"}}'
@@ -300,15 +301,14 @@ function New-SyntheticReleaseRepository {
         -Content 'Synthetic SQLite blessing text'
     $componentSpecifications = @(
         @{ Name = '.NET Host'; Version = '10.0.11'; Paths = @('PhotoSift.App.exe'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
-        @{ Name = '.NET Runtime'; Version = '10.0.11'; Paths = @('coreclr.dll', 'System.Net.Http.dll', 'WindowsBase.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Microsoft.Data.Sqlite'; Version = '10.0.11'; Paths = @(); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Microsoft.Data.Sqlite.Core'; Version = '10.0.11'; Paths = @('Microsoft.Data.Sqlite.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Native SQLite'; Version = '3.49.1'; Paths = @('e_sqlite3.dll'); License = 'blessing'; LicensePaths = @('licenses/SQLite-Blessing.txt') },
         @{ Name = 'SQLitePCLRaw.bundle_e_sqlite3'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.batteries_v2.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
         @{ Name = 'SQLitePCLRaw.core'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.core.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
         @{ Name = 'SQLitePCLRaw.lib.e_sqlite3'; Version = '2.1.12'; Paths = @('e_sqlite3.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
-        @{ Name = 'SQLitePCLRaw.provider.e_sqlite3'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.provider.e_sqlite3.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
-        @{ Name = 'Windows Desktop / WPF'; Version = '10.0.11'; Paths = @('D3DCompiler_47_cor3.dll', 'PresentationCore.dll', 'WindowsBase.dll', 'cs/PresentationCore.resources.dll', 'de/PresentationCore.resources.dll', 'wpfgfx_cor3.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') })
+        @{ Name = 'SQLitePCLRaw.provider.e_sqlite3'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.provider.e_sqlite3.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') }
+    )
     $inventory = [pscustomobject][ordered]@{
         schemaVersion = 1
         components = @($componentSpecifications | ForEach-Object {
@@ -334,55 +334,7 @@ function New-SyntheticPackagesRoot {
     param([string]$Name)
 
     $root = Join-Path $testRoot $Name
-    $netCorePath = Join-Path $root 'microsoft.netcore.app.runtime.win-x64\10.0.11\data'
-    $windowsDesktopPath = Join-Path $root 'microsoft.windowsdesktop.app.runtime.win-x64\10.0.11\data'
-    [System.IO.Directory]::CreateDirectory($netCorePath) | Out-Null
-    [System.IO.Directory]::CreateDirectory($windowsDesktopPath) | Out-Null
-    Write-Utf8NoBom `
-        -Path (Join-Path $netCorePath 'RuntimeList.xml') `
-        -Content @'
-<FileList FrameworkName="Microsoft.NETCore.App" TargetFrameworkVersion="10.0">
-  <File Type="Native" Path="runtimes/win-x64/native/coreclr.dll" />
-  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/System.Net.Http.dll" />
-  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/WindowsBase.dll" />
-</FileList>
-'@
-    Write-Utf8NoBom `
-        -Path (Join-Path $windowsDesktopPath 'RuntimeList.xml') `
-        -Content @'
-<FileList FrameworkName="Microsoft.WindowsDesktop.App" TargetFrameworkVersion="10.0">
-  <File Type="Native" Path="runtimes/win-x64/native/D3DCompiler_47_cor3.dll" Profile="WindowsForms;WPF" />
-  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/PresentationCore.dll" Profile="WPF" />
-  <File Type="Native" Path="runtimes/win-x64/native/wpfgfx_cor3.dll" Profile="WPF" />
-  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/WindowsBase.dll" Profile="WPF" />
-  <File Type="Resources" Path="runtimes/win-x64/lib/net10.0/cs/PresentationCore.resources.dll" Culture="cs" Profile="WPF" />
-  <File Type="Resources" Path="runtimes/win-x64/lib/net10.0/de/PresentationCore.resources.dll" Culture="de" Profile="WPF" />
-  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/Microsoft.VisualBasic.dll" Profile="WindowsForms" />
-  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/System.Drawing.dll" Profile="WindowsForms" />
-  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/BlankProfile.dll" Profile="" />
-  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/AbsentProfile.dll" />
-  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/PartialProfile.dll" Profile="NotWPF" />
-  <File Type="Managed" Path="runtimes/win-x64/lib/net10.0/WrongCaseProfile.dll" Profile="wpf" />
-</FileList>
-'@
-    foreach ($payload in @(
-            @{ Package = $netCorePath; Source = 'runtimes/win-x64/native/coreclr.dll'; Name = 'coreclr.dll' },
-            @{ Package = $netCorePath; Source = 'runtimes/win-x64/lib/net10.0/System.Net.Http.dll'; Name = 'System.Net.Http.dll' },
-            @{ Package = $netCorePath; Source = 'runtimes/win-x64/lib/net10.0/WindowsBase.dll'; Name = 'WindowsBase.dll' },
-            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/native/D3DCompiler_47_cor3.dll'; Name = 'D3DCompiler_47_cor3.dll' },
-            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/native/wpfgfx_cor3.dll'; Name = 'wpfgfx_cor3.dll' },
-            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/lib/net10.0/PresentationCore.dll'; Name = 'PresentationCore.dll' },
-            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/lib/net10.0/WindowsBase.dll'; Name = 'WindowsBase.dll' },
-            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/lib/net10.0/cs/PresentationCore.resources.dll'; Name = 'cs/PresentationCore.resources.dll' },
-            @{ Package = $windowsDesktopPath; Source = 'runtimes/win-x64/lib/net10.0/de/PresentationCore.resources.dll'; Name = 'de/PresentationCore.resources.dll' }
-        )) {
-        $payloadPath = Join-Path (Split-Path $payload.Package -Parent) $payload.Source
-        [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($payloadPath)) | Out-Null
-        Write-Utf8NoBom -Path $payloadPath -Content ('synthetic ' + $payload.Name)
-    }
     foreach ($package in @(
-            @{ Id = 'Microsoft.NETCore.App.Runtime.win-x64'; Version = '10.0.11'; License = 'MIT' },
-            @{ Id = 'Microsoft.WindowsDesktop.App.Runtime.win-x64'; Version = '10.0.11'; License = 'MIT' },
             @{ Id = 'Microsoft.NETCore.App.Host.win-x64'; Version = '10.0.11'; License = 'MIT' },
             @{ Id = 'Microsoft.Data.Sqlite'; Version = '10.0.11'; License = 'MIT' },
             @{ Id = 'Microsoft.Data.Sqlite.Core'; Version = '10.0.11'; License = 'MIT' },
@@ -432,9 +384,6 @@ function Write-SyntheticPublishOutput {
     [System.IO.Directory]::CreateDirectory($OutputPath) | Out-Null
     $libraries = [ordered]@{
         'PhotoSift.App/1.0.0' = @{ type = 'project' }
-        'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
-        'Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
-        'Microsoft.NETCore.App.Host.win-x64/10.0.11' = @{ type = 'package' }
         'Microsoft.Data.Sqlite/10.0.11' = @{ type = 'package' }
         'Microsoft.Data.Sqlite.Core/10.0.11' = @{ type = 'package' }
         'SQLitePCLRaw.bundle_e_sqlite3/2.1.12' = @{ type = 'package' }
@@ -446,7 +395,7 @@ function Write-SyntheticPublishOutput {
         Set-Content -LiteralPath (Join-Path $OutputPath 'PhotoSift.App.deps.json') -Encoding utf8
     Write-Utf8NoBom `
         -Path (Join-Path $OutputPath 'PhotoSift.App.runtimeconfig.json') `
-        -Content '{"runtimeOptions":{"tfm":"net10.0","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}'
+        -Content '{"runtimeOptions":{"tfm":"net10.0","rollForward":"LatestPatch","frameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}'
     foreach ($file in @(
             'PhotoSift.App.exe',
             'PhotoSift.App.dll',
@@ -454,15 +403,7 @@ function Write-SyntheticPublishOutput {
             'SQLitePCLRaw.batteries_v2.dll',
             'SQLitePCLRaw.core.dll',
             'SQLitePCLRaw.provider.e_sqlite3.dll',
-            'e_sqlite3.dll',
-            'coreclr.dll',
-            'D3DCompiler_47_cor3.dll',
-            'System.Net.Http.dll',
-            'PresentationCore.dll',
-            'WindowsBase.dll',
-            'cs/PresentationCore.resources.dll',
-            'de/PresentationCore.resources.dll',
-            'wpfgfx_cor3.dll')) {
+            'e_sqlite3.dll')) {
         $content = "synthetic $file"
         if ($Drift -and $file -ceq 'PhotoSift.App.dll') {
             $content += ' drift'
@@ -526,9 +467,7 @@ function New-SyntheticReleaseOperations {
                 [pscustomobject]@{
                     libraries = $restoredLibraries
                     project = @{ frameworks = @{ 'net10.0-windows7.0' = @{
-                        downloadDependencies = @(
-                            @{ name = 'Microsoft.NETCore.App.Runtime.win-x64'; version = '[10.0.11, 10.0.11]' },
-                            @{ name = 'Microsoft.WindowsDesktop.App.Runtime.win-x64'; version = '[10.0.11, 10.0.11]' })
+                        downloadDependencies = @()
                     } } }
                 } | ConvertTo-Json -Depth 6 |
                     Set-Content -LiteralPath $assetsPath -Encoding utf8
@@ -558,7 +497,7 @@ function New-SyntheticReleaseOperations {
                 Get-ChildItem -Force -Recurse -LiteralPath $RootPath)
             return @($entries + @(
                     [pscustomobject]@{
-                        FullName = Join-Path $RootPath 'CORECLR.dll'
+                        FullName = Join-Path $RootPath 'E_SQLITE3.dll'
                         Attributes = [System.IO.FileAttributes]::Normal
                         PSIsContainer = $false
                     }))
@@ -928,29 +867,18 @@ try {
         'the release workflow must disable SDK roll-forward in the repository pin'
     $script:passed++
 
-    foreach ($downloadCase in @(
-            @{ Name = 'runtime-download-range'; Mutate = { param($AssetsPath)
-                $json = (Get-Content -Raw -LiteralPath $AssetsPath).Replace('[10.0.11, 10.0.11]', '[10.0.11, 10.0.12]')
-                Write-Utf8NoBom -Path $AssetsPath -Content $json
-            } },
-            @{ Name = 'runtime-download-missing'; Mutate = { param($AssetsPath)
-                $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
-                $assets.project.frameworks.'net10.0-windows7.0'.downloadDependencies = @()
-                Write-Utf8NoBom -Path $AssetsPath -Content ($assets | ConvertTo-Json -Depth 8)
-            } },
-            @{ Name = 'runtime-download-extra'; Mutate = { param($AssetsPath)
-                $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
-                $assets.project.frameworks.'net10.0-windows7.0'.downloadDependencies += @{ name = 'Unexpected.Package'; version = '[10.0.11, 10.0.11]' }
-                Write-Utf8NoBom -Path $AssetsPath -Content ($assets | ConvertTo-Json -Depth 8)
-            } }
-        )) {
+    foreach ($downloadId in @('Microsoft.NETCore.App.Runtime.win-x64', 'Microsoft.WindowsDesktop.App.Runtime.win-x64', 'Unexpected.Package')) {
+        $downloadMutation = { param($AssetsPath)
+            $assets = Get-Content -Raw -LiteralPath $AssetsPath | ConvertFrom-Json
+            $assets.project.frameworks.'net10.0-windows7.0'.downloadDependencies = @(@{ name = $downloadId; version = '[10.0.11, 10.0.11]' })
+            Write-Utf8NoBom -Path $AssetsPath -Content ($assets | ConvertTo-Json -Depth 8)
+        }.GetNewClosure()
         $downloadCalls = [System.Collections.Generic.List[object]]::new()
-        $downloadOperations = New-SyntheticReleaseOperations -Calls $downloadCalls -DriftSecondPublish $false -AfterRestore $downloadCase.Mutate
-        $downloadOutput = Join-Path $testRoot $downloadCase.Name
+        $downloadOperations = New-SyntheticReleaseOperations -Calls $downloadCalls -DriftSecondPublish $false -AfterRestore $downloadMutation
+        $downloadOutput = Join-Path $testRoot $downloadId
         Assert-ThrowsLike -Action {
             & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot $downloadOutput -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $downloadOperations | Out-Null
-        } -Pattern 'unpinned download|runtime download' -Because 'runtime PackageDownload must resolve only the exact closed pinned version'
-        Assert-True ([System.IO.File]::Exists((Join-Path $downloadOutput 'evidence/restore-1-project.assets.json'))) 'failed restore validation must retain the actual assets input'
+        } -Pattern 'download|framework-dependent' -Because 'framework-dependent restore must reject runtime-pack and unapproved downloads'
         Assert-Equal 'sdk-version,restore-1' ($downloadCalls.Name -join ',') 'unapproved downloads must stop before publish'
     }
 
@@ -974,13 +902,8 @@ try {
     foreach ($diagnostic in @('sdk-version-command.json', 'restore-1-command.json', 'restore-2-command.json', 'publish-1-command.json', 'publish-2-command.json', 'restore-1-project.assets.json', 'restore-2-project.assets.json')) {
         Assert-True ([System.IO.File]::Exists((Join-Path $captureOutput ('evidence/' + $diagnostic)))) 'successful command output and each actual restored assets file must survive work cleanup'
     }
-    $capturedFramework = Get-Content -Raw -LiteralPath (
-        Join-Path $captureOutput 'evidence\framework-closure.json') | ConvertFrom-Json
-    Assert-Equal `
-        'D3DCompiler_47_cor3.dll,PresentationCore.dll,System.Net.Http.dll,WindowsBase.dll,coreclr.dll,cs/PresentationCore.resources.dll,de/PresentationCore.resources.dll,wpfgfx_cor3.dll' `
-        ($capturedFramework.frameworkPaths -join ',') `
-        'WPF and WindowsForms;WPF entries must be included; WindowsForms, blank, absent, partial, and wrong-case profiles must be excluded without filtering NETCore'
-    $script:passed++
+    Assert-True (-not (Test-Path (Join-Path $captureOutput 'evidence/framework-closure.json'))) 'framework-dependent capture must not create a bundled framework closure'
+    Assert-Equal 'e_sqlite3.dll' ($captureResult.nativePaths -join ',') 'only native SQLite ships'
     $captureEvidence = Get-Content -Raw -LiteralPath (
         Join-Path $captureOutput 'evidence\capture-evidence.json') | ConvertFrom-Json
     Assert-Equal '10.0.400' `
@@ -996,14 +919,9 @@ try {
         Join-Path $captureOutput 'evidence\dependency-capture.json') | ConvertFrom-Json
     Assert-Equal 1 $dependencyCapture.schemaVersion 'dependency capture schema must be versioned'
     Assert-Equal `
-        '.NET Host,.NET Runtime,Microsoft.Data.Sqlite,Microsoft.Data.Sqlite.Core,Native SQLite,SQLitePCLRaw.bundle_e_sqlite3,SQLitePCLRaw.core,SQLitePCLRaw.lib.e_sqlite3,SQLitePCLRaw.provider.e_sqlite3,Windows Desktop / WPF' `
+        '.NET Host,Microsoft.Data.Sqlite,Microsoft.Data.Sqlite.Core,Native SQLite,SQLitePCLRaw.bundle_e_sqlite3,SQLitePCLRaw.core,SQLitePCLRaw.lib.e_sqlite3,SQLitePCLRaw.provider.e_sqlite3' `
         (($dependencyCapture.components | ForEach-Object { $_.name }) -join ',') `
         'capture-only mode must enumerate every required shipped/runtime component'
-    foreach ($frameworkComponent in @('.NET Runtime', 'Windows Desktop / WPF')) {
-        $component = @($dependencyCapture.components | Where-Object { $_.name -ceq $frameworkComponent })[0]
-        Assert-Equal 1 @($component.shippedPaths | Where-Object { $_ -ceq 'WindowsBase.dll' }).Count `
-            'a deduplicated framework path must retain provenance in both pinned components'
-    }
     $script:passed++
     $nativeSqliteCapture = @($dependencyCapture.components | Where-Object {
             $_.name -ceq 'Native SQLite'
@@ -1011,50 +929,17 @@ try {
     Assert-Equal '3.49.1' $nativeSqliteCapture.version 'native SQLite version must come from the shipped binary evidence'
     Assert-Equal 'e_sqlite3.dll' ($nativeSqliteCapture.shippedPaths -join ',') 'native SQLite must map to its exact shipped path'
     Assert-True `
-        (@($dependencyCapture.packages).Count -eq 9) `
-        'capture-only mode must retain exact local metadata for both runtime packs, host pack, and all SQLite NuGet packages'
+        (@($dependencyCapture.packages).Count -eq 7) `
+        'capture-only mode must retain exact local metadata for the apphost pack and all SQLite NuGet packages'
     Assert-True `
-        ([System.IO.File]::Exists((Join-Path $captureOutput 'evidence\license-sources\microsoft.netcore.app.runtime.win-x64\10.0.11\LICENSE.txt'))) `
+        ([System.IO.File]::Exists((Join-Path $captureOutput 'evidence\license-sources\microsoft.netcore.app.host.win-x64\10.0.11\LICENSE.txt'))) `
         'capture-only mode must preserve local package license sources for review without downloading anything'
     $script:passed++
-
-    foreach ($overlapCase in @(
-            @{ Name = 'runtime-case-collision'; Replacement = '<File Type="Managed" Path="other/source/windowsbase.dll" Profile="WPF" />'; Pattern = 'case-colliding' },
-            @{ Name = 'runtime-type-conflict'; Replacement = '<File Type="Native" Path="runtimes/win-x64/native/WindowsBase.dll" Profile="WPF" />'; Pattern = 'Type conflict' },
-            @{ Name = 'runtime-same-pack-duplicate'; Replacement = '<File Type="Managed" Path="other/source/PresentationCore.dll" Profile="WPF" />'; Pattern = 'duplicate' },
-            @{ Name = 'runtime-resource-missing-culture'; Replacement = '<File Type="Resources" Path="runtimes/win-x64/lib/net10.0/cs/Other.resources.dll" Profile="WPF" />'; Pattern = 'Culture' },
-            @{ Name = 'runtime-resource-invalid-culture'; Replacement = '<File Type="Resources" Path="runtimes/win-x64/lib/net10.0/cs/Other.resources.dll" Culture="../escape" Profile="WPF" />'; Pattern = 'Culture' },
-            @{ Name = 'runtime-resource-case-collision'; Replacement = '<File Type="Resources" Path="other/source/PresentationCore.resources.dll" Culture="CS" Profile="WPF" />'; Pattern = 'case-colliding' }
-            @{ Name = 'runtime-unknown-type'; Replacement = '<File Type="Mystery" Path="runtimes/win-x64/lib/net10.0/WindowsBase.dll" Profile="WPF" />'; Pattern = 'unsupported.*Type' }
-        )) {
-        $overlapPackages = Join-Path $testRoot ($overlapCase.Name + '-packages')
-        Copy-Item -Recurse -LiteralPath $syntheticPackages -Destination $overlapPackages
-        $overlapManifestPath = Join-Path $overlapPackages `
-            'microsoft.windowsdesktop.app.runtime.win-x64\10.0.11\data\RuntimeList.xml'
-        $overlapManifest = Get-Content -Raw -LiteralPath $overlapManifestPath
-        Write-Utf8NoBom -Path $overlapManifestPath -Content $overlapManifest.Replace(
-            '<File Type="Managed" Path="runtimes/win-x64/lib/net10.0/WindowsBase.dll" Profile="WPF" />', $overlapCase.Replacement)
-        $overlapCalls = [System.Collections.Generic.List[object]]::new()
-        $overlapOperations = New-SyntheticReleaseOperations -Calls $overlapCalls -DriftSecondPublish $false
-        Assert-ThrowsLike -Action {
-            & $builderPath `
-                -RepositoryRoot $syntheticRepository `
-                -OutputRoot (Join-Path $testRoot ($overlapCase.Name + '-output')) `
-                -SdkRoot $syntheticSdk `
-                -PackagesRoot $overlapPackages `
-                -SourceIdentity 'synthetic-source-identity' `
-                -CaptureOnly `
-                -Operations $overlapOperations | Out-Null
-        } -Pattern $overlapCase.Pattern -Because 'only exact-case, same-Type overlap between the two pinned components is permitted'
-        Assert-Equal 'sdk-version' ($overlapCalls.Name -join ',') `
-            'invalid runtime manifest overlap must fail before restore or publish'
-        $script:passed++
-    }
 
     foreach ($captureAuditCase in @(
             @{
                 Name = 'capture-tampered-framework'
-                Pattern = 'pinned.*(hash|payload)|SHA256'
+                Pattern = 'bundled|framework|forbidden'
                 Mutate = {
                     param($OutputPath, $PublishIndex)
                     Write-Utf8NoBom -Path (Join-Path $OutputPath 'System.Net.Http.dll') -Content 'untrusted replacement at a legitimate framework path'
@@ -1233,48 +1118,6 @@ try {
     }
     $script:passed++
 
-    foreach ($runtimeListMismatch in @(
-            @{
-                Name = 'wrong-runtime-framework'
-                Attribute = 'FrameworkName="Microsoft.NETCore.App"'
-                Replacement = 'FrameworkName="Contoso.NotNetCore"'
-            },
-            @{
-                Name = 'wrong-runtime-identifier'
-                Attribute = 'TargetFrameworkVersion="10.0"'
-                Replacement = 'TargetFrameworkVersion="10.0" RuntimeIdentifier="linux-x64"'
-            }
-        )) {
-        $mismatchedPackages = Join-Path $testRoot $runtimeListMismatch.Name
-        Copy-Item -Recurse -LiteralPath $syntheticPackages -Destination $mismatchedPackages
-        $mismatchedRuntimeListPath = Join-Path $mismatchedPackages `
-            'microsoft.netcore.app.runtime.win-x64\10.0.11\data\RuntimeList.xml'
-        $mismatchedRuntimeList = Get-Content -Raw -LiteralPath $mismatchedRuntimeListPath
-        Write-Utf8NoBom `
-            -Path $mismatchedRuntimeListPath `
-            -Content $mismatchedRuntimeList.Replace(
-                $runtimeListMismatch.Attribute,
-                $runtimeListMismatch.Replacement)
-        $mismatchCalls = [System.Collections.Generic.List[object]]::new()
-        $mismatchOperations = New-SyntheticReleaseOperations `
-            -Calls $mismatchCalls `
-            -DriftSecondPublish $false
-        Assert-ThrowsLike `
-            -Action {
-                & $builderPath `
-                    -RepositoryRoot $captureRepository `
-                    -OutputRoot (Join-Path $testRoot ($runtimeListMismatch.Name + '-output')) `
-                    -SdkRoot $syntheticSdk `
-                    -PackagesRoot $mismatchedPackages `
-                    -SourceIdentity 'synthetic-source-identity' `
-                    -CaptureOnly `
-                    -Operations $mismatchOperations | Out-Null
-            } `
-            -Pattern 'runtime pack list does not match' `
-            -Because "the builder must reject a RuntimeList.xml with $($runtimeListMismatch.Name)"
-    }
-    $script:passed++
-
     $unapprovedDependencyOutput = Join-Path $testRoot 'unapproved-dependency-output'
     $unapprovedDependencyCalls = [System.Collections.Generic.List[object]]::new()
     $unapprovedDependencyOperations = New-SyntheticReleaseOperations `
@@ -1293,7 +1136,7 @@ try {
                 -Operations $unapprovedDependencyOperations | Out-Null
         } `
         -Pattern 'approved|dependency|package|Contoso.LocalHelper' `
-        -Because 'self-contained restore must retain the E5-S3 exact approved production package closure'
+        -Because 'framework-dependent restore must retain the E5-S3 exact approved production package closure'
     $script:passed++
 
     $builderOutput = Join-Path $testRoot 'builder-output'
@@ -1338,8 +1181,9 @@ try {
                 'publish',
                 '-c Release',
                 '-r win-x64',
-                '--self-contained true',
+                '--self-contained false',
                 '--no-restore',
+                '-p:RollForward=LatestPatch',
                 '-p:PublishSingleFile=false',
                 '-p:RuntimeFrameworkVersion=10.0.11',
                 '-p:TargetLatestRuntimePatch=false',
@@ -1356,7 +1200,7 @@ try {
                 'restore',
                 '-r win-x64',
                 '--locked-mode',
-                '-p:SelfContained=true',
+                '-p:SelfContained=false',
                 '--configfile',
                 '-p:RuntimeFrameworkVersion=10.0.11',
                 '-p:TargetLatestRuntimePatch=false')) {
@@ -1368,12 +1212,14 @@ try {
     $candidatePath = Join-Path $builderOutput 'candidate'
     Assert-True ([System.IO.Directory]::Exists($candidatePath)) 'candidate must be copied only after two equal package inventories'
     Test-PhotoSiftRelease -PackagePath $candidatePath | Out-Null
+    Assert-True (Test-Path (Join-Path $candidatePath 'README.txt')) 'runtime prerequisite README must be included in the verified package'
+    Assert-Equal $false (Get-Content -Raw (Join-Path $builderOutput 'evidence/build-evidence.json') | ConvertFrom-Json).selfContained 'build evidence must identify framework-dependent deployment'
     $candidateNativePolicy = Get-Content -Raw -LiteralPath (
         Join-Path $candidatePath 'release-native-paths.json') | ConvertFrom-Json
     Assert-Equal `
-        'D3DCompiler_47_cor3.dll,coreclr.dll,e_sqlite3.dll,wpfgfx_cor3.dll' `
+        'e_sqlite3.dll' `
         ($candidateNativePolicy.nativePaths -join ',') `
-        'the builder must derive the exact native closure from the pinned runtime packs plus SQLite'
+        'the framework-dependent package must classify only SQLite as native runtime'
     Assert-Equal $true $buildResult.inventoriesEqual 'the successful builder result must report exact tuple equality'
     Assert-Equal 'pending-owner-approval' $buildResult.status 'a provisional candidate must stop at the redistribution owner gate'
     Assert-Equal 'path,length,sha256' ($buildResult.comparedFields -join ',') 'determinism must be bounded to exact path, length, and SHA-256 tuples'
@@ -1383,7 +1229,7 @@ try {
     Copy-Item -Recurse -LiteralPath $syntheticRepository -Destination $mismatchedRepository
     $mismatchedInventoryPath = Join-Path $mismatchedRepository 'eng\release\release-dependencies.json'
     $mismatchedInventory = Get-Content -Raw -LiteralPath $mismatchedInventoryPath | ConvertFrom-Json
-    @($mismatchedInventory.components | Where-Object { $_.name -ceq '.NET Runtime' })[0].shippedPaths = @('coreclr.dll')
+    @($mismatchedInventory.components | Where-Object { $_.name -ceq '.NET Host' })[0].shippedPaths = @()
     Write-Utf8NoBom `
         -Path $mismatchedInventoryPath `
         -Content (($mismatchedInventory | ConvertTo-Json -Depth 8) + [System.Environment]::NewLine)
@@ -1403,7 +1249,7 @@ try {
                 -Operations $mismatchedOperations | Out-Null
         } `
         -Pattern 'inventory|shipped path|component' `
-        -Because 'a dependency inventory that omits one actually shipped framework file must block candidate creation'
+        -Because 'a dependency inventory that omits the shipped apphost must block candidate creation'
     Assert-True `
         (-not [System.IO.Directory]::Exists((Join-Path $mismatchedOutput 'candidate'))) `
         'an inventory mismatch must leave no provisional candidate'

@@ -9,9 +9,10 @@ Development status: **17 of 26 stories are complete and 9 remain: E5-S4 is in pr
 Planning is complete and validated. E1-S1 through E1-S6 are done. E1-S6 adds restart-only Action Records, explicit read-only revalidation, accessible progress, and conservative unknown outcomes. Its user-facing safety behavior passed explicit manual verification after the approved two-attempt VM/timing cap stopped the real COM callback crash harness. The deferred automated edge coverage is [PM-001](docs/backlog/post-mvp.md#pm-001--harden-e1-s6-real-process-crash-boundary-automation).
 
 - Latest completed story: **E5-S3 — Offline privacy and privacy-minimized diagnostics**
-- Active story: **E5-S4 — Package a self-contained licensed release candidate**
-- E5-S4 design: [`docs/superpowers/specs/2026-09-21-e5-s4-self-contained-release-design.md`](docs/superpowers/specs/2026-09-21-e5-s4-self-contained-release-design.md)
-- E5-S4 implementation plan: [`docs/superpowers/plans/2026-09-21-e5-s4-self-contained-release.md`](docs/superpowers/plans/2026-09-21-e5-s4-self-contained-release.md)
+- Active story: **E5-S4 — Package a framework-dependent licensed release candidate**
+- V1 prerequisite: **Windows 11 x64 and .NET 10 Desktop Runtime x64 (10.0.11 or a later compatible 10.0 patch)**, installed separately. No SDK is required; PhotoSift runs offline after prerequisite installation.
+- E5-S4 design: [`docs/superpowers/specs/2026-09-23-e5-s4-framework-dependent-release-design.md`](docs/superpowers/specs/2026-09-23-e5-s4-framework-dependent-release-design.md)
+- E5-S4 implementation plan: [`docs/superpowers/plans/2026-09-23-e5-s4-framework-dependent-release.md`](docs/superpowers/plans/2026-09-23-e5-s4-framework-dependent-release.md)
 - E5-S3 evidence: [`docs/evidence/e5-s3/verification.md`](docs/evidence/e5-s3/verification.md)
 - E5-S2 evidence: [`docs/evidence/e5-s2/golden-vm-results.md`](docs/evidence/e5-s2/golden-vm-results.md) and [`fixture-manifest.json`](docs/evidence/e5-s2/fixture-manifest.json)
 - E5-S1 evidence: [`docs/evidence/e5-s1/verification.md`](docs/evidence/e5-s1/verification.md)

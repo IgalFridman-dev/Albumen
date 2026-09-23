@@ -29,6 +29,7 @@ try {
         }
         $process = Start-Process `
             -FilePath $FilePath `
+            -WindowStyle Hidden `
             -ArgumentList ($engineArguments + @('-File', $checkerPath) + $Arguments) `
             -Wait `
             -PassThru `
@@ -613,6 +614,54 @@ public static class AllowedAppFixture
         -OutputPrefix 'allowed-path-policy'
     if ($allowedPathPolicyResult.ExitCode -ne 0) {
         throw "Allowed path-policy fixture failed: $($allowedPathPolicyResult.Output)"
+    }
+
+    foreach ($case in @('valid', 'latest-patch', 'included-frameworks', 'aspnet', 'old-minimum',
+            'wrong-tfm', 'disable-patches', 'disabled-rollforward', 'major-rollforward',
+            'framework-override', 'missing-apphost', 'missing-assembly', 'coreclr.dll',
+            'PresentationCore.dll', 'WindowsBase.dll', 'System.Private.CoreLib.dll',
+            'hostfxr.dll', 'wpfgfx_cor3.dll', 'unknown-native.dll', 'runtime-library')) {
+        $fixture = New-RuntimeArtifactFixture -Name ('framework-dependent-' + $case)
+        $options = [ordered]@{
+            tfm = 'net10.0'
+            frameworks = @(
+                @{ name = 'Microsoft.NETCore.App'; version = '10.0.11' },
+                @{ name = 'Microsoft.WindowsDesktop.App'; version = '10.0.11' })
+        }
+        [System.IO.File]::WriteAllText((Join-Path $fixture.Root 'PhotoSift.App.exe'), 'apphost fixture')
+        [System.IO.File]::WriteAllText((Join-Path $fixture.Root 'PhotoSift.App.dll'), 'app fixture')
+        switch ($case) {
+            'latest-patch' { $options.rollForward = 'LatestPatch' }
+            'included-frameworks' { $options.includedFrameworks = $options.frameworks }
+            'aspnet' { $options.frameworks += @{ name = 'Microsoft.AspNetCore.App'; version = '10.0.11' } }
+            'old-minimum' { $options.frameworks[0].version = '10.0.0' }
+            'wrong-tfm' { $options.tfm = 'net9.0' }
+            'disable-patches' { $options.applyPatches = $false }
+            'disabled-rollforward' { $options.rollForward = 'Disable' }
+            'major-rollforward' { $options.rollForward = 'Major' }
+            'framework-override' { $options.frameworks[0].rollForward = 'Disable' }
+            'missing-apphost' { Remove-Item -LiteralPath (Join-Path $fixture.Root 'PhotoSift.App.exe') }
+            'missing-assembly' { Remove-Item -LiteralPath (Join-Path $fixture.Root 'PhotoSift.App.dll') }
+            'runtime-library' {
+                @{ libraries = @{ 'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' } } } |
+                    ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $fixture.Manifest -Encoding utf8
+            }
+            default {
+                if ($case.EndsWith('.dll')) {
+                    [System.IO.File]::WriteAllText((Join-Path $fixture.Root $case), 'bundled binary fixture')
+                }
+            }
+        }
+        @{ runtimeOptions = $options } | ConvertTo-Json -Depth 6 |
+            Set-Content -LiteralPath (Join-Path $fixture.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+        $result = Invoke-BoundaryChecker -Arguments @(
+            '-DependencyManifestPath', $fixture.Manifest, '-SourceRootPath', $fixture.Source,
+            '-FrameworkDependentRelease') -OutputPrefix ('fdd-' + $case)
+        if ($case -in @('valid', 'latest-patch')) {
+            if ($result.ExitCode -ne 0) { throw "Valid framework-dependent package failed: $($result.Output)" }
+        }
+        elseif ($result.ExitCode -eq 0) { throw "Invalid framework-dependent package was accepted: $case" }
+        $script:passed++
     }
 
     Write-Output "Passed: $script:passed Failed: 0"
