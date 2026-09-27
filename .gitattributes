@@ -1,0 +1,3 @@
+# Preserve captured upstream license bytes across Windows checkouts.
+eng/release/licenses/**/*.txt -text
+eng/release/licenses/*.txt -text
