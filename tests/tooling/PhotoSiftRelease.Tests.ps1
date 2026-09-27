@@ -249,7 +249,10 @@ function Invoke-PackageLauncher {
 }
 
 function New-SyntheticReleaseRepository {
-    param([string]$Name)
+    param(
+        [string]$Name,
+        [string]$RedistributionApproval = 'pending-owner-approval'
+    )
 
     $root = Join-Path $testRoot $Name
     foreach ($path in @(
@@ -320,7 +323,7 @@ function New-SyntheticReleaseRepository {
                     packagedLicensePaths = $_.LicensePaths
                     officialSourceUrl = 'https://example.invalid/source/' + ($_.Name -replace ' ', '-')
                     redistributionTermUrl = 'https://example.invalid/terms/' + ($_.Name -replace ' ', '-')
-                    redistributionApproval = 'pending-owner-approval'
+                    redistributionApproval = $RedistributionApproval
                 }
             })
     }
@@ -1282,6 +1285,32 @@ try {
     Assert-Equal $true $buildResult.inventoriesEqual 'the successful builder result must report exact tuple equality'
     Assert-Equal 'pending-owner-approval' $buildResult.status 'a provisional candidate must stop at the redistribution owner gate'
     Assert-Equal 'path,length,sha256' ($buildResult.comparedFields -join ',') 'determinism must be bounded to exact path, length, and SHA-256 tuples'
+    $script:passed++
+
+    $approvedRepository = New-SyntheticReleaseRepository `
+        -Name 'owner-approved-repository' `
+        -RedistributionApproval 'owner-approved'
+    $approvedOutput = Join-Path $testRoot 'owner-approved-output'
+    $approvedCalls = [System.Collections.Generic.List[object]]::new()
+    $approvedOperations = New-SyntheticReleaseOperations `
+        -Calls $approvedCalls `
+        -DriftSecondPublish $false
+    $approvedBuildResult = & $builderPath `
+        -RepositoryRoot $approvedRepository `
+        -OutputRoot $approvedOutput `
+        -SdkRoot $syntheticSdk `
+        -PackagesRoot $syntheticPackages `
+        -SourceIdentity 'owner-approved-source-identity' `
+        -Operations $approvedOperations
+    Assert-Equal `
+        'owner-approved' `
+        $approvedBuildResult.status `
+        'an owner-approved inventory must produce an owner-approved candidate'
+    $approvedCandidatePath = Join-Path $approvedOutput 'candidate'
+    Assert-True `
+        ([System.IO.Directory]::Exists($approvedCandidatePath)) `
+        'an owner-approved build must produce a candidate after both inventories match'
+    Test-PhotoSiftRelease -PackagePath $approvedCandidatePath | Out-Null
     $script:passed++
 
     $mismatchedRepository = Join-Path $testRoot 'mismatched-inventory-repository'
