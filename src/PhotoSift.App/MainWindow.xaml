@@ -88,6 +88,16 @@
                 </StackPanel>
             </app:ReviewAutomationBorder>
         </DataTemplate>
+        <DataTemplate x:Key="ActionRecordHistoryTemplate">
+            <StackPanel Margin="0,8,0,4">
+                <TextBlock Text="{Binding RequestedUtc, StringFormat='Requested: {0:u}'}" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding CertaintyText}" />
+                <TextBlock Text="{Binding OutcomeMixText}" />
+                <TextBlock Text="{Binding RecoveredBytesText}" />
+                <TextBlock Text="{Binding UnknownCount, StringFormat='Unknown items: {0}'}" />
+                <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource ActionRecordItemTemplate}" />
+            </StackPanel>
+        </DataTemplate>
         <Style x:Key="ReviewListStyle" TargetType="ListBox">
             <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
@@ -257,7 +267,9 @@
             </StackPanel>
         </StackPanel>
 
-        <Grid Grid.Row="1">
+        <TabControl Grid.Row="1" AutomationProperties.Name="PhotoSift views">
+          <TabItem Header="Workflow" IsSelected="True" AutomationProperties.Name="Workflow">
+        <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="240" />
                 <ColumnDefinition Width="24" />
@@ -759,25 +771,38 @@
                                 AutomationProperties.Name="Action record status announcement"
                                 AutomationProperties.LiveSetting="Polite" />
                         <ItemsControl ItemsSource="{Binding ActionRecoveryRecords}"
-                                      Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Margin="0,8,0,4">
-                                        <TextBlock Text="{Binding RequestedUtc, StringFormat='Requested: {0:u}'}" FontWeight="SemiBold" />
-                                        <TextBlock Text="{Binding CertaintyText}" />
-                                        <TextBlock Text="{Binding OutcomeMixText}" />
-                                        <TextBlock Text="{Binding RecoveredBytesText}" />
-                                        <TextBlock Text="{Binding UnknownCount, StringFormat='Unknown items: {0}'}" />
-                                        <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource ActionRecordItemTemplate}" />
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                                      ItemTemplate="{StaticResource ActionRecordHistoryTemplate}"
+                                      Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
                       </StackPanel>
                     </ScrollViewer>
                 </Grid>
             </app:ReviewAutomationBorder>
         </Grid>
+          </TabItem>
+          <TabItem x:Name="ActionRecordsTab" Header="Action Records"
+                   AutomationProperties.Name="Action Records">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="12">
+                <TextBlock Text="Action Records" FontSize="24" FontWeight="SemiBold" />
+                <TextBlock Margin="0,8,0,0" Text="Saved Recycle Bin outcomes from this device appear here."
+                           TextWrapping="Wrap" />
+                <TextBlock Margin="0,8,0,0" Text="{Binding ActionRecoveryDisclosure}"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <Button x:Name="HistoryRevalidateUnknownItemsButton" Content="Revalidate unknown items"
+                        MinHeight="38" Margin="0,8,0,0" Padding="14,7" HorizontalAlignment="Left"
+                        Command="{Binding RevalidateUnknownCommand}"
+                        IsEnabled="{Binding CanRevalidateUnknownItems}"
+                        Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <app:ReviewAnnouncementTextBlock Text="{Binding ActionRecoveryAnnouncement}"
+                        TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                <ItemsControl x:Name="ActionRecordsHistoryList"
+                              ItemsSource="{Binding ActionRecoveryRecords}"
+                              ItemTemplate="{StaticResource ActionRecordHistoryTemplate}" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+        </TabControl>
 
         <StackPanel Grid.Row="2" Margin="0,16,0,0">
             <app:ReviewAnnouncementTextBlock x:Name="ReviewAnnouncementText"
