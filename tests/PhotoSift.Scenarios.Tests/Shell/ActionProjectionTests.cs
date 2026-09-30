@@ -142,9 +142,10 @@ internal sealed class ActionShellFixture : IPhotoSiftWorkflow
         property.SetValue(Current, action);
         SnapshotChanged?.Invoke(this, Current);
     }
-    internal void PublishRecovery(ActionRecoverySnapshot recovery)
+    internal void PublishRecovery(ActionRecoverySnapshot recovery,
+        WorkflowPhase phase = WorkflowPhase.ApproveCleanup)
     {
-        Current = Current with { CurrentPhase = WorkflowPhase.ApproveCleanup, ActionRecovery = recovery };
+        Current = Current with { CurrentPhase = phase, ActionRecovery = recovery };
         SnapshotChanged?.Invoke(this, Current);
     }
     internal static T Read<T>(object instance, string name)

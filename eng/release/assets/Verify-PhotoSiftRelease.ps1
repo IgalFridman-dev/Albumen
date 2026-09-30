@@ -548,7 +548,8 @@ if ($null -eq $libraryMode -or -not [bool]$libraryMode.Value) {
     try {
         Test-PhotoSiftPackageIntegrity -PackagePath $PSScriptRoot | Out-Null
         $applicationPath = Join-Path $PSScriptRoot 'PhotoSift.App.exe'
-        & $applicationPath @ApplicationArgument
+        # A pipeline makes PowerShell wait for a GUI app and populate LASTEXITCODE.
+        & $applicationPath @ApplicationArgument | Out-Host
         $applicationExitCode = $LASTEXITCODE
         if ($null -eq $applicationExitCode) {
             $applicationExitCode = 0

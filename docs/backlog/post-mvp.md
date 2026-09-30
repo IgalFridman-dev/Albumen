@@ -43,7 +43,8 @@ The callback/retained-sidecar experiment remains available as the explicit, opt-
 
 ## PM-002 — Verify the E2-S1 startup-failure UI on a stable runnable shell
 
-**Status:** Backlog — required before release-candidate acceptance
+**Status:** Partially verified — visual safety accepted for the recruiter-demo V1;
+Narrator criterion remains open under PM-005
 
 **Priority:** Pre-release verification
 
@@ -77,6 +78,21 @@ The phase-independent startup message, accessibility behavior, zero destructive 
 ### MVP disposition
 
 E2-S1 was accepted complete by explicit product-owner waiver on 2026-09-14. PM-002 does not block E2-S2 or later backend stories, but it blocks final release acceptance until verified or replaced by a documented product-owner release decision.
+
+### 2026-09-30 release disposition
+
+The packaged `f33c63b` runtime-only/no-SDK VM run visibly verified all four
+unsafe SQLite cases, the exact fail-closed warning, Choose Scope containment,
+blocked destructive entry, and preserved database/sidecar bytes and attributes.
+Controlled Narrator relaunch did **not** announce the warning. This is a failed
+accessibility observation, not a PM-002 completion pass. The product owner
+explicitly deferred accessibility beyond the recruiter-demo V1, preferably
+within about one month; the missing announcement is carried into PM-005. The
+`b0c4c13` candidate changed the Action Records view but not startup admission.
+The earlier visual/safety evidence applies to that unchanged path with this
+scope limit. The composed teardown test and a complete Narrator pass remain
+PM-002 completion work; no accessibility-complete claim is permitted.
+See [release verification](../evidence/e5-s4/laptop-release-verification-b0c4c13.md).
 
 ## PM-003 — Align E2-S2 Scan detail and coverage wording before release
 
@@ -170,6 +186,9 @@ of accessibility compliance.
 
 - Resolve the missing Narrator announcement for Scan completion, status, and
   discovered/analyzed/unsupported/failed/canceled/outstanding counts.
+- Resolve the missing Narrator announcement of the local-data fail-closed
+  startup warning observed in PM-002; verify it is spoken once without
+  duplicate Review/Action announcements.
 - Complete the Narrator keyboard walkthrough through Action Records and both
   Local Data Control confirmation branches.
 - Run Accessibility Insights FastPass across the shipped workflow.
@@ -206,3 +225,22 @@ PM-005 does not block the recruiter-demo V1 or E5-S2 through E5-S5. E5-S5 must
 record it as an accepted limitation in the release decision. PM-005 blocks any
 accessibility-complete or accessibility-compliance claim until its completion
 criteria are met.
+
+## PM-006 — Make Review content reachable at default window size
+
+**Status:** Backlog — observed usability limitation on the V1 candidate
+
+**Priority:** Post-V1 layout repair; revisit sooner if a supported display
+cannot reach explicit Approval even after resizing
+
+**Origin:** Owner observation during `b0c4c13` packaged manual verification,
+2026-09-30
+
+At the default PhotoSift window size, some Review content was clipped and
+could not be reached by scrolling. Maximizing the window and scrolling inside
+the lower Approval pane exposed the control; both Near and Exact packaged
+actions completed safely. Make Comparison, selection controls, survivor
+disclosure, and Approval reachable at the default 960×720 window and common
+DPI settings without requiring maximize. Preserve explicit approval and
+virtualized list behavior. Verify in the actual WPF app at multiple window
+sizes, not only through layout unit tests.
