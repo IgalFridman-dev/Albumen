@@ -36,7 +36,8 @@ function Get-NetworkAuditRecords {
         $events = @(Get-WinEvent -FilterHashtable @{
             LogName = 'Security'
             Id = 5156, 5157, 5158
-            StartTime = $StartedUtc
+            # Get-WinEvent stringifies DateTime and loses its Kind; retain the UTC offset.
+            StartTime = $StartedUtc.ToUniversalTime().ToString('o')
         } -ErrorAction Stop)
     }
     catch [System.Exception] {
