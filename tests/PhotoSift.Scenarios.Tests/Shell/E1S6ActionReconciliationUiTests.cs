@@ -11,6 +11,7 @@ using PhotoSift.Application.Action;
 using PhotoSift.Application.Review;
 using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Scan;
+using PhotoSift.Domain.Workflow;
 using Xunit;
 
 namespace PhotoSift.Scenarios.Tests.Shell;
@@ -126,6 +127,42 @@ public sealed class E1S6ActionReconciliationUiTests
 [Collection("WPF UI Automation")]
 public sealed class E1S6ActionReconciliationAccessibilityTests
 {
+    [Fact]
+    public Task SavedActionRecordsAreReachableFromFreshChooseScopeWithoutCleanup() =>
+        WpfScenarioIsolation.RunAsync(typeof(E1S6ActionReconciliationAccessibilityTests), "saved-records-startup",
+            nameof(SavedActionRecordsAreReachableFromFreshChooseScopeWithoutCleanup), stage =>
+        {
+            WpfReviewSelectionTests.RunOnSta(() =>
+            {
+                var fixture = new ActionShellFixture();
+                var record = E1S6ActionReconciliationUiTests.Record(
+                    E1S6ActionReconciliationUiTests.Row(1, ActionRecordEvidenceState.Recycled));
+                fixture.PublishRecovery(new(ActionRecoveryStatus.Ready, [record], null, false),
+                    WorkflowPhase.ChooseScope);
+                var window = new MainWindow { DataContext = fixture.ViewModel };
+                try
+                {
+                    window.Show();
+                    WpfReviewSelectionTests.Drain();
+                    Assert.True(fixture.ViewModel.IsChooseScopePhase);
+                    var history = Assert.IsType<TabItem>(window.FindName("ActionRecordsTab"));
+                    history.IsSelected = true;
+                    window.UpdateLayout();
+                    WpfReviewSelectionTests.Drain();
+                    var records = Assert.IsType<ItemsControl>(window.FindName("ActionRecordsHistoryList"));
+                    Assert.True(records.IsVisible);
+                    Assert.Single(records.Items);
+                    var path = record.Items[0].Requested.Safety.Item.DiscoveredPath;
+                    Assert.Contains(WpfReviewSelectionTests.Descendants<TextBox>(records),
+                        control => control.IsVisible && control.Text == path);
+                    Assert.Empty(fixture.Approvals);
+                    Assert.False(Assert.IsType<Button>(window.FindName("ApproveCleanupButton")).IsVisible);
+                }
+                finally { window.Close(); WpfReviewSelectionTests.Drain(); }
+                stage.CleanupSucceeded();
+            });
+        });
+
     [Fact]
     public Task ActiveProbeIsIndeterminateAnnouncedAndDoesNotStealInspectionFocus() =>
         WpfScenarioIsolation.RunAsync(typeof(E1S6ActionReconciliationAccessibilityTests), "e1-s6-revalidation-ui",
