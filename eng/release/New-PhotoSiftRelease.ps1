@@ -529,8 +529,9 @@ function Assert-ReleaseDependencyInventory {
         if ([string]::IsNullOrWhiteSpace([string]$component.licenseIdentifier)) {
             throw "Release dependency inventory omits a license identifier: $($component.name)"
         }
-        if ([string]$component.redistributionApproval -cne 'pending-owner-approval') {
-            throw "Release dependency redistribution approval must remain pending-owner-approval at the provisional gate: $($component.name)"
+        if (@('pending-owner-approval', 'owner-approved') -cnotcontains
+            [string]$component.redistributionApproval) {
+            throw "Release dependency redistribution approval is not recognized: $($component.name)"
         }
         foreach ($urlProperty in 'officialSourceUrl', 'redistributionTermUrl') {
             $uri = $null
@@ -556,6 +557,13 @@ function Assert-ReleaseDependencyInventory {
             }
         }
         $inventoryByName.Add([string]$component.name, $component)
+    }
+
+    $approvalStates = @($inventoryComponents | ForEach-Object {
+            [string]$_.redistributionApproval
+        } | Sort-Object -Unique)
+    if ($approvalStates.Count -ne 1) {
+        throw 'Release dependency redistribution approval must use one uniform state.'
     }
 
     foreach ($captured in $CapturedComponents) {
@@ -862,9 +870,10 @@ if ($CaptureOnly) {
     }
 }
 
-Assert-ReleaseDependencyInventory `
+$releaseDependencyInventory = Assert-ReleaseDependencyInventory `
     -InventoryPath (Join-Path $resolvedRepositoryRoot 'eng\release\release-dependencies.json') `
-    -CapturedComponents $components | Out-Null
+    -CapturedComponents $components
+$releaseApprovalState = [string]$releaseDependencyInventory.components[0].redistributionApproval
 
 for ($index = 0; $index -lt 2; $index++) {
     Copy-ReleaseDirectoryContents `
@@ -949,7 +958,7 @@ Write-ReleaseUtf8NoBom `
     -Content (($buildEvidence | ConvertTo-Json -Depth 8) + [System.Environment]::NewLine)
 
 return [pscustomobject]@{
-    status = 'pending-owner-approval'
+    status = $releaseApprovalState
     outputRoot = $resolvedOutputRoot
     candidatePath = $candidatePath
     candidateManifestSha256 = $candidateManifestSha256
