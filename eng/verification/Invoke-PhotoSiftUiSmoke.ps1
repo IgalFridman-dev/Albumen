@@ -26,6 +26,17 @@ param(
     [Parameter()]
     [string]$GuestDotnetRoot = 'C:\PhotoSift\golden\sdk',
 
+    # Launch the app this many times, closing the main window normally between
+    # launches, to check what a clean shutdown leaves for the next start.
+    [Parameter()]
+    [ValidateRange(1, 5)]
+    [int]$Launches = 1,
+
+    # Windows app colour mode for the guest user before the app starts.
+    [Parameter()]
+    [ValidateSet('Default', 'Light', 'Dark')]
+    [string]$AppTheme = 'Default',
+
     [Parameter()]
     [ValidateRange(800, 3840)]
     [int]$ScreenWidth = 1600,
@@ -107,7 +118,7 @@ $session = $null
 # Runs inside the guest, in PhotoSiftRunner's interactive desktop session, via
 # a scheduled task. PowerShell Direct itself has no desktop to draw on.
 $guestLaunchScript = @'
-param([string]$AppPath, [string]$OutputPath, [int]$LaunchSeconds, [string]$DotnetRoot)
+param([string]$AppPath, [string]$OutputPath, [int]$LaunchSeconds, [string]$DotnetRoot, [int]$Launches = 1, [string]$AppTheme = 'Default')
 $ErrorActionPreference = 'Stop'
 $log = Join-Path $OutputPath 'guest-launch.log'
 function Write-Log([string]$Message) {
@@ -128,61 +139,101 @@ try {
         $env:DOTNET_ROOT_X64 = $DotnetRoot
         Write-Log "DOTNET_ROOT=$DotnetRoot"
     }
-    Write-Log "Starting $exe"
-    $process = Start-Process -FilePath $exe -WorkingDirectory $AppPath -PassThru
-    $deadline = [DateTimeOffset]::Now.AddSeconds($LaunchSeconds)
-    while ([DateTimeOffset]::Now -lt $deadline) {
-        Start-Sleep -Milliseconds 500
-        $process.Refresh()
-        if ($process.HasExited) { break }
+    if ($AppTheme -ne 'Default') {
+        $personalize = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+        $light = [int]($AppTheme -eq 'Light')
+        New-Item $personalize -Force | Out-Null
+        Set-ItemProperty $personalize -Name AppsUseLightTheme -Value $light -Type DWord
+        Set-ItemProperty $personalize -Name SystemUsesLightTheme -Value $light -Type DWord
+        Start-Sleep -Seconds 3
+        Write-Log "AppTheme=$AppTheme"
+    }
+    $dataPath = Join-Path $env:LOCALAPPDATA 'PhotoSift'
+    function Get-DataFiles {
+        @(Get-ChildItem -LiteralPath $dataPath -Force -ErrorAction SilentlyContinue |
+            ForEach-Object { [pscustomobject]@{ name = $_.Name; length = $_.Length; lastWriteUtc = $_.LastWriteTimeUtc.ToString('O') } })
     }
 
-    $state = [ordered]@{
-        processId = $process.Id
-        hasExited = $process.HasExited
-        exitCode = $(if ($process.HasExited) { $process.ExitCode } else { $null })
-        mainWindowTitle = $null
-        uiaElementCount = 0
-    }
-
-    if (-not $process.HasExited) {
-        $process.Refresh()
-        $state.mainWindowTitle = $process.MainWindowTitle
-        if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
-            [PhotoSiftSmoke.Native]::ShowWindow($process.MainWindowHandle, 3) | Out-Null  # maximize
-            [PhotoSiftSmoke.Native]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
-            Start-Sleep -Seconds 2
-
-            # Dump the UI Automation tree so missing text is visible as data,
-            # not only in the screenshot.
-            $root = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
-            $all = $root.FindAll(
-                [System.Windows.Automation.TreeScope]::Descendants,
-                [System.Windows.Automation.Condition]::TrueCondition)
-            $rows = foreach ($element in $all) {
-                $current = $element.Current
-                [pscustomobject]@{
-                    controlType = $current.ControlType.ProgrammaticName -replace '^ControlType\.', ''
-                    automationId = $current.AutomationId
-                    className = $current.ClassName
-                    name = $current.Name
-                    isOffscreen = $current.IsOffscreen
-                    bounds = $current.BoundingRectangle.ToString()
-                }
-            }
-            $state.uiaElementCount = @($rows).Count
-            $rows | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $OutputPath 'uia-tree.json') -Encoding UTF8
+    $launchStates = @()
+    for ($launch = 1; $launch -le $Launches; $launch++) {
+        # First launch keeps the plain file names; later launches get a suffix.
+        $suffix = if ($launch -eq 1) { '' } else { "-$launch" }
+        Write-Log "Launch $launch : starting $exe"
+        $process = Start-Process -FilePath $exe -WorkingDirectory $AppPath -PassThru
+        $deadline = [DateTimeOffset]::Now.AddSeconds($LaunchSeconds)
+        while ([DateTimeOffset]::Now -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            $process.Refresh()
+            if ($process.HasExited) { break }
         }
+
+        $state = [ordered]@{
+            launch = $launch
+            processId = $process.Id
+            hasExited = $process.HasExited
+            exitCode = $(if ($process.HasExited) { $process.ExitCode } else { $null })
+            mainWindowTitle = $null
+            uiaElementCount = 0
+            dataFilesWhileRunning = Get-DataFiles
+            closedNormally = $null
+            exitCodeAfterClose = $null
+            dataFilesAfterClose = $null
+        }
+
+        if (-not $process.HasExited) {
+            $process.Refresh()
+            $state.mainWindowTitle = $process.MainWindowTitle
+            if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
+                [PhotoSiftSmoke.Native]::ShowWindow($process.MainWindowHandle, 3) | Out-Null  # maximize
+                [PhotoSiftSmoke.Native]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
+                Start-Sleep -Seconds 2
+
+                # Dump the UI Automation tree so missing text is visible as data,
+                # not only in the screenshot.
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+                $all = $root.FindAll(
+                    [System.Windows.Automation.TreeScope]::Descendants,
+                    [System.Windows.Automation.Condition]::TrueCondition)
+                $rows = foreach ($element in $all) {
+                    $current = $element.Current
+                    [pscustomobject]@{
+                        controlType = $current.ControlType.ProgrammaticName -replace '^ControlType\.', ''
+                        automationId = $current.AutomationId
+                        className = $current.ClassName
+                        name = $current.Name
+                        isOffscreen = $current.IsOffscreen
+                        bounds = $current.BoundingRectangle.ToString()
+                    }
+                }
+                $state.uiaElementCount = @($rows).Count
+                $rows | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $OutputPath "uia-tree$suffix.json") -Encoding UTF8
+            }
+        }
+
+        $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+        $bitmap.Save((Join-Path $OutputPath "screen$suffix.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+        $graphics.Dispose(); $bitmap.Dispose()
+
+        # Close like a user would (WM_CLOSE on the main window, never a kill)
+        # before the next launch, and record what the app left on disk.
+        if ($launch -lt $Launches -and -not $process.HasExited) {
+            Write-Log "Launch $launch : closing the main window"
+            $state.closedNormally = $process.CloseMainWindow()
+            $state.closedNormally = $process.WaitForExit(30000) -and $state.closedNormally
+            if ($process.HasExited) { $state.exitCodeAfterClose = $process.ExitCode }
+            else { Write-Log "Launch $launch : did not exit within 30 s; killing it"; $process.Kill(); $process.WaitForExit() }
+            Start-Sleep -Seconds 2
+            $state.dataFilesAfterClose = Get-DataFiles
+        }
+
+        $state | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $OutputPath "app-state$suffix.json") -Encoding UTF8
+        $launchStates += [pscustomobject]$state
+        if ($process.HasExited -and $launch -lt $Launches -and $null -eq $state.closedNormally) { break }
     }
-
-    $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
-    $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-    $bitmap.Save((Join-Path $OutputPath 'screen.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-    $graphics.Dispose(); $bitmap.Dispose()
-
-    $state | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputPath 'app-state.json') -Encoding UTF8
+    Write-Log 'Completed'
     Write-Log 'Completed'
 }
 catch {
@@ -270,18 +321,18 @@ try {
 
     Write-Output "Launching PhotoSift on the guest desktop for $LaunchSeconds seconds."
     Invoke-Command -Session $session -ScriptBlock {
-        param($Root, $AppPath, $OutputPath, $Seconds, $ScriptText, $TaskName, $DotnetRoot)
+        param($Root, $AppPath, $OutputPath, $Seconds, $ScriptText, $TaskName, $DotnetRoot, $LaunchCount, $Theme)
         $scriptPath = Join-Path $Root 'launch.ps1'
         Set-Content -LiteralPath $scriptPath -Value $ScriptText -Encoding UTF8
-        $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -AppPath "{1}" -OutputPath "{2}" -LaunchSeconds {3} -DotnetRoot "{4}"' -f `
-            $scriptPath, $AppPath, $OutputPath, $Seconds, $DotnetRoot
+        $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -AppPath "{1}" -OutputPath "{2}" -LaunchSeconds {3} -DotnetRoot "{4}" -Launches {5} -AppTheme {6}' -f `
+            $scriptPath, $AppPath, $OutputPath, $Seconds, $DotnetRoot, $LaunchCount, $Theme
         $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
         $taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\PhotoSiftRunner" -LogonType Interactive -RunLevel Limited
         Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $taskPrincipal -Force | Out-Null
         Start-ScheduledTask -TaskName $TaskName
-    } -ArgumentList $guestRoot, $guestAppPath, $guestOutputPath, $LaunchSeconds, $guestLaunchScript, $taskName, $GuestDotnetRoot
+    } -ArgumentList $guestRoot, $guestAppPath, $guestOutputPath, $LaunchSeconds, $guestLaunchScript, $taskName, $GuestDotnetRoot, $Launches, $AppTheme
 
-    Wait-PhotoSiftGuestCondition -Description 'the guest launch script' -TimeoutSeconds ($LaunchSeconds + 180) -Condition {
+    Wait-PhotoSiftGuestCondition -Description 'the guest launch script' -TimeoutSeconds (($LaunchSeconds + 45) * $Launches + 180) -Condition {
         Invoke-Command -Session $session -ScriptBlock {
             param($OutputPath) Test-Path -LiteralPath (Join-Path $OutputPath 'done.flag')
         } -ArgumentList $guestOutputPath
