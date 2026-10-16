@@ -1,51 +1,79 @@
 # PhotoSift
 
-PhotoSift is a privacy-first Windows 11 desktop application for safely finding and reviewing exact duplicates, near duplicates, and likely blurry photos in ordinary local folders. Analysis stays on-device, recommendations remain explainable, and no file is removed without explicit approval. Approved removals use the Windows Recycle Bin only.
+**Find duplicate photos on Windows, review them safely, and send only what you approve to the Recycle Bin.**
 
-## Project status
+PhotoSift is a privacy-first Windows 11 desktop app (.NET 10, C# 14, WPF). It scans one local
+folder for byte-identical and conservatively near-identical JPEG/PNG images, groups them for
+side-by-side review, and moves only the files you explicitly approve to the Recycle Bin. It runs
+fully offline, never deletes permanently, and keeps a durable record of every action.
 
-Planning is complete and validated. Implementation has not started.
+> **Status: V1 candidate (accepted for a bounded demo).** 19 of 26 planned stories are done;
+> 2 are planned for V1.1 (Blur, Signature reuse) and 5 for V1.2 (Semantic / Likely Matches).
+> Full automated suite: **1,757 / 1,757** passing. Release decision: `CONCERNS` with
+> documented limitations — see [release readiness](docs/evidence/e5-s5/release-readiness.md).
 
-- Current implementation entry point: **E1-S1 — Bootstrap the native offline application boundary**
-- Current tracking: [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)
-- Story contracts: [`_bmad-output/specs/`](_bmad-output/specs/)
-- Documentation map: [`docs/README.md`](docs/README.md)
+## Highlights
 
-The mandatory first-epic sequence is:
+- **Exact + Near duplicates** — streaming SHA-256 for byte identity (hard links detected as
+  aliases), a managed dHash + color signature for conservative near matches.
+- **Safety by design** — at least one survivor per group, sealed approval, fresh revalidation
+  and a durable SQLite journal before every Recycle Bin call; interrupted actions are reconciled
+  on restart, never replayed.
+- **Clean architecture** — hexagonal modular monolith: Domain → Application (ports) →
+  Infrastructure (Win32, WIC, SQLite) → WPF App, with boundaries enforced by architecture tests.
+- **Offline & private** — no network, no telemetry, no accounts; verified with network audits.
+- **Reproducible release** — locked package restore, pinned SDK, two identical publishes,
+  checksum-verified ZIP and third-party notices.
 
-```text
-E1-S1 -> E1-S2 -> E1-S3 -> E1-S4 -> E1-S5 -> E1-S6 safety gate
+How it works and looks: **[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)**.
+
+## Running it
+
+End users need Windows 11 x64 and the **.NET 10 Desktop Runtime x64 10.0.11+** (no SDK).
+Extract the release ZIP and run `Start-PhotoSift.cmd`; the launcher verifies the package first.
+
+Developers need the .NET SDK `10.0.400` (pinned in `global.json`):
+
+```powershell
+dotnet restore PhotoSift.slnx --locked-mode
+dotnet build   PhotoSift.slnx -c Release --no-restore
+dotnet run --project src/PhotoSift.App -c Release
+dotnet test    PhotoSift.slnx -c Release --no-build
 ```
 
-Each Epic 1 story must be complete before the next begins. No later epic—and especially no semantic or Likely Matches work—may begin until the E1-S6 Windows safety harness records `PASS`. The execution policy in `sprint-status.yaml` is authoritative for this gate.
+Official verification runs in an isolated, NIC-free Hyper-V VM — see
+[`.claude/skills/verify-gates/SKILL.md`](.claude/skills/verify-gates/SKILL.md).
 
-## Product boundary
+## Known limitations (V1)
 
-The MVP is a native, offline-first Windows application built as a hexagonal modular monolith. It analyzes one explicitly selected local folder, keeps source-photo mutation behind a durable and revalidated Action boundary, and degrades optional semantic capability without blocking the core cleanup workflow.
-
-The project deliberately excludes cloud inference, accounts, telemetry, automatic or permanent deletion, and general-purpose photo-library management.
-
-## Implementation workflow
-
-1. Read the current story's `SPEC.md` and its linked upstream decisions.
-2. Implement only that story's contract and acceptance criteria.
-3. Run its required automated, integration, and platform evidence.
-4. Review the change before marking the story done.
-5. Update `_bmad-output/implementation-artifacts/sprint-status.yaml` without bypassing its execution policy.
-6. Stop at E1-S6 until the safety gate is explicitly recorded as `PASS`.
-
-The application solution and source tree are intentionally absent before E1-S1; bootstrapping them is part of that story.
+- At the default window size Review content can be clipped; maximize and scroll the Approval pane (PM-006).
+- Accessibility is not complete: a local-data warning is not announced by Narrator (PM-002, PM-005). No accessibility-compliance claim.
+- HEIF depends on the Windows codec and is best effort.
+- A first 300-image scan took 12.1 s on a 2-CPU / 4 GiB VM — an observation, not a guarantee.
 
 ## Repository layout
 
 ```text
-PhotoSift/
-|-- README.md
-|-- docs/                         # Human-facing documentation index
-`-- _bmad-output/
-    |-- planning-artifacts/       # Product, UX, architecture, and backlog
-    |-- specs/                    # One implementation contract per story
-    `-- implementation-artifacts/ # Sprint tracking and implementation evidence
+src/                     6 production projects (Domain, Application, Analysis, Infrastructure.Sqlite,
+                         Infrastructure.Windows, App)
+tests/                   5 xUnit v3 projects + Pester tests for tooling
+eng/                     verification (Hyper-V VM gates) and release packaging scripts
+docs/                    HOW-IT-WORKS, documentation index, per-story evidence, backlog,
+                         superpowers/ design specs and implementation plans
+_bmad-output/            product brief, PRD, UX, architecture, epics, one SPEC.md per story,
+                         sprint-status.yaml
+CLAUDE.md, .claude/      Claude Code project guide, skills, agent and commands
 ```
 
-Local `.uv-cache-bmad-*` directories are disposable workflow caches and are not project artifacts.
+## How it was built
+
+Planned with the BMAD Method (brief → PRD → UX → architecture → epics → 26 story specs) and
+implemented story by story with a test-first design → plan → build → review → evidence loop
+(originally Codex + Superpowers, now continued with Claude Code). Every finished story has a
+verification record in [`docs/evidence/`](docs/evidence/); the documentation index is
+[`docs/README.md`](docs/README.md); progress lives in
+[`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml).
+
+## Notices
+
+No open-source license has been chosen yet. Shipped dependency notices: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

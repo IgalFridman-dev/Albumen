@@ -1,0 +1,817 @@
+<Window x:Class="PhotoSift.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:PhotoSift.App"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="PhotoSift"
+        Width="960"
+        Height="720"
+        MinWidth="680"
+        MinHeight="520"
+        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+        Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+        WindowStartupLocation="CenterScreen">
+    <Window.CommandBindings>
+        <CommandBinding Command="ApplicationCommands.SelectAll"
+                        CanExecute="OnCanSelectFocusedReviewGroup"
+                        Executed="OnSelectFocusedReviewGroup" />
+    </Window.CommandBindings>
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <Style x:Key="ActionFocusVisual" TargetType="Control">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate>
+                        <Rectangle Margin="2" StrokeThickness="2" StrokeDashArray="1,1"
+                                   Stroke="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="DangerButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#FFB3261E" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource ActionFocusVisual}" />
+        </Style>
+        <DataTemplate x:Key="ScanOutcomeSummaryTemplate">
+            <StackPanel Margin="0,2">
+                <TextBlock TextWrapping="Wrap">
+                    <Run FontWeight="SemiBold" Text="{Binding Label}" />
+                    <Run Text=": " />
+                    <Run Text="{Binding Count, Mode=OneWay}" />
+                </TextBlock>
+                <TextBlock Text="{Binding NextStep}" TextWrapping="Wrap" />
+            </StackPanel>
+        </DataTemplate>
+        <DataTemplate x:Key="ActionItemTemplate">
+            <app:ReviewAutomationBorder Margin="4,6" Padding="8" BorderThickness="1"
+                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    AutomationProperties.AutomationId="action-item"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.ItemStatus="{Binding ItemStatus}">
+                <StackPanel>
+                    <TextBlock Text="Windows Recycle Bin — original path" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBox Text="{Binding OriginalPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                             AutomationProperties.Name="{Binding AutomationName}"
+                             AutomationProperties.ItemStatus="{Binding ItemStatus}" />
+                    <TextBlock Text="{Binding StateText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ReasonText}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding CertaintyText}" TextWrapping="Wrap" />
+                </StackPanel>
+            </app:ReviewAutomationBorder>
+        </DataTemplate>
+        <DataTemplate x:Key="ActionRecordItemTemplate">
+            <app:ReviewAutomationBorder Margin="4,6" Padding="8" BorderThickness="1"
+                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    AutomationProperties.AutomationId="action-record-item"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.ItemStatus="{Binding StatusText}">
+                <StackPanel>
+                    <TextBox Text="{Binding OriginalPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                             AutomationProperties.Name="Action record original path"
+                             AutomationProperties.ItemStatus="{Binding StatusText}" />
+                    <TextBlock Text="{Binding ResultText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ReasonText}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap"
+                               Visibility="{Binding IsVerifying, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <ProgressBar Height="8" Margin="0,5,0,0" IsIndeterminate="{Binding IsVerifying}"
+                                 Visibility="{Binding IsVerifying, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                 AutomationProperties.Name="Current file state verification progress"
+                                 AutomationProperties.ItemStatus="{Binding StatusText}" />
+                </StackPanel>
+            </app:ReviewAutomationBorder>
+        </DataTemplate>
+        <DataTemplate x:Key="ActionRecordHistoryTemplate">
+            <StackPanel Margin="0,8,0,4">
+                <TextBlock Text="{Binding RequestedUtc, StringFormat='Requested: {0:u}'}" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding CertaintyText}" />
+                <TextBlock Text="{Binding OutcomeMixText}" />
+                <TextBlock Text="{Binding RecoveredBytesText}" />
+                <TextBlock Text="{Binding UnknownCount, StringFormat='Unknown items: {0}'}" />
+                <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource ActionRecordItemTemplate}" />
+            </StackPanel>
+        </DataTemplate>
+        <Style x:Key="ReviewListStyle" TargetType="ListBox">
+            <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+            <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+            <Setter Property="VirtualizingPanel.ScrollUnit" Value="Item" />
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <DataTemplate x:Key="OccurrenceTemplate">
+            <StackPanel Margin="4,6">
+                <TextBlock Text="{Binding PathKind}" FontWeight="SemiBold" />
+                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" TextWrapping="Wrap"
+                         AutomationProperties.Name="Discovered file path" />
+                <TextBox Text="{Binding ResolvedPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" TextWrapping="Wrap"
+                         AutomationProperties.Name="Resolved file path" />
+                <TextBlock Text="{Binding PhysicalIdentity}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding ByteLength, StringFormat='Content length: {0} bytes'}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Allocation}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Outcome}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding OutcomeLabel}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding NextStep}" TextWrapping="Wrap" />
+            </StackPanel>
+        </DataTemplate>
+        <DataTemplate x:Key="ReviewOccurrenceTemplate">
+            <StackPanel Margin="4,6">
+                <app:ReviewSelectionCheckBox MinHeight="34"
+                          Padding="4"
+                          IsChecked="{Binding IsSelected, Mode=OneWay}"
+                          IsEnabled="{Binding CanSelect}"
+                          Command="{Binding ToggleSelectionCommand}"
+                          AutomationProperties.AutomationId="selection-control"
+                          AutomationProperties.Name="{Binding AutomationName}"
+                          AutomationProperties.ItemStatus="{Binding ItemStatus}"
+                           Content="{Binding EligibilityText}" />
+                <TextBlock Text="{Binding PathKind}" FontWeight="SemiBold" />
+                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False"
+                         TextWrapping="Wrap" AutomationProperties.Name="Discovered file path" />
+                <TextBox Text="{Binding ResolvedPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False"
+                         TextWrapping="Wrap" AutomationProperties.Name="Resolved file path" />
+                <TextBlock Text="{Binding PhysicalIdentity}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding ByteLength, StringFormat='Content length: {0} bytes'}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Allocation}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Outcome}" TextWrapping="Wrap" />
+            </StackPanel>
+        </DataTemplate>
+        <DataTemplate x:Key="ReviewCategoryTemplate">
+            <Button MinHeight="44" Margin="4" Padding="10,6" HorizontalContentAlignment="Left"
+                    Content="{Binding AutomationName}"
+                    Click="OnOpenReviewCategoryClick"
+                    AutomationProperties.AutomationId="open-review-category"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.PositionInSet="{Binding PositionInSet}"
+                    AutomationProperties.SizeOfSet="{Binding SizeOfSet}" />
+        </DataTemplate>
+        <DataTemplate x:Key="ReviewGroupTemplate">
+            <Button MinHeight="44" Margin="4" Padding="10,6" HorizontalContentAlignment="Left"
+                    Content="{Binding Summary}"
+                    Click="OnOpenReviewGroupClick"
+                    AutomationProperties.AutomationId="open-review-group"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.ItemStatus="{Binding ItemStatus}"
+                    AutomationProperties.PositionInSet="{Binding PositionInSet}"
+                    AutomationProperties.SizeOfSet="{Binding SizeOfSet}" />
+        </DataTemplate>
+        <DataTemplate x:Key="ReviewComparisonTemplate">
+            <StackPanel Margin="4,6">
+                <Button MinHeight="38" Padding="8,5" HorizontalContentAlignment="Left"
+                        Content="Open comparison"
+                        Click="OnOpenReviewMemberClick"
+                        AutomationProperties.AutomationId="open-review-member"
+                        AutomationProperties.Name="{Binding AutomationName}"
+                        AutomationProperties.ItemStatus="{Binding ItemStatus}"
+                        AutomationProperties.PositionInSet="{Binding PositionInSet}"
+                        AutomationProperties.SizeOfSet="{Binding SizeOfSet}" />
+                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True"
+                         IsTabStop="False" TextWrapping="Wrap"
+                         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                         AutomationProperties.Name="{Binding DiscoveredPath}" />
+                <app:ReviewSelectionCheckBox x:Name="ReviewSelectionCheckBox" MinHeight="34"
+                        Padding="4" Margin="0,4,0,0"
+                        IsChecked="{Binding IsSelected, Mode=OneWay}"
+                        IsEnabled="{Binding CanSelect}"
+                        Command="{Binding ToggleSelectionCommand}"
+                        AutomationProperties.AutomationId="selection-control"
+                        AutomationProperties.Name="{Binding AutomationName}"
+                        AutomationProperties.ItemStatus="{Binding ItemStatus}"
+                        Content="{Binding EligibilityText}" />
+            </StackPanel>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock FontSize="30"
+                       FontWeight="SemiBold"
+                       Text="PhotoSift" />
+            <TextBlock Margin="0,6,0,0"
+                       FontSize="16"
+                       TextWrapping="Wrap"
+                       Text="Choose one local photo folder. PhotoSift checks it without changing or uploading your photos." />
+            <TextBlock x:Name="LocalDataStatusText" Margin="0,6,0,0"
+                       Text="{Binding ActionRecoveryStatusText}" TextWrapping="Wrap"
+                       AutomationProperties.Name="Local data status"
+                       AutomationProperties.ItemStatus="{Binding ActionRecoveryStatusText}"
+                       AutomationProperties.LiveSetting="Polite" />
+            <StackPanel Margin="0,10,0,0"
+                        Visibility="{Binding HasLocalScanDataControl, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Button x:Name="ClearScanDataButton"
+                        Content="Clear local Scan data"
+                        HorizontalAlignment="Left"
+                        MinHeight="34"
+                        Padding="12,6"
+                        IsDefault="False"
+                        IsCancel="False"
+                        AutomationProperties.Name="Clear local Scan data"
+                        AutomationProperties.HelpText="Starts confirmation. Source photos and Action records are not cleared."
+                        Command="{Binding RequestClearScanDataCommand}" />
+                <StackPanel Margin="0,8,0,0"
+                            Visibility="{Binding IsClearScanDataConfirmationPending, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock x:Name="ClearScanDataConsequenceText"
+                               Text="This clears local Scan history and checkpoints. Source photos are unchanged. Action records are retained."
+                               TextWrapping="Wrap" />
+                    <WrapPanel Margin="0,6,0,0">
+                        <Button x:Name="ConfirmClearScanDataButton"
+                                Content="Confirm clear local Scan data"
+                                MinHeight="34"
+                                Padding="12,6"
+                                Margin="0,0,8,0"
+                                IsDefault="False"
+                                IsCancel="False"
+                                IsTabStop="True"
+                                Style="{StaticResource DangerButtonStyle}"
+                                AutomationProperties.Name="Confirm clear local Scan data"
+                                AutomationProperties.HelpText="Clears local Scan data. Source photos and Action records remain unchanged."
+                                IsVisibleChanged="OnClearScanDataConfirmationVisibilityChanged"
+                                Command="{Binding ConfirmClearScanDataCommand}" />
+                        <Button Content="Cancel"
+                                MinHeight="34"
+                                Padding="12,6"
+                                IsDefault="False"
+                                IsCancel="False"
+                                AutomationProperties.Name="Cancel clearing local Scan data"
+                                Command="{Binding CancelClearScanDataCommand}" />
+                    </WrapPanel>
+                </StackPanel>
+                <TextBlock x:Name="LocalDataClearStatusText"
+                           Margin="0,6,0,0"
+                           Text="{Binding LocalDataClearStatus}"
+                           TextWrapping="Wrap"
+                           Focusable="True"
+                           AutomationProperties.Name="Local Scan data clear status"
+                           AutomationProperties.ItemStatus="{Binding LocalDataClearStatus}"
+                           AutomationProperties.LiveSetting="Polite" />
+            </StackPanel>
+        </StackPanel>
+
+        <TabControl Grid.Row="1" AutomationProperties.Name="PhotoSift views">
+          <TabItem Header="Workflow" IsSelected="True" AutomationProperties.Name="Workflow">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="240" />
+                <ColumnDefinition Width="24" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <ScrollViewer Grid.Column="0"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="PhaseRail"
+                              AutomationProperties.Name="Workflow phases"
+                              ItemsSource="{Binding Phases}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Margin="0,0,0,10"
+                                    Padding="12"
+                                    CornerRadius="4"
+                                    BorderThickness="1"
+                                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock FontSize="15"
+                                               FontWeight="SemiBold"
+                                               Text="{Binding DisplayName}" />
+                                    <TextBlock Grid.Row="1"
+                                               Margin="0,3,0,8"
+                                               Text="{Binding AvailabilityLabel}" />
+                                    <Button Grid.Row="2"
+                                            MinHeight="32"
+                                            Padding="10,5"
+                                            AutomationProperties.Name="{Binding DisplayName}"
+                                            Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Phase}"
+                                            Content="{Binding DisplayName}"
+                                            IsEnabled="{Binding IsAvailable}" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <ScrollViewer Grid.Column="2" Visibility="{Binding IsChooseScopePhase, Converter={StaticResource BooleanToVisibilityConverter}}"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock FontSize="24"
+                               FontWeight="SemiBold"
+                               Text="Choose Scope" />
+
+                    <Border Margin="0,14,0,0"
+                            Padding="14"
+                            CornerRadius="4"
+                            BorderThickness="1"
+                            BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Path x:Name="ScopeStatusIcon"
+                                  Width="18"
+                                  Height="18"
+                                  Margin="0,2,10,0"
+                                  VerticalAlignment="Top"
+                                  AutomationProperties.ItemStatus="{Binding ScopeStatus}"
+                                  AutomationProperties.Name="{Binding ScopeStatus, StringFormat='Scope status: {0}'}"
+                                  Fill="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                                  Stretch="Uniform">
+                                <Path.Style>
+                                    <Style TargetType="Path">
+                                        <Setter Property="Data"
+                                                Value="M 9,0 L 18,9 L 9,18 L 0,9 Z" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsReady}" Value="True">
+                                                <Setter Property="Data"
+                                                        Value="M 1,9 L 6,14 L 17,3 L 14,0 L 6,8 L 4,6 Z" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                                <Setter Property="Data"
+                                                        Value="M 9,0 L 18,18 L 0,18 Z M 8,5 L 10,5 L 10,12 L 8,12 Z M 8,14 L 10,14 L 10,16 L 8,16 Z" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Path.Style>
+                            </Path>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock x:Name="ScopeStatusText"
+                                           FontSize="18"
+                                           FontWeight="SemiBold"
+                                           AutomationProperties.HelpText="{Binding Instruction}"
+                                           AutomationProperties.ItemStatus="{Binding ScopeStatus}"
+                                           AutomationProperties.LiveSetting="Polite"
+                                           AutomationProperties.Name="Scope status"
+                                           Text="{Binding ScopeStatus}" />
+                                <TextBlock Margin="0,5,0,0"
+                                           TextWrapping="Wrap"
+                                           Text="{Binding Instruction}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border x:Name="BlockingNotice"
+                            Margin="0,14,0,0"
+                            Padding="14"
+                            Focusable="True"
+                            AutomationProperties.Name="{Binding BlockingNoticeAutomationName}"
+                            Background="{DynamicResource {x:Static SystemColors.InfoBrushKey}}"
+                            BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                            BorderThickness="1"
+                            TextElement.Foreground="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}"
+                            Visibility="{Binding IsBlocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold"
+                                       Text="This folder cannot be used yet." />
+                            <ItemsControl Margin="0,6,0,0"
+                                          AutomationProperties.Name="Blocking reasons"
+                                          ItemsSource="{Binding BlockingReasons}" />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Margin="0,16,0,0">
+                        <TextBlock FontWeight="SemiBold"
+                                   Text="Selected Scope" />
+                        <TextBox x:Name="SelectedPathTextBox"
+                                 Margin="0,5,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 Text="{Binding SelectedPath, Mode=OneWay}"
+                                 TextWrapping="Wrap"
+                                 AutomationProperties.Name="Selected Scope" />
+
+                        <TextBlock Margin="0,12,0,0"
+                                   FontWeight="SemiBold"
+                                   Text="Resolved Scope" />
+                        <TextBox x:Name="ResolvedPathTextBox"
+                                 Margin="0,5,0,0"
+                                 Padding="8"
+                                 IsReadOnly="True"
+                                 Text="{Binding ResolvedPath, Mode=OneWay}"
+                                 TextWrapping="Wrap"
+                                 AutomationProperties.Name="Resolved Scope" />
+
+                        <CheckBox x:Name="IncludeSubfoldersCheckBox"
+                                  Margin="0,14,0,0"
+                                  AutomationProperties.Name="Include subfolders"
+                                  Command="{Binding ChangeRecursionCommand}"
+                                  CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                  Content="Include subfolders"
+                                  IsEnabled="{Binding CanChangeRecursion}"
+                                  IsChecked="{Binding IncludeSubfolders, Mode=OneWay}" />
+                    </StackPanel>
+
+                    <TextBlock Margin="0,18,0,0"
+                               FontSize="17"
+                               FontWeight="SemiBold"
+                               Text="Preflight summary" />
+                    <ItemsControl x:Name="ScopeSummaryList"
+                                  Margin="0,8,0,0"
+                                  AutomationProperties.Name="Scope preflight summary"
+                                  ItemsSource="{Binding ScopeSummary}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,5">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Label}" />
+                                    <TextBlock Grid.Column="1"
+                                               Margin="16,0,0,0"
+                                               FontWeight="SemiBold"
+                                               Text="{Binding Value}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock x:Name="RuleSetStatusText"
+                               Margin="0,14,0,0"
+                               FontWeight="SemiBold"
+                               Text="{Binding RuleSetStatus, StringFormat='Rule Set: {0}'}" />
+
+                    <WrapPanel Margin="0,18,0,0">
+                        <Button x:Name="ChooseAnotherScopeButton"
+                                MinWidth="160"
+                                MinHeight="36"
+                                Margin="0,0,10,10"
+                                Padding="14,7"
+                                AutomationProperties.Name="{Binding Content, RelativeSource={RelativeSource Self}}"
+                                Command="{Binding ChooseScopeCommand}">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Content" Value="Choose folder" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsChecking}" Value="True">
+                                            <Setter Property="Content" Value="Choose another folder" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsReady}" Value="True">
+                                            <Setter Property="Content" Value="Choose another folder" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                            <Setter Property="Content" Value="Choose another folder" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsCanceled}" Value="True">
+                                            <Setter Property="Content" Value="Choose another folder" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+
+                        <Button x:Name="RetryScopeButton"
+                                MinWidth="160"
+                                MinHeight="36"
+                                Margin="0,0,10,10"
+                                Padding="14,7"
+                                AutomationProperties.Name="Retry Scope verification"
+                                Command="{Binding RetryScopeCommand}"
+                                Content="Retry verification">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsCanceled}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button x:Name="ContinueButton" MinHeight="36" Padding="14,7" Margin="0,0,10,10"
+                                Content="Continue" AutomationProperties.Name="Continue to Confirm Rules"
+                                Command="{Binding ContinueCommand}" IsEnabled="{Binding CanContinue}" />
+                    </WrapPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          Visibility="{Binding IsConfirmRulesPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <StackPanel>
+                    <TextBlock Text="Confirm Rules" FontSize="24" FontWeight="SemiBold" />
+                    <TextBlock Text="Selected Scope" Margin="0,16,0,4" FontWeight="SemiBold" />
+                    <TextBox Text="{Binding SelectedPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                             AutomationProperties.Name="Scope for Exact rules" />
+                    <TextBlock Text="{Binding RecursionSummary}" Margin="0,8" />
+                    <TextBlock Text="{Binding ExactPreset}" TextWrapping="Wrap" FontSize="17" FontWeight="SemiBold" />
+                    <CheckBox x:Name="ExactDuplicatesCheckBox"
+                              Margin="0,12,0,0"
+                              Content="Exact duplicates"
+                              IsChecked="True"
+                              IsEnabled="False"
+                              AutomationProperties.Name="Exact duplicates are always enabled"
+                              AutomationProperties.HelpText="Exact requires identical bytes and cannot be disabled." />
+                    <CheckBox x:Name="NearDuplicatesCheckBox"
+                              Margin="0,8,0,0"
+                              Content="Conservative Near duplicates"
+                              IsChecked="{Binding NearDuplicatesEnabled, Mode=OneWay}"
+                              IsEnabled="{Binding CanChangeScanOptions}"
+                              Command="{Binding ChangeNearDuplicateModeCommand}"
+                              CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                              AutomationProperties.Name="Conservative Near duplicates"
+                              AutomationProperties.HelpText="Uses the fixed precision-first Near profile. Ambiguous matches remain Uncertain." />
+                    <TextBlock x:Name="ScanOptionsGuidanceText"
+                               Margin="0,10,0,0"
+                               Text="{Binding ScanOptionsGuidance}"
+                               TextWrapping="Wrap"
+                               AutomationProperties.Name="Scan options guidance"
+                               AutomationProperties.ItemStatus="{Binding ScanOptionsGuidance}"
+                               AutomationProperties.LiveSetting="Polite" />
+                    <TextBlock Text="{Binding RuleSetStatus}" TextWrapping="Wrap" />
+                    <WrapPanel Margin="0,16,0,0">
+                        <Button x:Name="ConfirmExactRulesButton" Content="Confirm Scan options" Padding="12,8" Margin="0,0,10,10"
+                                AutomationProperties.Name="Confirm Scan options" Command="{Binding ConfirmExactRulesCommand}"
+                                IsEnabled="{Binding CanConfirmExactRules}" />
+                        <Button x:Name="StartScanButton" Content="Start Scan" Padding="12,8" Margin="0,0,10,10"
+                                AutomationProperties.Name="Start Scan" Command="{Binding StartScanCommand}" IsEnabled="{Binding CanStartScan}" />
+                    </WrapPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <Grid Grid.Column="2" Visibility="{Binding IsScanPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Scan" FontSize="24" FontWeight="SemiBold" />
+                    <TextBlock x:Name="ScanStatusText" Text="{Binding ScanStatus}" TextWrapping="Wrap" Margin="0,16,0,8"
+                               AutomationProperties.Name="Scan status" AutomationProperties.ItemStatus="{Binding ScanStatus}"
+                               AutomationProperties.LiveSetting="Polite" />
+                    <ProgressBar Height="8" IsIndeterminate="{Binding IsScanBusy}" AutomationProperties.Name="Scan activity"
+                                 AutomationProperties.ItemStatus="{Binding ScanStatus}" />
+                    <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" Margin="0,12" />
+                    <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
+                                  ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
+                                  AutomationProperties.Name="Scan outcome categories" />
+                    <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" />
+                    <WrapPanel Margin="0,16,0,0">
+                        <Button x:Name="CancelScanButton" Content="Cancel Scan" Padding="12,8" Margin="0,0,10,10"
+                                AutomationProperties.Name="Cancel Scan" Command="{Binding CancelScanCommand}" IsEnabled="{Binding IsScanBusy}" />
+                        <Button Content="Open Review" Padding="12,8" Margin="0,0,10,10" AutomationProperties.Name="Open Review"
+                                Command="{Binding OpenReviewCommand}" IsEnabled="{Binding CanOpenReview}" />
+                        <Button Content="Scan again" Padding="12,8" Margin="0,0,10,10" AutomationProperties.Name="Start a fresh scan"
+                                Command="{Binding StartScanCommand}" IsEnabled="{Binding CanStartScan}" />
+                    </WrapPanel>
+                </StackPanel>
+            </Grid>
+
+            <!-- Each review level owns a native virtualized viewport. -->
+            <Grid Grid.Column="2" Visibility="{Binding IsReviewPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="3*" />
+                    <RowDefinition Height="2*" />
+                </Grid.RowDefinitions>
+                <ScrollViewer Grid.Row="0" MaxHeight="180"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <TextBlock x:Name="ReviewHeading" Text="Review" FontSize="24" FontWeight="SemiBold" Focusable="True"
+                               AutomationProperties.Name="Grouped duplicate review" />
+                    <TextBlock x:Name="ReviewStatusText" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
+                               AutomationProperties.Name="Review status" AutomationProperties.ItemStatus="{Binding ReviewStatusText}"
+                               AutomationProperties.LiveSetting="Polite" />
+                    <DockPanel Margin="0,6,0,4">
+                        <Button x:Name="ReviewBackButton" Content="Back" MinHeight="34" Padding="10,4" Margin="0,0,8,0"
+                                Click="OnReviewBackClick" IsEnabled="{Binding CanReviewBack}"
+                                AutomationProperties.Name="Back one review level" />
+                        <TextBlock x:Name="ReviewBreadcrumbText" VerticalAlignment="Center" TextWrapping="Wrap"
+                                   Text="{Binding ReviewBreadcrumbText}" AutomationProperties.Name="Review breadcrumb" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
+                    <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
+                                  ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
+                                  AutomationProperties.Name="Scan outcome categories" />
+                </StackPanel>
+                </ScrollViewer>
+
+                <Grid x:Name="ReviewNavigationGrid" Grid.Row="1" MinHeight="120" Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="ReviewCategoriesColumn" Width="*" />
+                        <ColumnDefinition x:Name="ReviewGroupsColumn" Width="*" />
+                        <ColumnDefinition x:Name="ReviewComparisonsColumn" Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border x:Name="ReviewCategoriesPanel" Grid.Column="0" Margin="0,0,4,0" Padding="4"
+                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="Categories" FontWeight="SemiBold" Margin="4" />
+                            <ListBox x:Name="ReviewCategoriesList" ItemsSource="{Binding ReviewCategories}"
+                                     Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewCategoryTemplate}"
+                                     PreviewKeyDown="OnReviewListPreviewKeyDown"
+                                     AutomationProperties.Name="Review categories" />
+                        </DockPanel>
+                    </Border>
+                    <Border x:Name="ReviewGroupsPanel" Grid.Column="1" Margin="4,0" Padding="4"
+                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="Groups" FontWeight="SemiBold" Margin="4" />
+                            <ListBox x:Name="ReviewGroupsList" ItemsSource="{Binding ActiveReviewGroups}"
+                                     Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewGroupTemplate}"
+                                     PreviewKeyDown="OnReviewListPreviewKeyDown"
+                                     AutomationProperties.Name="Groups in selected category" />
+                        </DockPanel>
+                    </Border>
+                    <Border x:Name="ReviewComparisonsPanel" Grid.Column="2" Margin="4,0,0,0" Padding="4"
+                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="Comparison" FontWeight="SemiBold" Margin="4" />
+                            <ListBox x:Name="ReviewComparisonsList" ItemsSource="{Binding ActiveReviewMembers}"
+                                     Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewComparisonTemplate}"
+                                     PreviewKeyDown="OnReviewListPreviewKeyDown"
+                                     AutomationProperties.Name="Comparison paths and Selection controls" />
+                        </DockPanel>
+                    </Border>
+                </Grid>
+
+                <ScrollViewer x:Name="ReviewDetailsScrollViewer" Grid.Row="2" Margin="0,8,0,0"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel>
+                <app:ReviewAutomationBorder x:Name="ReviewEvidencePanel" Padding="8"
+                        BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                        AutomationProperties.AutomationId="review-evidence"
+                        AutomationProperties.Name="{Binding ActiveReviewEvidence.AutomationName}"
+                        AutomationProperties.ItemStatus="{Binding ActiveReviewEvidence.ItemStatus}">
+                    <StackPanel DataContext="{Binding ActiveReviewEvidence}">
+                        <TextBlock Text="Evidence" FontWeight="SemiBold" />
+                        <app:PreviewStatusControl x:Name="ReviewPreviewStatusControl"
+                                DataContext="{Binding DataContext.ActiveReviewPreview, RelativeSource={RelativeSource AncestorType=Window}}" />
+                        <TextBlock x:Name="ReviewEvidenceFullPathText" Text="{Binding FullPath}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceDimensionsText" Text="{Binding Dimensions, StringFormat='Dimensions: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceSizeText" Text="{Binding Size, StringFormat='Size: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceRelevantDateText" Text="{Binding RelevantDate, StringFormat='Relevant date: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceCategoryText" Text="{Binding Category, StringFormat='Category: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceConfidenceText" Text="{Binding Confidence, StringFormat='Confidence: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceUncertaintyText" Text="{Binding Uncertainty, StringFormat='Uncertainty: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceTransformationsText" Text="{Binding Transformations, StringFormat='Transformations: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceReasonText" Text="{Binding Reason, StringFormat='Reason: {0}'}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReviewEvidenceRecommendationText" Text="{Binding Recommendation}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </app:ReviewAutomationBorder>
+
+                <TextBlock x:Name="SelectionSummaryText" Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,8,0,0"
+                           AutomationProperties.Name="Selection summary"
+                           AutomationProperties.ItemStatus="{Binding SelectionSummary}"
+                           AutomationProperties.LiveSetting="Polite" />
+
+                    <app:ReviewAutomationBorder x:Name="ApprovalPanel" Margin="0,8,0,0" Padding="12" Focusable="True"
+                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                            AutomationProperties.AutomationId="approval-panel"
+                            AutomationProperties.Name="Cleanup approval disclosure"
+                            AutomationProperties.ItemStatus="{Binding ApprovalAutomationStatus}">
+                        <StackPanel>
+                            <TextBlock Text="Approval" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding ApprovalSelectedOccurrenceText}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ApprovalSelectedPathText}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ApprovalSelectedPhysicalText}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ApprovalRecoveryText}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ApprovalCoverageText}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ApprovalUnresolvedText}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ApprovalUnresolvedSubtotals}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ApprovalUnselectedSurvivorsText}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ApprovalDestinationText}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ApprovalRevalidationText}" TextWrapping="Wrap" />
+                            <Button x:Name="ApproveCleanupButton" Content="Approve Cleanup" MinHeight="38"
+                                    Margin="0,10,0,0" Padding="14,7" HorizontalAlignment="Left"
+                                    IsDefault="False" IsCancel="False" AutomationProperties.Name="Approve Cleanup"
+                                    Command="{Binding ApproveReviewCommand}" IsEnabled="{Binding CanApproveReview}" />
+                        </StackPanel>
+                    </app:ReviewAutomationBorder>
+                <StackPanel Margin="0,10,0,0">
+                    <TextBlock Text="{Binding ReviewDisclaimer}" TextWrapping="Wrap" />
+                    <WrapPanel>
+                        <Button Content="Cancel Scan" Padding="10,6" Margin="0,6,8,0" AutomationProperties.Name="Cancel Scan from Review"
+                                Command="{Binding CancelScanCommand}" IsEnabled="{Binding IsScanBusy}" />
+                        <Button Content="Scan again" Padding="10,6" Margin="0,6,8,0" AutomationProperties.Name="Start a fresh scan from Review"
+                                Command="{Binding StartScanCommand}" IsEnabled="{Binding CanStartScan}" />
+                    </WrapPanel>
+                </StackPanel>
+                  </StackPanel>
+                </ScrollViewer>
+            </Grid>
+            <app:ReviewAutomationBorder x:Name="ActionPanel" Grid.Column="2"
+                    Visibility="{Binding IsActionPhase, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    AutomationProperties.AutomationId="action-panel"
+                    AutomationProperties.Name="Approved Recycle Bin Action"
+                    AutomationProperties.ItemStatus="{Binding ActionStatusText}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="ActionHeading" Text="Recycle Bin progress" FontSize="24" FontWeight="SemiBold"
+                               Focusable="True" FocusVisualStyle="{StaticResource ActionFocusVisual}" TextWrapping="Wrap"
+                               AutomationProperties.Name="Recycle Bin progress" />
+                    <ScrollViewer Grid.Row="1" MaxHeight="160" Margin="0,8,0,8"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                      <StackPanel>
+                        <TextBlock Text="{Binding ActionSelectionText}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ActionStatusText}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ActionCountsText}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ActionCertaintyText}" TextWrapping="Wrap" />
+                        <app:ReviewAnnouncementTextBlock x:Name="ActionAnnouncementText" Text="{Binding ActionAnnouncement}"
+                                TextWrapping="Wrap" AutomationProperties.AutomationId="action-announcement"
+                                AutomationProperties.Name="Recycle Bin progress announcement"
+                                AutomationProperties.LiveSetting="Polite" />
+                      </StackPanel>
+                    </ScrollViewer>
+                    <ListBox x:Name="ActionItemsList" Grid.Row="2" ItemsSource="{Binding ActionRows}"
+                             Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ActionItemTemplate}"
+                             AutomationProperties.Name="Approved original paths and Recycle Bin results"
+                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                    <ScrollViewer Grid.Row="3" MaxHeight="300" Margin="0,8,0,0"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                      <StackPanel>
+                        <TextBlock Text="{Binding ActionReplayNotice}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ActionRecoveryNotice}" TextWrapping="Wrap" />
+                        <Separator Margin="0,10,0,8" Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <TextBlock Text="Action Records" FontSize="18" FontWeight="SemiBold"
+                                   Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <TextBlock Text="{Binding ActionRecoveryDisclosure}" TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="action-recovery-disclosure"
+                                   Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <Button x:Name="RevalidateUnknownItemsButton" Content="Revalidate unknown items"
+                                MinHeight="38" Margin="0,8,0,0" Padding="14,7" HorizontalAlignment="Left"
+                                AutomationProperties.Name="Revalidate unknown items"
+                                Command="{Binding RevalidateUnknownCommand}"
+                                IsEnabled="{Binding CanRevalidateUnknownItems}"
+                                Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <app:ReviewAnnouncementTextBlock x:Name="ActionRecoveryAnnouncementText"
+                                Text="{Binding ActionRecoveryAnnouncement}" TextWrapping="Wrap"
+                                AutomationProperties.AutomationId="action-recovery-announcement"
+                                AutomationProperties.Name="Action record status announcement"
+                                AutomationProperties.LiveSetting="Polite" />
+                        <ItemsControl ItemsSource="{Binding ActionRecoveryRecords}"
+                                      ItemTemplate="{StaticResource ActionRecordHistoryTemplate}"
+                                      Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                      </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </app:ReviewAutomationBorder>
+        </Grid>
+          </TabItem>
+          <TabItem x:Name="ActionRecordsTab" Header="Action Records"
+                   AutomationProperties.Name="Action Records">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="12">
+                <TextBlock Text="Action Records" FontSize="24" FontWeight="SemiBold" />
+                <TextBlock Margin="0,8,0,0" Text="Saved Recycle Bin outcomes from this device appear here."
+                           TextWrapping="Wrap" />
+                <TextBlock Margin="0,8,0,0" Text="{Binding ActionRecoveryDisclosure}"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <Button x:Name="HistoryRevalidateUnknownItemsButton" Content="Revalidate unknown items"
+                        MinHeight="38" Margin="0,8,0,0" Padding="14,7" HorizontalAlignment="Left"
+                        Command="{Binding RevalidateUnknownCommand}"
+                        IsEnabled="{Binding CanRevalidateUnknownItems}"
+                        Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <app:ReviewAnnouncementTextBlock Text="{Binding ActionRecoveryAnnouncement}"
+                        TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                <ItemsControl x:Name="ActionRecordsHistoryList"
+                              ItemsSource="{Binding ActionRecoveryRecords}"
+                              ItemTemplate="{StaticResource ActionRecordHistoryTemplate}" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+        </TabControl>
+
+        <StackPanel Grid.Row="2" Margin="0,16,0,0">
+            <app:ReviewAnnouncementTextBlock x:Name="ReviewAnnouncementText"
+                       Text="{Binding ReviewAnnouncement}" TextWrapping="Wrap"
+                       AutomationProperties.Name="Review command status"
+                       AutomationProperties.LiveSetting="Polite" />
+            <TextBlock x:Name="SourceMutationNoticeText"
+                       TextWrapping="Wrap"
+                       Text="{Binding SourceMutationNotice}" />
+        </StackPanel>
+    </Grid>
+</Window>

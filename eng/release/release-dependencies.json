@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "name": ".NET Host",
+      "version": "10.0.11",
+      "shippedPaths": [
+        "PhotoSift.App.exe"
+      ],
+      "licenseIdentifier": "LicenseRef-Microsoft-NET-Library",
+      "packagedLicensePaths": [
+        "licenses/dotnet/LICENSE.txt",
+        "licenses/dotnet/ThirdPartyNotices.txt"
+      ],
+      "officialSourceUrl": "https://github.com/dotnet/runtime/tree/v10.0.11",
+      "redistributionTermUrl": "https://www.microsoft.com/net/dotnet_library_license.htm",
+      "redistributionApproval": "owner-approved"
+    },
+    {
+      "name": "Microsoft.Data.Sqlite",
+      "version": "10.0.11",
+      "shippedPaths": [],
+      "licenseIdentifier": "MIT",
+      "packagedLicensePaths": [
+        "licenses/MIT.txt"
+      ],
+      "officialSourceUrl": "https://github.com/dotnet/dotnet/tree/v10.0.11",
+      "redistributionTermUrl": "https://github.com/dotnet/dotnet/blob/v10.0.11/LICENSE.TXT",
+      "redistributionApproval": "owner-approved"
+    },
+    {
+      "name": "Microsoft.Data.Sqlite.Core",
+      "version": "10.0.11",
+      "shippedPaths": [
+        "Microsoft.Data.Sqlite.dll"
+      ],
+      "licenseIdentifier": "MIT",
+      "packagedLicensePaths": [
+        "licenses/MIT.txt"
+      ],
+      "officialSourceUrl": "https://github.com/dotnet/dotnet/tree/v10.0.11",
+      "redistributionTermUrl": "https://github.com/dotnet/dotnet/blob/v10.0.11/LICENSE.TXT",
+      "redistributionApproval": "owner-approved"
+    },
+    {
+      "name": "Native SQLite",
+      "version": "3.53.3",
+      "shippedPaths": [
+        "e_sqlite3.dll"
+      ],
+      "licenseIdentifier": "blessing",
+      "packagedLicensePaths": [
+        "licenses/SQLitePCLRaw-NOTICE.txt"
+      ],
+      "officialSourceUrl": "https://sqlite.org/",
+      "redistributionTermUrl": "https://sqlite.org/copyright.html",
+      "redistributionApproval": "owner-approved"
+    },
+    {
+      "name": "SQLitePCLRaw.bundle_e_sqlite3",
+      "version": "2.1.12",
+      "shippedPaths": [
+        "SQLitePCLRaw.batteries_v2.dll"
+      ],
+      "licenseIdentifier": "Apache-2.0",
+      "packagedLicensePaths": [
+        "licenses/SQLitePCLRaw-LICENSE.txt",
+        "licenses/SQLitePCLRaw-NOTICE.txt"
+      ],
+      "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
+      "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
+      "redistributionApproval": "owner-approved"
+    },
+    {
+      "name": "SQLitePCLRaw.core",
+      "version": "2.1.12",
+      "shippedPaths": [
+        "SQLitePCLRaw.core.dll"
+      ],
+      "licenseIdentifier": "Apache-2.0",
+      "packagedLicensePaths": [
+        "licenses/SQLitePCLRaw-LICENSE.txt",
+        "licenses/SQLitePCLRaw-NOTICE.txt"
+      ],
+      "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
+      "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
+      "redistributionApproval": "owner-approved"
+    },
+    {
+      "name": "SQLitePCLRaw.lib.e_sqlite3",
+      "version": "2.1.12",
+      "shippedPaths": [
+        "e_sqlite3.dll"
+      ],
+      "licenseIdentifier": "Apache-2.0",
+      "packagedLicensePaths": [
+        "licenses/SQLitePCLRaw-LICENSE.txt",
+        "licenses/SQLitePCLRaw-NOTICE.txt"
+      ],
+      "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
+      "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
+      "redistributionApproval": "owner-approved"
+    },
+    {
+      "name": "SQLitePCLRaw.provider.e_sqlite3",
+      "version": "2.1.12",
+      "shippedPaths": [
+        "SQLitePCLRaw.provider.e_sqlite3.dll"
+      ],
+      "licenseIdentifier": "Apache-2.0",
+      "packagedLicensePaths": [
+        "licenses/SQLitePCLRaw-LICENSE.txt",
+        "licenses/SQLitePCLRaw-NOTICE.txt"
+      ],
+      "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
+      "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
+      "redistributionApproval": "owner-approved"
+    }
+  ]
+}
