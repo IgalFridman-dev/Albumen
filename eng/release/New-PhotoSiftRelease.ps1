@@ -240,7 +240,7 @@ function Copy-CleanReleaseSource {
     foreach ($entry in @(Get-ChildItem -Force -Recurse -LiteralPath $resolvedSourcePath)) {
         $relativePath = $entry.FullName.Substring($sourcePrefix.Length)
         $segments = @($relativePath -split '[\\/]')
-        if (@($segments | Where-Object { $_ -in @('.git', '.superpowers', '.codex', '.agents', 'bin', 'obj') }).Count -gt 0) {
+        if (@($segments | Where-Object { $_ -in @('.git', '.claude', '.superpowers', '.codex', '.agents', 'bin', 'obj') }).Count -gt 0) {
             continue
         }
         if (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
