@@ -56,6 +56,9 @@ The script does the following:
    the autologon password.
 
 Use `-KeepRunning` to leave the VM at the desktop for hands-on inspection.
+`-Launches 2` closes the main window normally between launches and records the
+local data files after each close. `-AppTheme Dark` switches the guest user to
+dark app mode before launching.
 
 ## Run the test suite
 
