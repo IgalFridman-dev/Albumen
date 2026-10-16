@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+    <PackageReference Include="xunit.v3" />
+    <ProjectReference Include="..\..\src\PhotoSift.Analysis\PhotoSift.Analysis.csproj" />
+    <ProjectReference Include="..\..\src\PhotoSift.App\PhotoSift.App.csproj" />
+    <ProjectReference Include="..\..\src\PhotoSift.Infrastructure.Sqlite\PhotoSift.Infrastructure.Sqlite.csproj" />
+    <ProjectReference Include="..\..\src\PhotoSift.Infrastructure.Windows\PhotoSift.Infrastructure.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="Exact\ExactCorpusManifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+</Project>
