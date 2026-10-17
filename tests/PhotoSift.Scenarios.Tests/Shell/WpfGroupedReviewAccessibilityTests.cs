@@ -336,15 +336,17 @@ public sealed class WpfGroupedReviewAccessibilityTests
     }
 
     [Theory]
-    [InlineData(double.NaN, double.NaN)]
-    [InlineData(680d, 520d)]
-    public void ReviewPageReachesComparisonSelectionAndApprovalWithoutMaximizing(double width, double height)
+    [InlineData(double.NaN, double.NaN, 12d)]
+    [InlineData(680d, 520d, 12d)]
+    [InlineData(680d, 520d, 24d)]
+    public void ReviewPageReachesComparisonSelectionAndApprovalWithoutMaximizing(
+        double width, double height, double fontSize)
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var fixture = GroupedWpfFixture.Create();
             OpenFirstComparison(fixture.ViewModel);
-            var window = new MainWindow { DataContext = fixture.ViewModel };
+            var window = new MainWindow { DataContext = fixture.ViewModel, FontSize = fontSize };
             if (!double.IsNaN(width)) window.Width = width;
             if (!double.IsNaN(height)) window.Height = height;
             try
@@ -363,6 +365,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 selection.BringIntoView();
                 ShowAndDrain(window);
                 AssertInsideViewport(page, selection);
+                AssertInsideWindow(window, selection);
 
                 foreach (var name in new[] { "ReviewEvidencePanel", "SelectionSummaryText", "ApproveCleanupButton" })
                 {
@@ -371,6 +374,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
                     ShowAndDrain(window);
                     AssertInsideViewport(page, element);
                 }
+                AssertInsideWindow(window, NamedElement(window, "ApproveCleanupButton"));
             }
             finally
             {
