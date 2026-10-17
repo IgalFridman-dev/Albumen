@@ -12,6 +12,8 @@
         MinHeight="520"
         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+        FontFamily="Segoe UI Variable Text, Segoe UI"
+        FontSize="14"
         WindowStartupLocation="CenterScreen">
     <Window.CommandBindings>
         <CommandBinding Command="ApplicationCommands.SelectAll"
@@ -19,6 +21,10 @@
                         Executed="OnSelectFocusedReviewGroup" />
     </Window.CommandBindings>
     <Window.Resources>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="/PhotoSift.App;component/Themes/PhotoSiftTheme.xaml" />
+        </ResourceDictionary.MergedDictionaries>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
         <Style x:Key="ActionFocusVisual" TargetType="Control">
             <Setter Property="Template">
@@ -196,9 +202,51 @@
                         Content="{Binding EligibilityText}" />
             </StackPanel>
         </DataTemplate>
+        </ResourceDictionary>
     </Window.Resources>
 
-    <Grid Margin="24">
+    <Grid>
+    <!-- Decorative soft glow behind the workflow. Hidden in High Contrast and while
+         reviewing photos, where a tinted background would distort how colors look. -->
+    <Grid x:Name="BackgroundGlow" IsHitTestVisible="False" ClipToBounds="True">
+        <Grid.Style>
+            <Style TargetType="Grid">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsReviewPhase}" Value="True">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Grid.Style>
+        <Rectangle>
+            <Rectangle.Fill>
+                <RadialGradientBrush Center="0.05,-0.1" GradientOrigin="0.05,-0.1" RadiusX="0.75" RadiusY="0.8">
+                    <GradientStop Color="#FFDCE7FF" Offset="0" />
+                    <GradientStop Color="#00DCE7FF" Offset="1" />
+                </RadialGradientBrush>
+            </Rectangle.Fill>
+        </Rectangle>
+        <Rectangle>
+            <Rectangle.Fill>
+                <RadialGradientBrush Center="1,-0.05" GradientOrigin="1,-0.05" RadiusX="0.6" RadiusY="0.75">
+                    <GradientStop Color="#FFEFE4FF" Offset="0" />
+                    <GradientStop Color="#00EFE4FF" Offset="1" />
+                </RadialGradientBrush>
+            </Rectangle.Fill>
+        </Rectangle>
+        <Rectangle>
+            <Rectangle.Fill>
+                <RadialGradientBrush Center="0.6,1.1" GradientOrigin="0.6,1.1" RadiusX="0.6" RadiusY="0.7">
+                    <GradientStop Color="#FFDDF5EE" Offset="0" />
+                    <GradientStop Color="#00DDF5EE" Offset="1" />
+                </RadialGradientBrush>
+            </Rectangle.Fill>
+        </Rectangle>
+    </Grid>
+    <Grid Margin="24,16,24,16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -214,18 +262,35 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
-            <StackPanel Grid.Column="0">
-                <TextBlock FontSize="26"
-                           FontWeight="SemiBold"
-                           Text="PhotoSift" />
-                <TextBlock Margin="0,2,0,0"
-                           FontSize="14"
-                           TextWrapping="Wrap"
-                           Text="Choose one local photo folder. PhotoSift checks it without changing or uploading your photos." />
-            </StackPanel>
+            <Grid Grid.Column="0" VerticalAlignment="Top">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Width="36" Height="36" CornerRadius="9" VerticalAlignment="Top"
+                        Background="{StaticResource PhotoSift.AccentBrush}">
+                    <Path Width="18" Height="18" Stretch="Uniform" Stroke="White" StrokeThickness="2"
+                          StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                          Data="M 3,6 L 15,6 L 15,18 L 3,18 Z M 7,3 L 18,3 L 18,14 M 5,15 L 8,11.5 L 11,14.5 L 13,12.5" />
+                </Border>
+                <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                    <WrapPanel>
+                        <TextBlock FontFamily="{StaticResource PhotoSift.DisplayFontFamily}" FontSize="20"
+                                   FontWeight="SemiBold" Text="PhotoSift" Margin="0,0,12,0" />
+                        <Border Margin="0,3,0,0" Padding="10,2" CornerRadius="10" VerticalAlignment="Center"
+                                Background="{StaticResource PhotoSift.SuccessSoftBrush}">
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource PhotoSift.SuccessBrush}"
+                                       Text="Offline · nothing is uploaded" />
+                        </Border>
+                    </WrapPanel>
+                    <TextBlock Style="{StaticResource PhotoSift.MutedText}" Margin="0,2,0,0" FontSize="14"
+                               Text="Choose one local photo folder. PhotoSift checks it without changing or uploading your photos." />
+                </StackPanel>
+            </Grid>
             <StackPanel Grid.Column="1" Margin="16,4,0,0" MaxWidth="360" VerticalAlignment="Top"
                         Visibility="{Binding HasLocalScanDataControl, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Button x:Name="ClearScanDataButton"
+                        Style="{StaticResource PhotoSift.Button}"
                         Content="Clear local Scan data"
                         HorizontalAlignment="Right"
                         MinHeight="34"
@@ -321,7 +386,8 @@
             </Border>
         </Grid>
 
-        <TabControl Grid.Row="1" AutomationProperties.Name="PhotoSift views">
+        <TabControl Grid.Row="1" Background="Transparent" BorderBrush="{StaticResource PhotoSift.BorderBrush}" Padding="8,12,4,4"
+                    AutomationProperties.Name="PhotoSift views">
           <TabItem Header="Workflow" IsSelected="True" AutomationProperties.Name="Workflow">
         <Grid>
             <Grid.ColumnDefinitions>
@@ -338,7 +404,7 @@
                               ItemsSource="{Binding Phases}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Button Margin="0,0,0,6"
+                            <Button Margin="0,0,8,4"
                                     MinHeight="52"
                                     Padding="10,6"
                                     HorizontalAlignment="Stretch"
@@ -348,25 +414,38 @@
                                     Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Phase}"
                                     IsEnabled="{Binding IsAvailable}">
                                 <Button.Style>
-                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                    <Style TargetType="Button" BasedOn="{StaticResource PhotoSift.StepButton}">
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
-                                                <Setter Property="BorderThickness" Value="2" />
+                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                                                <Setter Property="BorderBrush" Value="{StaticResource PhotoSift.AccentBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
                                 </Button.Style>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="28" />
+                                        <ColumnDefinition Width="36" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"
-                                               Text="{Binding StepNumber}" />
-                                    <StackPanel Grid.Column="1">
+                                    <Border Width="26" Height="26" CornerRadius="13" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                        <Setter Property="Background" Value="{StaticResource PhotoSift.AccentBrush}" />
+                                                        <Setter Property="TextElement.Foreground" Value="White" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Text="{Binding StepNumber}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding DisplayName}" />
-                                        <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding AvailabilityLabel}" />
+                                        <TextBlock Style="{StaticResource PhotoSift.Caption}" Text="{Binding AvailabilityLabel}" />
                                     </StackPanel>
                                 </Grid>
                             </Button>
@@ -378,186 +457,240 @@
             <ScrollViewer Grid.Column="2" Visibility="{Binding IsChooseScopePhase, Converter={StaticResource BooleanToVisibilityConverter}}"
                           HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
-                <StackPanel Margin="0,0,20,0">
-                    <TextBlock FontSize="24"
-                               FontWeight="SemiBold"
-                               Text="Choose Scope" />
+                <StackPanel Margin="0,0,20,8" MaxWidth="760" HorizontalAlignment="Stretch">
+                    <TextBlock Style="{StaticResource PhotoSift.PageTitle}" Text="Choose a photo folder" />
+                    <TextBlock Margin="0,6,0,0" Style="{StaticResource PhotoSift.MutedText}"
+                               Text="PhotoSift reads the photos in one folder and shows you copies and look-alikes. Nothing changes until you approve it." />
 
-                    <Border Margin="0,14,0,0"
-                            Padding="14"
-                            CornerRadius="4"
-                            BorderThickness="1"
-                            BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Path x:Name="ScopeStatusIcon"
-                                  Width="18"
-                                  Height="18"
-                                  Margin="0,2,10,0"
-                                  VerticalAlignment="Top"
-                                  AutomationProperties.ItemStatus="{Binding ScopeStatus}"
-                                  AutomationProperties.Name="{Binding ScopeStatus, StringFormat='Scope status: {0}'}"
-                                  Fill="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
-                                  Stretch="Uniform">
-                                <Path.Style>
-                                    <Style TargetType="Path">
-                                        <Setter Property="Data"
-                                                Value="M 9,0 L 18,9 L 9,18 L 0,9 Z" />
+                    <Border Margin="0,18,0,0" Style="{StaticResource PhotoSift.Card}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="40" Height="40" Margin="0,0,14,0" CornerRadius="10" VerticalAlignment="Top">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsReady}" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource PhotoSift.SuccessSoftBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource PhotoSift.WarningSoftBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                                                    <Setter Property="Background" Value="Transparent" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Path x:Name="ScopeStatusIcon"
+                                          Width="18"
+                                          Height="18"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          AutomationProperties.ItemStatus="{Binding ScopeStatus}"
+                                          AutomationProperties.Name="{Binding ScopeStatus, StringFormat='Scope status: {0}'}"
+                                          Fill="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                                          Stretch="Uniform">
+                                        <Path.Style>
+                                            <Style TargetType="Path">
+                                                <Setter Property="Data"
+                                                        Value="M 9,0 L 18,9 L 9,18 L 0,9 Z" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsReady}" Value="True">
+                                                        <Setter Property="Data"
+                                                                Value="M 1,9 L 6,14 L 17,3 L 14,0 L 6,8 L 4,6 Z" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                                        <Setter Property="Data"
+                                                                Value="M 9,0 L 18,18 L 0,18 Z M 8,5 L 10,5 L 10,12 L 8,12 Z M 8,14 L 10,14 L 10,16 L 8,16 Z" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Path.Style>
+                                    </Path>
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock x:Name="ScopeStatusText"
+                                               FontSize="18"
+                                               FontWeight="SemiBold"
+                                               AutomationProperties.HelpText="{Binding Instruction}"
+                                               AutomationProperties.ItemStatus="{Binding ScopeStatus}"
+                                               AutomationProperties.LiveSetting="Polite"
+                                               AutomationProperties.Name="Scope status"
+                                               Text="{Binding ScopeStatus}" />
+                                    <TextBlock Margin="0,3,0,0"
+                                               Style="{StaticResource PhotoSift.MutedText}"
+                                               Text="{Binding Instruction}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Border x:Name="BlockingNotice"
+                                    Margin="0,16,0,0"
+                                    Padding="14"
+                                    CornerRadius="10"
+                                    Focusable="True"
+                                    FocusVisualStyle="{StaticResource PhotoSift.FocusVisual}"
+                                    AutomationProperties.Name="{Binding BlockingNoticeAutomationName}"
+                                    BorderThickness="1"
+                                    Visibility="{Binding IsBlocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{StaticResource PhotoSift.WarningSoftBrush}" />
+                                        <Setter Property="BorderBrush" Value="{StaticResource PhotoSift.WarningBorderBrush}" />
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsReady}" Value="True">
-                                                <Setter Property="Data"
-                                                        Value="M 1,9 L 6,14 L 17,3 L 14,0 L 6,8 L 4,6 Z" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding IsBlocked}" Value="True">
-                                                <Setter Property="Data"
-                                                        Value="M 9,0 L 18,18 L 0,18 Z M 8,5 L 10,5 L 10,12 L 8,12 Z M 8,14 L 10,14 L 10,16 L 8,16 Z" />
+                                            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.InfoBrushKey}}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" />
+                                                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
-                                </Path.Style>
-                            </Path>
-                            <StackPanel Grid.Column="1">
-                                <TextBlock x:Name="ScopeStatusText"
-                                           FontSize="18"
-                                           FontWeight="SemiBold"
-                                           AutomationProperties.HelpText="{Binding Instruction}"
-                                           AutomationProperties.ItemStatus="{Binding ScopeStatus}"
-                                           AutomationProperties.LiveSetting="Polite"
-                                           AutomationProperties.Name="Scope status"
-                                           Text="{Binding ScopeStatus}" />
-                                <TextBlock Margin="0,5,0,0"
-                                           TextWrapping="Wrap"
-                                           Text="{Binding Instruction}" />
-                            </StackPanel>
-                        </Grid>
-                    </Border>
+                                </Border.Style>
+                                <StackPanel>
+                                    <TextBlock FontWeight="SemiBold"
+                                               Text="This folder cannot be used yet." />
+                                    <ItemsControl Margin="0,6,0,0"
+                                                  AutomationProperties.Name="Blocking reasons"
+                                                  ItemsSource="{Binding BlockingReasons}" />
+                                </StackPanel>
+                            </Border>
 
-                    <Border x:Name="BlockingNotice"
-                            Margin="0,14,0,0"
-                            Padding="14"
-                            Focusable="True"
-                            AutomationProperties.Name="{Binding BlockingNoticeAutomationName}"
-                            Background="{DynamicResource {x:Static SystemColors.InfoBrushKey}}"
-                            BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
-                            BorderThickness="1"
-                            TextElement.Foreground="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}"
-                            Visibility="{Binding IsBlocked, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <StackPanel>
-                            <TextBlock FontWeight="SemiBold"
-                                       Text="This folder cannot be used yet." />
-                            <ItemsControl Margin="0,6,0,0"
-                                          AutomationProperties.Name="Blocking reasons"
-                                          ItemsSource="{Binding BlockingReasons}" />
+                            <Border Height="1" Margin="0,18" Background="{StaticResource PhotoSift.BorderBrush}" />
+
+                            <TextBlock Style="{StaticResource PhotoSift.Caption}" Text="Folder" />
+                            <Grid Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Padding="12,9" CornerRadius="8" BorderThickness="1"
+                                        BorderBrush="{StaticResource PhotoSift.BorderBrush}"
+                                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
+                                    <Grid>
+                                        <TextBlock IsHitTestVisible="False" Text="No folder chosen yet">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock" BasedOn="{StaticResource PhotoSift.MutedText}">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding SelectedPath}" Value="">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBox x:Name="SelectedPathTextBox"
+                                                 Style="{StaticResource PhotoSift.PathText}"
+                                                 FontWeight="SemiBold"
+                                                 IsReadOnly="True"
+                                                 Text="{Binding SelectedPath, Mode=OneWay}"
+                                                 TextWrapping="Wrap"
+                                                 AutomationProperties.Name="Selected Scope" />
+                                    </Grid>
+                                </Border>
+                                <Button x:Name="ChooseAnotherScopeButton"
+                                        Grid.Column="1"
+                                        MinWidth="150"
+                                        Margin="10,0,0,0"
+                                        VerticalAlignment="Top"
+                                        AutomationProperties.Name="{Binding Content, RelativeSource={RelativeSource Self}}"
+                                        Command="{Binding ChooseScopeCommand}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource PhotoSift.Button}">
+                                            <Setter Property="Content" Value="Choose folder" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsChecking}" Value="True">
+                                                    <Setter Property="Content" Value="Choose another folder" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsReady}" Value="True">
+                                                    <Setter Property="Content" Value="Choose another folder" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                                    <Setter Property="Content" Value="Choose another folder" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsCanceled}" Value="True">
+                                                    <Setter Property="Content" Value="Choose another folder" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </Grid>
+
+                            <CheckBox x:Name="IncludeSubfoldersCheckBox"
+                                      Margin="0,16,0,0"
+                                      Style="{StaticResource PhotoSift.SwitchCheckBox}"
+                                      AutomationProperties.Name="Include subfolders"
+                                      Command="{Binding ChangeRecursionCommand}"
+                                      CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                      Content="Include subfolders"
+                                      IsEnabled="{Binding CanChangeRecursion}"
+                                      IsChecked="{Binding IncludeSubfolders, Mode=OneWay}" />
+
+                            <Expander Margin="0,16,0,0" Header="Folder details" IsExpanded="False"
+                                      AutomationProperties.Name="Folder details">
+                                <StackPanel Margin="0,10,0,0">
+                                    <TextBlock Style="{StaticResource PhotoSift.Caption}" Text="Resolved Scope" />
+                                    <TextBox x:Name="ResolvedPathTextBox"
+                                             Margin="0,4,0,0"
+                                             Style="{StaticResource PhotoSift.PathText}"
+                                             IsReadOnly="True"
+                                             Text="{Binding ResolvedPath, Mode=OneWay}"
+                                             TextWrapping="Wrap"
+                                             AutomationProperties.Name="Resolved Scope" />
+
+                                    <TextBlock Margin="0,14,0,0" Style="{StaticResource PhotoSift.Caption}" Text="Preflight summary" />
+                                    <ItemsControl x:Name="ScopeSummaryList"
+                                                  Margin="0,6,0,0"
+                                                  AutomationProperties.Name="Scope preflight summary"
+                                                  Grid.IsSharedSizeScope="True"
+                                                  ItemsSource="{Binding ScopeSummary}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,0,0,5">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" SharedSizeGroup="PreflightLabel" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Style="{StaticResource PhotoSift.MutedText}" Text="{Binding Label}" />
+                                                    <TextBlock Grid.Column="1"
+                                                               Margin="24,0,0,0"
+                                                               FontWeight="SemiBold"
+                                                               TextWrapping="Wrap"
+                                                               Text="{Binding Value}" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <TextBlock x:Name="RuleSetStatusText"
+                                               Margin="0,10,0,0"
+                                               Style="{StaticResource PhotoSift.MutedText}"
+                                               Text="{Binding RuleSetStatus, StringFormat='Rule Set: {0}'}" />
+                                </StackPanel>
+                            </Expander>
                         </StackPanel>
                     </Border>
 
-                    <StackPanel Margin="0,16,0,0">
-                        <TextBlock FontWeight="SemiBold"
-                                   Text="Selected Scope" />
-                        <TextBox x:Name="SelectedPathTextBox"
-                                 Margin="0,5,0,0"
-                                 Padding="8"
-                                 IsReadOnly="True"
-                                 Text="{Binding SelectedPath, Mode=OneWay}"
-                                 TextWrapping="Wrap"
-                                 AutomationProperties.Name="Selected Scope" />
-
-                        <TextBlock Margin="0,12,0,0"
-                                   FontWeight="SemiBold"
-                                   Text="Resolved Scope" />
-                        <TextBox x:Name="ResolvedPathTextBox"
-                                 Margin="0,5,0,0"
-                                 Padding="8"
-                                 IsReadOnly="True"
-                                 Text="{Binding ResolvedPath, Mode=OneWay}"
-                                 TextWrapping="Wrap"
-                                 AutomationProperties.Name="Resolved Scope" />
-
-                        <CheckBox x:Name="IncludeSubfoldersCheckBox"
-                                  Margin="0,14,0,0"
-                                  AutomationProperties.Name="Include subfolders"
-                                  Command="{Binding ChangeRecursionCommand}"
-                                  CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
-                                  Content="Include subfolders"
-                                  IsEnabled="{Binding CanChangeRecursion}"
-                                  IsChecked="{Binding IncludeSubfolders, Mode=OneWay}" />
-                    </StackPanel>
-
-                    <TextBlock Margin="0,18,0,0"
-                               FontSize="17"
-                               FontWeight="SemiBold"
-                               Text="Preflight summary" />
-                    <ItemsControl x:Name="ScopeSummaryList"
-                                  Margin="0,8,0,0"
-                                  AutomationProperties.Name="Scope preflight summary"
-                                  Grid.IsSharedSizeScope="True"
-                                  ItemsSource="{Binding ScopeSummary}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Margin="0,0,0,5">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" SharedSizeGroup="PreflightLabel" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding Label}" />
-                                    <TextBlock Grid.Column="1"
-                                               Margin="24,0,0,0"
-                                               FontWeight="SemiBold"
-                                               TextWrapping="Wrap"
-                                               Text="{Binding Value}" />
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                    <TextBlock x:Name="RuleSetStatusText"
-                               Margin="0,14,0,0"
-                               FontWeight="SemiBold"
-                               Text="{Binding RuleSetStatus, StringFormat='Rule Set: {0}'}" />
-
                     <WrapPanel Margin="0,18,0,0">
-                        <Button x:Name="ChooseAnotherScopeButton"
-                                MinWidth="160"
-                                MinHeight="36"
-                                Margin="0,0,10,10"
-                                Padding="14,7"
-                                AutomationProperties.Name="{Binding Content, RelativeSource={RelativeSource Self}}"
-                                Command="{Binding ChooseScopeCommand}">
-                            <Button.Style>
-                                <Style TargetType="Button">
-                                    <Setter Property="Content" Value="Choose folder" />
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsChecking}" Value="True">
-                                            <Setter Property="Content" Value="Choose another folder" />
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding IsReady}" Value="True">
-                                            <Setter Property="Content" Value="Choose another folder" />
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding IsBlocked}" Value="True">
-                                            <Setter Property="Content" Value="Choose another folder" />
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding IsCanceled}" Value="True">
-                                            <Setter Property="Content" Value="Choose another folder" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Button.Style>
-                        </Button>
-
+                        <Button x:Name="ContinueButton" Margin="0,0,10,10" MinWidth="160"
+                                Style="{StaticResource PhotoSift.LargePrimaryButton}"
+                                Content="Continue" AutomationProperties.Name="Continue to Confirm Rules"
+                                Command="{Binding ContinueCommand}" IsEnabled="{Binding CanContinue}" />
                         <Button x:Name="RetryScopeButton"
                                 MinWidth="160"
-                                MinHeight="36"
                                 Margin="0,0,10,10"
-                                Padding="14,7"
                                 AutomationProperties.Name="Retry Scope verification"
                                 Command="{Binding RetryScopeCommand}"
                                 Content="Retry verification">
                             <Button.Style>
-                                <Style TargetType="Button">
+                                <Style TargetType="Button" BasedOn="{StaticResource PhotoSift.Button}">
                                     <Setter Property="Visibility" Value="Collapsed" />
+                                    <Setter Property="MinHeight" Value="44" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsBlocked}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
@@ -569,80 +702,113 @@
                                 </Style>
                             </Button.Style>
                         </Button>
-                        <Button x:Name="ContinueButton" MinHeight="36" Padding="14,7" Margin="0,0,10,10"
-                                Content="Continue" AutomationProperties.Name="Continue to Confirm Rules"
-                                Command="{Binding ContinueCommand}" IsEnabled="{Binding CanContinue}" />
                     </WrapPanel>
                 </StackPanel>
             </ScrollViewer>
 
             <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           Visibility="{Binding IsConfirmRulesPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <StackPanel Margin="0,0,20,0">
-                    <TextBlock Text="Confirm Rules" FontSize="24" FontWeight="SemiBold" />
-                    <TextBlock Text="Selected Scope" Margin="0,16,0,4" FontWeight="SemiBold" />
-                    <TextBox Text="{Binding SelectedPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
-                             AutomationProperties.Name="Scope for Exact rules" />
-                    <TextBlock Text="{Binding RecursionSummary}" Margin="0,8" />
-                    <TextBlock Text="{Binding ExactPreset}" TextWrapping="Wrap" FontSize="17" FontWeight="SemiBold" />
-                    <CheckBox x:Name="ExactDuplicatesCheckBox"
-                              Margin="0,12,0,0"
-                              Content="Exact duplicates"
-                              IsChecked="True"
-                              IsEnabled="False"
-                              AutomationProperties.Name="Exact duplicates are always enabled"
-                              AutomationProperties.HelpText="Exact requires identical bytes and cannot be disabled." />
-                    <CheckBox x:Name="NearDuplicatesCheckBox"
-                              Margin="0,8,0,0"
-                              Content="Conservative Near duplicates"
-                              IsChecked="{Binding NearDuplicatesEnabled, Mode=OneWay}"
-                              IsEnabled="{Binding CanChangeScanOptions}"
-                              Command="{Binding ChangeNearDuplicateModeCommand}"
-                              CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
-                              AutomationProperties.Name="Conservative Near duplicates"
-                              AutomationProperties.HelpText="Uses the fixed precision-first Near profile. Ambiguous matches remain Uncertain." />
-                    <TextBlock x:Name="ScanOptionsGuidanceText"
-                               Margin="0,10,0,0"
-                               Text="{Binding ScanOptionsGuidance}"
-                               TextWrapping="Wrap"
-                               AutomationProperties.Name="Scan options guidance"
-                               AutomationProperties.ItemStatus="{Binding ScanOptionsGuidance}"
-                               AutomationProperties.LiveSetting="Polite" />
-                    <TextBlock Text="{Binding RuleSetStatus}" TextWrapping="Wrap" />
-                    <WrapPanel Margin="0,16,0,0">
-                        <Button x:Name="ConfirmExactRulesButton" Content="Confirm Scan options" Padding="12,8" Margin="0,0,10,10"
+                <StackPanel Margin="0,0,20,8" MaxWidth="760" HorizontalAlignment="Stretch">
+                    <TextBlock Style="{StaticResource PhotoSift.PageTitle}" Text="What should PhotoSift look for?" />
+                    <TextBlock Margin="0,6,0,0" Style="{StaticResource PhotoSift.MutedText}"
+                               Text="Scanning only reads your photos. You review every match before anything is moved." />
+
+                    <Border Margin="0,18,0,0" Style="{StaticResource PhotoSift.Card}">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource PhotoSift.Caption}" Text="Folder" />
+                            <TextBox Margin="0,4,0,0" Style="{StaticResource PhotoSift.PathText}" FontWeight="SemiBold"
+                                     Text="{Binding SelectedPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                                     AutomationProperties.Name="Scope for Exact rules" />
+                            <TextBlock Margin="0,4,0,0" Style="{StaticResource PhotoSift.Caption}" Text="{Binding RecursionSummary}" />
+
+                            <Border Height="1" Margin="0,18" Background="{StaticResource PhotoSift.BorderBrush}" />
+
+                            <CheckBox x:Name="ExactDuplicatesCheckBox"
+                                      Style="{StaticResource PhotoSift.SwitchCheckBox}"
+                                      Content="Exact duplicates"
+                                      IsChecked="True"
+                                      IsEnabled="False"
+                                      AutomationProperties.Name="Exact duplicates are always enabled"
+                                      AutomationProperties.HelpText="Exact requires identical bytes and cannot be disabled." />
+                            <TextBlock Margin="56,4,0,0" Style="{StaticResource PhotoSift.Caption}" Text="{Binding ExactPreset}" />
+
+                            <CheckBox x:Name="NearDuplicatesCheckBox"
+                                      Margin="0,18,0,0"
+                                      Style="{StaticResource PhotoSift.SwitchCheckBox}"
+                                      Content="Conservative Near duplicates"
+                                      IsChecked="{Binding NearDuplicatesEnabled, Mode=OneWay}"
+                                      IsEnabled="{Binding CanChangeScanOptions}"
+                                      Command="{Binding ChangeNearDuplicateModeCommand}"
+                                      CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                      AutomationProperties.Name="Conservative Near duplicates"
+                                      AutomationProperties.HelpText="Uses the fixed precision-first Near profile. Ambiguous matches remain Uncertain." />
+                            <TextBlock Margin="56,4,0,0" Style="{StaticResource PhotoSift.Caption}"
+                                       Text="Look-alikes, such as a resized or re-saved copy of the same photo. Close calls are shown separately as Uncertain." />
+
+                            <TextBlock x:Name="ScanOptionsGuidanceText"
+                                       Margin="0,18,0,0"
+                                       Style="{StaticResource PhotoSift.MutedText}"
+                                       Text="{Binding ScanOptionsGuidance}"
+                                       AutomationProperties.Name="Scan options guidance"
+                                       AutomationProperties.ItemStatus="{Binding ScanOptionsGuidance}"
+                                       AutomationProperties.LiveSetting="Polite" />
+                            <TextBlock Margin="0,4,0,0" Style="{StaticResource PhotoSift.Caption}" Text="{Binding RuleSetStatus}" />
+                        </StackPanel>
+                    </Border>
+
+                    <WrapPanel Margin="0,18,0,0">
+                        <Button x:Name="ConfirmExactRulesButton" Content="Confirm Scan options" Margin="0,0,10,10" MinHeight="44"
+                                Style="{StaticResource PhotoSift.Button}"
                                 AutomationProperties.Name="Confirm Scan options" Command="{Binding ConfirmExactRulesCommand}"
                                 IsEnabled="{Binding CanConfirmExactRules}" />
-                        <Button x:Name="StartScanButton" Content="Start Scan" Padding="12,8" Margin="0,0,10,10"
+                        <Button x:Name="StartScanButton" Content="Start Scan" Margin="0,0,10,10" MinWidth="160"
+                                Style="{StaticResource PhotoSift.LargePrimaryButton}"
                                 AutomationProperties.Name="Start Scan" Command="{Binding StartScanCommand}" IsEnabled="{Binding CanStartScan}" />
                     </WrapPanel>
                 </StackPanel>
             </ScrollViewer>
 
-            <Grid Grid.Column="2" Visibility="{Binding IsScanPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                <StackPanel>
-                    <TextBlock Text="Scan" FontSize="24" FontWeight="SemiBold" />
-                    <TextBlock x:Name="ScanStatusText" Text="{Binding ScanStatus}" TextWrapping="Wrap" Margin="0,16,0,8"
-                               AutomationProperties.Name="Scan status" AutomationProperties.ItemStatus="{Binding ScanStatus}"
-                               AutomationProperties.LiveSetting="Polite" />
-                    <ProgressBar Height="8" IsIndeterminate="{Binding IsScanBusy}" AutomationProperties.Name="Scan activity"
-                                 AutomationProperties.ItemStatus="{Binding ScanStatus}" />
-                    <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" Margin="0,12" />
-                    <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
-                                  ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
-                                  AutomationProperties.Name="Scan outcome categories" />
-                    <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" />
-                    <WrapPanel Margin="0,16,0,0">
-                        <Button x:Name="CancelScanButton" Content="Cancel Scan" Padding="12,8" Margin="0,0,10,10"
-                                AutomationProperties.Name="Cancel Scan" Command="{Binding CancelScanCommand}" IsEnabled="{Binding IsScanBusy}" />
-                        <Button Content="Open Review" Padding="12,8" Margin="0,0,10,10" AutomationProperties.Name="Open Review"
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          Visibility="{Binding IsScanPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <StackPanel Margin="0,0,20,8" MaxWidth="760" HorizontalAlignment="Stretch">
+                    <TextBlock Style="{StaticResource PhotoSift.PageTitle}" Text="Scan" />
+                    <TextBlock Margin="0,6,0,0" Style="{StaticResource PhotoSift.MutedText}"
+                               Text="PhotoSift is only reading your photos. You can cancel at any time." />
+
+                    <Border Margin="0,18,0,0" Style="{StaticResource PhotoSift.Card}">
+                        <StackPanel>
+                            <TextBlock x:Name="ScanStatusText" Text="{Binding ScanStatus}"
+                                       Style="{StaticResource PhotoSift.SectionTitle}" FontSize="18"
+                                       AutomationProperties.Name="Scan status" AutomationProperties.ItemStatus="{Binding ScanStatus}"
+                                       AutomationProperties.LiveSetting="Polite" />
+                            <ProgressBar Height="8" Margin="0,14,0,0" IsIndeterminate="{Binding IsScanBusy}"
+                                         Foreground="{StaticResource PhotoSift.AccentBrush}"
+                                         AutomationProperties.Name="Scan activity"
+                                         AutomationProperties.ItemStatus="{Binding ScanStatus}" />
+                            <TextBlock Margin="0,12,0,0" Style="{StaticResource PhotoSift.MutedText}" Text="{Binding ScanCountsText}" />
+
+                            <Border Height="1" Margin="0,16" Background="{StaticResource PhotoSift.BorderBrush}" />
+
+                            <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
+                                          ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
+                                          AutomationProperties.Name="Scan outcome categories" />
+                            <TextBlock Margin="0,8,0,0" Style="{StaticResource PhotoSift.Caption}" Text="{Binding CoverageStatus}" />
+                        </StackPanel>
+                    </Border>
+
+                    <WrapPanel Margin="0,18,0,0">
+                        <Button Content="Open Review" Margin="0,0,10,10" MinWidth="160" AutomationProperties.Name="Open Review"
+                                Style="{StaticResource PhotoSift.LargePrimaryButton}"
                                 Command="{Binding OpenReviewCommand}" IsEnabled="{Binding CanOpenReview}" />
-                        <Button Content="Scan again" Padding="12,8" Margin="0,0,10,10" AutomationProperties.Name="Start a fresh scan"
+                        <Button x:Name="CancelScanButton" Content="Cancel Scan" Margin="0,0,10,10" MinHeight="44"
+                                Style="{StaticResource PhotoSift.Button}"
+                                AutomationProperties.Name="Cancel Scan" Command="{Binding CancelScanCommand}" IsEnabled="{Binding IsScanBusy}" />
+                        <Button Content="Scan again" Margin="0,0,10,10" MinHeight="44" AutomationProperties.Name="Start a fresh scan"
+                                Style="{StaticResource PhotoSift.Button}"
                                 Command="{Binding StartScanCommand}" IsEnabled="{Binding CanStartScan}" />
                     </WrapPanel>
                 </StackPanel>
-            </Grid>
+            </ScrollViewer>
 
             <!-- The Review page scrolls as one surface so evidence, selection and Approval stay
                  reachable at any window size. Each review level still owns a native virtualized
@@ -861,14 +1027,15 @@
           </TabItem>
         </TabControl>
 
-        <StackPanel Grid.Row="2" Margin="0,16,0,0">
+        <StackPanel Grid.Row="2" Margin="0,10,0,0">
             <app:ReviewAnnouncementTextBlock x:Name="ReviewAnnouncementText"
                        Text="{Binding ReviewAnnouncement}" TextWrapping="Wrap"
                        AutomationProperties.Name="Review command status"
                        AutomationProperties.LiveSetting="Polite" />
             <TextBlock x:Name="SourceMutationNoticeText"
-                       TextWrapping="Wrap"
+                       Style="{StaticResource PhotoSift.Caption}"
                        Text="{Binding SourceMutationNotice}" />
         </StackPanel>
+    </Grid>
     </Grid>
 </Window>
