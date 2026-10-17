@@ -109,6 +109,83 @@ public sealed class NearDuplicateGroupTests
         Assert.Equal([rows[1].Token, rows[2].Token], groups[1].Members.Select(member => member.Token));
     }
 
+    [Fact]
+    public void TwoNearComponentsThatAreRelatedEverywhereMergeIntoOneSet()
+    {
+        var store = ExactRows(4);
+        var rows = StoreFixture.Snapshot(store).Occurrences;
+        // Rows 0-1 and rows 2-3 are Near pairs; every cross pair differs by 8 or 9 bits.
+        Assert.True(store.CommitNearDuplicates(new(rows[0].Token.Pin, "managed-dhash-bgra-v1", [
+            Success(rows[0], 0), Success(rows[1], 0b1),
+            Success(rows[2], 0xFF00), Success(rows[3], 0xFF01)])).Accepted);
+
+        var set = Assert.Single(StoreFixture.Snapshot(store).Groups);
+        Assert.Equal(CandidateCategory.Uncertain, set.Category);
+        Assert.Equal(rows.Select(row => row.Token), set.Members.Select(member => member.Token));
+        Assert.Equal(2, set.Similarity.Count(edge => edge.Kind == NearRelationshipKind.Near));
+        Assert.Equal(4, set.Similarity.Count(edge => edge.Kind == NearRelationshipKind.Uncertain));
+    }
+
+    [Fact]
+    public void LookAlikeSetsDoNotDependOnInputOrder()
+    {
+        // Two dense families that are unrelated to each other, plus scattered hashes that
+        // bridge some of them, so merges compete and ties have to break the same way.
+        var hashes = DenseHashes(20)
+            .Concat(DenseHashes(20).Select(hash => ~hash))
+            .Concat(Enumerable.Range(1, 10).Select(index => DenseHashes(20)[index] | (0xFFUL << (index * 5))))
+            .ToArray();
+        var forward = ExactRows(hashes.Length);
+        var reverse = ExactRows(hashes.Length);
+        var forwardRows = StoreFixture.Snapshot(forward).Occurrences;
+        var reverseRows = StoreFixture.Snapshot(reverse).Occurrences;
+
+        Assert.True(forward.CommitNearDuplicates(new(forwardRows[0].Token.Pin, "managed-dhash-bgra-v1",
+            forwardRows.Select((row, index) => Success(row, hashes[index])).ToImmutableArray())).Accepted);
+        Assert.True(reverse.CommitNearDuplicates(new(reverseRows[0].Token.Pin, "managed-dhash-bgra-v1",
+            reverseRows.Select((row, index) => Success(row, hashes[index])).Reverse().ToImmutableArray())).Accepted);
+
+        Assert.Equal(
+            StoreFixture.Snapshot(forward).Groups.Select(SetShape),
+            StoreFixture.Snapshot(reverse).Groups.Select(SetShape));
+    }
+
+    [Fact]
+    public void ThreeHundredMutuallySimilarPhotosFormOneSet()
+    {
+        // Every pair differs by at most 6 bits, so complete linkage keeps merging until one
+        // set holds all of them; each merge only revisits the merged set's neighbors.
+        var hashes = DenseHashes(300);
+        var store = ExactRows(hashes.Length);
+        var rows = StoreFixture.Snapshot(store).Occurrences;
+
+        Assert.True(store.CommitNearDuplicates(new(rows[0].Token.Pin, "managed-dhash-bgra-v1",
+            rows.Select((row, index) => Success(row, hashes[index])).ToImmutableArray())).Accepted);
+
+        var set = Assert.Single(StoreFixture.Snapshot(store).Groups);
+        Assert.Equal(CandidateCategory.Uncertain, set.Category);
+        Assert.Equal(300, set.Members.Length);
+        Assert.Equal(300 * 299 / 2, set.Similarity.Length);
+        Assert.Null(set.KeeperOccurrenceId);
+    }
+
+    // Distinct three-bit hashes: any two differ by 2, 4 or 6 bits (Near or Uncertain).
+    private static ulong[] DenseHashes(int count)
+    {
+        var triples = new List<ulong>();
+        for (var a = 0; a < 64; a++)
+        for (var b = a + 1; b < 64; b++)
+        for (var c = b + 1; c < 64; c++)
+            triples.Add((1UL << a) | (1UL << b) | (1UL << c));
+        return Enumerable.Range(0, count).Select(index => triples[index * 997 % triples.Count]).ToArray();
+    }
+
+    private static string SetShape(CandidateGroup group) =>
+        $"{group.Category}:{group.Uncertain}:" +
+        string.Join(",", group.Members.Select(row => row.Token.OccurrenceId)) + ":" +
+        string.Join(";", group.Similarity.Select(edge =>
+            $"{edge.Left.OccurrenceId}-{edge.Right.OccurrenceId}-{edge.Kind}"));
+
     [Theory]
     [InlineData("scan")]
     [InlineData("occurrence")]
