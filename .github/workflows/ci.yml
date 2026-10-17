@@ -82,8 +82,9 @@ jobs:
 
       # ReleaseInputs.Tests.ps1 needs a real SDK and sealed package cache, so it
       # runs only on the owner's machine before a VM capture.
+      # The runner shell is always pwsh; each file runs under the matrix shell.
       - name: Run tooling tests
-        shell: ${{ matrix.shell }}
+        shell: pwsh
         run: |
           $failed = @()
           Get-ChildItem tests/tooling -Filter '*.Tests.ps1' |
