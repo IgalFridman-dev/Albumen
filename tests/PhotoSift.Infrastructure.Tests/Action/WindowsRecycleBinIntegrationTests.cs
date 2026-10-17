@@ -13,6 +13,7 @@ using Xunit;
 namespace PhotoSift.Infrastructure.Tests.ActionExecution;
 
 [Collection(WindowsRecycleBinIsolationDefinition.Name)]
+[Trait("Category", "GoldenVm")]
 public sealed class WindowsRecycleBinIntegrationTests
 {
     [Fact]
