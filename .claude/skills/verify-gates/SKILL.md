@@ -46,7 +46,8 @@ The dev host's Application Control blocks unsigned builds, so gates run in a NIC
   in `WpfReviewSelectionTests.cs`. Report a failure; never skip it.
 
 ## Release
-`eng/release/New-PhotoSiftRelease.ps1` builds the framework-dependent `win-x64` ZIP and
+`eng/release/New-PhotoSiftRelease.ps1` builds the self-contained `win-x64` ZIP (bundled .NET and
+WPF runtime, PM-008) and
 `Test-PhotoSiftRelease.ps1` re-verifies it. Required: two identical publishes, SHA256SUMS, and
 owner approval of the dependency inventory (`release-dependencies.json`). Any package change goes
 through that gate.
