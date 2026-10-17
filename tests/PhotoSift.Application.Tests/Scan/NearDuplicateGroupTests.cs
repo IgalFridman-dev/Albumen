@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using System.Numerics;
 using PhotoSift.Application.Scan;
 using PhotoSift.Domain.Scan;
 using Xunit;
@@ -134,6 +135,7 @@ public sealed class NearDuplicateGroupTests
         var hashes = DenseHashes(20)
             .Concat(DenseHashes(20).Select(hash => ~hash))
             .Concat(Enumerable.Range(1, 10).Select(index => DenseHashes(20)[index] | (0xFFUL << (index * 5))))
+            .Concat(SpreadHashes(20))
             .ToArray();
         var forward = ExactRows(hashes.Length);
         var reverse = ExactRows(hashes.Length);
@@ -153,9 +155,10 @@ public sealed class NearDuplicateGroupTests
     [Fact]
     public void ThreeHundredMutuallySimilarPhotosFormOneSet()
     {
-        // Every pair differs by at most 6 bits, so complete linkage keeps merging until one
-        // set holds all of them; each merge only revisits the merged set's neighbors.
-        var hashes = DenseHashes(300);
+        // Every pair is Uncertain and none is Near, so all 300 start as single photos and
+        // complete linkage keeps merging until one set holds them all; each merge only
+        // revisits the merged set's neighbors.
+        var hashes = SpreadHashes(300);
         var store = ExactRows(hashes.Length);
         var rows = StoreFixture.Snapshot(store).Occurrences;
 
@@ -178,6 +181,21 @@ public sealed class NearDuplicateGroupTests
         for (var c = b + 1; c < 64; c++)
             triples.Add((1UL << a) | (1UL << b) | (1UL << c));
         return Enumerable.Range(0, count).Select(index => triples[index * 997 % triples.Count]).ToArray();
+    }
+
+    // Distinct eight-bit hashes that share at most five bits: any two differ by 6 to 16 bits,
+    // which is always Uncertain and never Near.
+    private static ulong[] SpreadHashes(int count)
+    {
+        var random = new Random(20261017);
+        var hashes = new List<ulong>();
+        while (hashes.Count < count)
+        {
+            var hash = 0UL;
+            while (BitOperations.PopCount(hash) < 8) hash |= 1UL << random.Next(64);
+            if (hashes.TrueForAll(other => BitOperations.PopCount(hash ^ other) >= 6)) hashes.Add(hash);
+        }
+        return [.. hashes];
     }
 
     private static string SetShape(CandidateGroup group) =>
