@@ -134,6 +134,7 @@ ad-hoc prompting. The workflow is checked into the repo, so anyone can see exact
 | [`design-and-plan`](.claude/skills/design-and-plan/SKILL.md) skill | Turns a story spec into a design doc and a step-by-step plan before any code is written. |
 | [`story-reviewer`](.claude/agents/story-reviewer.md) agent | Fresh-context reviewer that checks safety, boundaries, offline guarantees, spec fit and test honesty. |
 | [`verify-gates`](.claude/skills/verify-gates/SKILL.md) skill | Runs the build, the test suites and the isolated VM gates, and records what actually passed. |
+| [`commit-and-pr`](.claude/skills/commit-and-pr/SKILL.md) skill | Keeps commit messages and PR descriptions short, specific and honest about what was verified. |
 
 Independent work runs in parallel: separate agents can implement a feature, review it with no shared
 context, and drive CI, while every change still lands through a pull request that a human approves.
