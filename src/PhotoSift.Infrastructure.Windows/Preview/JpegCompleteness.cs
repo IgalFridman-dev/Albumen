@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace PhotoSift.Infrastructure.Windows.Preview;
 
 // Windows decodes a JPEG that ends early without an error and fills the missing part with
@@ -14,14 +16,26 @@ internal static class JpegCompleteness
     public static bool EndsBeforeImageData(Stream stream, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        var reader = new Reader(stream, cancellationToken);
+        var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+        try
+        {
+            return EndsEarly(new Reader(stream, buffer, cancellationToken));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static bool EndsEarly(Reader reader)
+    {
         if (reader.Next() != 0xFF || reader.Next() != StartOfImage) return false;
 
         var marker = reader.NextMarker();
         while (marker >= 0)
         {
             if (marker == EndOfImage) return false;
-            if (marker is 0x01 or (>= 0xD0 and <= 0xD7))
+            if (marker is 0x01 or StartOfImage or (>= 0xD0 and <= 0xD7))
             {
                 marker = reader.NextMarker();
                 continue;
@@ -37,9 +51,8 @@ internal static class JpegCompleteness
         return true;
     }
 
-    private sealed class Reader(Stream stream, CancellationToken cancellationToken)
+    private sealed class Reader(Stream stream, byte[] buffer, CancellationToken cancellationToken)
     {
-        private readonly byte[] buffer = new byte[64 * 1024];
         private int count;
         private int index;
 
