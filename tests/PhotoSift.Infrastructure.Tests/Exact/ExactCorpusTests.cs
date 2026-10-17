@@ -172,7 +172,7 @@ public sealed class ExactCorpusTests
         Assert.Equal(
             heicAvailable
                 ? new StageOutcome(ScanStageState.Succeeded, ScanReason.None)
-                : new StageOutcome(ScanStageState.Unsupported, ScanReason.CodecUnavailable),
+                : new StageOutcome(ScanStageState.NotApplicable, ScanReason.CodecUnavailable),
             heic.Exact);
         if (heicTruth is not null)
         {
