@@ -32,7 +32,7 @@ public sealed class PreviewItemViewModel
     public string AutomationName { get; }
     public ImageSource? Image { get; }
 
-    private static BitmapSource? CreateImage(PreviewFrame? frame)
+    internal static BitmapSource? CreateImage(PreviewFrame? frame)
     {
         if (frame is null) return null;
         var image = BitmapSource.Create(

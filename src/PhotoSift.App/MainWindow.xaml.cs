@@ -6,6 +6,7 @@ using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -230,6 +231,10 @@ public partial class MainWindow : Window
 
         var source = eventArgs.OriginalSource as DependencyObject
             ?? Keyboard.FocusedElement as DependencyObject;
+        // A card's own buttons (such as Compare) act on Enter themselves.
+        if (FindAncestor<Button>(source) is { } button && IsWithin(button, list)
+            && !AutomationProperties.GetAutomationId(button).StartsWith("open-review-", StringComparison.Ordinal))
+            return;
         var item = list.SelectedItem
             ?? FindDataContext<ReviewCategoryViewModel>(source)
             ?? (object?)FindDataContext<ReviewGroupViewModel>(source)
@@ -277,8 +282,63 @@ public partial class MainWindow : Window
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
         var viewport = eventArgs.NewSize.Height;
         ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.45, 180, 480));
-        // Scrolled to Evidence, the photo fills most of the page instead of a fixed thumbnail.
-        ReviewPreviewStatusControl.PreviewImage.MaxHeight = Math.Max(240, viewport * 0.8);
+        // Scrolled to the viewer, the photo fills most of the page instead of a fixed thumbnail.
+        ReviewPreviewStatusControl.FitHeight = Math.Max(240, viewport * 0.8);
+    }
+
+    // The compared photo shares the viewer's size and zoom, and both photos pan together.
+    private void OnComparedPreviewLoaded(object sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is not PreviewStatusControl compared) return;
+        compared.SetBinding(PreviewStatusControl.ZoomProperty,
+            new Binding(nameof(Slider.Value)) { Source = ReviewZoomSlider });
+        compared.SetBinding(PreviewStatusControl.FitHeightProperty,
+            new Binding(nameof(PreviewStatusControl.FitHeight)) { Source = ReviewPreviewStatusControl });
+        compared.PreviewImage.SetValue(AutomationProperties.NameProperty, "Compared photo preview");
+        var main = ReviewPreviewStatusControl.PreviewImageScroller;
+        var other = compared.PreviewImageScroller;
+        // Photos of different widths pan by the same share of their own width.
+        var syncing = false;
+        void Follow(ScrollViewer leader, ScrollViewer follower)
+        {
+            if (syncing) return;
+            syncing = true;
+            try
+            {
+                var share = leader.ScrollableWidth > 0 ? leader.HorizontalOffset / leader.ScrollableWidth : 0;
+                follower.ScrollToHorizontalOffset(share * follower.ScrollableWidth);
+            }
+            finally
+            {
+                syncing = false;
+            }
+        }
+        ScrollChangedEventHandler fromMain = (_, change) =>
+        {
+            if (change.HorizontalChange != 0 || change.ExtentWidthChange != 0) Follow(main, other);
+        };
+        ScrollChangedEventHandler fromOther = (_, change) =>
+        {
+            if (change.HorizontalChange != 0) Follow(other, main);
+        };
+        main.ScrollChanged += fromMain;
+        other.ScrollChanged += fromOther;
+        compared.Unloaded += OnUnloaded;
+        Follow(main, other);
+
+        void OnUnloaded(object? unloadedSender, RoutedEventArgs unloadedArgs)
+        {
+            compared.Unloaded -= OnUnloaded;
+            main.ScrollChanged -= fromMain;
+            other.ScrollChanged -= fromOther;
+        }
+    }
+
+    // The selection bar stays under the page; its button brings the approval into view.
+    private void OnReviewCleanupClick(object sender, RoutedEventArgs eventArgs)
+    {
+        ApprovalPanel.BringIntoView();
+        ApprovalPanel.Focus();
     }
 
     // The Recycle Bin item list gets the same bounded height so the progress summary
@@ -395,6 +455,16 @@ public partial class MainWindow : Window
             target.Focus();
             Keyboard.Focus(target);
         }, DispatcherPriority.Input);
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
+    {
+        while (current is not null)
+        {
+            if (current is T match) return match;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
     }
 
     private static T? FindDataContext<T>(DependencyObject? current) where T : class
@@ -1024,8 +1094,36 @@ internal sealed class ReviewAnnouncementDiagnosticBuffer(int ownerThreadId)
 
 public class ReviewSelectionCheckBox : CheckBox
 {
+    private bool pressedShownChoice;
+
     protected override AutomationPeer OnCreateAutomationPeer() =>
         new ReviewSelectionCheckBoxAutomationPeer(this);
+
+    // The Keep | Remove style looks like two choices, so a mouse click on the choice that
+    // is already shown leaves it as it is instead of flipping it. Keyboard and UI
+    // Automation still toggle.
+    protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
+    {
+        pressedShownChoice = GetTemplateChild(IsChecked == true ? "RemovePart" : "KeepPart")
+            is UIElement { IsMouseOver: true };
+        base.OnMouseLeftButtonDown(e);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        pressedShownChoice = false;
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnClick()
+    {
+        if (pressedShownChoice)
+        {
+            pressedShownChoice = false;
+            return;
+        }
+        base.OnClick();
+    }
 
     protected override void OnToggle()
     {

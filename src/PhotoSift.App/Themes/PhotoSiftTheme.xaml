@@ -24,6 +24,10 @@
     <SolidColorBrush x:Key="PhotoSift.WarningBorderBrush" Color="#F5C38B" />
     <SolidColorBrush x:Key="PhotoSift.DangerBrush" Color="#B42318" />
     <SolidColorBrush x:Key="PhotoSift.DangerHoverBrush" Color="#912018" />
+    <SolidColorBrush x:Key="PhotoSift.DangerSoftBrush" Color="#FEF3F2" />
+    <!-- Review kinds: Identical copies (accent), Look-alike (teal), Maybe similar (amber). -->
+    <SolidColorBrush x:Key="PhotoSift.LookAlikeBrush" Color="#0F766E" />
+    <SolidColorBrush x:Key="PhotoSift.MaybeSimilarBrush" Color="#B45309" />
 
     <!-- Keyboard focus ring shared by every themed control. -->
     <Style x:Key="PhotoSift.FocusVisual">
@@ -354,6 +358,242 @@
         <Style.Triggers>
             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                 <Setter Property="Template" Value="{StaticResource PhotoSift.HighContrastStepTemplate}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <!-- Review: a whole card that opens something (a kind or a set). In High Contrast it
+         keeps system colors and shows hover and the open item with a Highlight border. -->
+    <ControlTemplate x:Key="PhotoSift.HighContrastCardTemplate" TargetType="Button">
+        <Border x:Name="Chrome" CornerRadius="10" Padding="{TemplateBinding Padding}"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}">
+            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <Style x:Key="PhotoSift.CardButton" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource PhotoSift.FocusVisual}" />
+        <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+        <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+        <Setter Property="BorderBrush" Value="{StaticResource PhotoSift.BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="12,10" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Chrome" CornerRadius="10" SnapsToDevicePixels="True" Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource PhotoSift.BorderStrongBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource PhotoSift.PressedBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                <Setter Property="Template" Value="{StaticResource PhotoSift.HighContrastCardTemplate}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- A photo thumbnail that opens the photo in the viewer. -->
+    <Style x:Key="PhotoSift.ThumbnailButton" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource PhotoSift.FocusVisual}" />
+        <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource PhotoSift.BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Chrome" CornerRadius="8" ClipToBounds="True"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource PhotoSift.AccentBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Colored mark for a Review kind; bound to anything with a Category property. -->
+    <Style x:Key="PhotoSift.KindMark" TargetType="Border">
+        <Setter Property="Width" Value="4" />
+        <Setter Property="CornerRadius" Value="2" />
+        <Setter Property="Background" Value="{StaticResource PhotoSift.BorderStrongBrush}" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Category}" Value="Exact">
+                <Setter Property="Background" Value="{StaticResource PhotoSift.AccentBrush}" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding Category}" Value="Near">
+                <Setter Property="Background" Value="{StaticResource PhotoSift.LookAlikeBrush}" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding Category}" Value="Uncertain">
+                <Setter Property="Background" Value="{StaticResource PhotoSift.MaybeSimilarBrush}" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- A small rounded label on a photo card. -->
+    <Style x:Key="PhotoSift.Badge" TargetType="Border">
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="8,2" />
+        <Setter Property="Margin" Value="0,4,6,0" />
+        <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+        <Setter Property="TextElement.FontSize" Value="12" />
+        <Setter Property="TextElement.FontWeight" Value="SemiBold" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <ControlTemplate x:Key="PhotoSift.HighContrastKeepRemoveTemplate" TargetType="CheckBox">
+        <StackPanel>
+            <Border x:Name="Track" CornerRadius="8" Padding="2" HorizontalAlignment="Left" BorderThickness="2"
+                    Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                    BorderBrush="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}">
+                <StackPanel Orientation="Horizontal">
+                    <Border x:Name="KeepPart" CornerRadius="6" Padding="14,4"
+                            Background="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}">
+                        <TextBlock x:Name="KeepText" Text="Keep" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+                    </Border>
+                    <Border x:Name="RemovePart" CornerRadius="6" Padding="14,4" Background="Transparent">
+                        <TextBlock x:Name="RemoveText" Text="Remove" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                    </Border>
+                </StackPanel>
+            </Border>
+            <ContentPresenter x:Name="Reason" Margin="0,4,0,0" Visibility="Collapsed"
+                              TextElement.Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}">
+                <ContentPresenter.Resources>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="TextWrapping" Value="Wrap" />
+                    </Style>
+                </ContentPresenter.Resources>
+            </ContentPresenter>
+        </StackPanel>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="KeepPart" Property="Background" Value="Transparent" />
+                <Setter TargetName="KeepText" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <Setter TargetName="RemovePart" Property="Background" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                <Setter TargetName="RemoveText" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+            </Trigger>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                <Setter TargetName="KeepPart" Property="Background" Value="Transparent" />
+                <Setter TargetName="RemovePart" Property="Background" Value="Transparent" />
+                <Setter TargetName="KeepText" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                <Setter TargetName="RemoveText" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                <Setter TargetName="Reason" Property="Visibility" Value="Visible" />
+                <Setter Property="Cursor" Value="Arrow" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <!-- Keep / Remove drawn over the real Review selection CheckBox: checked means
+         "marked for removal". The command, automation name and keyboard behavior stay
+         those of the CheckBox; the eligibility text shows only when it can't change. -->
+    <Style x:Key="PhotoSift.KeepRemoveToggle" TargetType="CheckBox">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource PhotoSift.FocusVisual}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <StackPanel>
+                        <Border x:Name="Track" CornerRadius="8" Padding="2" HorizontalAlignment="Left" BorderThickness="1"
+                                Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                                BorderBrush="{StaticResource PhotoSift.BorderStrongBrush}">
+                            <StackPanel Orientation="Horizontal">
+                                <Border x:Name="KeepPart" CornerRadius="6" Padding="14,4"
+                                        Background="{StaticResource PhotoSift.SuccessSoftBrush}">
+                                    <TextBlock x:Name="KeepText" Text="Keep" FontWeight="SemiBold"
+                                               Foreground="{StaticResource PhotoSift.SuccessBrush}" />
+                                </Border>
+                                <Border x:Name="RemovePart" CornerRadius="6" Padding="14,4" Background="Transparent">
+                                    <TextBlock x:Name="RemoveText" Text="Remove" FontWeight="SemiBold"
+                                               Foreground="{StaticResource PhotoSift.MutedTextBrush}" />
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                        <ContentPresenter x:Name="Reason" Margin="0,4,0,0" Visibility="Collapsed"
+                                          TextElement.FontSize="12"
+                                          TextElement.Foreground="{StaticResource PhotoSift.MutedTextBrush}">
+                            <ContentPresenter.Resources>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="TextWrapping" Value="Wrap" />
+                                </Style>
+                            </ContentPresenter.Resources>
+                        </ContentPresenter>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="KeepPart" Property="Background" Value="Transparent" />
+                            <Setter TargetName="KeepText" Property="Foreground" Value="{StaticResource PhotoSift.MutedTextBrush}" />
+                            <Setter TargetName="RemovePart" Property="Background" Value="{StaticResource PhotoSift.DangerBrush}" />
+                            <Setter TargetName="RemoveText" Property="Foreground" Value="White" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource PhotoSift.AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Track" Property="Opacity" Value="0.5" />
+                            <Setter TargetName="Reason" Property="Visibility" Value="Visible" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                <Setter Property="Template" Value="{StaticResource PhotoSift.HighContrastKeepRemoveTemplate}" />
             </DataTrigger>
         </Style.Triggers>
     </Style>

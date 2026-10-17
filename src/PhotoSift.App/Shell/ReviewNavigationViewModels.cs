@@ -49,6 +49,18 @@ public sealed class ReviewCategoryViewModel
     public int PositionInSet { get; }
     public int SizeOfSet { get; }
     public string AutomationName => $"{Name}: {GroupCount.ToString(CultureInfo.InvariantCulture)} groups";
+    public string Description => Category switch
+    {
+        ReviewCategoryKind.Exact => "Identical copies: the same file saved more than once. Keeping one loses nothing.",
+        ReviewCategoryKind.Near => "Look-alike: the same photo resized, recompressed or lightly edited.",
+        ReviewCategoryKind.Uncertain => "Maybe similar: photos that look close. Check them yourself before removing any.",
+        _ => "Files PhotoSift couldn't read or doesn't support. Nothing here can be removed.",
+    };
+    public string CountText => GroupCount == 1
+        ? Category == ReviewCategoryKind.CouldNotAnalyze ? "1 file" : "1 set"
+        : Category == ReviewCategoryKind.CouldNotAnalyze
+            ? $"{GroupCount.ToString(CultureInfo.InvariantCulture)} files"
+            : $"{GroupCount.ToString(CultureInfo.InvariantCulture)} sets";
     public LazyReviewCollection<ReviewGroupViewModel> Groups { get; }
 
     internal ReviewGroupViewModel? FindGroup(Guid groupId) =>
@@ -107,6 +119,7 @@ public sealed class ReviewGroupViewModel
             index + 1, members.Length));
         MemberCount = members.Length;
         Summary = FormatSummary(category, MemberCount);
+        SelectionStatus = FormatSelectionStatus(group.SelectedOccurrenceIds.Count);
         var physicalFileCount = members.Select(member => member.Occurrence.PhysicalFileKey)
             .Where(key => key is not null).Distinct().Count();
         AutomationName = category == ReviewCategoryKind.Exact
@@ -151,6 +164,7 @@ public sealed class ReviewGroupViewModel
     public int PositionInSet { get; }
     public int SizeOfSet { get; }
     public string Summary { get; }
+    public string SelectionStatus { get; } = string.Empty;
     public string AutomationName { get; private init; }
     public string ItemStatus { get; private init; }
     public LazyReviewCollection<ScanOccurrenceViewModel> Members { get; }
@@ -180,6 +194,13 @@ public sealed class ReviewGroupViewModel
             ReviewCategoryKind.Uncertain => "Uncertain",
             _ => "Could Not Analyze",
         }} group: {count.ToString(CultureInfo.InvariantCulture)} paths";
+
+    private static string FormatSelectionStatus(int selected) => selected switch
+    {
+        0 => "Nothing marked yet",
+        1 => "1 photo marked for removal",
+        _ => $"{selected.ToString(CultureInfo.InvariantCulture)} photos marked for removal",
+    };
 
     private static AsyncCommand DisabledCommand(bool parameterized = false) => parameterized
         ? new AsyncCommand(_ => Task.CompletedTask, canExecute: () => false)
