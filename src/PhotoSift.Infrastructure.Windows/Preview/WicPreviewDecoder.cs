@@ -23,6 +23,8 @@ public sealed class WicPreviewDecoder
         "Preview unavailable: the file is unavailable.";
     public const string ChangedReason =
         "Preview unavailable: the file changed while it was analyzed.";
+    public const string IncompleteReason =
+        "Preview unavailable: the photo file is incomplete.";
 
     public WicPreviewDecoder() : this(
         new WicCodecCapability(new ComClassAvailability()), MemoryPool<byte>.Shared) { }
@@ -128,6 +130,12 @@ public sealed class WicPreviewDecoder
     private PreviewDecodeResult DecodeContent(
         Stream stream, string fullPath, int maximumEdge, CancellationToken cancellationToken)
     {
+        var start = stream.Position;
+        if (JpegCompleteness.EndsBeforeImageData(stream, cancellationToken))
+            return PreviewDecodeResult.Failure(
+                fullPath, PreviewAvailability.CouldNotAnalyze, IncompleteReason);
+        stream.Position = start;
+
         var header = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat,
             BitmapCacheOption.None).Frames[0];
         var orientation = ReadOrientation(header.Metadata);
