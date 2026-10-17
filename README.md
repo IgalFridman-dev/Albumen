@@ -1,17 +1,24 @@
 # PhotoSift
 
-[![CI](https://github.com/IgalFridman-dev/PhotoSift/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/IgalFridman-dev/PhotoSift/actions/workflows/ci.yml)
+[![CI](https://github.com/IgalFridman-dev/PhotoSift/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/IgalFridman-dev/PhotoSift/actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/platform-Windows%2011%20x64-0078D4)
 ![.NET](https://img.shields.io/badge/.NET-10-512BD4)
 ![C#](https://img.shields.io/badge/C%23-14-239120)
 ![Offline](https://img.shields.io/badge/network-none-success)
 
-**Find duplicate photos on Windows, review them side by side, and send only what you approve to the Recycle Bin.**
+**Find duplicate photos on Windows, review each group, and send only what you approve to the Recycle Bin.**
+
+![PhotoSift reviewing an exact duplicate group: categories, groups, the paths being compared and a preview of the photo](docs/images/hero-review-exact.png)
 
 PhotoSift is a privacy-first desktop app for Windows 11 built with .NET 10, C# 14 and WPF. It scans one
 local folder for byte-identical and conservatively near-identical JPEG/PNG images, groups them for
 review, and moves only the files you explicitly approve to the Recycle Bin. It works fully offline,
 never deletes permanently, and keeps a durable record of every action it takes.
+
+| 1. Choose a folder | 2. Approve exactly what goes | 3. See every outcome |
+|---|---|---|
+| ![Choose Scope with a ready preflight summary](docs/images/choose-scope.png) | ![Approval listing the selected path, recovery estimate and Recycle Bin destination](docs/images/approve-cleanup.png) | ![Recycle Bin progress showing one original path recycled](docs/images/recycle-bin-progress.png) |
+| Preflight checks the folder is local and readable before any scan. | The approval lists every path, the estimated space recovered and the destination. | Each file is sent on its own and its result is recorded. |
 
 ## Why it is interesting
 
@@ -68,7 +75,7 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 | Imaging | Windows Imaging Component (WIC) for orientation-aware decoding and bounded previews |
 | File system | Win32 traversal and identity APIs, `IFileOperation` for Recycle Bin moves |
 | Storage | SQLite (`Microsoft.Data.Sqlite`) with forward-only schema migrations and WAL |
-| Tests | xUnit v3 (5 projects), Pester for the PowerShell tooling |
+| Tests | xUnit v3 (5 projects), script tests for the PowerShell tooling |
 | Build | .NET SDK 10.0.400 pinned in `global.json`, central package versions, locked restore, warnings as errors |
 
 ## Quality and verification
@@ -78,17 +85,22 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 - **Full suite: 1,757 / 1,757 passing** in the official gate on the release candidate.
 - **Isolated verification VM.** Official gates run in a Hyper-V VM with no network adapter, restored
   from a known checkpoint for every run. This proves the offline guarantee and keeps runs reproducible.
-- **Reproducible release.** Two independent locked publishes are compared file by file (path,
-  length, SHA-256) before the ZIP is produced, with a checksum-verifying launcher and third-party notices.
+- **Reproducible release.** Two independent locked, self-contained publishes are compared file by
+  file (path, length, SHA-256) before the ZIP is produced, with a checksum-verifying launcher and
+  third-party notices for every bundled component.
 - **CI.** Every pull request builds with warnings as errors and runs the test suites on `windows-latest`.
 - **Evidence over claims.** Every finished story has a written verification record, and the V1
   release decision lists its open limitations instead of hiding them (see below).
 
 ## Getting started
 
-**To run it** you need Windows 11 x64 and the
-[.NET 10 Desktop Runtime x64](https://dotnet.microsoft.com/download/dotnet/10.0) (10.0.11 or later).
-Extract the release ZIP and run `Start-PhotoSift.cmd`; the launcher verifies the package before starting.
+**To run it** you need Windows 11 x64 and nothing else: the release is self-contained, so no .NET
+install is required.
+
+1. Download the ZIP from the latest release and extract it to a local folder.
+2. Run `Start-PhotoSift.cmd`. It checks every packaged file against its manifest, then starts the app.
+3. The build is not code-signed, so Windows SmartScreen may warn on first run: choose
+   **More info → Run anyway**.
 
 **To build it** you need the .NET SDK `10.0.400`:
 
@@ -105,10 +117,9 @@ the official gate scripts live in [`eng/verification/`](eng/verification/) and a
 
 ## Known limitations (V1)
 
-- At the default window size the Review content can be clipped; maximize the window and scroll the
-  Approval pane ([PM-006](docs/backlog/post-mvp.md)).
-- Accessibility work is not complete: a local-data warning is not announced by Narrator
-  (PM-002, PM-005). PhotoSift makes no accessibility-compliance claim.
+- Accessibility work is not complete. The local-data warning now raises a screen-reader
+  announcement, but that has not yet been checked with Narrator (PM-002, PM-005). PhotoSift makes
+  no accessibility-compliance claim.
 - HEIF support depends on the installed Windows codec and is best effort; JPEG and PNG are supported.
 - Near-duplicate quality was validated on a small labeled corpus. Human review is always required.
 - A first scan of 300 images took 12.1 s on a 2-CPU, 4 GiB VM. That is an observation, not a benchmark.
@@ -143,7 +154,7 @@ Product planning used the BMAD Method (brief → PRD → UX → architecture →
 ```text
 src/            6 production projects: Domain, Application, Analysis,
                 Infrastructure.Sqlite, Infrastructure.Windows, App
-tests/          5 xUnit v3 projects + Pester tests for tooling
+tests/          5 xUnit v3 projects + PowerShell tooling tests
 eng/            Hyper-V verification gates and release packaging scripts
 docs/           HOW-IT-WORKS and the deferred-work backlog
 .github/        CI workflow
