@@ -54,6 +54,48 @@ public sealed class WpfReviewViewerTests
     }
 
     [Fact]
+    public void ComparedPhotosPanTogetherByTheSameShareOfTheirWidth()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
+            var viewModel = new ShellViewModel(workflow.Scope, workflow,
+                reviewPreviewSource: new SizedPreviewSource(40, 30));
+            var near = viewModel.ReviewCategories.Single(row => row.Category == ReviewCategoryKind.Near);
+            viewModel.OpenReviewCategoryCommand.ExecuteAsync(near).GetAwaiter().GetResult();
+            var group = near.Groups[0];
+            viewModel.OpenReviewGroupCommand.ExecuteAsync(group).GetAwaiter().GetResult();
+            viewModel.OpenReviewMemberCommand.ExecuteAsync(group.Members[0]).GetAwaiter().GetResult();
+            viewModel.CompareReviewMemberCommand.ExecuteAsync(group.Members[1]).GetAwaiter().GetResult();
+            var window = new MainWindow { DataContext = viewModel, Width = 1280, Height = 800 };
+            try
+            {
+                ShowAndDrain(window);
+                Assert.IsType<Slider>(window.FindName("ReviewZoomSlider")).Value = 3;
+                ShowAndDrain(window);
+                var previews = WpfReviewSelectionTests.Descendants<PreviewStatusControl>(window).ToArray();
+                Assert.Equal(2, previews.Length);
+                var main = previews[0].PreviewImageScroller;
+                var compared = previews[1].PreviewImageScroller;
+                Assert.True(main.ScrollableWidth > 0 && compared.ScrollableWidth > 0,
+                    $"Zoomed photos did not pan: {main.ScrollableWidth} and {compared.ScrollableWidth}.");
+
+                main.ScrollToHorizontalOffset(main.ScrollableWidth / 2);
+                ShowAndDrain(window);
+                Assert.Equal(compared.ScrollableWidth / 2, compared.HorizontalOffset, 1.0);
+
+                compared.ScrollToHorizontalOffset(compared.ScrollableWidth);
+                ShowAndDrain(window);
+                Assert.Equal(main.ScrollableWidth, main.HorizontalOffset, 1.0);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void SelectionBarStaysOutsideThePageAndLeadsToTheApproval()
     {
         WpfReviewSelectionTests.RunOnSta(() =>
@@ -245,6 +287,23 @@ internal sealed class SizedThumbnailSource(IReadOnlyDictionary<long, (int Width,
     {
         var (width, height) = sizes[occurrence.Token.OccurrenceId];
         var frame = new PreviewFrame(1, 1, width, height, MemoryPool<byte>.Shared.Rent(4));
+        return Task.FromResult(ReviewPreviewResult.Success(occurrence.ResolvedPath, frame, 512, null));
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+// Answers every viewer request at once with a small solid frame that the viewer scales up.
+internal sealed class SizedPreviewSource(int width, int height) : IReviewPreviewSource
+{
+    public Task<ReviewPreviewResult> LoadAsync(
+        ScanRunContext context,
+        ScanFileOccurrence occurrence,
+        CancellationToken cancellationToken)
+    {
+        var pixels = MemoryPool<byte>.Shared.Rent(width * height * 4);
+        pixels.Memory.Span.Fill(0x80);
+        var frame = new PreviewFrame(width, height, width, height, pixels);
         return Task.FromResult(ReviewPreviewResult.Success(occurrence.ResolvedPath, frame, 512, null));
     }
 
