@@ -81,9 +81,8 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 - **Reproducible release.** Two independent locked publishes are compared file by file (path,
   length, SHA-256) before the ZIP is produced, with a checksum-verifying launcher and third-party notices.
 - **CI.** Every pull request builds with warnings as errors and runs the test suites on `windows-latest`.
-- **Evidence over claims.** Each finished story has a verification record in [`docs/evidence/`](docs/evidence/),
-  and the V1 release decision with its open limitations is in
-  [release readiness](docs/evidence/e5-s5/release-readiness.md).
+- **Evidence over claims.** Every finished story has a written verification record, and the V1
+  release decision lists its open limitations instead of hiding them (see below).
 
 ## Getting started
 
@@ -119,8 +118,7 @@ the official gate scripts live in [`eng/verification/`](eng/verification/) and a
 - **V1.1:** blur detection as review evidence, and reuse of previously computed signatures across scans.
 - **V1.2:** on-device semantic "likely matches" using a local image encoder, still fully offline.
 
-The full backlog is in [`docs/backlog/post-mvp.md`](docs/backlog/post-mvp.md) and story-level status in
-[`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml).
+Deferred work is tracked in [`docs/backlog/post-mvp.md`](docs/backlog/post-mvp.md).
 
 ## How it was built
 
@@ -147,11 +145,14 @@ src/            6 production projects: Domain, Application, Analysis,
                 Infrastructure.Sqlite, Infrastructure.Windows, App
 tests/          5 xUnit v3 projects + Pester tests for tooling
 eng/            Hyper-V verification gates and release packaging scripts
-docs/           HOW-IT-WORKS, evidence per story, backlog, design specs and plans
-_bmad-output/   product brief, PRD, UX, architecture, epics, one SPEC.md per story
+docs/           HOW-IT-WORKS and the deferred-work backlog
 .github/        CI workflow
+.claude/        skills, agents and commands used to develop PhotoSift
 CLAUDE.md       guide for working on the code with Claude Code
 ```
+
+Product planning, per-story specs and design docs, and the verification evidence records are kept in
+a private development repository.
 
 ## License
 
