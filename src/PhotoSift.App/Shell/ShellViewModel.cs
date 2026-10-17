@@ -230,6 +230,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             "Local data could not be safely loaded. PhotoSift will not modify files until the database is available.",
         _ => string.Empty,
     };
+    public bool HasActionRecoveryStatus => ActionRecoveryStatusText.Length != 0;
+    public bool IsLocalDataFaulted => photoSnapshot?.ActionRecovery.Status == ActionRecoveryStatus.Faulted;
     public bool CanRevalidateUnknownItems => photoSnapshot?.ActionRecovery is
         { Status: ActionRecoveryStatus.Ready, ProbeOutstanding: false }
         && HasActionRecoveryDisclosure;
@@ -1099,7 +1101,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             foreach (var record in projected) actionRecoveryRecords.Add(record);
         }
         foreach (var property in new[] { nameof(ActionRecoveryRecords), nameof(HasActionRecoveryRecords),
-            nameof(HasActionRecoveryDisclosure), nameof(ActionRecoveryStatusText), nameof(CanRevalidateUnknownItems) })
+            nameof(HasActionRecoveryDisclosure), nameof(ActionRecoveryStatusText), nameof(HasActionRecoveryStatus),
+            nameof(IsLocalDataFaulted), nameof(CanRevalidateUnknownItems) })
             OnPropertyChanged(property);
         var active = ActionRecoveryRecords.SelectMany(record => record.Items).FirstOrDefault(item => item.IsVerifying);
         actionRecoveryAnnouncement = active is not null
