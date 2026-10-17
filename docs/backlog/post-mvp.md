@@ -237,7 +237,13 @@ criteria are met.
 
 ## PM-006 — Make Review content reachable at default window size
 
-**Status:** Backlog — observed usability limitation on the V1 candidate
+**Status:** Fixed in PR #10. Review and the Recycle Bin progress page scroll as
+one surface with bounded, still-virtualized lists. Owner verified it in the real
+app on 2026-10-17 at the default window size; the VM UI smoke and Scenarios
+tests cover 960×720 and 680×520. The same PR carries owner-requested V1 polish
+outside any SPEC (compact header, numbered step rail, wrapping list labels,
+Scan summary expander, larger preview, Narrator-announced local-data warning);
+the Narrator announcement itself has not been verified by listening (PM-005).
 
 **Priority:** Post-V1 layout repair; revisit sooner if a supported display
 cannot reach explicit Approval even after resizing
@@ -272,3 +278,31 @@ resources (the dark tokens in the UX `DESIGN.md`) while keeping the High
 Contrast behavior that the `SystemColors` assertions cover today. Verify in the
 real app under light, dark and High Contrast, not only in tests that build
 `MainWindow` without the `App` theme.
+
+## PM-008 — Ship V1 as a self-contained release
+
+**Status:** In progress — design approved 2026-10-17; release built and clean-launch
+checked on 2026-10-17 at `8562f97`; inventory owner-approved 2026-10-17. Open: the
+demo-photos ZIP. The build used a fresh package cache restored on the owner's host,
+not the sealed offline Golden VM cache (the VM cache lacks the runtime packs); this
+was reported to the owner as sufficient for V1 but not separately signed off. Evidence: `docs/evidence/pm-008/`.
+
+**Priority:** Before the public V1 release
+
+**Origin:** Owner decision during GitHub polish, 2026-10-17
+
+The V1 candidate requires the .NET 10 Desktop Runtime to be installed first, which is a
+barrier for someone trying the app from a GitHub release. Bundle the pinned 10.0.11 runtime
+and the WPF part of the Windows Desktop runtime in the release folder so the user only
+extracts the ZIP and runs `Start-PhotoSift.cmd`. Design:
+`docs/superpowers/specs/2026-10-17-pm-008-self-contained-release-design.md`.
+
+### Completion criteria
+
+- Tooling tests and the release dry run pass on GitHub CI.
+- One Golden VM capture on the owner's PC: identical publishes and the closure check pass.
+- The owner approves the new redistribution inventory.
+- Acceptance on a runtime-free Windows 11 VM with no network: launch, an Exact and a Near
+  review, one Recycle Bin move and restore, and the tamper check still rejects a changed file.
+- A small demo-photos ZIP ships next to the app ZIP.
+

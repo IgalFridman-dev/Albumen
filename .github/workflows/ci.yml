@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build-and-test:
+    name: Build and test (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET SDK from global.json
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore (locked)
+        run: dotnet restore PhotoSift.slnx --locked-mode
+
+      - name: Build (warnings as errors)
+        run: dotnet build PhotoSift.slnx -c Release --no-restore
+
+      # Suites run one after another: the WPF scenario tests have wall-clock
+      # budgets that parallel suites on a shared runner can exceed.
+      - name: Test Domain
+        run: dotnet test tests/PhotoSift.Domain.Tests -c Release --no-build --logger trx --results-directory TestResults
+
+      - name: Test Application
+        if: success() || failure()
+        run: dotnet test tests/PhotoSift.Application.Tests -c Release --no-build --logger trx --results-directory TestResults
+
+      - name: Test Analysis
+        if: success() || failure()
+        run: dotnet test tests/PhotoSift.Analysis.Tests -c Release --no-build --logger trx --results-directory TestResults
+
+      # GoldenVm tests mutate real files and the Recycle Bin and refuse to run
+      # outside a disposable run of the isolated verification VM
+      # (eng/verification). They run there, not on hosted runners.
+      - name: Test Infrastructure (excluding GoldenVm)
+        if: success() || failure()
+        run: dotnet test tests/PhotoSift.Infrastructure.Tests -c Release --no-build --filter "Category!=GoldenVm" --logger trx --results-directory TestResults
+
+      - name: Test Scenarios (WPF)
+        if: success() || failure()
+        run: dotnet test tests/PhotoSift.Scenarios.Tests -c Release --no-build --logger trx --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: ignore
+
+  tooling-tests:
+    name: Tooling tests (${{ matrix.shell }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only the tests that are self-contained on a hosted runner. ReleaseInputs
+      # needs a real SDK and sealed package cache; E1S6CrashHarness needs a built
+      # crash harness; the Golden VM and Hyper-V tests assume a non-elevated host,
+      # and hosted runners are elevated. Those run on the owner's machine.
+      # The runner shell is always pwsh; each file runs under the matrix shell.
+      - name: Run tooling tests
+        shell: pwsh
+        run: |
+          $failed = @()
+          foreach ($name in 'PhotoSiftNetworkAudit', 'PhotoSiftRelease', 'ReleaseNativeCommand', 'RuntimeBoundary') {
+            $path = "tests/tooling/$name.Tests.ps1"
+            Write-Output "::group::$name"
+            & $env:TEST_SHELL -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $path
+            if ($LASTEXITCODE -ne 0) { $failed += $name }
+            Write-Output '::endgroup::'
+          }
+          if ($failed) { throw "Failed: $($failed -join ', ')" }
+        env:
+          TEST_SHELL: ${{ matrix.shell }}
