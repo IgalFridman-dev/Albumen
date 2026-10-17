@@ -237,12 +237,13 @@ criteria are met.
 
 ## PM-006 — Make Review content reachable at default window size
 
-**Status:** Fix proposed on `claude/improve-v1-ui-4nwjld` — the Review page now
-scrolls as one surface with bounded, still-virtualized navigation lists. Open
-until verified in the real WPF app at several window sizes. The same branch
-carries owner-requested V1 polish outside any SPEC: a compact header, a
-numbered step rail, wrapping Review list labels, a collapsed Scan summary on
-Review (coverage stays visible), and a Narrator-announced local-data warning.
+**Status:** Fixed in PR #10. Review and the Recycle Bin progress page scroll as
+one surface with bounded, still-virtualized lists. Owner verified it in the real
+app on 2026-10-17 at the default window size; the VM UI smoke and Scenarios
+tests cover 960×720 and 680×520. The same PR carries owner-requested V1 polish
+outside any SPEC (compact header, numbered step rail, wrapping list labels,
+Scan summary expander, larger preview, Narrator-announced local-data warning);
+the Narrator announcement itself has not been verified by listening (PM-005).
 
 **Priority:** Post-V1 layout repair; revisit sooner if a supported display
 cannot reach explicit Approval even after resizing
