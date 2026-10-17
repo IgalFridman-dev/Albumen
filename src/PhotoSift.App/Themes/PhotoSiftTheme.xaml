@@ -307,7 +307,10 @@
                 </MultiTrigger.Conditions>
                 <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
             </MultiTrigger>
+            <!-- Step content is the button's logical child, so it inherits the button's
+                 Foreground rather than the presenter's; set both. -->
             <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
                 <Setter TargetName="Content" Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
                 <Setter Property="Cursor" Value="Arrow" />
             </Trigger>
