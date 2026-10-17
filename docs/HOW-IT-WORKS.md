@@ -1,7 +1,7 @@
 # How PhotoSift works
 
 A one-page map of the app: what the user sees, how a click flows through the code, and where
-data lives. For the full rationale see the Architecture Spine in `_bmad-output/planning-artifacts/`.
+data lives.
 
 ## What the user sees
 
@@ -15,8 +15,6 @@ Each phase unlocks only when the previous one is valid (`Domain/Workflow/Workflo
 | 3 | **Scan** | Progress and live counts; "Cancel Scan". Outcome categories show what was grouped, skipped or unsupported. |
 | 4 | **Review** | Categories (Exact / Near) → groups → side-by-side comparison with bounded previews. The user ticks files to remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). |
 | 5 | **Approve Cleanup** | A disclosure lists the exact original paths. "Approve Cleanup" moves them one by one to the Recycle Bin and shows progress. Below it, **Action Records** list every past outcome, survive relaunch, and can be revalidated read-only. |
-
-Static UX mockups of these screens: `_bmad-output/planning-artifacts/ux-designs/ux-PhotoSift-2026-08-28/mockups/*.html`.
 
 ## Code layers
 
@@ -74,7 +72,7 @@ Key ideas:
 - `%LOCALAPPDATA%\PhotoSift\photosift.db` — SQLite (scan identity, checkpoints, override
   evidence, action journal and records). "Clear local Scan data" removes scan data only.
 - Photos are only read, never modified; removal = Windows Recycle Bin (restorable).
-- No network access at all (verified in `docs/evidence/e5-s3/`).
+- No network access at all (verified by network audits in a VM with no network adapter).
 
 ## Tests at a glance
 
@@ -85,4 +83,4 @@ Key ideas:
 | `PhotoSift.Analysis.Tests` | hashing and perceptual signatures |
 | `PhotoSift.Infrastructure.Tests` | Win32/WIC/SQLite adapters + architecture rules |
 | `PhotoSift.Scenarios.Tests` | real WPF window, keyboard and automation flows |
-| `tests/tooling/*.Tests.ps1` | Pester tests for VM and release scripts |
+| `tests/tooling/*.Tests.ps1` | PowerShell tests for VM and release scripts |

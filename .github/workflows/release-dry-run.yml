@@ -1,0 +1,78 @@
+name: Release dry run
+
+on:
+  pull_request:
+    paths:
+      - 'eng/release/**'
+      - 'eng/Verify-RuntimeBoundary.ps1'
+      - 'src/**'
+      - 'Directory.*.props'
+      - 'global.json'
+      - 'THIRD-PARTY-NOTICES.md'
+      - '.github/workflows/release-dry-run.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-dry-run-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+# Runs the real release builder (two locked restores and publishes, file-by-file
+# comparison, inventory and notices checks, packaging) on a hosted runner with
+# network access. It is not the offline Golden VM capture, which remains the
+# release gate; it catches builder and packaging breaks on every PR.
+jobs:
+  build-release:
+    name: Build release candidate (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET SDK from global.json
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build release candidate
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP 'photosift-release'
+          $packages = Join-Path $env:RUNNER_TEMP 'photosift-packages'
+          $result = & ./eng/release/New-PhotoSiftRelease.ps1 `
+            -RepositoryRoot $PWD `
+            -OutputRoot $output `
+            -SdkRoot $env:DOTNET_ROOT `
+            -PackagesRoot $packages `
+            -SourceIdentity $env:GITHUB_SHA
+          $result | Format-List | Out-String | Write-Output
+          "CANDIDATE=$($result.candidatePath)" >> $env:GITHUB_ENV
+
+      - name: Verify release candidate
+        shell: pwsh
+        run: ./eng/release/Test-PhotoSiftRelease.ps1 -PackagePath $env:CANDIDATE
+
+      - name: Summarize candidate
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not $env:CANDIDATE) { return }
+          $files = @(Get-ChildItem -Recurse -File $env:CANDIDATE)
+          $bytes = ($files | Measure-Object Length -Sum).Sum
+          Write-Output "Files: $($files.Count); bytes: $bytes"
+          $zip = Join-Path $env:RUNNER_TEMP 'PhotoSift-candidate.zip'
+          Compress-Archive -Path (Join-Path $env:CANDIDATE '*') -DestinationPath $zip
+          Write-Output "ZIP bytes: $((Get-Item $zip).Length)"
+
+      - name: Show failure evidence
+        if: failure()
+        shell: pwsh
+        run: |
+          $failure = Join-Path $env:RUNNER_TEMP 'photosift-release/evidence/failure.json'
+          if (Test-Path $failure) { Get-Content -Raw $failure }
