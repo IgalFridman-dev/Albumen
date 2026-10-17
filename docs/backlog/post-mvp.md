@@ -16,6 +16,15 @@ The failure repeated in Architecture runs `20260914-121019-architecture-b47aabb3
 
 Read-only follow-up identified the direct fail-closed boundary: `SqliteDatabaseOwner.RefuseRetainedSidecars()` rejects any retained SQLite `-wal`, `-shm`, or `-journal` file before opening the database. A hard process kill may legitimately leave WAL/SHM state, so elapsed time alone does not make this state admissible. The current behavior protects evidence and source photos by refusing startup mutation, but it can prevent Action Records from loading after this exact hard-crash edge case.
 
+Owner observation, 2026-10-16: on a fresh Windows install the restored `%LOCALAPPDATA%\PhotoSift` folder held a
+0-byte `photosift.db-wal` and a `photosift.db-shm` dated 2026-10-06. Every launch showed "Local data could not be
+safely loaded" and the app offered no in-app way out. The Hyper-V VM reproduced it on clean develop `9a78e3b`: one launch
+and a normal close (exit code 0) left an empty `-wal` and a `-shm`. Shutdown tracing showed every dispose step
+completing, no open statements, and the writer closing last, yet the close did not remove the sidecars. An explicit
+`PRAGMA wal_checkpoint(TRUNCATE)` before the writer closes made the close remove them, so `SqliteDatabaseOwner` now
+does that. Why the implicit close-time checkpoint did not run is not established. A hard kill can still leave
+sidecars, so the explicit recovery authority above is still needed.
+
 ### Deferred automated coverage
 
 - Capture and expose the precise retained-sidecar recovery reason without leaking paths or evidence.
@@ -244,3 +253,22 @@ disclosure, and Approval reachable at the default 960×720 window and common
 DPI settings without requiring maximize. Preserve explicit approval and
 virtualized list behavior. Verify in the actual WPF app at multiple window
 sizes, not only through layout unit tests.
+
+## PM-007 — Support Windows dark mode
+
+**Status:** Backlog
+
+**Priority:** Post-V1 presentation
+
+**Origin:** Owner observation on a dark-mode Windows 11 PC, 2026-10-16
+
+`App.xaml` used `ThemeMode="System"`, so the Fluent controls turned dark under
+Windows dark mode while `MainWindow` and the dialogs kept painting surfaces and
+text with `SystemColors` brushes, which stay light outside High Contrast. The
+Workflow tab showed white text and dark-translucent buttons on white panels, so
+the cards looked empty. The V1 fix pins `ThemeMode="Light"`. Dark mode needs
+the windows to take their surface, text and border colors from the Fluent theme
+resources (the dark tokens in the UX `DESIGN.md`) while keeping the High
+Contrast behavior that the `SystemColors` assertions cover today. Verify in the
+real app under light, dark and High Contrast, not only in tests that build
+`MainWindow` without the `App` theme.
