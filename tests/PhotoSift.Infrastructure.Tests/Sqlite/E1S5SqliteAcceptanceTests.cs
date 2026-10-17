@@ -10,6 +10,7 @@ using static PhotoSift.Infrastructure.Tests.Sqlite.SqliteSchemaVersionTwoTests;
 namespace PhotoSift.Infrastructure.Tests.Sqlite;
 
 [Collection(WindowsRecycleBinIsolationDefinition.Name)]
+[Trait("Category", "GoldenVm")]
 public sealed class E1S5SqliteAcceptanceTests
 {
     [Theory]
