@@ -44,3 +44,6 @@ packages/
 Thumbs.db
 Desktop.ini
 
+
+# Python cache from the ui-ux-pro-max skill search script
+__pycache__/
