@@ -4,14 +4,21 @@
         AutomationProperties.Name="{Binding AutomationName}"
         AutomationProperties.ItemStatus="{Binding StatusText}">
     <StackPanel>
-        <!-- MainWindow sizes the preview from the Review page viewport. -->
-        <Image x:Name="PreviewImage"
-               Source="{Binding Image, Mode=OneWay}"
-               MaxHeight="512"
-               HorizontalAlignment="Left"
-               Stretch="Uniform"
-               StretchDirection="Both"
-               AutomationProperties.Name="Active comparison preview" />
+        <!-- MainWindow sizes the preview from the Review page viewport and the zoom
+             slider; a zoomed photo pans sideways inside this scroller. -->
+        <ScrollViewer x:Name="PreviewImageScroller"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Disabled"
+                      Focusable="False"
+                      PreviewMouseWheel="OnPreviewImageMouseWheel">
+            <Image x:Name="PreviewImage"
+                   Source="{Binding Image, Mode=OneWay}"
+                   MaxHeight="512"
+                   HorizontalAlignment="Left"
+                   Stretch="Uniform"
+                   StretchDirection="Both"
+                   AutomationProperties.Name="Active comparison preview" />
+        </ScrollViewer>
         <TextBox x:Name="PreviewFullPathTextBox"
                  Text="{Binding FullPath, Mode=OneWay}"
                  IsReadOnly="True"

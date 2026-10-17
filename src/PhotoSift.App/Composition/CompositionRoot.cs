@@ -70,8 +70,13 @@ public static class CompositionRoot
             new WicPreviewDecoder(),
             new BoundedThumbnailCache(64L * 1024 * 1024),
             maximumEdge: 1024);
+        var thumbnails = new BoundedReviewPreviewSource(
+            reader,
+            new WicPreviewDecoder(),
+            new BoundedThumbnailCache(32L * 1024 * 1024),
+            maximumEdge: 320);
         return new ShellViewModel(
-            workflow, photoWorkflow, dialog, stores.ScanData, preview);
+            workflow, photoWorkflow, dialog, stores.ScanData, preview, thumbnails);
     }
 
     private sealed class OwnedPhotoSiftWorkflow(
