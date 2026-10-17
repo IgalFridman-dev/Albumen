@@ -348,9 +348,10 @@ is published as its own pair. Design:
 
 ## PM-011 — Treat truncated JPEGs as "couldn't be checked", not as look-alikes
 
-**Status:** Open — found in the Hyper-V Review pass of PR #22, 2026-10-17
+**Status:** In review — fix in the PR after #22; owner chose "before V1.0.0" on 2026-10-17.
+Found in the Hyper-V Review pass of PR #22.
 
-**Priority:** Owner decision; recommended before V1.0.0
+**Priority:** Before V1.0.0 (owner decision)
 
 **Origin:** VM fixture "Broken photo.jpg" (the first 2 KB of a 1200 × 900 JPEG)
 
@@ -364,3 +365,11 @@ Uncertain set of four. Only a file with non-image bytes was reported as "couldn'
 - Analysis detects a JPEG that ends before its image data is complete and reports it as
   Could Not Analyze with a plain reason, so it never gets a signature or joins a set.
 - A test with a truncated JPEG fixture passes on GitHub CI; Golden VM Full run before release.
+
+### Fix
+
+The preview decoder walks a JPEG's segments and compressed data before decoding and reports
+"the photo file is incomplete" (Could Not Analyze) when the file ends before its end-of-image
+marker. Data after that marker, such as a motion-photo video, is accepted. Accepted
+limitation: a JPEG whose image data is complete but whose end marker was never written is also
+reported, because it cannot be told apart from a file cut right after its last scan.
