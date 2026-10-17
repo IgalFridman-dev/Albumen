@@ -21,6 +21,7 @@ using static PhotoSift.Infrastructure.Tests.Sqlite.SqliteSchemaVersionTwoTests;
 namespace PhotoSift.Infrastructure.Tests.ActionExecution;
 
 [Collection(WindowsRecycleBinIsolationDefinition.Name)]
+[Trait("Category", "GoldenVm")]
 public sealed class E1S5RecycleBinAcceptanceTests
 {
     private static readonly JsonSerializerOptions journalOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
