@@ -40,6 +40,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         ReviewPageScrollViewer.AddHandler(RequestBringIntoViewEvent,
             new RequestBringIntoViewEventHandler(OnReviewListItemBringIntoView), true);
+        ActionPageScrollViewer.AddHandler(RequestBringIntoViewEvent,
+            new RequestBringIntoViewEventHandler(OnReviewListItemBringIntoView), true);
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
         SizeChanged += OnReviewSizeChanged;
@@ -279,41 +281,55 @@ public partial class MainWindow : Window
         ReviewPreviewStatusControl.PreviewImage.MaxHeight = Math.Max(240, viewport * 0.8);
     }
 
-    // A list scrolls its own item into view and stops the request, so the Review page
-    // then scrolls just enough to show that item too (for example at large text sizes).
+    // The Recycle Bin item list gets the same bounded height so the progress summary
+    // and Action Records below it stay reachable at small window sizes.
+    private void OnActionPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
+    {
+        if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
+        var viewport = eventArgs.NewSize.Height;
+        ActionItemsList.Height = Math.Min(viewport, Math.Clamp(viewport * 0.5, 180, 520));
+    }
+
+    private ScrollViewer? PageScrollerFor(DependencyObject element) =>
+        IsWithin(element, ReviewCategoriesList) || IsWithin(element, ReviewGroupsList)
+            || IsWithin(element, ReviewComparisonsList) ? ReviewPageScrollViewer
+        : IsWithin(element, ActionItemsList) ? ActionPageScrollViewer
+        : null;
+
+    // A list scrolls its own item into view and stops the request, so the page then
+    // scrolls just enough to show that item too (for example at large text sizes).
     private void OnReviewListItemBringIntoView(object sender, RequestBringIntoViewEventArgs eventArgs)
     {
         if (eventArgs.TargetObject is not FrameworkElement target
-            || !(IsWithin(target, ReviewCategoriesList) || IsWithin(target, ReviewGroupsList)
-                || IsWithin(target, ReviewComparisonsList)))
+            || PageScrollerFor(target) is not { } page)
             return;
         Dispatcher.InvokeAsync(() =>
         {
-            if (isClosed || !target.IsVisible || !IsWithin(target, ReviewPageScrollViewer)) return;
-            var bounds = target.TransformToAncestor(ReviewPageScrollViewer)
+            if (isClosed || !target.IsVisible || !IsWithin(target, page)) return;
+            var bounds = target.TransformToAncestor(page)
                 .TransformBounds(new Rect(target.RenderSize));
-            var viewport = ReviewPageScrollViewer.ViewportHeight;
-            var offset = ReviewPageScrollViewer.VerticalOffset;
+            var viewport = page.ViewportHeight;
+            var offset = page.VerticalOffset;
             if (bounds.Top < 0 || bounds.Height > viewport)
-                ReviewPageScrollViewer.ScrollToVerticalOffset(offset + bounds.Top);
+                page.ScrollToVerticalOffset(offset + bounds.Top);
             else if (bounds.Bottom > viewport)
-                ReviewPageScrollViewer.ScrollToVerticalOffset(offset + bounds.Bottom - viewport);
+                page.ScrollToVerticalOffset(offset + bounds.Bottom - viewport);
         }, DispatcherPriority.Loaded);
     }
 
-    // A list at its scroll limit hands the wheel to the Review page, so the page can
-    // still be scrolled while the pointer rests over the navigation lists.
+    // A list at its scroll limit hands the wheel to its page, so the page can still be
+    // scrolled while the pointer rests over a list.
     private void OnReviewListPreviewMouseWheel(object sender, MouseWheelEventArgs eventArgs)
     {
         if (sender is not DependencyObject list
+            || PageScrollerFor(list) is not { } page
             || Descendants<ScrollViewer>(list).FirstOrDefault() is not { } listScroller) return;
         var atLimit = eventArgs.Delta > 0
             ? listScroller.VerticalOffset <= 0
             : listScroller.VerticalOffset >= listScroller.ScrollableHeight;
         if (!atLimit) return;
         eventArgs.Handled = true;
-        ReviewPageScrollViewer.ScrollToVerticalOffset(
-            ReviewPageScrollViewer.VerticalOffset - eventArgs.Delta / 3.0);
+        page.ScrollToVerticalOffset(page.VerticalOffset - eventArgs.Delta / 3.0);
     }
 
     private void UpdateReviewLayout()
