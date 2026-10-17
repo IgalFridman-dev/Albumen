@@ -141,7 +141,7 @@ public sealed class WicPreviewDecoder
         var orientation = ReadOrientation(header.Metadata);
         var sourceWidth = header.PixelWidth;
         var sourceHeight = header.PixelHeight;
-        stream.Position = 0;
+        stream.Position = start;
 
         var bitmap = new BitmapImage();
         bitmap.BeginInit();

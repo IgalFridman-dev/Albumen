@@ -229,24 +229,60 @@ public sealed class WicPreviewDecoderTests
     }
 
     [Theory]
-    [InlineData(0.6)]
-    [InlineData(-2.0)]
-    public async Task JpegThatEndsEarlyCouldNotBeAnalyzedInsteadOfDecodingAsGray(double cut)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task JpegCutInsideItsImageDataCouldNotBeAnalyzedInsteadOfDecodingAsGray(bool throughLease)
     {
         using var fixture = JpegFixture.Create(orientation: 1);
         var bytes = await File.ReadAllBytesAsync(fixture.Path, TestContext.Current.CancellationToken);
-        // A fraction keeps that share of the file; a negative number drops that many bytes.
-        var length = cut > 0 ? (int)(bytes.Length * cut) : bytes.Length + (int)cut;
+        var scan = bytes.AsSpan().LastIndexOf((ReadOnlySpan<byte>)[0xFF, 0xDA]);
+        var imageData = scan + 2 + ((bytes[scan + 2] << 8) | bytes[scan + 3]);
+        var cut = (imageData + bytes.Length - 2) / 2;
+        Assert.InRange(cut, imageData + 1, bytes.Length - 3);
         using var directory = TemporaryDirectory.Create();
         var path = Path.Combine(directory.Path, "cut-off.jpg");
-        await File.WriteAllBytesAsync(path, bytes[..length], TestContext.Current.CancellationToken);
+        await File.WriteAllBytesAsync(path, bytes[..cut], TestContext.Current.CancellationToken);
+
+        PreviewDecodeResult result;
+        if (throughLease)
+        {
+            await using var lease = new RecordingProtectedLease(path);
+            result = await new WicPreviewDecoder().DecodeAsync(
+                lease, path, 256, TestContext.Current.CancellationToken);
+            Assert.Equal(1, lease.RefreshCount);
+        }
+        else
+        {
+            result = await new WicPreviewDecoder().DecodeAsync(
+                path, 256, TestContext.Current.CancellationToken);
+        }
+
+        using (result)
+        {
+            Assert.Equal(PreviewAvailability.CouldNotAnalyze, result.Availability);
+            Assert.Equal("Preview unavailable: the photo file is incomplete.", result.Reason);
+            Assert.Null(result.Frame);
+        }
+    }
+
+    [Fact]
+    public async Task JpegWithoutItsEndMarkerCouldNotBeAnalyzed()
+    {
+        // A file cut exactly after its last scan cannot be told apart from one whose end
+        // marker was never written, so both are reported rather than guessed complete.
+        using var fixture = JpegFixture.Create(orientation: 1);
+        var bytes = await File.ReadAllBytesAsync(fixture.Path, TestContext.Current.CancellationToken);
+        Assert.Equal((byte)0xFF, bytes[^2]);
+        Assert.Equal((byte)0xD9, bytes[^1]);
+        using var directory = TemporaryDirectory.Create();
+        var path = Path.Combine(directory.Path, "no-end-marker.jpg");
+        await File.WriteAllBytesAsync(path, bytes[..^2], TestContext.Current.CancellationToken);
 
         using var result = await new WicPreviewDecoder().DecodeAsync(
             path, 256, TestContext.Current.CancellationToken);
 
         Assert.Equal(PreviewAvailability.CouldNotAnalyze, result.Availability);
         Assert.Equal("Preview unavailable: the photo file is incomplete.", result.Reason);
-        Assert.Null(result.Frame);
     }
 
     [Fact]
