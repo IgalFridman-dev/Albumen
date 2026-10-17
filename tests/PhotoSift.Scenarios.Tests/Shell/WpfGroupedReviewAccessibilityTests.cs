@@ -16,6 +16,9 @@ namespace PhotoSift.Scenarios.Tests.Shell;
 [Collection("WPF UI Automation")]
 public sealed class WpfGroupedReviewAccessibilityTests
 {
+    private static readonly string[] ReviewDetailNames =
+        ["ReviewEvidencePanel", "SelectionSummaryText", "ApproveCleanupButton"];
+
     private static readonly string[] EvidenceTextNames =
     [
         "ReviewEvidenceFullPathText",
@@ -367,7 +370,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 AssertInsideViewport(page, selection);
                 AssertInsideWindow(window, selection);
 
-                foreach (var name in new[] { "ReviewEvidencePanel", "SelectionSummaryText", "ApproveCleanupButton" })
+                foreach (var name in ReviewDetailNames)
                 {
                     var element = NamedElement(window, name);
                     element.BringIntoView();
