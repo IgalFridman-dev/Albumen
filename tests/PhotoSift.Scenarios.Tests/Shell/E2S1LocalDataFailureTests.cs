@@ -40,6 +40,11 @@ public sealed class E2S1LocalDataFailureTests
                 Assert.True(status.IsVisible);
                 Assert.Equal(BlockedMessage, status.Text);
                 Assert.Equal(BlockedMessage, AutomationProperties.GetItemStatus(status));
+                // Narrator reads the live region's name, so the name carries the warning itself.
+                Assert.Equal(BlockedMessage, AutomationProperties.GetName(status));
+                Assert.Equal(AutomationLiveSetting.Assertive, AutomationProperties.GetLiveSetting(status));
+                Assert.True(viewModel.IsLocalDataFaulted);
+                Assert.True(Assert.IsType<Border>(window.FindName("LocalDataStatusBanner")).IsVisible);
 
                 viewModel.ApproveReviewCommand.Execute(null);
                 WpfReviewSelectionTests.Drain();
