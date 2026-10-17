@@ -1161,7 +1161,6 @@
                             <TextBlock DockPanel.Dock="Top" Text="Photos in this set" Style="{StaticResource PhotoSift.SectionTitle}" Margin="6,4,6,6" />
                             <ListBox x:Name="ReviewComparisonsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewMembers}"
                                      Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewComparisonTemplate}"
-                                     VirtualizingPanel.ScrollUnit="Pixel"
                                      PreviewKeyDown="OnReviewListPreviewKeyDown"
                                      AutomationProperties.Name="Comparison paths and Selection controls" />
                         </DockPanel>
