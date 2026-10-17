@@ -42,7 +42,7 @@ internal sealed class NearDuplicateGroupIndex
         var setOf = new Dictionary<long, int>();
         for (var index = 0; index < sets.Count; index++)
             foreach (var member in sets[index].Members) setOf[member] = index;
-        var evidence = sets.Select(_ => new List<NearDuplicateEvidence>()).ToArray();
+        var setEvidence = sets.Select(_ => new List<NearDuplicateEvidence>()).ToArray();
         var leftover = new List<NearDuplicateEvidence>();
         foreach (var edge in relationships)
         {
@@ -53,7 +53,7 @@ internal sealed class NearDuplicateGroupIndex
                 // evidence; a set that joined more photos through Uncertain links is
                 // reviewed as Uncertain with all of its internal evidence.
                 if (!sets[left].IsSingleNearComponent || edge.Kind == NearRelationshipKind.Near)
-                    evidence[left].Add(edge);
+                    setEvidence[left].Add(edge);
             }
             else if (edge.Kind == NearRelationshipKind.Uncertain)
             {
@@ -63,7 +63,7 @@ internal sealed class NearDuplicateGroupIndex
             }
         }
         for (var index = 0; index < sets.Count; index++)
-            next.Add(Project(sets[index].Members, evidence[index],
+            next.Add(Project(sets[index].Members, setEvidence[index],
                 sets[index].IsSingleNearComponent ? CandidateCategory.NearDuplicate : CandidateCategory.Uncertain, rows));
         foreach (var edge in leftover)
             next.Add(Project([edge.Left.OccurrenceId, edge.Right.OccurrenceId], [edge],
