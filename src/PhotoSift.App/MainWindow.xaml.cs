@@ -38,6 +38,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ReviewPageScrollViewer.AddHandler(RequestBringIntoViewEvent,
+            new RequestBringIntoViewEventHandler(OnReviewListItemBringIntoView), true);
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
         SizeChanged += OnReviewSizeChanged;
@@ -275,6 +277,28 @@ public partial class MainWindow : Window
         ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.45, 180, 480));
         // Scrolled to Evidence, the photo fills most of the page instead of a fixed thumbnail.
         ReviewPreviewStatusControl.PreviewImage.MaxHeight = Math.Max(240, viewport * 0.8);
+    }
+
+    // A list scrolls its own item into view and stops the request, so the Review page
+    // then scrolls just enough to show that item too (for example at large text sizes).
+    private void OnReviewListItemBringIntoView(object sender, RequestBringIntoViewEventArgs eventArgs)
+    {
+        if (eventArgs.TargetObject is not FrameworkElement target
+            || !(IsWithin(target, ReviewCategoriesList) || IsWithin(target, ReviewGroupsList)
+                || IsWithin(target, ReviewComparisonsList)))
+            return;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || !target.IsVisible || !IsWithin(target, ReviewPageScrollViewer)) return;
+            var bounds = target.TransformToAncestor(ReviewPageScrollViewer)
+                .TransformBounds(new Rect(target.RenderSize));
+            var viewport = ReviewPageScrollViewer.ViewportHeight;
+            var offset = ReviewPageScrollViewer.VerticalOffset;
+            if (bounds.Top < 0 || bounds.Height > viewport)
+                ReviewPageScrollViewer.ScrollToVerticalOffset(offset + bounds.Top);
+            else if (bounds.Bottom > viewport)
+                ReviewPageScrollViewer.ScrollToVerticalOffset(offset + bounds.Bottom - viewport);
+        }, DispatcherPriority.Loaded);
     }
 
     // A list at its scroll limit hands the wheel to the Review page, so the page can
