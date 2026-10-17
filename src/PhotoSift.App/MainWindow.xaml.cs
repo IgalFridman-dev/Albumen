@@ -395,6 +395,9 @@ public partial class MainWindow : Window
     private void UpdateReviewLayout()
     {
         if (!IsInitialized) return;
+        // In a short window the page keeps the height; Approval stays reachable by scrolling.
+        var height = double.IsNaN(Height) ? ActualHeight : Height;
+        ReviewSelectionBar.Visibility = height >= 640 ? Visibility.Visible : Visibility.Collapsed;
         var width = double.IsNaN(Width) ? ActualWidth : Width;
         var level = shellViewModel?.ReviewNavigationLevel ?? ReviewNavigationLevel.Categories;
         if (width >= 920)
