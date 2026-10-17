@@ -18,7 +18,12 @@ Read-only follow-up identified the direct fail-closed boundary: `SqliteDatabaseO
 
 Owner observation, 2026-10-16: on a fresh Windows install the restored `%LOCALAPPDATA%\PhotoSift` folder held a
 0-byte `photosift.db-wal` and a `photosift.db-shm` dated 2026-10-06. Every launch showed "Local data could not be
-safely loaded" and the app offered no in-app way out. The explicit recovery authority above would also cover this case.
+safely loaded" and the app offered no in-app way out. The Hyper-V VM reproduced it on clean develop `9a78e3b`: one launch
+and a normal close (exit code 0) left an empty `-wal` and a `-shm`. Shutdown tracing showed every dispose step
+completing, no open statements, and the writer closing last, yet the close did not remove the sidecars. An explicit
+`PRAGMA wal_checkpoint(TRUNCATE)` before the writer closes made the close remove them, so `SqliteDatabaseOwner` now
+does that. Why the implicit close-time checkpoint did not run is not established. A hard kill can still leave
+sidecars, so the explicit recovery authority above is still needed.
 
 ### Deferred automated coverage
 
