@@ -110,10 +110,9 @@ the official gate scripts live in [`eng/verification/`](eng/verification/) and a
 
 ## Known limitations (V1)
 
-- At the default window size the Review content can be clipped; maximize the window and scroll the
-  Approval pane ([PM-006](docs/backlog/post-mvp.md)).
-- Accessibility work is not complete: a local-data warning is not announced by Narrator
-  (PM-002, PM-005). PhotoSift makes no accessibility-compliance claim.
+- Accessibility work is not complete. The local-data warning now raises a screen-reader
+  announcement, but that has not yet been checked with Narrator (PM-002, PM-005). PhotoSift makes
+  no accessibility-compliance claim.
 - HEIF support depends on the installed Windows codec and is best effort; JPEG and PNG are supported.
 - Near-duplicate quality was validated on a small labeled corpus. Human review is always required.
 - A first scan of 300 images took 12.1 s on a 2-CPU, 4 GiB VM. That is an observation, not a benchmark.
