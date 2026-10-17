@@ -39,26 +39,35 @@ internal sealed class NearDuplicateGroupIndex
 
         var next = ImmutableArray.CreateBuilder<CandidateGroupProjection>();
         var sets = LookAlikeSets(relationships);
-        foreach (var set in sets)
+        var setOf = new Dictionary<long, int>();
+        for (var index = 0; index < sets.Count; index++)
+            foreach (var member in sets[index].Members) setOf[member] = index;
+        var evidence = sets.Select(_ => new List<NearDuplicateEvidence>()).ToArray();
+        var leftover = new List<NearDuplicateEvidence>();
+        foreach (var edge in relationships)
         {
-            // A Near component that absorbed nothing keeps its Near category and Near evidence;
-            // a set that joined more photos through Uncertain links is reviewed as Uncertain.
-            var evidence = relationships.Where(edge => set.Members.Contains(edge.Left.OccurrenceId)
-                && set.Members.Contains(edge.Right.OccurrenceId)
-                && (!set.IsSingleNearComponent || edge.Kind == NearRelationshipKind.Near));
-            next.Add(Project(set.Members, evidence,
-                set.IsSingleNearComponent ? CandidateCategory.NearDuplicate : CandidateCategory.Uncertain, rows));
+            if (setOf.TryGetValue(edge.Left.OccurrenceId, out var left)
+                && setOf.TryGetValue(edge.Right.OccurrenceId, out var right) && left == right)
+            {
+                // A Near component that absorbed nothing keeps its Near category and Near
+                // evidence; a set that joined more photos through Uncertain links is
+                // reviewed as Uncertain with all of its internal evidence.
+                if (!sets[left].IsSingleNearComponent || edge.Kind == NearRelationshipKind.Near)
+                    evidence[left].Add(edge);
+            }
+            else if (edge.Kind == NearRelationshipKind.Uncertain)
+            {
+                // A photo related to only part of a set is not forced into it; that
+                // relationship still surfaces as an Uncertain pair.
+                leftover.Add(edge);
+            }
         }
-
-        // A photo related to only part of a set is not forced into it; its relationship
-        // still surfaces as an Uncertain pair so no relationship is hidden.
-        foreach (var edge in relationships.Where(item => item.Kind == NearRelationshipKind.Uncertain))
-        {
-            if (sets.Any(set => set.Members.Contains(edge.Left.OccurrenceId)
-                && set.Members.Contains(edge.Right.OccurrenceId))) continue;
+        for (var index = 0; index < sets.Count; index++)
+            next.Add(Project(sets[index].Members, evidence[index],
+                sets[index].IsSingleNearComponent ? CandidateCategory.NearDuplicate : CandidateCategory.Uncertain, rows));
+        foreach (var edge in leftover)
             next.Add(Project([edge.Left.OccurrenceId, edge.Right.OccurrenceId], [edge],
                 CandidateCategory.Uncertain, rows));
-        }
         projections = next
             .OrderBy(value => value.Category)
             .ThenBy(value => value.Members[0].Token.OccurrenceId)
@@ -108,91 +117,113 @@ internal sealed class NearDuplicateGroupIndex
 
     // Near relationships join photos transitively, as before. Those Near components and the
     // remaining photos with Uncertain relationships are then merged with complete linkage:
-    // two sets merge only when every cross pair is related, closest pair first, so loosely
-    // chained photos are not pulled together and no new threshold is introduced.
+    // two sets merge only when every cross pair is related, closest pair first (largest
+    // Hamming distance, then largest color distance, then lowest photo ids), so loosely
+    // chained photos are not pulled together and no new threshold is introduced. Linkage
+    // after a merge is the larger of the two parts' linkages (Lance-Williams), so each merge
+    // only revisits the merged set's neighbors.
     private static List<LookAlikeSet> LookAlikeSets(IReadOnlyList<NearDuplicateEvidence> relationships)
     {
-        var related = new Dictionary<(long, long), NearDuplicateEvidence>();
-        foreach (var edge in relationships) related[PairKey(edge.Left.OccurrenceId, edge.Right.OccurrenceId)] = edge;
+        var clusters = new List<Cluster>();
+        var owner = new Dictionary<long, int>();
+        void Add(HashSet<long> members, bool nearComponent)
+        {
+            foreach (var member in members) owner[member] = clusters.Count;
+            clusters.Add(new(members, nearComponent));
+        }
 
-        var sets = Components(relationships.Where(edge => edge.Kind == NearRelationshipKind.Near))
-            .Select(component => new LookAlikeSet(component, true))
-            .ToList();
+        foreach (var component in Components(relationships.Where(edge => edge.Kind == NearRelationshipKind.Near)))
+            Add(component, true);
         foreach (var node in relationships
             .Where(edge => edge.Kind == NearRelationshipKind.Uncertain)
             .SelectMany(edge => new[] { edge.Left.OccurrenceId, edge.Right.OccurrenceId })
             .Distinct().Order())
-            if (!sets.Any(set => set.Members.Contains(node))) sets.Add(new([node], false));
+            if (!owner.ContainsKey(node)) Add([node], false);
 
-        while (true)
+        foreach (var edge in relationships)
         {
-            var owner = new Dictionary<long, int>();
-            for (var index = 0; index < sets.Count; index++)
-                foreach (var member in sets[index].Members) owner[member] = index;
+            var a = owner[edge.Left.OccurrenceId];
+            var b = owner[edge.Right.OccurrenceId];
+            if (a == b) continue;
+            var link = clusters[a].Links.TryGetValue(b, out var existing) ? existing : new Link(0, 0, 0);
+            link = new(link.Count + 1, Math.Max(link.Hamming, edge.HammingDistance),
+                Math.Max(link.Color, edge.ColorDistance));
+            clusters[a].Links[b] = link;
+            clusters[b].Links[a] = link;
+        }
 
-            (int Left, int Right, int Hamming, int Color, long First, long Second)? best = null;
-            var tried = new HashSet<(int, int)>();
-            foreach (var edge in relationships.Where(edge => edge.Kind == NearRelationshipKind.Uncertain))
+        var queue = new PriorityQueue<(int Left, int Right), (int Hamming, int Color, long First, long Second)>();
+        void Offer(int a, int b, Link link)
+        {
+            if (link.Count != (long)clusters[a].Members.Count * clusters[b].Members.Count) return;
+            var first = Math.Min(clusters[a].Lowest, clusters[b].Lowest);
+            var second = Math.Max(clusters[a].Lowest, clusters[b].Lowest);
+            queue.Enqueue((a, b), (link.Hamming, link.Color, first, second));
+        }
+
+        for (var a = 0; a < clusters.Count; a++)
+            foreach (var (b, link) in clusters[a].Links)
+                if (a < b) Offer(a, b, link);
+
+        while (queue.TryDequeue(out var pair, out _))
+        {
+            var left = clusters[pair.Left];
+            var right = clusters[pair.Right];
+            if (!left.Alive || !right.Alive) continue;
+            left.Alive = false;
+            right.Alive = false;
+            var members = new HashSet<long>(left.Members);
+            members.UnionWith(right.Members);
+            var merged = clusters.Count;
+            clusters.Add(new(members, false));
+            foreach (var neighbor in left.Links.Keys.Union(right.Links.Keys).Order())
             {
-                var a = owner[edge.Left.OccurrenceId];
-                var b = owner[edge.Right.OccurrenceId];
-                if (a == b || !tried.Add((Math.Min(a, b), Math.Max(a, b)))) continue;
-                var linkage = Linkage(sets[a].Members, sets[b].Members, related);
-                if (linkage is null) continue;
-                var first = Math.Min(sets[a].Members.Min(), sets[b].Members.Min());
-                var second = Math.Max(sets[a].Members.Min(), sets[b].Members.Min());
-                var candidate = (Math.Min(a, b), Math.Max(a, b), linkage.Value.Hamming, linkage.Value.Color, first, second);
-                if (best is null || Precedes(candidate, best.Value)) best = candidate;
+                if (neighbor == pair.Left || neighbor == pair.Right || !clusters[neighbor].Alive) continue;
+                left.Links.TryGetValue(neighbor, out var fromLeft);
+                right.Links.TryGetValue(neighbor, out var fromRight);
+                var link = new Link(
+                    (fromLeft?.Count ?? 0) + (fromRight?.Count ?? 0),
+                    Math.Max(fromLeft?.Hamming ?? 0, fromRight?.Hamming ?? 0),
+                    Math.Max(fromLeft?.Color ?? 0, fromRight?.Color ?? 0));
+                clusters[neighbor].Links.Remove(pair.Left);
+                clusters[neighbor].Links.Remove(pair.Right);
+                clusters[neighbor].Links[merged] = link;
+                clusters[merged].Links[neighbor] = link;
+                Offer(merged, neighbor, link);
             }
-            if (best is null) break;
-
-            var merged = new HashSet<long>(sets[best.Value.Left].Members);
-            merged.UnionWith(sets[best.Value.Right].Members);
-            sets.RemoveAt(best.Value.Right);
-            sets[best.Value.Left] = new(merged, false);
         }
-        return sets.Where(set => set.Members.Count > 1).ToList();
+
+        return clusters
+            .Where(cluster => cluster.Alive && cluster.Members.Count > 1)
+            .Select(cluster => new LookAlikeSet(cluster.Members, cluster.IsNearComponent))
+            .ToList();
     }
-
-    private static (int Hamming, int Color)? Linkage(IReadOnlySet<long> left, IReadOnlySet<long> right,
-        Dictionary<(long, long), NearDuplicateEvidence> related)
-    {
-        var hamming = 0;
-        var color = 0;
-        foreach (var a in left)
-        foreach (var b in right)
-        {
-            if (!related.TryGetValue(PairKey(a, b), out var edge)) return null;
-            hamming = Math.Max(hamming, edge.HammingDistance);
-            color = Math.Max(color, edge.ColorDistance);
-        }
-        return (hamming, color);
-    }
-
-    private static bool Precedes(
-        (int Left, int Right, int Hamming, int Color, long First, long Second) candidate,
-        (int Left, int Right, int Hamming, int Color, long First, long Second) best) =>
-        (candidate.Hamming, candidate.Color, candidate.First, candidate.Second)
-            .CompareTo((best.Hamming, best.Color, best.First, best.Second)) < 0;
-
-    private static (long, long) PairKey(long a, long b) => a < b ? (a, b) : (b, a);
 
     private static List<HashSet<long>> Components(IEnumerable<NearDuplicateEvidence> edges)
     {
-        var remaining = edges.ToList();
-        var nodes = remaining.SelectMany(edge => new[] { edge.Left.OccurrenceId, edge.Right.OccurrenceId })
-            .Distinct().Order().ToArray();
-        var components = new List<HashSet<long>>();
-        foreach (var node in nodes)
+        var peers = new Dictionary<long, List<long>>();
+        foreach (var edge in edges)
         {
-            if (components.Any(component => component.Contains(node))) continue;
+            if (!peers.TryGetValue(edge.Left.OccurrenceId, out var left)) peers[edge.Left.OccurrenceId] = left = [];
+            if (!peers.TryGetValue(edge.Right.OccurrenceId, out var right)) peers[edge.Right.OccurrenceId] = right = [];
+            left.Add(edge.Right.OccurrenceId);
+            right.Add(edge.Left.OccurrenceId);
+        }
+        var seen = new HashSet<long>();
+        var components = new List<HashSet<long>>();
+        foreach (var node in peers.Keys.Order())
+        {
+            if (!seen.Add(node)) continue;
             var component = new HashSet<long> { node };
             var queue = new Queue<long>();
             queue.Enqueue(node);
             while (queue.TryDequeue(out var current))
-                foreach (var peer in remaining.Where(edge => edge.Left.OccurrenceId == current || edge.Right.OccurrenceId == current)
-                    .Select(edge => edge.Left.OccurrenceId == current ? edge.Right.OccurrenceId : edge.Left.OccurrenceId))
-                    if (component.Add(peer)) queue.Enqueue(peer);
+                foreach (var peer in peers[current])
+                    if (seen.Add(peer))
+                    {
+                        component.Add(peer);
+                        queue.Enqueue(peer);
+                    }
             components.Add(component);
         }
         return components;
@@ -208,6 +239,17 @@ internal sealed class NearDuplicateGroupIndex
         $"{Key(projection)}:{string.Join(";", projection.Similarity.Select(edge => $"{edge.Left.OccurrenceRevision}:{edge.Right.OccurrenceRevision}:{edge.HammingDistance}:{edge.ColorDistance}:{edge.Kind}"))}";
 
     private sealed record LookAlikeSet(HashSet<long> Members, bool IsSingleNearComponent);
+
+    private sealed record Link(long Count, int Hamming, int Color);
+
+    private sealed class Cluster(HashSet<long> members, bool isNearComponent)
+    {
+        public HashSet<long> Members { get; } = members;
+        public bool IsNearComponent { get; } = isNearComponent;
+        public long Lowest { get; } = members.Min();
+        public Dictionary<int, Link> Links { get; } = [];
+        public bool Alive { get; set; } = true;
+    }
     private sealed record PublishedGroup(Guid GroupId, long GroupRevision, ScanPin Pin, string Fingerprint);
     private sealed record CandidateGroupProjection(CandidateCategory Category,
         ImmutableArray<ScanFileOccurrence> Members, ImmutableArray<NearDuplicateEvidence> Similarity, bool Uncertain);
