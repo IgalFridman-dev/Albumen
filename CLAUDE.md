@@ -19,7 +19,7 @@ Read [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) first for the map of the code 
 | Sprint state — source of truth for "what's next" | `_bmad-output/implementation-artifacts/sprint-status.yaml` |
 | Per-story design + implementation plans | `docs/superpowers/specs/`, `docs/superpowers/plans/` |
 | Verification evidence per story | `docs/evidence/eX-sY/` |
-| Deferred work (PM-001…PM-006) | `docs/backlog/post-mvp.md` |
+| Deferred work (PM-001…PM-007) | `docs/backlog/post-mvp.md` |
 | Docs index / authority rules | `docs/README.md` |
 
 The folder names `_bmad-output/` and `docs/superpowers/` are kept from the original
@@ -72,4 +72,5 @@ skill. A Linux container can read and edit code but cannot build or run WPF.
 | BMAD sprint status | `/status` and `/next-story` commands |
 
 Commit style: conventional prefixes (`feat:`, `fix:`, `test:`, `docs:`), small commits,
-work on a feature branch off `develop`.
+work on a feature branch off `develop`. Write commit messages and PR bodies with the
+`commit-and-pr` skill (short, no file lists, say what was and was not verified).
