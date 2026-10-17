@@ -122,6 +122,57 @@ public sealed class WpfReviewViewerTests
         });
     }
 
+    [Theory]
+    [InlineData(1280, 800)]
+    [InlineData(680, 520)]
+    public void EveryPartOfAPhotoCardFitsInsideThePhotoList(double width, double height)
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = GroupedWpfFixture.Create();
+            var viewModel = fixture.ViewModel;
+            WpfReviewSelectionTests.OpenFirstGroupedComparison(viewModel);
+            var group = Assert.IsType<ReviewGroupViewModel>(viewModel.ActiveReviewGroup);
+            viewModel.OpenReviewMemberCommand.ExecuteAsync(group.Members[0]).GetAwaiter().GetResult();
+            var window = new MainWindow { DataContext = viewModel, Width = width, Height = height };
+            try
+            {
+                ShowAndDrain(window);
+                var list = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
+                list.ScrollIntoView(group.Members[1]);
+                ShowAndDrain(window);
+                var card = Assert.IsType<ListBoxItem>(list.ItemContainerGenerator.ContainerFromItem(group.Members[1]));
+                // The list scrolls by item, so its own viewport height counts cards, not pixels.
+                var viewport = WpfReviewSelectionTests.Descendants<ScrollContentPresenter>(list).First();
+                var compare = WpfReviewSelectionTests.Descendants<Button>(card)
+                    .Single(button => button.IsVisible && Equals(button.Content, "Compare"));
+
+                foreach (var part in new FrameworkElement[] { card, compare })
+                {
+                    var bounds = part.TransformToAncestor(viewport).TransformBounds(
+                        new Rect(new Point(), part.RenderSize));
+                    Assert.True(bounds.Top >= -0.5 && bounds.Bottom <= viewport.ActualHeight + 0.5,
+                        $"{part.GetType().Name} bounds {bounds} fell outside the photo list height {viewport.ActualHeight}.");
+                }
+
+                var open = WpfReviewSelectionTests.Descendants<Button>(card).Single(button =>
+                    System.Windows.Automation.AutomationProperties.GetAutomationId(button) == "open-review-member");
+                open.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                ShowAndDrain(window);
+                Assert.Same(group.Members[1], viewModel.ActiveReviewMember);
+                var page = Assert.IsType<ScrollViewer>(window.FindName("ReviewPageScrollViewer"));
+                var viewer = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("ReviewEvidencePanel"));
+                var top = viewer.TransformToAncestor(page).Transform(new Point()).Y;
+                Assert.True(top >= -0.5 && top < page.ViewportHeight - 40,
+                    $"The viewer top {top} was not shown in the Review page height {page.ViewportHeight}.");
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     [Fact]
     public void SuggestedBestMarksTheLargestPhotoWithoutSelectingAnything()
     {
