@@ -420,14 +420,16 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
                 || member.NearDuplicate.State != ScanStageState.Succeeded)) return false;
         var connected = members.Keys.ToDictionary(id => id, _ => new HashSet<long>());
         var edges = new HashSet<(long Left, long Right)>();
+        var hasExpectedKind = false;
         foreach (var edge in group.Similarity)
         {
             if (!members.TryGetValue(edge.Left.OccurrenceId, out var left)
                 || !members.TryGetValue(edge.Right.OccurrenceId, out var right)
                 || edge.Left != left.Token || edge.Right != right.Token
-                || edge.Left == edge.Right || edge.Kind != expectedKind
+                || edge.Left == edge.Right || !AllowedKind(edge.Kind, expectedKind)
                 || SameBytes(left.Content!, right.Content!)
-                || !ValidDistance(edge, expectedKind)) return false;
+                || !ValidDistance(edge, edge.Kind)) return false;
+            hasExpectedKind |= edge.Kind == expectedKind;
             var pair = edge.Left.OccurrenceId < edge.Right.OccurrenceId
                 ? (edge.Left.OccurrenceId, edge.Right.OccurrenceId)
                 : (edge.Right.OccurrenceId, edge.Left.OccurrenceId);
@@ -435,8 +437,15 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
             connected[pair.Item1].Add(pair.Item2);
             connected[pair.Item2].Add(pair.Item1);
         }
-        return Connected(group.Members[0].Token.OccurrenceId, connected) == members.Count;
+        return hasExpectedKind
+            && Connected(group.Members[0].Token.OccurrenceId, connected) == members.Count;
     }
+
+    // A look-alike set is Uncertain as a whole but keeps the Near evidence between its
+    // closest members; a Near group holds Near evidence only.
+    private static bool AllowedKind(NearRelationshipKind kind, NearRelationshipKind expectedKind) =>
+        kind == expectedKind
+        || expectedKind == NearRelationshipKind.Uncertain && kind == NearRelationshipKind.Near;
 
     private static bool ValidDistance(NearDuplicateEvidence edge, NearRelationshipKind kind)
     {
