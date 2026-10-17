@@ -23,8 +23,11 @@ dotnet restore PhotoSift.slnx --locked-mode
 dotnet build PhotoSift.slnx -c Release --no-restore
 dotnet test tests/PhotoSift.Domain.Tests -c Release --no-build      # fastest
 dotnet test PhotoSift.slnx -c Release --no-build --filter "Category!=GoldenVm"
-Invoke-Pester tests/tooling                                          # PowerShell tooling
+Get-ChildItem tests/tooling -Filter *.Tests.ps1 | % { pwsh -NoProfile -File $_.FullName }  # tooling
 ```
+The tooling tests are plain scripts, not Pester. CI runs the four that are safe on a hosted
+runner (NetworkAudit, Release, ReleaseNativeCommand, RuntimeBoundary) under both shells; the
+Golden VM, Hyper-V, crash-harness and ReleaseInputs tests need the owner's non-elevated host.
 `Category=GoldenVm` tests mutate real files and the Recycle Bin and refuse to run outside a
 disposable VM, so they fail on the host by design. Run suites one at a time; the WPF scenario
 tests have wall-clock budgets that parallel runs can exceed.

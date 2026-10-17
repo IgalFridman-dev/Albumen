@@ -12,7 +12,7 @@ Read [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) first for the map of the code 
 | Need | Path |
 |---|---|
 | App code (6 projects) | `src/` — Domain → Application → Analysis / Infrastructure.* → App |
-| Tests (5 xUnit v3 projects + Pester tooling tests) | `tests/` |
+| Tests (5 xUnit v3 projects + PowerShell tooling tests) | `tests/` |
 | Build/verify/release scripts (PowerShell) | `eng/verification/`, `eng/release/` |
 | Product, UX, architecture, epics (BMAD planning) | `_bmad-output/planning-artifacts/` |
 | One contract per story (`SPEC.md`) | `_bmad-output/specs/spec-eX-sY-*/` |

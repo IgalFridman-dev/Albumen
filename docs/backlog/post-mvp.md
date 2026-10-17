@@ -278,3 +278,27 @@ resources (the dark tokens in the UX `DESIGN.md`) while keeping the High
 Contrast behavior that the `SystemColors` assertions cover today. Verify in the
 real app under light, dark and High Contrast, not only in tests that build
 `MainWindow` without the `App` theme.
+
+## PM-008 — Ship V1 as a self-contained release
+
+**Status:** In progress — design approved 2026-10-17
+
+**Priority:** Before the public V1 release
+
+**Origin:** Owner decision during GitHub polish, 2026-10-17
+
+The V1 candidate requires the .NET 10 Desktop Runtime to be installed first, which is a
+barrier for someone trying the app from a GitHub release. Bundle the pinned 10.0.11 runtime
+and the WPF part of the Windows Desktop runtime in the release folder so the user only
+extracts the ZIP and runs `Start-PhotoSift.cmd`. Design:
+`docs/superpowers/specs/2026-10-17-pm-008-self-contained-release-design.md`.
+
+### Completion criteria
+
+- Tooling tests and the release dry run pass on GitHub CI.
+- One Golden VM capture on the owner's PC: identical publishes and the closure check pass.
+- The owner approves the new redistribution inventory.
+- Acceptance on a runtime-free Windows 11 VM with no network: launch, an Exact and a Near
+  review, one Recycle Bin move and restore, and the tamper check still rejects a changed file.
+- A small demo-photos ZIP ships next to the app ZIP.
+
