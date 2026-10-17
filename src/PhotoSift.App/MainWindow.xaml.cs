@@ -265,8 +265,12 @@ public partial class MainWindow : Window
 
     private void OnOpenReviewMemberClick(object sender, RoutedEventArgs eventArgs)
     {
-        if (sender is Button { DataContext: ScanOccurrenceViewModel member })
-            shellViewModel?.OpenReviewMemberCommand.Execute(member);
+        if (sender is not Button { DataContext: ScanOccurrenceViewModel member }) return;
+        shellViewModel?.OpenReviewMemberCommand.Execute(member);
+        // Show the top of the viewer so the click visibly opens the photo, scrolling the
+        // page no further than that so the photo list stays in sight.
+        ReviewEvidencePanel.BringIntoView(new Rect(0, 0, ReviewEvidencePanel.ActualWidth,
+            Math.Min(ReviewEvidencePanel.ActualHeight, 160)));
     }
 
     private void OnReviewBackClick(object sender, RoutedEventArgs eventArgs) =>
@@ -276,12 +280,14 @@ public partial class MainWindow : Window
         UpdateReviewLayout();
 
     // The navigation lists keep a bounded height so they stay virtualized inside the
-    // scrolling Review page, leaving room for the evidence below them to come into view.
+    // scrolling Review page, leaving room for the viewer below them to come into view.
+    // The lists scroll a whole card at a time, so they stay taller than one photo card:
+    // a shorter list would cut off the bottom of a card for good.
     private void OnReviewPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
     {
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
         var viewport = eventArgs.NewSize.Height;
-        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.45, 180, 480));
+        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.6, 300, 600));
         // Scrolled to the viewer, the photo fills most of the page instead of a fixed thumbnail.
         ReviewPreviewStatusControl.FitHeight = Math.Max(240, viewport * 0.8);
     }
