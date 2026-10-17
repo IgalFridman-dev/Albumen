@@ -272,7 +272,9 @@ public partial class MainWindow : Window
     {
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
         var viewport = eventArgs.NewSize.Height;
-        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.55, 180, 520));
+        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.45, 180, 480));
+        // Scrolled to Evidence, the photo fills most of the page instead of a fixed thumbnail.
+        ReviewPreviewStatusControl.PreviewImage.MaxHeight = Math.Max(240, viewport * 0.8);
     }
 
     // A list at its scroll limit hands the wheel to the Review page, so the page can
