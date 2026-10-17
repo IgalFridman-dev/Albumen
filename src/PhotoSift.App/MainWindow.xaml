@@ -783,19 +783,16 @@
                     AutomationProperties.AutomationId="action-panel"
                     AutomationProperties.Name="Approved Recycle Bin Action"
                     AutomationProperties.ItemStatus="{Binding ActionStatusText}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                <!-- Like Review, the Action page scrolls as one surface; the item list keeps a
+                     bounded height from the page viewport so it stays virtualized. -->
+                <ScrollViewer x:Name="ActionPageScrollViewer"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              SizeChanged="OnActionPageSizeChanged">
+                <StackPanel Margin="0,0,20,0">
                     <TextBlock x:Name="ActionHeading" Text="Recycle Bin progress" FontSize="24" FontWeight="SemiBold"
                                Focusable="True" FocusVisualStyle="{StaticResource ActionFocusVisual}" TextWrapping="Wrap"
                                AutomationProperties.Name="Recycle Bin progress" />
-                    <ScrollViewer Grid.Row="1" MaxHeight="160" Margin="0,8,0,8"
-                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                      <StackPanel>
+                      <StackPanel Margin="0,8,0,8">
                         <TextBlock Text="{Binding ActionSelectionText}" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding ActionStatusText}" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding ActionCountsText}" TextWrapping="Wrap" />
@@ -805,15 +802,12 @@
                                 AutomationProperties.Name="Recycle Bin progress announcement"
                                 AutomationProperties.LiveSetting="Polite" />
                       </StackPanel>
-                    </ScrollViewer>
-                    <ListBox x:Name="ActionItemsList" Grid.Row="2" ItemsSource="{Binding ActionRows}"
+                    <ListBox x:Name="ActionItemsList" Height="300" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActionRows}"
                              Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ActionItemTemplate}"
                              AutomationProperties.Name="Approved original paths and Recycle Bin results"
                              Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                              Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                    <ScrollViewer Grid.Row="3" MaxHeight="300" Margin="0,8,0,0"
-                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                      <StackPanel>
+                      <StackPanel x:Name="ActionNoticesPanel" Margin="0,8,0,0">
                         <TextBlock Text="{Binding ActionReplayNotice}" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding ActionRecoveryNotice}" TextWrapping="Wrap" />
                         <Separator Margin="0,10,0,8" Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
@@ -837,8 +831,8 @@
                                       ItemTemplate="{StaticResource ActionRecordHistoryTemplate}"
                                       Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
                       </StackPanel>
-                    </ScrollViewer>
-                </Grid>
+                </StackPanel>
+                </ScrollViewer>
             </app:ReviewAutomationBorder>
         </Grid>
           </TabItem>
