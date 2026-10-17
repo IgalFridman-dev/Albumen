@@ -271,7 +271,23 @@ public partial class MainWindow : Window
     private void OnReviewPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
     {
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
-        ReviewNavigationGrid.Height = Math.Clamp(eventArgs.NewSize.Height * 0.55, 180, 520);
+        var viewport = eventArgs.NewSize.Height;
+        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.55, 180, 520));
+    }
+
+    // A list at its scroll limit hands the wheel to the Review page, so the page can
+    // still be scrolled while the pointer rests over the navigation lists.
+    private void OnReviewListPreviewMouseWheel(object sender, MouseWheelEventArgs eventArgs)
+    {
+        if (sender is not DependencyObject list
+            || Descendants<ScrollViewer>(list).FirstOrDefault() is not { } listScroller) return;
+        var atLimit = eventArgs.Delta > 0
+            ? listScroller.VerticalOffset <= 0
+            : listScroller.VerticalOffset >= listScroller.ScrollableHeight;
+        if (!atLimit) return;
+        eventArgs.Handled = true;
+        ReviewPageScrollViewer.ScrollToVerticalOffset(
+            ReviewPageScrollViewer.VerticalOffset - eventArgs.Delta / 3.0);
     }
 
     private void UpdateReviewLayout()
