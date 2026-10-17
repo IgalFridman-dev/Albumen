@@ -124,11 +124,20 @@ The full backlog is in [`docs/backlog/post-mvp.md`](docs/backlog/post-mvp.md) an
 
 ## How it was built
 
-PhotoSift was planned with the BMAD Method (product brief → PRD → UX → architecture → epics → 26 story
-specs) and implemented story by story with a test-first design → plan → build → review → evidence loop,
-originally with Codex and now continued with Claude Code. Planning artifacts are in
-[`_bmad-output/`](_bmad-output/) and design specs and plans in [`docs/superpowers/`](docs/superpowers/);
-the documentation index is [`docs/README.md`](docs/README.md).
+PhotoSift is developed with AI coding agents under a written, reviewable process rather than
+ad-hoc prompting. The workflow is checked into the repo, so anyone can see exactly how changes are made:
+
+| Piece | What it does |
+|---|---|
+| [`CLAUDE.md`](CLAUDE.md) | Project guide: architecture boundaries, safety invariants, build and test rules every agent follows. |
+| [`story-workflow`](.claude/skills/story-workflow/SKILL.md) skill | One story end to end: read the spec, design and plan, test-first build, review, verify, record evidence. |
+| [`design-and-plan`](.claude/skills/design-and-plan/SKILL.md) skill | Turns a story spec into a design doc and a step-by-step plan before any code is written. |
+| [`story-reviewer`](.claude/agents/story-reviewer.md) agent | Fresh-context reviewer that checks safety, boundaries, offline guarantees, spec fit and test honesty. |
+| [`verify-gates`](.claude/skills/verify-gates/SKILL.md) skill | Runs the build, the test suites and the isolated VM gates, and records what actually passed. |
+
+Independent work runs in parallel: separate agents can implement a feature, review it with no shared
+context, and drive CI, while every change still lands through a pull request that a human approves.
+Product planning used the BMAD Method (brief → PRD → UX → architecture → 26 story specs).
 
 ## Repository layout
 
