@@ -31,7 +31,7 @@ public sealed class NearDuplicateGroupTests
     }
 
     [Fact]
-    public void AtomicCommitKeepsExactDistinctAndPublishesDeterministicNearAndUncertainGroups()
+    public void AtomicCommitKeepsExactDistinctAndPublishesDeterministicLookAlikeSets()
     {
         var store = ExactRows(4);
         var rows = StoreFixture.Snapshot(store).Occurrences;
@@ -46,11 +46,67 @@ public sealed class NearDuplicateGroupTests
 
         Assert.True(first.Accepted);
         Assert.True(second.Accepted);
-        Assert.Contains(firstSnapshot.Groups, group => group.Category == CandidateCategory.NearDuplicate);
-        Assert.Contains(firstSnapshot.Groups, group => group.Category == CandidateCategory.Uncertain && group.Uncertain);
+        // Rows 0-2 are Near to each other and row 3 is Uncertain to all three, so they form
+        // one Uncertain set that keeps every pair's evidence instead of a Near group plus pairs.
+        var set = Assert.Single(firstSnapshot.Groups);
+        Assert.Equal(CandidateCategory.Uncertain, set.Category);
+        Assert.True(set.Uncertain);
+        Assert.Equal(rows.Select(row => row.Token), set.Members.Select(member => member.Token));
+        Assert.Equal(6, set.Similarity.Length);
+        Assert.Equal(3, set.Similarity.Count(edge => edge.Kind == NearRelationshipKind.Near));
         Assert.Equal(firstSnapshot.Groups.Select(GroupShape), secondSnapshot.Groups.Select(GroupShape));
         Assert.All(firstSnapshot.Groups.Where(group => group.Category != CandidateCategory.Exact),
             group => Assert.Null(group.KeeperOccurrenceId));
+    }
+
+    [Fact]
+    public void NearComponentWithNothingElseRelatedStaysNear()
+    {
+        var store = ExactRows(3);
+        var rows = StoreFixture.Snapshot(store).Occurrences;
+
+        Assert.True(store.CommitNearDuplicates(new(rows[0].Token.Pin, "managed-dhash-bgra-v1", [
+            Success(rows[0], 0), Success(rows[1], 0b1), Success(rows[2], ulong.MaxValue)])).Accepted);
+
+        var group = Assert.Single(StoreFixture.Snapshot(store).Groups);
+        Assert.Equal(CandidateCategory.NearDuplicate, group.Category);
+        Assert.False(group.Uncertain);
+        Assert.Equal([rows[0].Token, rows[1].Token], group.Members.Select(member => member.Token));
+        Assert.All(group.Similarity, edge => Assert.Equal(NearRelationshipKind.Near, edge.Kind));
+    }
+
+    [Fact]
+    public void SixMutuallySimilarPhotosFormOneSetInsteadOfPairs()
+    {
+        var store = ExactRows(6);
+        var rows = StoreFixture.Snapshot(store).Occurrences;
+        // Each photo sets its own 3-bit block, so every pair differs by 6 bits: Uncertain.
+        var results = rows.Select((row, index) => Success(row, 0b111UL << (3 * index))).ToImmutableArray();
+
+        Assert.True(store.CommitNearDuplicates(new(rows[0].Token.Pin, "managed-dhash-bgra-v1", results)).Accepted);
+
+        var set = Assert.Single(StoreFixture.Snapshot(store).Groups);
+        Assert.Equal(CandidateCategory.Uncertain, set.Category);
+        Assert.Equal(rows.Select(row => row.Token), set.Members.Select(member => member.Token));
+        Assert.Equal(15, set.Similarity.Length);
+        Assert.Null(set.KeeperOccurrenceId);
+    }
+
+    [Fact]
+    public void LooselyChainedPhotosAreNotForcedIntoOneSet()
+    {
+        var store = ExactRows(3);
+        var rows = StoreFixture.Snapshot(store).Occurrences;
+        // A-B and B-C differ by 12 bits (Uncertain); A-C differs by 24 bits (not related).
+        Assert.True(store.CommitNearDuplicates(new(rows[0].Token.Pin, "managed-dhash-bgra-v1", [
+            Success(rows[0], 0), Success(rows[1], 0xFFF), Success(rows[2], 0xFFFFFF)])).Accepted);
+
+        var groups = StoreFixture.Snapshot(store).Groups;
+
+        Assert.Equal(2, groups.Length);
+        Assert.All(groups, group => Assert.Equal(CandidateCategory.Uncertain, group.Category));
+        Assert.Equal([rows[0].Token, rows[1].Token], groups[0].Members.Select(member => member.Token));
+        Assert.Equal([rows[1].Token, rows[2].Token], groups[1].Members.Select(member => member.Token));
     }
 
     [Theory]
