@@ -228,6 +228,45 @@ public sealed class WicPreviewDecoderTests
         }
     }
 
+    [Theory]
+    [InlineData(0.6)]
+    [InlineData(-2.0)]
+    public async Task JpegThatEndsEarlyCouldNotBeAnalyzedInsteadOfDecodingAsGray(double cut)
+    {
+        using var fixture = JpegFixture.Create(orientation: 1);
+        var bytes = await File.ReadAllBytesAsync(fixture.Path, TestContext.Current.CancellationToken);
+        // A fraction keeps that share of the file; a negative number drops that many bytes.
+        var length = cut > 0 ? (int)(bytes.Length * cut) : bytes.Length + (int)cut;
+        using var directory = TemporaryDirectory.Create();
+        var path = Path.Combine(directory.Path, "cut-off.jpg");
+        await File.WriteAllBytesAsync(path, bytes[..length], TestContext.Current.CancellationToken);
+
+        using var result = await new WicPreviewDecoder().DecodeAsync(
+            path, 256, TestContext.Current.CancellationToken);
+
+        Assert.Equal(PreviewAvailability.CouldNotAnalyze, result.Availability);
+        Assert.Equal("Preview unavailable: the photo file is incomplete.", result.Reason);
+        Assert.Null(result.Frame);
+    }
+
+    [Fact]
+    public async Task CompleteJpegWithDataAfterTheImageStillDecodes()
+    {
+        using var fixture = JpegFixture.Create(orientation: 1);
+        var bytes = await File.ReadAllBytesAsync(fixture.Path, TestContext.Current.CancellationToken);
+        var trailer = Enumerable.Range(0, 4096).Select(index => (byte)(index * 37)).ToArray();
+        using var directory = TemporaryDirectory.Create();
+        var path = Path.Combine(directory.Path, "motion-photo.jpg");
+        await File.WriteAllBytesAsync(path, [.. bytes, .. trailer], TestContext.Current.CancellationToken);
+
+        using var result = await new WicPreviewDecoder().DecodeAsync(
+            path, 256, TestContext.Current.CancellationToken);
+
+        Assert.Equal(PreviewAvailability.Available, result.Availability);
+        Assert.NotNull(result.Frame);
+        AssertNearestColor(result.Frame, JpegFixture.CellSize / 2, JpegFixture.CellSize / 2, 0);
+    }
+
     private static SourceTruth ReadSourceTruth(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
