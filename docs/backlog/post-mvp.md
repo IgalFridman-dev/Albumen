@@ -237,7 +237,9 @@ criteria are met.
 
 ## PM-006 — Make Review content reachable at default window size
 
-**Status:** Backlog — observed usability limitation on the V1 candidate
+**Status:** Fix proposed on `claude/improve-v1-ui-4nwjld` — the Review page now
+scrolls as one surface with bounded, still-virtualized navigation lists. Open
+until verified in the real WPF app at several window sizes.
 
 **Priority:** Post-V1 layout repair; revisit sooner if a supported display
 cannot reach explicit Approval even after resizing

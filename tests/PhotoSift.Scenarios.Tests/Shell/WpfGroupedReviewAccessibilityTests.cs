@@ -335,6 +335,50 @@ public sealed class WpfGroupedReviewAccessibilityTests
         });
     }
 
+    [Theory]
+    [InlineData(double.NaN, double.NaN)]
+    [InlineData(680d, 520d)]
+    public void ReviewPageReachesComparisonSelectionAndApprovalWithoutMaximizing(double width, double height)
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = GroupedWpfFixture.Create();
+            OpenFirstComparison(fixture.ViewModel);
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            if (!double.IsNaN(width)) window.Width = width;
+            if (!double.IsNaN(height)) window.Height = height;
+            try
+            {
+                ShowAndDrain(window);
+                var page = Assert.IsType<ScrollViewer>(window.FindName("ReviewPageScrollViewer"));
+                var navigation = NamedElement(window, "ReviewNavigationGrid");
+                Assert.True(page.IsVisible);
+                Assert.True(navigation.ActualHeight <= page.ViewportHeight,
+                    $"Navigation height {navigation.ActualHeight} exceeded page viewport {page.ViewportHeight}.");
+
+                var comparisons = NamedList(window, "ReviewComparisonsList");
+                Assert.True(comparisons.IsVisible);
+                var selection = Descendants<ReviewSelectionCheckBox>(
+                    Realize(comparisons, comparisons.Items[0])).Single();
+                selection.BringIntoView();
+                ShowAndDrain(window);
+                AssertInsideViewport(page, selection);
+
+                foreach (var name in new[] { "ReviewEvidencePanel", "SelectionSummaryText", "ApproveCleanupButton" })
+                {
+                    var element = NamedElement(window, name);
+                    element.BringIntoView();
+                    ShowAndDrain(window);
+                    AssertInsideViewport(page, element);
+                }
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     private static void OpenFirstComparison(ShellViewModel viewModel)
     {
         var category = viewModel.ReviewCategories[0];
@@ -395,6 +439,16 @@ public sealed class WpfGroupedReviewAccessibilityTests
         for (var current = VisualTreeHelper.GetParent(child); current is not null;
              current = VisualTreeHelper.GetParent(current))
             yield return current;
+    }
+
+    private static void AssertInsideViewport(ScrollViewer viewport, FrameworkElement element)
+    {
+        var bounds = element.TransformToAncestor(viewport).TransformBounds(
+            new Rect(new Point(), element.RenderSize));
+        // An element taller than the viewport is brought into view top first.
+        var fits = bounds.Height <= viewport.ViewportHeight;
+        Assert.True(bounds.Top >= -0.5 && (fits ? bounds.Bottom <= viewport.ViewportHeight + 0.5 : bounds.Top <= 0.5),
+            $"{element.Name} bounds {bounds} were outside the Review viewport height {viewport.ViewportHeight}.");
     }
 
     private static void AssertInsideWindow(Window window, FrameworkElement element)
