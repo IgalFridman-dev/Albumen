@@ -151,22 +151,24 @@
         </DataTemplate>
         <DataTemplate x:Key="ReviewCategoryTemplate">
             <Button MinHeight="44" Margin="4" Padding="10,6" HorizontalContentAlignment="Left"
-                    Content="{Binding AutomationName}"
                     Click="OnOpenReviewCategoryClick"
                     AutomationProperties.AutomationId="open-review-category"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.PositionInSet="{Binding PositionInSet}"
-                    AutomationProperties.SizeOfSet="{Binding SizeOfSet}" />
+                    AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
+                <TextBlock Text="{Binding AutomationName}" TextWrapping="Wrap" />
+            </Button>
         </DataTemplate>
         <DataTemplate x:Key="ReviewGroupTemplate">
             <Button MinHeight="44" Margin="4" Padding="10,6" HorizontalContentAlignment="Left"
-                    Content="{Binding Summary}"
                     Click="OnOpenReviewGroupClick"
                     AutomationProperties.AutomationId="open-review-group"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding ItemStatus}"
                     AutomationProperties.PositionInSet="{Binding PositionInSet}"
-                    AutomationProperties.SizeOfSet="{Binding SizeOfSet}" />
+                    AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
+                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" />
+            </Button>
         </DataTemplate>
         <DataTemplate x:Key="ReviewComparisonTemplate">
             <StackPanel Margin="4,6">
@@ -203,24 +205,29 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,20">
-            <TextBlock FontSize="30"
-                       FontWeight="SemiBold"
-                       Text="PhotoSift" />
-            <TextBlock Margin="0,6,0,0"
-                       FontSize="16"
-                       TextWrapping="Wrap"
-                       Text="Choose one local photo folder. PhotoSift checks it without changing or uploading your photos." />
-            <TextBlock x:Name="LocalDataStatusText" Margin="0,6,0,0"
-                       Text="{Binding ActionRecoveryStatusText}" TextWrapping="Wrap"
-                       AutomationProperties.Name="Local data status"
-                       AutomationProperties.ItemStatus="{Binding ActionRecoveryStatusText}"
-                       AutomationProperties.LiveSetting="Polite" />
-            <StackPanel Margin="0,10,0,0"
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock FontSize="26"
+                           FontWeight="SemiBold"
+                           Text="PhotoSift" />
+                <TextBlock Margin="0,2,0,0"
+                           FontSize="14"
+                           TextWrapping="Wrap"
+                           Text="Choose one local photo folder. PhotoSift checks it without changing or uploading your photos." />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Margin="16,4,0,0" MaxWidth="360" VerticalAlignment="Top"
                         Visibility="{Binding HasLocalScanDataControl, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Button x:Name="ClearScanDataButton"
                         Content="Clear local Scan data"
-                        HorizontalAlignment="Left"
+                        HorizontalAlignment="Right"
                         MinHeight="34"
                         Padding="12,6"
                         IsDefault="False"
@@ -265,14 +272,61 @@
                            AutomationProperties.ItemStatus="{Binding LocalDataClearStatus}"
                            AutomationProperties.LiveSetting="Polite" />
             </StackPanel>
-        </StackPanel>
+            <!-- Shown only while Action records load or after local data failed to load. -->
+            <Border x:Name="LocalDataStatusBanner" Grid.Row="1" Grid.ColumnSpan="2"
+                    Margin="0,8,0,0" CornerRadius="4"
+                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    Visibility="{Binding HasActionRecoveryStatus, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="Padding" Value="0" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsLocalDataFaulted}" Value="True">
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="Padding" Value="12,8" />
+                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.InfoBrushKey}}" />
+                                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Path Width="16" Height="16" Margin="0,1,10,0" VerticalAlignment="Top" Stretch="Uniform"
+                          Fill="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}"
+                          Data="M 9,0 L 18,18 L 0,18 Z M 8,5 L 10,5 L 10,12 L 8,12 Z M 8,14 L 10,14 L 10,16 L 8,16 Z"
+                          Visibility="{Binding IsLocalDataFaulted, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <TextBlock x:Name="LocalDataStatusText" Grid.Column="1"
+                               Text="{Binding ActionRecoveryStatusText}" TextWrapping="Wrap"
+                               AutomationProperties.Name="{Binding ActionRecoveryStatusText}"
+                               AutomationProperties.ItemStatus="{Binding ActionRecoveryStatusText}"
+                               AutomationProperties.AutomationId="local-data-status">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="AutomationProperties.LiveSetting" Value="Polite" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsLocalDataFaulted}" Value="True">
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                        <Setter Property="AutomationProperties.LiveSetting" Value="Assertive" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+            </Border>
+        </Grid>
 
         <TabControl Grid.Row="1" AutomationProperties.Name="PhotoSift views">
           <TabItem Header="Workflow" IsSelected="True" AutomationProperties.Name="Workflow">
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="240" />
-                <ColumnDefinition Width="24" />
+                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="20" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
@@ -284,32 +338,38 @@
                               ItemsSource="{Binding Phases}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Margin="0,0,0,10"
-                                    Padding="12"
-                                    CornerRadius="4"
-                                    BorderThickness="1"
-                                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                            <Button Margin="0,0,0,6"
+                                    MinHeight="52"
+                                    Padding="10,6"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Stretch"
+                                    AutomationProperties.Name="{Binding DisplayName}"
+                                    AutomationProperties.ItemStatus="{Binding AvailabilityLabel}"
+                                    Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Phase}"
+                                    IsEnabled="{Binding IsAvailable}">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                                                <Setter Property="BorderThickness" Value="2" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
                                 <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <TextBlock FontSize="15"
-                                               FontWeight="SemiBold"
-                                               Text="{Binding DisplayName}" />
-                                    <TextBlock Grid.Row="1"
-                                               Margin="0,3,0,8"
-                                               Text="{Binding AvailabilityLabel}" />
-                                    <Button Grid.Row="2"
-                                            MinHeight="32"
-                                            Padding="10,5"
-                                            AutomationProperties.Name="{Binding DisplayName}"
-                                            Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Phase}"
-                                            Content="{Binding DisplayName}"
-                                            IsEnabled="{Binding IsAvailable}" />
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="28" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"
+                                               Text="{Binding StepNumber}" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding DisplayName}" />
+                                        <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding AvailabilityLabel}" />
+                                    </StackPanel>
                                 </Grid>
-                            </Border>
+                            </Button>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -318,7 +378,7 @@
             <ScrollViewer Grid.Column="2" Visibility="{Binding IsChooseScopePhase, Converter={StaticResource BooleanToVisibilityConverter}}"
                           HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
-                <StackPanel>
+                <StackPanel Margin="0,0,20,0">
                     <TextBlock FontSize="24"
                                FontWeight="SemiBold"
                                Text="Choose Scope" />
@@ -433,18 +493,20 @@
                     <ItemsControl x:Name="ScopeSummaryList"
                                   Margin="0,8,0,0"
                                   AutomationProperties.Name="Scope preflight summary"
+                                  Grid.IsSharedSizeScope="True"
                                   ItemsSource="{Binding ScopeSummary}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Grid Margin="0,0,0,5">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" SharedSizeGroup="PreflightLabel" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="{Binding Label}" />
                                     <TextBlock Grid.Column="1"
-                                               Margin="16,0,0,0"
+                                               Margin="24,0,0,0"
                                                FontWeight="SemiBold"
+                                               TextWrapping="Wrap"
                                                Text="{Binding Value}" />
                                 </Grid>
                             </DataTemplate>
@@ -516,7 +578,7 @@
 
             <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           Visibility="{Binding IsConfirmRulesPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <StackPanel>
+                <StackPanel Margin="0,0,20,0">
                     <TextBlock Text="Confirm Rules" FontSize="24" FontWeight="SemiBold" />
                     <TextBlock Text="Selected Scope" Margin="0,16,0,4" FontWeight="SemiBold" />
                     <TextBox Text="{Binding SelectedPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
@@ -582,15 +644,14 @@
                 </StackPanel>
             </Grid>
 
-            <!-- Each review level owns a native virtualized viewport. -->
-            <Grid Grid.Column="2" Visibility="{Binding IsReviewPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="3*" />
-                    <RowDefinition Height="2*" />
-                </Grid.RowDefinitions>
-                <ScrollViewer Grid.Row="0" MaxHeight="180"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <!-- The Review page scrolls as one surface so evidence, selection and Approval stay
+                 reachable at any window size. Each review level still owns a native virtualized
+                 viewport: ReviewNavigationGrid gets a bounded height from the page viewport. -->
+            <ScrollViewer x:Name="ReviewPageScrollViewer" Grid.Column="2"
+                          Visibility="{Binding IsReviewPhase, Converter={StaticResource BooleanToVisibilityConverter}}"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          SizeChanged="OnReviewPageSizeChanged">
+              <StackPanel Margin="0,0,20,0">
                 <StackPanel>
                     <TextBlock x:Name="ReviewHeading" Text="Review" FontSize="24" FontWeight="SemiBold" Focusable="True"
                                AutomationProperties.Name="Grouped duplicate review" />
@@ -605,14 +666,18 @@
                                    Text="{Binding ReviewBreadcrumbText}" AutomationProperties.Name="Review breadcrumb" />
                     </DockPanel>
                     <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
-                    <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
-                                  ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
-                                  AutomationProperties.Name="Scan outcome categories" />
+                    <Expander x:Name="ReviewScanSummaryExpander" Header="Scan summary" IsExpanded="False" Margin="0,2,0,0"
+                              AutomationProperties.Name="Scan summary">
+                        <StackPanel Margin="0,4,0,0">
+                            <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
+                            <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
+                                          ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
+                                          AutomationProperties.Name="Scan outcome categories" />
+                        </StackPanel>
+                    </Expander>
                 </StackPanel>
-                </ScrollViewer>
 
-                <Grid x:Name="ReviewNavigationGrid" Grid.Row="1" MinHeight="120" Margin="0,6,0,0">
+                <Grid x:Name="ReviewNavigationGrid" Height="300" Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition x:Name="ReviewCategoriesColumn" Width="*" />
                         <ColumnDefinition x:Name="ReviewGroupsColumn" Width="*" />
@@ -622,7 +687,7 @@
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="Categories" FontWeight="SemiBold" Margin="4" />
-                            <ListBox x:Name="ReviewCategoriesList" ItemsSource="{Binding ReviewCategories}"
+                            <ListBox x:Name="ReviewCategoriesList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ReviewCategories}"
                                      Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewCategoryTemplate}"
                                      PreviewKeyDown="OnReviewListPreviewKeyDown"
                                      AutomationProperties.Name="Review categories" />
@@ -632,7 +697,7 @@
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="Groups" FontWeight="SemiBold" Margin="4" />
-                            <ListBox x:Name="ReviewGroupsList" ItemsSource="{Binding ActiveReviewGroups}"
+                            <ListBox x:Name="ReviewGroupsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewGroups}"
                                      Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewGroupTemplate}"
                                      PreviewKeyDown="OnReviewListPreviewKeyDown"
                                      AutomationProperties.Name="Groups in selected category" />
@@ -642,7 +707,7 @@
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="Comparison" FontWeight="SemiBold" Margin="4" />
-                            <ListBox x:Name="ReviewComparisonsList" ItemsSource="{Binding ActiveReviewMembers}"
+                            <ListBox x:Name="ReviewComparisonsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewMembers}"
                                      Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewComparisonTemplate}"
                                      PreviewKeyDown="OnReviewListPreviewKeyDown"
                                      AutomationProperties.Name="Comparison paths and Selection controls" />
@@ -650,9 +715,7 @@
                     </Border>
                 </Grid>
 
-                <ScrollViewer x:Name="ReviewDetailsScrollViewer" Grid.Row="2" Margin="0,8,0,0"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                  <StackPanel>
+                  <StackPanel x:Name="ReviewDetailsPanel" Margin="0,8,0,0">
                 <app:ReviewAutomationBorder x:Name="ReviewEvidencePanel" Padding="8"
                         BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                         AutomationProperties.AutomationId="review-evidence"
@@ -713,26 +776,23 @@
                     </WrapPanel>
                 </StackPanel>
                   </StackPanel>
-                </ScrollViewer>
-            </Grid>
+              </StackPanel>
+            </ScrollViewer>
             <app:ReviewAutomationBorder x:Name="ActionPanel" Grid.Column="2"
                     Visibility="{Binding IsActionPhase, Converter={StaticResource BooleanToVisibilityConverter}}"
                     AutomationProperties.AutomationId="action-panel"
                     AutomationProperties.Name="Approved Recycle Bin Action"
                     AutomationProperties.ItemStatus="{Binding ActionStatusText}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                <!-- Like Review, the Action page scrolls as one surface; the item list keeps a
+                     bounded height from the page viewport so it stays virtualized. -->
+                <ScrollViewer x:Name="ActionPageScrollViewer"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              SizeChanged="OnActionPageSizeChanged">
+                <StackPanel Margin="0,0,20,0">
                     <TextBlock x:Name="ActionHeading" Text="Recycle Bin progress" FontSize="24" FontWeight="SemiBold"
                                Focusable="True" FocusVisualStyle="{StaticResource ActionFocusVisual}" TextWrapping="Wrap"
                                AutomationProperties.Name="Recycle Bin progress" />
-                    <ScrollViewer Grid.Row="1" MaxHeight="160" Margin="0,8,0,8"
-                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                      <StackPanel>
+                      <StackPanel Margin="0,8,0,8">
                         <TextBlock Text="{Binding ActionSelectionText}" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding ActionStatusText}" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding ActionCountsText}" TextWrapping="Wrap" />
@@ -742,15 +802,12 @@
                                 AutomationProperties.Name="Recycle Bin progress announcement"
                                 AutomationProperties.LiveSetting="Polite" />
                       </StackPanel>
-                    </ScrollViewer>
-                    <ListBox x:Name="ActionItemsList" Grid.Row="2" ItemsSource="{Binding ActionRows}"
+                    <ListBox x:Name="ActionItemsList" Height="300" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActionRows}"
                              Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ActionItemTemplate}"
                              AutomationProperties.Name="Approved original paths and Recycle Bin results"
                              Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                              Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                    <ScrollViewer Grid.Row="3" MaxHeight="300" Margin="0,8,0,0"
-                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                      <StackPanel>
+                      <StackPanel x:Name="ActionNoticesPanel" Margin="0,8,0,0">
                         <TextBlock Text="{Binding ActionReplayNotice}" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding ActionRecoveryNotice}" TextWrapping="Wrap" />
                         <Separator Margin="0,10,0,8" Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
@@ -774,8 +831,8 @@
                                       ItemTemplate="{StaticResource ActionRecordHistoryTemplate}"
                                       Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
                       </StackPanel>
-                    </ScrollViewer>
-                </Grid>
+                </StackPanel>
+                </ScrollViewer>
             </app:ReviewAutomationBorder>
         </Grid>
           </TabItem>

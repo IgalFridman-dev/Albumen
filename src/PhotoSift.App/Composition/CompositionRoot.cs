@@ -69,7 +69,7 @@ public static class CompositionRoot
             reader,
             new WicPreviewDecoder(),
             new BoundedThumbnailCache(64L * 1024 * 1024),
-            maximumEdge: 512);
+            maximumEdge: 1024);
         return new ShellViewModel(
             workflow, photoWorkflow, dialog, stores.ScanData, preview);
     }
