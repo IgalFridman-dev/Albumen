@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using PhotoSift.Application.Review;
 using PhotoSift.Domain.Scan;
 
@@ -55,10 +56,15 @@ public sealed class ScanOccurrenceViewModel
         ResolvedPath = occurrence.ResolvedPath;
         Outcome = $"Enumerate: {occurrence.Enumerate.State} ({occurrence.Enumerate.Reason}); Exact: {occurrence.Exact.State} ({occurrence.Exact.Reason})";
         ByteLength = occurrence.Content?.ByteLength.ToString(CultureInfo.InvariantCulture) ?? "Unknown";
+        ByteCount = occurrence.Content?.ByteLength;
+        SizeText = ByteCount is { } bytes ? FormatSize(bytes) : "Size unknown";
+        FileName = Path.GetFileName(occurrence.DiscoveredPath.TrimEnd('\\', '/')) is { Length: > 0 } name
+            ? name : occurrence.DiscoveredPath;
         PhysicalIdentity = occurrence.PhysicalFileKey is { } key
             ? $"Volume {key.VolumeSerial:X}; file {key.FileId.High:X16}{key.FileId.Low:X16}"
             : "Unknown physical identity";
         PathKind = isAlias ? "Alias path to the same physical file" : "Physical file";
+        IsAliasPath = isAlias;
         Allocation = $"Allocation: {occurrence.Allocation.AllocatedBytes?.ToString(CultureInfo.InvariantCulture) ?? "unknown"} bytes; links: {occurrence.Allocation.LinkCount?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; metadata {(occurrence.Allocation.Stable ? "stable" : "unavailable or unstable")}";
         (OutcomeLabel, NextStep) = DescribeOutcome(occurrence);
         ToggleSelectionCommand = toggle;
@@ -77,8 +83,12 @@ public sealed class ScanOccurrenceViewModel
     public string OutcomeLabel { get; }
     public string NextStep { get; }
     public string ByteLength { get; }
+    public long? ByteCount { get; }
+    public string SizeText { get; }
+    public string FileName { get; }
     public string PhysicalIdentity { get; }
     public string PathKind { get; }
+    public bool IsAliasPath { get; }
     public string Allocation { get; }
     public ReviewEligibilityState Eligibility { get; }
     public ReviewUnavailableReason UnavailableReason { get; }
@@ -90,6 +100,14 @@ public sealed class ScanOccurrenceViewModel
     public AsyncCommand? ToggleSelectionCommand { get; }
     public int PositionInSet { get; }
     public int SizeOfSet { get; }
+
+    internal static string FormatSize(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes.ToString(CultureInfo.InvariantCulture)} bytes",
+        < 1024 * 1024 => $"{(bytes / 1024d).ToString("0", CultureInfo.InvariantCulture)} KB",
+        < 1024L * 1024 * 1024 => $"{(bytes / (1024d * 1024)).ToString("0.0", CultureInfo.InvariantCulture)} MB",
+        _ => $"{(bytes / (1024d * 1024 * 1024)).ToString("0.00", CultureInfo.InvariantCulture)} GB",
+    };
 
     private static (string Label, string NextStep) DescribeOutcome(ScanFileOccurrence occurrence)
     {
