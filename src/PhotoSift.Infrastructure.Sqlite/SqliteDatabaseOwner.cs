@@ -131,7 +131,29 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
         }
         finally
         {
-            if (connection is not null) await connection.DisposeAsync().ConfigureAwait(false);
+            if (connection is not null)
+            {
+                await CheckpointBeforeCloseAsync(connection).ConfigureAwait(false);
+                await connection.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    // The writer is the last connection to close. In the shipped app that close
+    // left -wal and -shm behind, and the next start refused them as retained
+    // journal state. An explicit TRUNCATE checkpoint lets the close remove them.
+    // A failed or busy checkpoint leaves the state as it was before this call.
+    private static async Task CheckpointBeforeCloseAsync(SqliteConnection connection)
+    {
+        try
+        {
+            await ExecuteAsync(connection, "PRAGMA wal_checkpoint(TRUNCATE);", CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (SqliteException)
+        {
+            System.Diagnostics.Trace.WriteLine(
+                "PHOTOSIFT_DIAGNOSTIC stage=shutdown code=wal_checkpoint_failed");
         }
     }
 
