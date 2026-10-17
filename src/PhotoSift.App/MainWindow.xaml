@@ -672,7 +672,7 @@
                                     </Button>
                                 </Grid>
 
-                                <CheckBox x:Name="IncludeSubfoldersCheckBox"
+                                <app:CommandSwitchCheckBox x:Name="IncludeSubfoldersCheckBox"
                                           Margin="0,16,0,0"
                                           Style="{StaticResource PhotoSift.SwitchCheckBox}"
                                           AutomationProperties.Name="Include subfolders"
@@ -788,7 +788,7 @@
                                           AutomationProperties.HelpText="Exact requires identical bytes and cannot be disabled." />
                                 <TextBlock Margin="56,4,0,0" Style="{StaticResource PhotoSift.MutedText}" Text="{Binding ExactPreset}" />
 
-                                <CheckBox x:Name="NearDuplicatesCheckBox"
+                                <app:CommandSwitchCheckBox x:Name="NearDuplicatesCheckBox"
                                           Margin="0,18,0,0"
                                           Style="{StaticResource PhotoSift.SwitchCheckBox}"
                                           Content="Conservative Near duplicates"
