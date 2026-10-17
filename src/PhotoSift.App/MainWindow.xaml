@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:app="clr-namespace:PhotoSift.App"
+        xmlns:shell="clr-namespace:PhotoSift.App.Shell"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
@@ -154,52 +155,251 @@
                 <TextBlock Text="{Binding Outcome}" TextWrapping="Wrap" />
             </StackPanel>
         </DataTemplate>
+        <app:EqualValuesConverter x:Key="EqualValuesConverter" />
+        <app:EqualValuesToVisibilityConverter x:Key="EqualValuesToVisibilityConverter" />
+        <!-- A kind of result (Identical copies, Look-alike, Maybe similar, couldn't check). -->
         <DataTemplate x:Key="ReviewCategoryTemplate">
-            <Button MinHeight="44" Margin="4" Padding="10,6" HorizontalContentAlignment="Left"
-                    Click="OnOpenReviewCategoryClick"
+            <Button MinHeight="44" Margin="2,3" Click="OnOpenReviewCategoryClick"
                     AutomationProperties.AutomationId="open-review-category"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.PositionInSet="{Binding PositionInSet}"
                     AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
-                <TextBlock Text="{Binding AutomationName}" TextWrapping="Wrap" />
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource PhotoSift.CardButton}">
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Value="True">
+                                        <Condition.Binding>
+                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
+                                                <Binding Path="Category" />
+                                                <Binding Path="DataContext.ActiveReviewCategory.Category" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                            </MultiBinding>
+                                        </Condition.Binding>
+                                    </Condition>
+                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Background" Value="{StaticResource PhotoSift.AccentSoftBrush}" />
+                                <Setter Property="BorderBrush" Value="{StaticResource PhotoSift.AccentBrush}" />
+                            </MultiDataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Value="True">
+                                        <Condition.Binding>
+                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
+                                                <Binding Path="Category" />
+                                                <Binding Path="DataContext.ActiveReviewCategory.Category" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                            </MultiBinding>
+                                        </Condition.Binding>
+                                    </Condition>
+                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                                <Setter Property="BorderThickness" Value="2" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource PhotoSift.KindMark}" Margin="0,2,10,2" />
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,2,0,0" Style="{StaticResource PhotoSift.Caption}" Text="{Binding Description}" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Margin="10,0,0,0" FontWeight="SemiBold" Text="{Binding CountText}" />
+                </Grid>
             </Button>
         </DataTemplate>
+        <!-- One set of photos inside the open kind. -->
         <DataTemplate x:Key="ReviewGroupTemplate">
-            <Button MinHeight="44" Margin="4" Padding="10,6" HorizontalContentAlignment="Left"
-                    Click="OnOpenReviewGroupClick"
+            <Button MinHeight="44" Margin="2,3" Click="OnOpenReviewGroupClick"
                     AutomationProperties.AutomationId="open-review-group"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding ItemStatus}"
                     AutomationProperties.PositionInSet="{Binding PositionInSet}"
                     AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
-                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" />
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource PhotoSift.CardButton}">
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Value="True">
+                                        <Condition.Binding>
+                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
+                                                <Binding Path="GroupId" />
+                                                <Binding Path="DataContext.ActiveReviewGroup.GroupId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                            </MultiBinding>
+                                        </Condition.Binding>
+                                    </Condition>
+                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Background" Value="{StaticResource PhotoSift.AccentSoftBrush}" />
+                                <Setter Property="BorderBrush" Value="{StaticResource PhotoSift.AccentBrush}" />
+                            </MultiDataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Value="True">
+                                        <Condition.Binding>
+                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
+                                                <Binding Path="GroupId" />
+                                                <Binding Path="DataContext.ActiveReviewGroup.GroupId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                            </MultiBinding>
+                                        </Condition.Binding>
+                                    </Condition>
+                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                                <Setter Property="BorderThickness" Value="2" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource PhotoSift.KindMark}" Margin="0,2,10,2" />
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,2,0,0" Style="{StaticResource PhotoSift.Caption}" Text="{Binding SelectionStatus}" />
+                    </StackPanel>
+                </Grid>
             </Button>
         </DataTemplate>
+        <!-- One photo of the open set: thumbnail (opens the viewer), name, the Keep / Remove
+             control near the top so it stays reachable at large text sizes, then path, facts
+             and badges. The selection control's direct parent
+             stays a StackPanel (acceptance tests swap it in place). -->
         <DataTemplate x:Key="ReviewComparisonTemplate">
-            <StackPanel Margin="4,6">
-                <Button MinHeight="38" Padding="8,5" HorizontalContentAlignment="Left"
-                        Content="Open comparison"
-                        Click="OnOpenReviewMemberClick"
-                        AutomationProperties.AutomationId="open-review-member"
-                        AutomationProperties.Name="{Binding AutomationName}"
-                        AutomationProperties.ItemStatus="{Binding ItemStatus}"
-                        AutomationProperties.PositionInSet="{Binding PositionInSet}"
-                        AutomationProperties.SizeOfSet="{Binding SizeOfSet}" />
-                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True"
-                         IsTabStop="False" TextWrapping="Wrap"
-                         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
-                         AutomationProperties.Name="{Binding DiscoveredPath}" />
-                <app:ReviewSelectionCheckBox x:Name="ReviewSelectionCheckBox" MinHeight="34"
-                        Padding="4" Margin="0,4,0,0"
-                        IsChecked="{Binding IsSelected, Mode=OneWay}"
-                        IsEnabled="{Binding CanSelect}"
-                        Command="{Binding ToggleSelectionCommand}"
-                        AutomationProperties.AutomationId="selection-control"
-                        AutomationProperties.Name="{Binding AutomationName}"
-                        AutomationProperties.ItemStatus="{Binding ItemStatus}"
-                        Content="{Binding EligibilityText}" />
-            </StackPanel>
+            <Border x:Name="PhotoCard" Margin="2,3" Padding="10" CornerRadius="10">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                        <Setter Property="BorderBrush" Value="{StaticResource PhotoSift.BorderBrush}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                            </DataTrigger>
+                            <DataTrigger Value="True">
+                                <DataTrigger.Binding>
+                                    <MultiBinding Converter="{StaticResource EqualValuesConverter}">
+                                        <Binding Path="OccurrenceId" />
+                                        <Binding Path="DataContext.ActiveReviewMember.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                    </MultiBinding>
+                                </DataTrigger.Binding>
+                                <Setter Property="BorderBrush" Value="{StaticResource PhotoSift.AccentBrush}" />
+                                <Setter Property="BorderThickness" Value="2" />
+                            </DataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Value="True">
+                                        <Condition.Binding>
+                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
+                                                <Binding Path="OccurrenceId" />
+                                                <Binding Path="DataContext.ActiveReviewMember.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                            </MultiBinding>
+                                        </Condition.Binding>
+                                    </Condition>
+                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <!-- Compare sits under the thumbnail so it is never clipped by a narrow card. -->
+                    <StackPanel Grid.Column="0" Width="124" VerticalAlignment="Top">
+                        <Button Width="112" Height="84" VerticalAlignment="Top" Margin="0,0,12,0"
+                                Style="{StaticResource PhotoSift.ThumbnailButton}"
+                                Click="OnOpenReviewMemberClick"
+                                ToolTip="Open in the viewer"
+                                AutomationProperties.AutomationId="open-review-member"
+                                AutomationProperties.Name="{Binding AutomationName}"
+                                AutomationProperties.ItemStatus="{Binding ItemStatus}"
+                                AutomationProperties.PositionInSet="{Binding PositionInSet}"
+                                AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
+                            <app:PhotoThumbnail x:Name="Thumbnail" Member="{Binding}"
+                                    Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
+                        </Button>
+                        <!-- The photo already in the viewer has nothing to be compared with. -->
+                        <Button Content="Compare" Margin="0,6,12,0" MinHeight="32" Padding="6,4" HorizontalAlignment="Stretch"
+                                Command="{Binding DataContext.CompareReviewMemberCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                CommandParameter="{Binding}"
+                                ToolTip="Show this photo beside the one in the viewer"
+                                AutomationProperties.Name="{Binding FileName, StringFormat='Compare {0} with the photo in the viewer'}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource PhotoSift.Button}">
+                                    <Style.Triggers>
+                                        <DataTrigger Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{StaticResource EqualValuesConverter}">
+                                                    <Binding Path="OccurrenceId" />
+                                                    <Binding Path="DataContext.ActiveReviewMember.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
+                            <app:ReviewSelectionCheckBox x:Name="ReviewSelectionCheckBox" MinHeight="34"
+                                    VerticalAlignment="Top"
+                                    Style="{StaticResource PhotoSift.KeepRemoveToggle}"
+                                    IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                    IsEnabled="{Binding CanSelect}"
+                                    Command="{Binding ToggleSelectionCommand}"
+                                    AutomationProperties.AutomationId="selection-control"
+                                    AutomationProperties.Name="{Binding AutomationName}"
+                                    AutomationProperties.ItemStatus="{Binding ItemStatus}"
+                                    Content="{Binding EligibilityText}" />
+                        </StackPanel>
+                        <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True"
+                                 IsTabStop="False" TextWrapping="Wrap" FontSize="12" Margin="0,2,0,0"
+                                 Style="{StaticResource PhotoSift.PathText}"
+                                 AutomationProperties.Name="{Binding DiscoveredPath}" />
+                        <WrapPanel Margin="0,4,0,0">
+                            <TextBlock Margin="0,0,12,0" Style="{StaticResource PhotoSift.Caption}" Text="{Binding SizeText}" />
+                            <TextBlock Style="{StaticResource PhotoSift.Caption}"
+                                       Text="{Binding DimensionsText, ElementName=Thumbnail}" />
+                        </WrapPanel>
+                        <WrapPanel>
+                            <Border Style="{StaticResource PhotoSift.Badge}">
+                                <Border.Visibility>
+                                    <MultiBinding Converter="{StaticResource EqualValuesToVisibilityConverter}">
+                                        <Binding Path="OccurrenceId" />
+                                        <Binding Path="DataContext.ActiveReviewSuggestion.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                    </MultiBinding>
+                                </Border.Visibility>
+                                <TextBlock TextWrapping="Wrap">
+                                    <Run Text="Suggested best:" />
+                                    <Run Text="{Binding DataContext.ActiveReviewSuggestion.Reason, RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" />
+                                </TextBlock>
+                            </Border>
+                            <Border Style="{StaticResource PhotoSift.Badge}"
+                                    Visibility="{Binding IsAliasPath, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="Another path to the same file" TextWrapping="Wrap" />
+                            </Border>
+                        </WrapPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
         </DataTemplate>
         </ResourceDictionary>
     </Window.Resources>
@@ -884,28 +1084,40 @@
                 </WrapPanel>
             </Grid>
 
-            <!-- The Review page scrolls as one surface so evidence, selection and Approval stay
+            <!-- The Review page scrolls as one surface so the viewer, selection and approval stay
                  reachable at any window size. Each review level still owns a native virtualized
-                 viewport: ReviewNavigationGrid gets a bounded height from the page viewport. -->
-            <ScrollViewer x:Name="ReviewPageScrollViewer" Grid.Column="2"
+                 viewport: ReviewNavigationGrid gets a bounded height from the page viewport. The
+                 selection bar under the page stays put while the page scrolls. -->
+            <Grid Grid.Column="2" Visibility="{Binding IsReviewPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+            <ScrollViewer x:Name="ReviewPageScrollViewer"
                           Visibility="{Binding IsReviewPhase, Converter={StaticResource BooleanToVisibilityConverter}}"
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           SizeChanged="OnReviewPageSizeChanged">
-              <StackPanel Margin="0,0,20,0">
+              <StackPanel Margin="4,4,20,8">
                 <StackPanel>
-                    <TextBlock x:Name="ReviewHeading" Text="Review" FontSize="24" FontWeight="SemiBold" Focusable="True"
+                    <TextBlock x:Name="ReviewHeading" Text="Review" Style="{StaticResource PhotoSift.PageTitle}" Focusable="True"
+                               FocusVisualStyle="{StaticResource PhotoSift.FocusVisual}"
                                AutomationProperties.Name="Grouped duplicate review" />
-                    <TextBlock x:Name="ReviewStatusText" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
+                    <TextBlock x:Name="ReviewResultsSummaryText" Margin="0,4,0,0" Style="{StaticResource PhotoSift.SectionTitle}"
+                               Text="{Binding ReviewResultsSummary}" />
+                    <TextBlock Margin="0,2,0,0" Style="{StaticResource PhotoSift.MutedText}"
+                               Text="Pick a kind, open a set and choose Keep or Remove for each photo. Nothing changes until you approve the cleanup below." />
+                    <TextBlock x:Name="ReviewStatusText" Margin="0,6,0,0" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
                                AutomationProperties.Name="Review status" AutomationProperties.ItemStatus="{Binding ReviewStatusText}"
                                AutomationProperties.LiveSetting="Polite" />
-                    <DockPanel Margin="0,6,0,4">
-                        <Button x:Name="ReviewBackButton" Content="Back" MinHeight="34" Padding="10,4" Margin="0,0,8,0"
+                    <DockPanel Margin="0,8,0,4">
+                        <Button x:Name="ReviewBackButton" Content="Back" MinHeight="34" Padding="14,4" Margin="0,0,10,0"
+                                Style="{StaticResource PhotoSift.Button}"
                                 Click="OnReviewBackClick" IsEnabled="{Binding CanReviewBack}"
                                 AutomationProperties.Name="Back one review level" />
                         <TextBlock x:Name="ReviewBreadcrumbText" VerticalAlignment="Center" TextWrapping="Wrap"
                                    Text="{Binding ReviewBreadcrumbText}" AutomationProperties.Name="Review breadcrumb" />
                     </DockPanel>
-                    <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" />
+                    <TextBlock Style="{StaticResource PhotoSift.MutedText}" Text="{Binding CoverageStatus}" />
                     <Expander x:Name="ReviewScanSummaryExpander" Header="Scan summary" IsExpanded="False" Margin="0,2,0,0"
                               AutomationProperties.Name="Scan summary">
                         <StackPanel Margin="0,4,0,0">
@@ -917,36 +1129,39 @@
                     </Expander>
                 </StackPanel>
 
-                <Grid x:Name="ReviewNavigationGrid" Height="300" Margin="0,8,0,0">
+                <Grid x:Name="ReviewNavigationGrid" Height="300" Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition x:Name="ReviewCategoriesColumn" Width="*" />
                         <ColumnDefinition x:Name="ReviewGroupsColumn" Width="*" />
                         <ColumnDefinition x:Name="ReviewComparisonsColumn" Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Border x:Name="ReviewCategoriesPanel" Grid.Column="0" Margin="0,0,4,0" Padding="4"
+                    <Border x:Name="ReviewCategoriesPanel" Grid.Column="0" Margin="0,0,4,0" Padding="6" CornerRadius="12"
+                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="Categories" FontWeight="SemiBold" Margin="4" />
+                            <TextBlock DockPanel.Dock="Top" Text="What was found" Style="{StaticResource PhotoSift.SectionTitle}" Margin="6,4,6,6" />
                             <ListBox x:Name="ReviewCategoriesList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ReviewCategories}"
                                      Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewCategoryTemplate}"
                                      PreviewKeyDown="OnReviewListPreviewKeyDown"
                                      AutomationProperties.Name="Review categories" />
                         </DockPanel>
                     </Border>
-                    <Border x:Name="ReviewGroupsPanel" Grid.Column="1" Margin="4,0" Padding="4"
+                    <Border x:Name="ReviewGroupsPanel" Grid.Column="1" Margin="4,0" Padding="6" CornerRadius="12"
+                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="Groups" FontWeight="SemiBold" Margin="4" />
+                            <TextBlock DockPanel.Dock="Top" Text="Sets" Style="{StaticResource PhotoSift.SectionTitle}" Margin="6,4,6,6" />
                             <ListBox x:Name="ReviewGroupsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewGroups}"
                                      Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewGroupTemplate}"
                                      PreviewKeyDown="OnReviewListPreviewKeyDown"
                                      AutomationProperties.Name="Groups in selected category" />
                         </DockPanel>
                     </Border>
-                    <Border x:Name="ReviewComparisonsPanel" Grid.Column="2" Margin="4,0,0,0" Padding="4"
+                    <Border x:Name="ReviewComparisonsPanel" Grid.Column="2" Margin="4,0,0,0" Padding="6" CornerRadius="12"
+                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="Comparison" FontWeight="SemiBold" Margin="4" />
+                            <TextBlock DockPanel.Dock="Top" Text="Photos in this set" Style="{StaticResource PhotoSift.SectionTitle}" Margin="6,4,6,6" />
                             <ListBox x:Name="ReviewComparisonsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewMembers}"
                                      Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewComparisonTemplate}"
                                      PreviewKeyDown="OnReviewListPreviewKeyDown"
@@ -955,41 +1170,94 @@
                     </Border>
                 </Grid>
 
-                  <StackPanel x:Name="ReviewDetailsPanel" Margin="0,8,0,0">
-                <app:ReviewAutomationBorder x:Name="ReviewEvidencePanel" Padding="8"
+                  <StackPanel x:Name="ReviewDetailsPanel" Margin="0,10,0,0">
+                <!-- Viewer: the open photo large, Previous / Next through the set, and an
+                     optional second photo side by side with one zoom for both. -->
+                <app:ReviewAutomationBorder x:Name="ReviewEvidencePanel" Padding="14" CornerRadius="12"
+                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                         BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                         AutomationProperties.AutomationId="review-evidence"
                         AutomationProperties.Name="{Binding ActiveReviewEvidence.AutomationName}"
                         AutomationProperties.ItemStatus="{Binding ActiveReviewEvidence.ItemStatus}">
                     <StackPanel DataContext="{Binding ActiveReviewEvidence}">
-                        <TextBlock Text="Evidence" FontWeight="SemiBold" />
-                        <app:PreviewStatusControl x:Name="ReviewPreviewStatusControl"
-                                DataContext="{Binding DataContext.ActiveReviewPreview, RelativeSource={RelativeSource AncestorType=Window}}" />
-                        <TextBlock x:Name="ReviewEvidenceFullPathText" Text="{Binding FullPath}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ReviewEvidenceDimensionsText" Text="{Binding Dimensions, StringFormat='Dimensions: {0}'}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ReviewEvidenceSizeText" Text="{Binding Size, StringFormat='Size: {0}'}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ReviewEvidenceRelevantDateText" Text="{Binding RelevantDate, StringFormat='Relevant date: {0}'}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ReviewEvidenceCategoryText" Text="{Binding Category, StringFormat='Category: {0}'}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ReviewEvidenceConfidenceText" Text="{Binding Confidence, StringFormat='Confidence: {0}'}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ReviewEvidenceUncertaintyText" Text="{Binding Uncertainty, StringFormat='Uncertainty: {0}'}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ReviewEvidenceTransformationsText" Text="{Binding Transformations, StringFormat='Transformations: {0}'}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ReviewEvidenceReasonText" Text="{Binding Reason, StringFormat='Reason: {0}'}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ReviewEvidenceRecommendationText" Text="{Binding Recommendation}" TextWrapping="Wrap" />
+                        <DockPanel LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Text="Viewer"
+                                       Style="{StaticResource PhotoSift.SectionTitle}" />
+                            <WrapPanel DockPanel.Dock="Right"
+                                       DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                                <Button x:Name="PreviousPhotoButton" Content="Previous" Margin="0,0,6,4" MinHeight="32" Padding="12,4"
+                                        Style="{StaticResource PhotoSift.Button}"
+                                        Command="{Binding ShowPreviousReviewMemberCommand}"
+                                        AutomationProperties.Name="Previous photo in this set" />
+                                <Button x:Name="NextPhotoButton" Content="Next" Margin="0,0,12,4" MinHeight="32" Padding="12,4"
+                                        Style="{StaticResource PhotoSift.Button}"
+                                        Command="{Binding ShowNextReviewMemberCommand}"
+                                        AutomationProperties.Name="Next photo in this set" />
+                                <TextBlock Text="Zoom" VerticalAlignment="Center" Margin="0,0,6,4" />
+                                <Slider x:Name="ReviewZoomSlider" Width="120" Minimum="1" Maximum="4" Value="1"
+                                        SmallChange="0.25" LargeChange="0.5" VerticalAlignment="Center" Margin="0,0,12,4"
+                                        AutomationProperties.Name="Zoom for the photos in the viewer" />
+                                <Button x:Name="CloseCompareButton" Content="Close compare" Margin="0,0,0,4" MinHeight="32" Padding="12,4"
+                                        Style="{StaticResource PhotoSift.Button}"
+                                        Command="{Binding CloseCompareCommand}"
+                                        Visibility="{Binding IsComparingReviewMembers, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                        AutomationProperties.Name="Close side-by-side compare" />
+                            </WrapPanel>
+                        </DockPanel>
+                        <UniformGrid Rows="1" Margin="0,8,0,0">
+                            <StackPanel Margin="0,0,6,0">
+                                <TextBlock Style="{StaticResource PhotoSift.Caption}" Margin="0,0,0,4"
+                                           Text="{Binding DataContext.ActiveReviewMember.FileName, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                <app:PreviewStatusControl x:Name="ReviewPreviewStatusControl"
+                                        Zoom="{Binding Value, ElementName=ReviewZoomSlider}"
+                                        DataContext="{Binding DataContext.ActiveReviewPreview, RelativeSource={RelativeSource AncestorType=Window}}" />
+                            </StackPanel>
+                            <StackPanel Margin="6,0,0,0"
+                                        Visibility="{Binding DataContext.IsComparingReviewMembers, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Style="{StaticResource PhotoSift.Caption}" Margin="0,0,0,4"
+                                           Text="{Binding DataContext.ComparedReviewMember.FileName, RelativeSource={RelativeSource AncestorType=Window}, StringFormat='Compared with {0}'}" />
+                                <!-- The second preview exists only while comparing. -->
+                                <ContentControl x:Name="ComparedPreviewHost" Focusable="False"
+                                                Content="{Binding DataContext.ComparedReviewPreview, RelativeSource={RelativeSource AncestorType=Window}}">
+                                    <ContentControl.Resources>
+                                        <DataTemplate DataType="{x:Type shell:PreviewItemViewModel}">
+                                            <app:PreviewStatusControl Loaded="OnComparedPreviewLoaded" />
+                                        </DataTemplate>
+                                    </ContentControl.Resources>
+                                </ContentControl>
+                            </StackPanel>
+                        </UniformGrid>
+                        <StackPanel Margin="0,10,0,0">
+                            <TextBlock x:Name="ReviewEvidenceFullPathText" Text="{Binding FullPath}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceDimensionsText" Text="{Binding Dimensions, StringFormat='Dimensions: {0}'}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceSizeText" Text="{Binding Size, StringFormat='Size: {0}'}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceRelevantDateText" Text="{Binding RelevantDate, StringFormat='Relevant date: {0}'}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceCategoryText" Text="{Binding Category, StringFormat='Category: {0}'}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceConfidenceText" Text="{Binding Confidence, StringFormat='Confidence: {0}'}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceUncertaintyText" Text="{Binding Uncertainty, StringFormat='Uncertainty: {0}'}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceTransformationsText" Text="{Binding Transformations, StringFormat='Transformations: {0}'}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceReasonText" Text="{Binding Reason, StringFormat='Reason: {0}'}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceRecommendationText" Text="{Binding Recommendation}" TextWrapping="Wrap" />
+                        </StackPanel>
                     </StackPanel>
                 </app:ReviewAutomationBorder>
 
-                <TextBlock x:Name="SelectionSummaryText" Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,8,0,0"
+                <TextBlock x:Name="SelectionSummaryText" Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,10,0,0"
                            AutomationProperties.Name="Selection summary"
                            AutomationProperties.ItemStatus="{Binding SelectionSummary}"
                            AutomationProperties.LiveSetting="Polite" />
 
-                    <app:ReviewAutomationBorder x:Name="ApprovalPanel" Margin="0,8,0,0" Padding="12" Focusable="True"
+                    <app:ReviewAutomationBorder x:Name="ApprovalPanel" Margin="0,8,0,0" Padding="16" Focusable="True" CornerRadius="12"
+                            FocusVisualStyle="{StaticResource PhotoSift.FocusVisual}"
+                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                             AutomationProperties.AutomationId="approval-panel"
                             AutomationProperties.Name="Cleanup approval disclosure"
                             AutomationProperties.ItemStatus="{Binding ApprovalAutomationStatus}">
                         <StackPanel>
-                            <TextBlock Text="Approval" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="Approval" Style="{StaticResource PhotoSift.SectionTitle}" />
+                            <TextBlock Margin="0,2,0,6" Style="{StaticResource PhotoSift.MutedText}"
+                                       Text="Marked photos go to the Recycle Bin only, and each file is checked again right before it moves." />
                             <TextBlock Text="{Binding ApprovalSelectedOccurrenceText}" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding ApprovalSelectedPathText}" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding ApprovalSelectedPhysicalText}" TextWrapping="Wrap" />
@@ -1001,23 +1269,42 @@
                             <TextBlock Text="{Binding ApprovalDestinationText}" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding ApprovalRevalidationText}" TextWrapping="Wrap" />
                             <Button x:Name="ApproveCleanupButton" Content="Approve Cleanup" MinHeight="38"
-                                    Margin="0,10,0,0" Padding="14,7" HorizontalAlignment="Left"
+                                    Margin="0,12,0,0" Padding="18,7" HorizontalAlignment="Left"
+                                    Style="{StaticResource PhotoSift.PrimaryButton}"
                                     IsDefault="False" IsCancel="False" AutomationProperties.Name="Approve Cleanup"
                                     Command="{Binding ApproveReviewCommand}" IsEnabled="{Binding CanApproveReview}" />
                         </StackPanel>
                     </app:ReviewAutomationBorder>
                 <StackPanel Margin="0,10,0,0">
-                    <TextBlock Text="{Binding ReviewDisclaimer}" TextWrapping="Wrap" />
+                    <TextBlock Style="{StaticResource PhotoSift.MutedText}" Text="{Binding ReviewDisclaimer}" />
                     <WrapPanel>
-                        <Button Content="Cancel Scan" Padding="10,6" Margin="0,6,8,0" AutomationProperties.Name="Cancel Scan from Review"
+                        <Button Content="Cancel Scan" Padding="12,6" Margin="0,6,8,0" AutomationProperties.Name="Cancel Scan from Review"
+                                Style="{StaticResource PhotoSift.Button}"
                                 Command="{Binding CancelScanCommand}" IsEnabled="{Binding IsScanBusy}" />
-                        <Button Content="Scan again" Padding="10,6" Margin="0,6,8,0" AutomationProperties.Name="Start a fresh scan from Review"
+                        <Button Content="Scan again" Padding="12,6" Margin="0,6,8,0" AutomationProperties.Name="Start a fresh scan from Review"
+                                Style="{StaticResource PhotoSift.Button}"
                                 Command="{Binding StartScanCommand}" IsEnabled="{Binding CanStartScan}" />
                     </WrapPanel>
                 </StackPanel>
                   </StackPanel>
               </StackPanel>
             </ScrollViewer>
+                <!-- Sticky selection bar: what is marked, and a way to the approval panel. -->
+                <Border x:Name="ReviewSelectionBar" Grid.Row="1" Margin="4,8,20,0" Padding="14,8" CornerRadius="12"
+                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                        BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                    <DockPanel>
+                        <Button x:Name="ReviewCleanupButton" DockPanel.Dock="Right" Content="Review cleanup" MinHeight="34" Padding="14,4"
+                                Margin="10,0,0,0" Style="{StaticResource PhotoSift.Button}"
+                                Click="OnReviewCleanupClick"
+                                ToolTip="Go to the cleanup approval"
+                                AutomationProperties.Name="Go to the cleanup approval" />
+                        <TextBlock x:Name="ReviewSelectionBarText" VerticalAlignment="Center" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   Text="{Binding ReviewSelectionBarText}" ToolTip="{Binding ReviewSelectionBarText}" />
+                    </DockPanel>
+                </Border>
+            </Grid>
             <app:ReviewAutomationBorder x:Name="ActionPanel" Grid.Column="2"
                     Visibility="{Binding IsActionPhase, Converter={StaticResource BooleanToVisibilityConverter}}"
                     AutomationProperties.AutomationId="action-panel"

@@ -345,3 +345,22 @@ is published as its own pair. Design:
 - Application tests for sets, Near-only groups, loose chains and determinism pass on GitHub CI.
 - Owner checks a real burst folder and confirms one moment shows as one set (or a set plus pairs).
 - Golden VM Full run before release.
+
+## PM-011 — Treat truncated JPEGs as "couldn't be checked", not as look-alikes
+
+**Status:** Open — found in the Hyper-V Review pass of PR #22, 2026-10-17
+
+**Priority:** Owner decision; recommended before V1.0.0
+
+**Origin:** VM fixture "Broken photo.jpg" (the first 2 KB of a 1200 × 900 JPEG)
+
+WIC decodes the truncated file without an error and fills the missing area with gray. The
+partial image gets a signature, is related (Uncertain) to unrelated photos, and joined a set of
+three resized copies of another photo, turning what would have been a clean Near set into an
+Uncertain set of four. Only a file with non-image bytes was reported as "couldn't be checked".
+
+### Completion criteria
+
+- Analysis detects a JPEG that ends before its image data is complete and reports it as
+  Could Not Analyze with a plain reason, so it never gets a signature or joins a set.
+- A test with a truncated JPEG fixture passes on GitHub CI; Golden VM Full run before release.
