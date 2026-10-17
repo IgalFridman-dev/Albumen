@@ -441,8 +441,11 @@ public partial class MainWindow : Window
             ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         ReviewGroupsColumn.Width = ReviewGroupsPanel.Visibility == Visibility.Visible
             ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        // An open set's photo cards get twice the room of the text lists beside them, so a
+        // card keeps a readable width and a height that fits the list.
+        var photosOpen = shellViewModel?.ReviewNavigationLevel == ReviewNavigationLevel.Comparisons;
         ReviewComparisonsColumn.Width = ReviewComparisonsPanel.Visibility == Visibility.Visible
-            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+            ? new GridLength(photosOpen ? 2 : 1, GridUnitType.Star) : new GridLength(0);
     }
 
     private void QueueReviewNavigationFocus()
