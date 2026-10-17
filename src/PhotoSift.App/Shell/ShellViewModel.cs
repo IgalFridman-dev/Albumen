@@ -30,6 +30,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IReviewDialogService? reviewDialog;
     private readonly ILocalScanDataControl? localScanDataControl;
     private IReviewPreviewSource? reviewPreviewSource;
+    private IReviewPreviewSource? reviewThumbnailSource;
+    private (ImmutableArray<ScanFileOccurrence> Source, Dictionary<long, ScanFileOccurrence>? ById) occurrenceIndex;
+    private SuggestedBest? activeReviewSuggestion;
+    private Guid? suggestionGroupId;
+    private CancellationTokenSource? suggestionCancellation;
+    private ScanOccurrenceViewModel? comparedReviewMember;
+    private PreviewItemViewModel? comparedReviewPreview;
+    private Guid? comparedGroupId;
+    private CancellationTokenSource? comparePreviewCancellation;
+    private long comparePreviewRequest;
     private PhotoSiftSnapshot? photoSnapshot;
     private ShellSnapshot? currentSnapshot;
     private ImmutableArray<PhaseItemViewModel> phases = [];
@@ -49,6 +59,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private bool isBlocked;
     private bool isCanceled;
     private string selectionSummary = "0 selected occurrences.";
+    private string reviewSelectionBarText = "Nothing marked for removal yet";
     private string reviewAnnouncement = string.Empty;
     private bool reviewOpenFailureAnnouncementActive;
     private ScanPin? reviewOpenFailureScan;
@@ -133,6 +144,17 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             OpenReviewMemberAsync, allowConcurrentExecutions: true);
         ReviewBackCommand = new AsyncCommand(ReviewBackAsync,
             canExecute: () => ReviewNavigationLevel != ReviewLevel.Categories);
+        ShowPreviousReviewMemberCommand = new AsyncCommand(() => ShowAdjacentReviewMemberAsync(-1),
+            allowConcurrentExecutions: true, canExecute: () => AdjacentReviewMember(-1) is not null);
+        ShowNextReviewMemberCommand = new AsyncCommand(() => ShowAdjacentReviewMemberAsync(1),
+            allowConcurrentExecutions: true, canExecute: () => AdjacentReviewMember(1) is not null);
+        CompareReviewMemberCommand = new AsyncCommand(CompareReviewMemberAsync,
+            allowConcurrentExecutions: true);
+        CloseCompareCommand = new AsyncCommand(() =>
+        {
+            ClearComparedReviewPreview();
+            return Task.CompletedTask;
+        }, canExecute: () => ComparedReviewMember is not null);
         NavigateCommand = new AsyncCommand(parameter => photoWorkflow is not null && parameter is WorkflowPhase phase
             ? photoWorkflow.NavigateAsync(phase) : parameter is WorkflowPhase.ChooseScope
                 ? this.chooseScopeWorkflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None) : Task.CompletedTask);
@@ -143,12 +165,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ShellViewModel(IChooseScopeWorkflow scope, IPhotoSiftWorkflow workflow,
         IReviewDialogService? reviewDialog = null,
         ILocalScanDataControl? localScanDataControl = null,
-        IReviewPreviewSource? reviewPreviewSource = null) : this(scope)
+        IReviewPreviewSource? reviewPreviewSource = null,
+        IReviewPreviewSource? reviewThumbnailSource = null) : this(scope)
     {
         photoWorkflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
         this.reviewDialog = reviewDialog;
         this.localScanDataControl = localScanDataControl;
         this.reviewPreviewSource = reviewPreviewSource;
+        this.reviewThumbnailSource = reviewThumbnailSource;
+        if (reviewThumbnailSource is not null)
+            ReviewThumbnails = new ReviewThumbnailLoader(reviewThumbnailSource, ResolveOccurrence);
         workflow.SnapshotChanged += OnPhotoSnapshotChanged;
         ApplyCombined(workflow.Current);
     }
@@ -168,6 +194,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand OpenReviewGroupCommand { get; }
     public AsyncCommand OpenReviewMemberCommand { get; }
     public AsyncCommand ReviewBackCommand { get; }
+    public AsyncCommand ShowPreviousReviewMemberCommand { get; }
+    public AsyncCommand ShowNextReviewMemberCommand { get; }
+    public AsyncCommand CompareReviewMemberCommand { get; }
+    public AsyncCommand CloseCompareCommand { get; }
+    public ReviewThumbnailLoader? ReviewThumbnails { get; }
     public AsyncCommand NavigateCommand { get; }
     public bool HasLocalScanDataControl => localScanDataControl is not null;
     public bool IsClearScanDataConfirmationPending
@@ -318,11 +349,55 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         get => activeReviewEvidence;
         private set => activeReviewEvidence = value;
     }
+    public SuggestedBest? ActiveReviewSuggestion
+    {
+        get => activeReviewSuggestion;
+        private set => SetField(ref activeReviewSuggestion, value);
+    }
+    public ScanOccurrenceViewModel? ComparedReviewMember
+    {
+        get => comparedReviewMember;
+        private set => comparedReviewMember = value;
+    }
+    public PreviewItemViewModel? ComparedReviewPreview
+    {
+        get => comparedReviewPreview;
+        private set => comparedReviewPreview = value;
+    }
+    public bool IsComparingReviewMembers => ComparedReviewMember is not null;
+    public string ReviewResultsSummary
+    {
+        get
+        {
+            var sets = ReviewCategories.Where(category => category.Category != ReviewCategoryKind.CouldNotAnalyze)
+                .Sum(category => category.GroupCount);
+            var unreadable = ReviewCategories.Where(category => category.Category == ReviewCategoryKind.CouldNotAnalyze)
+                .Sum(category => category.GroupCount);
+            var summary = sets switch
+            {
+                0 => "No copies or look-alikes found",
+                1 => "1 set to review",
+                _ => $"{sets.ToString(CultureInfo.InvariantCulture)} sets to review",
+            };
+            return unreadable switch
+            {
+                0 => summary,
+                1 => $"{summary} · 1 file couldn't be checked",
+                _ => $"{summary} · {unreadable.ToString(CultureInfo.InvariantCulture)} files couldn't be checked",
+            };
+        }
+    }
 
     public string SelectionSummary
     {
         get => selectionSummary;
         private set => SetField(ref selectionSummary, value);
+    }
+
+    public string ReviewSelectionBarText
+    {
+        get => reviewSelectionBarText;
+        private set => SetField(ref reviewSelectionBarText, value);
     }
 
     public string ReviewAnnouncement
@@ -591,6 +666,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             OnPropertyChanged(nameof(ExactGroups));
             OnPropertyChanged(nameof(ReviewCategories));
+            OnPropertyChanged(nameof(ReviewResultsSummary));
         }
         if (previousBusy != IsScanBusy)
         {
@@ -853,6 +929,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         if (!preservePreview)
             ClearActiveReviewPreview();
+        if (level != ReviewLevel.Comparisons || group?.GroupId != comparedGroupId
+            || member is not null && member.OccurrenceId == ComparedReviewMember?.OccurrenceId)
+            ClearComparedReviewPreview();
+        else if (ComparedReviewMember is { } compared && group?.FindMember(compared.OccurrenceId) is { } current)
+            ComparedReviewMember = current;
         var navigationLevelChanged = ReviewNavigationLevel != level;
         ReviewNavigationLevel = level;
         ActiveReviewCategory = category;
@@ -874,7 +955,157 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (navigationLevelChanged) OnPropertyChanged(nameof(CanReviewBack));
         OnPropertyChanged(nameof(ActiveReviewGroups));
         OnPropertyChanged(nameof(ActiveReviewMembers));
+        OnPropertyChanged(nameof(ComparedReviewMember));
         ReviewBackCommand.NotifyCanExecuteChanged();
+        ShowPreviousReviewMemberCommand.NotifyCanExecuteChanged();
+        ShowNextReviewMemberCommand.NotifyCanExecuteChanged();
+        RefreshActiveSuggestion(group);
+    }
+
+    private ScanOccurrenceViewModel? AdjacentReviewMember(int offset)
+    {
+        if (ActiveReviewGroup is not { } group || ActiveReviewMember is not { } member) return null;
+        var index = member.PositionInSet - 1 + offset;
+        return index >= 0 && index < group.MemberCount ? group.Members[index] : null;
+    }
+
+    private Task ShowAdjacentReviewMemberAsync(int offset) =>
+        AdjacentReviewMember(offset) is { } next ? OpenReviewMemberAsync(next) : Task.CompletedTask;
+
+    private async Task CompareReviewMemberAsync(object? parameter)
+    {
+        if (parameter is not ScanOccurrenceViewModel member || ActiveReviewGroup is not { } group
+            || group.FindMember(member.OccurrenceId) is null)
+            throw new ArgumentException("Comparison requires a member of the active group.", nameof(parameter));
+        if (ActiveReviewMember is null)
+        {
+            await OpenReviewMemberAsync(member);
+            return;
+        }
+        if (ActiveReviewMember.OccurrenceId == member.OccurrenceId) return;
+
+        ClearComparedReviewPreview();
+        ComparedReviewMember = member;
+        comparedGroupId = group.GroupId;
+        OnPropertyChanged(nameof(ComparedReviewMember));
+        OnPropertyChanged(nameof(IsComparingReviewMembers));
+        CloseCompareCommand.NotifyCanExecuteChanged();
+        var source = reviewPreviewSource;
+        if (source is null || ResolveOccurrence(member.OccurrenceId) is not { } target) return;
+
+        var cancellation = new CancellationTokenSource();
+        var cancellationToken = cancellation.Token;
+        comparePreviewCancellation = cancellation;
+        var request = Interlocked.Increment(ref comparePreviewRequest);
+        ReviewPreviewResult? result = null;
+        try
+        {
+            try
+            {
+                result = await source.LoadAsync(target.Context, target.Occurrence, cancellationToken);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                result = ReviewPreviewResult.Failure(target.Occurrence.ResolvedPath,
+                    PreviewAvailability.Unavailable, "Preview unavailable: the file could not be read.");
+            }
+            if (request != Volatile.Read(ref comparePreviewRequest)
+                || ComparedReviewMember?.OccurrenceId != member.OccurrenceId)
+                return;
+            ComparedReviewPreview = new PreviewItemViewModel(result);
+            OnPropertyChanged(nameof(ComparedReviewPreview));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            result?.Dispose();
+            if (ReferenceEquals(comparePreviewCancellation, cancellation))
+                comparePreviewCancellation = null;
+            cancellation.Dispose();
+        }
+    }
+
+    private void ClearComparedReviewPreview()
+    {
+        Interlocked.Increment(ref comparePreviewRequest);
+        var cancellation = Interlocked.Exchange(ref comparePreviewCancellation, null);
+        if (cancellation is not null)
+        {
+            cancellation.Cancel();
+            cancellation.Dispose();
+        }
+        var wasComparing = ComparedReviewMember is not null || ComparedReviewPreview is not null;
+        ComparedReviewMember = null;
+        ComparedReviewPreview = null;
+        comparedGroupId = null;
+        if (!wasComparing) return;
+        OnPropertyChanged(nameof(ComparedReviewMember));
+        OnPropertyChanged(nameof(ComparedReviewPreview));
+        OnPropertyChanged(nameof(IsComparingReviewMembers));
+        CloseCompareCommand.NotifyCanExecuteChanged();
+    }
+
+    // The "Suggested best" badge needs every photo's pixel size, which only a decode gives,
+    // so it appears once the set's thumbnails have loaded. It is a hint, never a Selection.
+    private void RefreshActiveSuggestion(ReviewGroupViewModel? group)
+    {
+        if (group?.GroupId == suggestionGroupId && group is not null) return;
+        var cancellation = Interlocked.Exchange(ref suggestionCancellation, null);
+        if (cancellation is not null)
+        {
+            cancellation.Cancel();
+            cancellation.Dispose();
+        }
+        suggestionGroupId = group?.GroupId;
+        ActiveReviewSuggestion = null;
+        if (group is null || ReviewThumbnails is not { } thumbnails
+            || group.Category is not (ReviewCategoryKind.Near or ReviewCategoryKind.Uncertain)
+            || group.MemberCount is < 2 or > SuggestedBestPhoto.MaximumSetSize)
+            return;
+
+        var next = new CancellationTokenSource();
+        suggestionCancellation = next;
+        _ = LoadSuggestionAsync(group, thumbnails, next.Token);
+    }
+
+    private async Task LoadSuggestionAsync(
+        ReviewGroupViewModel group,
+        ReviewThumbnailLoader thumbnails,
+        CancellationToken cancellationToken)
+    {
+        var facts = new List<PhotoFacts>(group.MemberCount);
+        for (var index = 0; index < group.MemberCount; index++)
+        {
+            var member = group.Members[index];
+            var thumbnail = await thumbnails.LoadAsync(member, cancellationToken);
+            if (cancellationToken.IsCancellationRequested
+                || thumbnail is not { PixelWidth: { } width, PixelHeight: { } height })
+                return;
+            facts.Add(new(member.OccurrenceId, width, height, member.ByteCount));
+        }
+        if (!cancellationToken.IsCancellationRequested && suggestionGroupId == group.GroupId)
+            ActiveReviewSuggestion = SuggestedBestPhoto.Pick(facts);
+    }
+
+    private (ScanRunContext Context, ScanFileOccurrence Occurrence)? ResolveOccurrence(long occurrenceId)
+    {
+        var snapshot = photoSnapshot;
+        if (snapshot?.Scope.Preflight?.Scope is not { } scope || snapshot.Scan.Pin is not { } pin)
+            return null;
+        var occurrences = snapshot.Scan.Occurrences;
+        if (occurrences.IsDefault) return null;
+        var byId = occurrenceIndex.ById;
+        if (byId is null || occurrenceIndex.Source != occurrences)
+        {
+            byId = new Dictionary<long, ScanFileOccurrence>(occurrences.Length);
+            foreach (var row in occurrences) byId.TryAdd(row.Token.OccurrenceId, row);
+            occurrenceIndex = (occurrences, byId);
+        }
+        return byId.TryGetValue(occurrenceId, out var occurrence)
+            ? (new ScanRunContext(pin, scope), occurrence)
+            : null;
     }
 
     private async Task LoadActiveReviewPreviewAsync(ScanOccurrenceViewModel member)
@@ -1230,11 +1461,32 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ApprovalUnselectedSurvivorsText = $"Ordinary unselected survivors: {review.Unresolved.UnselectedSurvivorMembers.ToString(CultureInfo.InvariantCulture)}";
         ApprovalAutomationStatus = $"{ApprovalSelectedOccurrenceText}; {ApprovalSelectedPathText}; {ApprovalSelectedPhysicalText}; {ApprovalRecoveryText} {ApprovalCoverageText}; {ApprovalUnresolvedText}; {ApprovalUnresolvedSubtotals}; {ApprovalUnselectedSurvivorsText}; {ApprovalDestinationText} {ApprovalRevalidationText}";
         SelectionSummary = $"{ApprovalSelectedOccurrenceText}; {ApprovalRecoveryText} {ApprovalCoverageText}; unresolved total {review.Unresolved.Total.ToString(CultureInfo.InvariantCulture)}.";
+        ReviewSelectionBarText = FormatSelectionBar(review, selectedCount);
         CanApproveReview = review.Status == ReviewStatus.Ready
             && review.Coverage is ScanSessionStatus.Complete or ScanSessionStatus.Incomplete
             && selectedCount > 0 && !review.Sealed
             && photoSnapshot?.ActionRecovery.Status != ActionRecoveryStatus.Faulted
             && selectedMembers.All(member => member.Eligibility == ReviewEligibilityState.Eligible);
+    }
+
+    private static string FormatSelectionBar(ReviewSnapshot review, long selectedCount)
+    {
+        if (selectedCount == 0) return "Nothing marked for removal yet";
+        var marked = selectedCount == 1
+            ? "1 photo marked for removal"
+            : $"{selectedCount.ToString(CultureInfo.InvariantCulture)} photos marked for removal";
+        var selectedGroups = review.Groups.Where(group => group.SelectedOccurrenceIds.Count > 0).ToArray();
+        if (selectedGroups.Any(group => group.Recovery.Bytes is null)) return marked;
+        try
+        {
+            var bytes = selectedGroups.Aggregate(0L,
+                (sum, group) => checked(sum + group.Recovery.Bytes.GetValueOrDefault()));
+            return bytes > 0 ? $"{marked} · about {ScanOccurrenceViewModel.FormatSize(bytes)} moves to the Recycle Bin" : marked;
+        }
+        catch (OverflowException)
+        {
+            return marked;
+        }
     }
 
     private static string FormatReviewRecovery(ReviewSnapshot review)
@@ -1412,10 +1664,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private async Task DisposeCoreAsync()
     {
         ClearActiveReviewPreview();
+        ClearComparedReviewPreview();
+        RefreshActiveSuggestion(null);
         chooseScopeWorkflow.SnapshotChanged -= OnSnapshotChanged;
         if (photoWorkflow is not null)
             photoWorkflow.SnapshotChanged -= OnPhotoSnapshotChanged;
         var previewSource = Interlocked.Exchange(ref reviewPreviewSource, null);
+        var thumbnailSource = Interlocked.Exchange(ref reviewThumbnailSource, null);
         try
         {
             if (photoWorkflow is IAsyncDisposable disposable)
@@ -1423,8 +1678,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
         finally
         {
-            if (previewSource is not null)
-                await previewSource.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                if (previewSource is not null)
+                    await previewSource.DisposeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                if (thumbnailSource is not null)
+                    await thumbnailSource.DisposeAsync().ConfigureAwait(false);
+            }
         }
     }
 }
