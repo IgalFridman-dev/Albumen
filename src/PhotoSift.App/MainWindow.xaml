@@ -1296,8 +1296,9 @@
                                 Click="OnReviewCleanupClick"
                                 ToolTip="Go to the cleanup approval"
                                 AutomationProperties.Name="Go to the cleanup approval" />
-                        <TextBlock x:Name="ReviewSelectionBarText" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap"
-                                   Text="{Binding ReviewSelectionBarText}" />
+                        <TextBlock x:Name="ReviewSelectionBarText" VerticalAlignment="Center" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   Text="{Binding ReviewSelectionBarText}" ToolTip="{Binding ReviewSelectionBarText}" />
                     </DockPanel>
                 </Border>
             </Grid>
