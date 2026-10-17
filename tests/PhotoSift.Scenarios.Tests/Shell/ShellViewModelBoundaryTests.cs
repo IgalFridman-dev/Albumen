@@ -3,25 +3,42 @@ using PhotoSift.App.Composition;
 using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Scope;
 using PhotoSift.Domain.Workflow;
+using PhotoSift.Infrastructure.Windows.Action;
 using Xunit;
 
 namespace PhotoSift.Scenarios.Tests.Shell;
 
+[Collection("WPF UI Automation")]
 public sealed class ShellViewModelBoundaryTests
 {
     [Fact]
     public void ConcreteCompositionStartsColdUnselectedLockedAndKeepsOfflineMarker()
     {
-        var viewModel = CompositionRoot.CreateShellViewModel();
+        // A private database keeps the test away from the user's own local data, and
+        // disposal on the dispatcher closes it cleanly instead of leaving journal files.
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            using var database = new TemporaryDatabase();
+            var viewModel = CompositionRoot.CreateShellViewModel(
+                database.Path, new WindowsRecycleBinExecutor());
+            try
+            {
+                var marker = ShellSmokeProbe.Validate(viewModel);
 
-        var marker = ShellSmokeProbe.Validate(viewModel);
-
-        Assert.Equal("Choose one local folder", viewModel.ScopeStatus);
-        Assert.Equal(string.Empty, viewModel.SelectedPath);
-        Assert.All(viewModel.Phases.Skip(1), phase => Assert.False(phase.IsAvailable));
-        Assert.Equal(
-            "PHOTOSIFT_SMOKE_OK phases=5 current=ChooseScope offline=true",
-            marker);
+                Assert.Equal("Choose one local folder", viewModel.ScopeStatus);
+                Assert.Equal(string.Empty, viewModel.SelectedPath);
+                Assert.All(viewModel.Phases.Skip(1), phase => Assert.False(phase.IsAvailable));
+                Assert.Equal(
+                    "PHOTOSIFT_SMOKE_OK phases=5 current=ChooseScope offline=true",
+                    marker);
+            }
+            finally
+            {
+                var disposal = viewModel.DisposeAsync().AsTask();
+                WpfActionAccessibilityTests.PumpUntil(() => disposal.IsCompleted);
+                disposal.GetAwaiter().GetResult();
+            }
+        });
     }
 
     [Fact]

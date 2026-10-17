@@ -15,6 +15,7 @@ using Xunit;
 
 namespace PhotoSift.Infrastructure.Tests.ActionExecution;
 
+[Trait("Category", "GoldenVm")]
 public sealed class WindowsActionLeaseIntegrationTests
 {
     [Theory]

@@ -125,6 +125,39 @@ public sealed class WpfActionAccessibilityTests
             });
         });
 
+    [Theory]
+    [InlineData(960d, 720d)]
+    [InlineData(680d, 520d)]
+    public void ActionPageKeepsProgressAndNoticesReachableWithoutMaximizing(double width, double height) =>
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new ActionShellFixture();
+            fixture.Publish(ActionShellFixture.Snapshot(
+                new ActionItemSnapshot(ActionShellFixture.Item(1), Guid.NewGuid(), ActionItemState.Recycled, ActionSafetyReason.None),
+                new ActionItemSnapshot(ActionShellFixture.Item(2), Guid.NewGuid(), ActionItemState.UnknownPendingRevalidation, ActionSafetyReason.JournalUnavailable)));
+            var window = new MainWindow { DataContext = fixture.ViewModel, Width = width, Height = height };
+            try
+            {
+                window.Show();
+                window.UpdateLayout();
+                WpfReviewSelectionTests.Drain();
+                var page = Assert.IsType<ScrollViewer>(window.FindName("ActionPageScrollViewer"));
+                var list = Assert.IsType<ListBox>(window.FindName("ActionItemsList"));
+                Assert.True(page.IsVisible);
+                Assert.True(list.ActualHeight <= page.ViewportHeight,
+                    $"Action list height {list.ActualHeight} exceeded page viewport {page.ViewportHeight}.");
+                var notices = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("ActionNoticesPanel"));
+                notices.BringIntoView();
+                window.UpdateLayout();
+                WpfReviewSelectionTests.Drain();
+                var bounds = notices.TransformToAncestor(page).TransformBounds(new Rect(notices.RenderSize));
+                var fits = bounds.Height <= page.ViewportHeight;
+                Assert.True(bounds.Top >= -0.5 && (fits ? bounds.Bottom <= page.ViewportHeight + 0.5 : bounds.Top <= 0.5),
+                    $"Action notices bounds {bounds} were outside the page viewport height {page.ViewportHeight}.");
+            }
+            finally { window.Close(); WpfReviewSelectionTests.Drain(); }
+        });
+
     [Fact]
     public Task ActionLiveAnnouncementsArePoliteCoalescedAndExposeTheLatestImmutableProgress() =>
         WpfScenarioIsolation.RunAsync(typeof(WpfActionAccessibilityTests), "action-live",
