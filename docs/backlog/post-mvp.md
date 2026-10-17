@@ -327,3 +327,21 @@ side-by-side comparison without changing the safety design. Design:
 - Golden VM Full run passes on the final commit.
 - Owner click-through on Windows 11 with real photos, including High Contrast.
 - README screenshots updated.
+
+## PM-010 — Show look-alike photos as one set instead of many pairs
+
+**Status:** In progress — design proposed 2026-10-17, waiting for owner approval.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-17 to ship V1.0.0 with the new UI)
+
+**Origin:** Owner testing with real photos, 2026-10-17
+
+Several shots of one moment appear as many two-photo groups because every Uncertain relationship
+is published as its own pair. Design:
+`docs/superpowers/specs/2026-10-17-pm-010-look-alike-sets-design.md`.
+
+### Completion criteria
+
+- Application tests for sets, Near-only groups, loose chains and determinism pass on GitHub CI.
+- Owner checks a real burst folder and confirms one moment shows as one set (or a set plus pairs).
+- Golden VM Full run before release.
