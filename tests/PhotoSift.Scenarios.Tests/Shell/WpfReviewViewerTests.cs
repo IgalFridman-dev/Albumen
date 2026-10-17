@@ -105,8 +105,8 @@ public sealed class WpfReviewViewerTests
                 ShowAndDrain(window);
                 var list = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
                 var compare = WpfReviewSelectionTests.Descendants<Button>(list)
-                    .Single(button => button.IsVisible && Equals(button.Content, "Compare"));
-                Assert.Same(group.Members[1], compare.DataContext);
+                    .Single(button => button.IsVisible && Equals(button.Content, "Compare")
+                        && ReferenceEquals(button.DataContext, group.Members[1]));
                 compare.Focus();
 
                 WpfReviewSelectionTests.Press(compare, System.Windows.Input.Key.Enter);
