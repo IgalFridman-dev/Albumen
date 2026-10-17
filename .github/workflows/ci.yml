@@ -80,21 +80,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ReleaseInputs.Tests.ps1 needs a real SDK and sealed package cache, so it
-      # runs only on the owner's machine before a VM capture.
+      # Only the tests that are self-contained on a hosted runner. ReleaseInputs
+      # needs a real SDK and sealed package cache; E1S6CrashHarness needs a built
+      # crash harness; the Golden VM and Hyper-V tests assume a non-elevated host,
+      # and hosted runners are elevated. Those run on the owner's machine.
       # The runner shell is always pwsh; each file runs under the matrix shell.
       - name: Run tooling tests
         shell: pwsh
         run: |
           $failed = @()
-          Get-ChildItem tests/tooling -Filter '*.Tests.ps1' |
-            Where-Object Name -ne 'ReleaseInputs.Tests.ps1' |
-            ForEach-Object {
-              Write-Output "::group::$($_.Name)"
-              & $env:TEST_SHELL -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $_.FullName
-              if ($LASTEXITCODE -ne 0) { $failed += $_.Name }
-              Write-Output '::endgroup::'
-            }
+          foreach ($name in 'PhotoSiftNetworkAudit', 'PhotoSiftRelease', 'ReleaseNativeCommand', 'RuntimeBoundary') {
+            $path = "tests/tooling/$name.Tests.ps1"
+            Write-Output "::group::$name"
+            & $env:TEST_SHELL -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $path
+            if ($LASTEXITCODE -ne 0) { $failed += $name }
+            Write-Output '::endgroup::'
+          }
           if ($failed) { throw "Failed: $($failed -join ', ')" }
         env:
           TEST_SHELL: ${{ matrix.shell }}

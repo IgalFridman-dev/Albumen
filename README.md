@@ -68,7 +68,7 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 | Imaging | Windows Imaging Component (WIC) for orientation-aware decoding and bounded previews |
 | File system | Win32 traversal and identity APIs, `IFileOperation` for Recycle Bin moves |
 | Storage | SQLite (`Microsoft.Data.Sqlite`) with forward-only schema migrations and WAL |
-| Tests | xUnit v3 (5 projects), Pester for the PowerShell tooling |
+| Tests | xUnit v3 (5 projects), script tests for the PowerShell tooling |
 | Build | .NET SDK 10.0.400 pinned in `global.json`, central package versions, locked restore, warnings as errors |
 
 ## Quality and verification
@@ -148,7 +148,7 @@ Product planning used the BMAD Method (brief → PRD → UX → architecture →
 ```text
 src/            6 production projects: Domain, Application, Analysis,
                 Infrastructure.Sqlite, Infrastructure.Windows, App
-tests/          5 xUnit v3 projects + Pester tests for tooling
+tests/          5 xUnit v3 projects + PowerShell tooling tests
 eng/            Hyper-V verification gates and release packaging scripts
 docs/           HOW-IT-WORKS and the deferred-work backlog
 .github/        CI workflow
