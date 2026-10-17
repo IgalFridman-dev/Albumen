@@ -15,5 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="PhotoSift.Infrastructure.Tests" />
+    <InternalsVisibleTo Include="PhotoSift.Scenarios.Tests" />
   </ItemGroup>
 </Project>

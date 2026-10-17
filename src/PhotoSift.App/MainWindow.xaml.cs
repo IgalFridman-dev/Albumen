@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private int selectionSummaryAnnouncementGeneration;
     private int actionAnnouncementGeneration;
     private int actionRecoveryAnnouncementGeneration;
+    private string announcedLocalDataStatus = string.Empty;
     private long reviewFailureAnnouncementSequence;
     private ReviewFocusIdentity? reviewFocusIdentity;
     private long reviewFocusGeneration;
@@ -37,6 +38,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ReviewPageScrollViewer.AddHandler(RequestBringIntoViewEvent,
+            new RequestBringIntoViewEventHandler(OnReviewListItemBringIntoView), true);
+        ActionPageScrollViewer.AddHandler(RequestBringIntoViewEvent,
+            new RequestBringIntoViewEventHandler(OnReviewListItemBringIntoView), true);
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
         SizeChanged += OnReviewSizeChanged;
@@ -53,6 +58,7 @@ public partial class MainWindow : Window
         DependencyPropertyChangedEventArgs eventArgs)
     {
         dataContextGeneration++;
+        announcedLocalDataStatus = string.Empty;
         reviewFocusIdentity = null;
         reviewFocusGeneration++;
         if (shellViewModel is not null)
@@ -75,6 +81,7 @@ public partial class MainWindow : Window
             FocusBlockingNotice();
         }
         if (shellViewModel?.IsActionPhase is true) QueuePhaseFocus();
+        QueueLocalDataStatusAnnouncement();
         UpdateReviewLayout();
     }
 
@@ -116,6 +123,10 @@ public partial class MainWindow : Window
         if (eventArgs.PropertyName == nameof(ShellViewModel.LocalDataClearStatus))
         {
             QueueLocalDataClearStatusAnnouncement();
+        }
+        if (eventArgs.PropertyName == nameof(ShellViewModel.ActionRecoveryStatusText))
+        {
+            QueueLocalDataStatusAnnouncement();
         }
         if (eventArgs.PropertyName == nameof(ShellViewModel.ReviewAnnouncement))
         {
@@ -259,6 +270,68 @@ public partial class MainWindow : Window
     private void OnReviewSizeChanged(object sender, SizeChangedEventArgs eventArgs) =>
         UpdateReviewLayout();
 
+    // The navigation lists keep a bounded height so they stay virtualized inside the
+    // scrolling Review page, leaving room for the evidence below them to come into view.
+    private void OnReviewPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
+    {
+        if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
+        var viewport = eventArgs.NewSize.Height;
+        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.45, 180, 480));
+        // Scrolled to Evidence, the photo fills most of the page instead of a fixed thumbnail.
+        ReviewPreviewStatusControl.PreviewImage.MaxHeight = Math.Max(240, viewport * 0.8);
+    }
+
+    // The Recycle Bin item list gets the same bounded height so the progress summary
+    // and Action Records below it stay reachable at small window sizes.
+    private void OnActionPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
+    {
+        if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
+        var viewport = eventArgs.NewSize.Height;
+        ActionItemsList.Height = Math.Min(viewport, Math.Clamp(viewport * 0.5, 180, 520));
+    }
+
+    private ScrollViewer? PageScrollerFor(DependencyObject element) =>
+        IsWithin(element, ReviewCategoriesList) || IsWithin(element, ReviewGroupsList)
+            || IsWithin(element, ReviewComparisonsList) ? ReviewPageScrollViewer
+        : IsWithin(element, ActionItemsList) ? ActionPageScrollViewer
+        : null;
+
+    // A list scrolls its own item into view and stops the request, so the page then
+    // scrolls just enough to show that item too (for example at large text sizes).
+    private void OnReviewListItemBringIntoView(object sender, RequestBringIntoViewEventArgs eventArgs)
+    {
+        if (eventArgs.TargetObject is not FrameworkElement target
+            || PageScrollerFor(target) is not { } page)
+            return;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || !target.IsVisible || !IsWithin(target, page)) return;
+            var bounds = target.TransformToAncestor(page)
+                .TransformBounds(new Rect(target.RenderSize));
+            var viewport = page.ViewportHeight;
+            var offset = page.VerticalOffset;
+            if (bounds.Top < 0 || bounds.Height > viewport)
+                page.ScrollToVerticalOffset(offset + bounds.Top);
+            else if (bounds.Bottom > viewport)
+                page.ScrollToVerticalOffset(offset + bounds.Bottom - viewport);
+        }, DispatcherPriority.Loaded);
+    }
+
+    // A list at its scroll limit hands the wheel to its page, so the page can still be
+    // scrolled while the pointer rests over a list.
+    private void OnReviewListPreviewMouseWheel(object sender, MouseWheelEventArgs eventArgs)
+    {
+        if (sender is not DependencyObject list
+            || PageScrollerFor(list) is not { } page
+            || Descendants<ScrollViewer>(list).FirstOrDefault() is not { } listScroller) return;
+        var atLimit = eventArgs.Delta > 0
+            ? listScroller.VerticalOffset <= 0
+            : listScroller.VerticalOffset >= listScroller.ScrollableHeight;
+        if (!atLimit) return;
+        eventArgs.Handled = true;
+        page.ScrollToVerticalOffset(page.VerticalOffset - eventArgs.Delta / 3.0);
+    }
+
     private void UpdateReviewLayout()
     {
         if (!IsInitialized) return;
@@ -390,6 +463,33 @@ public partial class MainWindow : Window
             LocalDataClearStatusText.Focus();
             Keyboard.Focus(LocalDataClearStatusText);
         }, DispatcherPriority.Input);
+    }
+
+    // The local-data failure can be projected before the window is loaded, so it is
+    // announced on load as well as on change, once per distinct failure message.
+    private void QueueLocalDataStatusAnnouncement()
+    {
+        var expected = shellViewModel;
+        if (expected is not { IsLocalDataFaulted: true })
+        {
+            announcedLocalDataStatus = string.Empty;
+            return;
+        }
+        var status = expected.ActionRecoveryStatusText;
+        var generation = dataContextGeneration;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (isClosed || !IsLoaded || generation != dataContextGeneration
+                || !ReferenceEquals(expected, shellViewModel)
+                || announcedLocalDataStatus == status
+                || !LocalDataStatusText.IsVisible || LocalDataStatusText.Text != status)
+                return;
+            var peer = UIElementAutomationPeer.FromElement(LocalDataStatusText)
+                ?? UIElementAutomationPeer.CreatePeerForElement(LocalDataStatusText);
+            if (peer is null) return;
+            announcedLocalDataStatus = status;
+            peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        }, DispatcherPriority.Background);
     }
 
     private void QueueScopeStatusAnnouncement()
