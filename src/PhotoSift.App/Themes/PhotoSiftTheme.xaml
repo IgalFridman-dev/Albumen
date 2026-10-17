@@ -30,7 +30,7 @@
         <Setter Property="Control.Template">
             <Setter.Value>
                 <ControlTemplate>
-                    <Rectangle Margin="-3" RadiusX="10" RadiusY="10" StrokeThickness="2"
+                    <Rectangle Margin="-2" RadiusX="10" RadiusY="10" StrokeThickness="2"
                                Stroke="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
                                SnapsToDevicePixels="True" />
                 </ControlTemplate>
@@ -112,6 +112,29 @@
                             <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
                             <Setter Property="Cursor" Value="Arrow" />
                         </Trigger>
+                        <!-- High Contrast: system button colors, Highlight on hover, GrayText when disabled. -->
+                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource {x:Static SystemColors.ControlBrushKey}}" />
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                        </DataTrigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}" Value="True" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+                        </MultiDataTrigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                <Condition Binding="{Binding IsEnabled, RelativeSource={RelativeSource TemplatedParent}}" Value="False" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="Chrome" Property="Opacity" Value="1" />
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                        </MultiDataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -144,6 +167,29 @@
                             <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
                             <Setter Property="Cursor" Value="Arrow" />
                         </Trigger>
+                        <!-- High Contrast: system button colors, Highlight on hover, GrayText when disabled. -->
+                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource {x:Static SystemColors.ControlBrushKey}}" />
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                        </DataTrigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}" Value="True" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+                        </MultiDataTrigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                <Condition Binding="{Binding IsEnabled, RelativeSource={RelativeSource TemplatedParent}}" Value="False" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="Chrome" Property="Opacity" Value="1" />
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                        </MultiDataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -153,7 +199,6 @@
     <Style x:Key="PhotoSift.LargePrimaryButton" TargetType="Button" BasedOn="{StaticResource PhotoSift.PrimaryButton}">
         <Setter Property="MinHeight" Value="44" />
         <Setter Property="Padding" Value="22,9" />
-        <Setter Property="FontSize" Value="15" />
     </Style>
 
     <!-- On/off switch drawn over a real CheckBox, so commands, automation names and
@@ -192,6 +237,30 @@
                             <Setter Property="Opacity" Value="0.5" />
                             <Setter Property="Cursor" Value="Arrow" />
                         </Trigger>
+                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                            <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                            <Setter TargetName="Knob" Property="Fill" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                        </DataTrigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                <Condition Binding="{Binding IsChecked, RelativeSource={RelativeSource TemplatedParent}}" Value="True" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                            <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                            <Setter TargetName="Knob" Property="Fill" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+                        </MultiDataTrigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                <Condition Binding="{Binding IsEnabled, RelativeSource={RelativeSource TemplatedParent}}" Value="False" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                            <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                            <Setter TargetName="Knob" Property="Fill" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                        </MultiDataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -235,6 +304,22 @@
                             <Setter TargetName="Chrome" Property="Opacity" Value="0.5" />
                             <Setter Property="Cursor" Value="Arrow" />
                         </Trigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}" Value="True" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="Chrome" Property="Background" Value="Transparent" />
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                        </MultiDataTrigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
+                                <Condition Binding="{Binding IsEnabled, RelativeSource={RelativeSource TemplatedParent}}" Value="False" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="Chrome" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+                        </MultiDataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
