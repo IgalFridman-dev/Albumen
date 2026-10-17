@@ -239,7 +239,10 @@ criteria are met.
 
 **Status:** Fix proposed on `claude/improve-v1-ui-4nwjld` — the Review page now
 scrolls as one surface with bounded, still-virtualized navigation lists. Open
-until verified in the real WPF app at several window sizes.
+until verified in the real WPF app at several window sizes. The same branch
+carries owner-requested V1 polish outside any SPEC: a compact header, a
+numbered step rail, wrapping Review list labels, a collapsed Scan summary on
+Review (coverage stays visible), and a Narrator-announced local-data warning.
 
 **Priority:** Post-V1 layout repair; revisit sooner if a supported display
 cannot reach explicit Approval even after resizing

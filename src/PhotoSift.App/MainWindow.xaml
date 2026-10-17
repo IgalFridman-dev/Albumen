@@ -304,12 +304,14 @@
                                Text="{Binding ActionRecoveryStatusText}" TextWrapping="Wrap"
                                AutomationProperties.Name="{Binding ActionRecoveryStatusText}"
                                AutomationProperties.ItemStatus="{Binding ActionRecoveryStatusText}"
-                               AutomationProperties.LiveSetting="Assertive">
+                               AutomationProperties.AutomationId="local-data-status">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
+                                <Setter Property="AutomationProperties.LiveSetting" Value="Polite" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsLocalDataFaulted}" Value="True">
                                         <Setter Property="FontWeight" Value="SemiBold" />
+                                        <Setter Property="AutomationProperties.LiveSetting" Value="Assertive" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -661,10 +663,10 @@
                         <TextBlock x:Name="ReviewBreadcrumbText" VerticalAlignment="Center" TextWrapping="Wrap"
                                    Text="{Binding ReviewBreadcrumbText}" AutomationProperties.Name="Review breadcrumb" />
                     </DockPanel>
+                    <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" />
                     <Expander x:Name="ReviewScanSummaryExpander" Header="Scan summary" IsExpanded="False" Margin="0,2,0,0"
                               AutomationProperties.Name="Scan summary">
                         <StackPanel Margin="0,4,0,0">
-                            <TextBlock Text="{Binding CoverageStatus}" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
                             <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
                                           ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
@@ -683,7 +685,7 @@
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="Categories" FontWeight="SemiBold" Margin="4" />
-                            <ListBox x:Name="ReviewCategoriesList" ItemsSource="{Binding ReviewCategories}"
+                            <ListBox x:Name="ReviewCategoriesList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ReviewCategories}"
                                      Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewCategoryTemplate}"
                                      PreviewKeyDown="OnReviewListPreviewKeyDown"
                                      AutomationProperties.Name="Review categories" />
@@ -693,7 +695,7 @@
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="Groups" FontWeight="SemiBold" Margin="4" />
-                            <ListBox x:Name="ReviewGroupsList" ItemsSource="{Binding ActiveReviewGroups}"
+                            <ListBox x:Name="ReviewGroupsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewGroups}"
                                      Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewGroupTemplate}"
                                      PreviewKeyDown="OnReviewListPreviewKeyDown"
                                      AutomationProperties.Name="Groups in selected category" />
@@ -703,7 +705,7 @@
                             BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="Comparison" FontWeight="SemiBold" Margin="4" />
-                            <ListBox x:Name="ReviewComparisonsList" ItemsSource="{Binding ActiveReviewMembers}"
+                            <ListBox x:Name="ReviewComparisonsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewMembers}"
                                      Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewComparisonTemplate}"
                                      PreviewKeyDown="OnReviewListPreviewKeyDown"
                                      AutomationProperties.Name="Comparison paths and Selection controls" />
