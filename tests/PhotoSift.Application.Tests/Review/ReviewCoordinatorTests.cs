@@ -119,6 +119,63 @@ public sealed class ReviewCoordinatorTests
         await f.Run();
     }
 
+    [Fact]
+    public async Task LookAlikeSetWithNearAndUncertainEvidenceOpensReview()
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        var occurrences = request.Scan.Occurrences;
+        // Three Near photos plus one photo that is Uncertain to all three form one
+        // Uncertain set whose evidence keeps both kinds of edges.
+        var set = new CandidateGroup(Guid.NewGuid(), 1, request.Scan.Pin!, CandidateCategory.Uncertain,
+            [occurrences[1], occurrences[2], occurrences[3], occurrences[4]], [], true, null,
+            new(null, RecoveryUnavailableReason.InconsistentFacts))
+        {
+            Similarity =
+            [
+                new(occurrences[1].Token, occurrences[2].Token, 1, 2, NearRelationshipKind.Near),
+                new(occurrences[1].Token, occurrences[4].Token, 2, 3, NearRelationshipKind.Near),
+                new(occurrences[2].Token, occurrences[4].Token, 1, 1, NearRelationshipKind.Near),
+                new(occurrences[1].Token, occurrences[3].Token, 8, 20, NearRelationshipKind.Uncertain),
+                new(occurrences[2].Token, occurrences[3].Token, 9, 18, NearRelationshipKind.Uncertain),
+                new(occurrences[3].Token, occurrences[4].Token, 7, 22, NearRelationshipKind.Uncertain),
+            ],
+        };
+        request = request with
+        {
+            Scan = request.Scan with { Groups = [request.Scan.Groups[0], set] },
+        };
+
+        var opened = await f.Open(request);
+
+        Assert.Equal(ReviewCommandOutcome.Committed, opened.Outcome);
+        Assert.Contains(opened.Snapshot.Groups, group => group.Candidate.GroupId == set.GroupId);
+        await f.Run();
+    }
+
+    [Theory]
+    [InlineData("only-near")]
+    [InlineData("near-edge-too-far")]
+    public async Task UncertainSetStillRejectsEvidenceThatDoesNotMatchItsKind(string mismatch)
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        var occurrences = request.Scan.Occurrences;
+        ImmutableArray<NearDuplicateEvidence> similarity = mismatch == "only-near"
+            ? [new(occurrences[2].Token, occurrences[3].Token, 1, 2, NearRelationshipKind.Near)]
+            :
+            [
+                new(occurrences[2].Token, occurrences[3].Token, 8, 20, NearRelationshipKind.Near),
+            ];
+        var groups = request.Scan.Groups.SetItem(2, request.Scan.Groups[2] with { Similarity = similarity });
+        request = request with { Scan = request.Scan with { Groups = groups } };
+
+        var opened = await f.Open(request);
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, opened.Outcome);
+        Assert.Empty(f.Executor.Runs);
+    }
+
     [Theory]
     [InlineData("foreign-endpoint")]
     [InlineData("wrong-kind")]
