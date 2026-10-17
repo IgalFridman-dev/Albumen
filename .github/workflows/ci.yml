@@ -68,3 +68,32 @@ jobs:
           name: test-results
           path: TestResults/**/*.trx
           if-no-files-found: ignore
+
+  tooling-tests:
+    name: Tooling tests (${{ matrix.shell }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+
+      # ReleaseInputs.Tests.ps1 needs a real SDK and sealed package cache, so it
+      # runs only on the owner's machine before a VM capture.
+      - name: Run tooling tests
+        shell: ${{ matrix.shell }}
+        run: |
+          $failed = @()
+          Get-ChildItem tests/tooling -Filter '*.Tests.ps1' |
+            Where-Object Name -ne 'ReleaseInputs.Tests.ps1' |
+            ForEach-Object {
+              Write-Output "::group::$($_.Name)"
+              & $env:TEST_SHELL -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $_.FullName
+              if ($LASTEXITCODE -ne 0) { $failed += $_.Name }
+              Write-Output '::endgroup::'
+            }
+          if ($failed) { throw "Failed: $($failed -join ', ')" }
+        env:
+          TEST_SHELL: ${{ matrix.shell }}
