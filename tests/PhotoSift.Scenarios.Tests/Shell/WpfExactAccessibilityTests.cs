@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -36,7 +38,7 @@ public sealed class WpfExactAccessibilityTests
                 var confirm = Assert.IsType<Button>(window.FindName("ConfirmExactRulesButton"));
                 var start = Assert.IsType<Button>(window.FindName("StartScanButton"));
                 var exact = Assert.IsType<CheckBox>(window.FindName("ExactDuplicatesCheckBox"));
-                var near = Assert.IsType<CheckBox>(window.FindName("NearDuplicatesCheckBox"));
+                var near = Assert.IsType<CommandSwitchCheckBox>(window.FindName("NearDuplicatesCheckBox"));
                 var guidance = Assert.IsType<TextBlock>(window.FindName("ScanOptionsGuidanceText"));
                 Assert.True(exact.IsChecked);
                 Assert.False(exact.IsEnabled);
@@ -69,6 +71,32 @@ public sealed class WpfExactAccessibilityTests
                 fixture.PublishPhase(WorkflowPhase.ChooseScope);
                 Drain();
                 Assert.True(Assert.IsType<Button>(window.FindName("ChooseAnotherScopeButton")).IsKeyboardFocusWithin);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
+    public void AutomationToggleOnNearSwitchChangesTheScanOptions()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = new ExactShellFixture();
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            try
+            {
+                window.Show();
+                fixture.PublishPhase(WorkflowPhase.ConfirmRules);
+                Drain();
+                var near = Assert.IsType<CommandSwitchCheckBox>(window.FindName("NearDuplicatesCheckBox"));
+                Assert.True(near.IsChecked);
+                var peer = UIElementAutomationPeer.CreatePeerForElement(near);
+                Assert.NotNull(peer);
+
+                Assert.IsAssignableFrom<IToggleProvider>(peer.GetPattern(PatternInterface.Toggle)).Toggle();
+                Drain();
+
+                Assert.Contains($"options:{NearDuplicateMode.Disabled}", fixture.Workflow.Actions);
             }
             finally { window.Close(); }
         });
