@@ -341,9 +341,12 @@ try {
     Write-Output 'Collecting results.'
     Invoke-Command -Session $session -ScriptBlock {
         param($OutputPath)
-        $appData = 'C:\Users\PhotoSiftRunner\AppData\Local\PhotoSift'
-        if (Test-Path -LiteralPath $appData) {
-            Copy-Item -LiteralPath $appData -Destination (Join-Path $OutputPath 'localappdata') -Recurse -Force
+        # The app's data folder plus any sibling PhotoSift* folders, such as
+        # trace output from a diagnostic build.
+        $localAppData = 'C:\Users\PhotoSiftRunner\AppData\Local'
+        foreach ($folder in @(Get-ChildItem -LiteralPath $localAppData -Directory -Filter 'PhotoSift*' -ErrorAction SilentlyContinue)) {
+            $name = if ($folder.Name -eq 'PhotoSift') { 'localappdata' } else { "localappdata-$($folder.Name)" }
+            Copy-Item -LiteralPath $folder.FullName -Destination (Join-Path $OutputPath $name) -Recurse -Force
         }
         $since = (Get-Date).AddMinutes(-30)
         Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $since; Level = 1, 2, 3 } -ErrorAction SilentlyContinue |
