@@ -479,11 +479,13 @@
                                                         <Setter Property="Background" Value="{StaticResource PhotoSift.AccentBrush}" />
                                                         <Setter Property="TextElement.Foreground" Value="White" />
                                                     </DataTrigger>
+                                                    <!-- In High Contrast the number follows the step's own text color,
+                                                         so an unavailable step reads as GrayText throughout. -->
                                                     <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                                         <Setter Property="Background" Value="Transparent" />
                                                         <Setter Property="BorderThickness" Value="1" />
-                                                        <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                                        <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                                        <Setter Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                                        <Setter Property="TextElement.Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -493,7 +495,17 @@
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding DisplayName}" />
-                                        <TextBlock Style="{StaticResource PhotoSift.Caption}" Text="{Binding AvailabilityLabel}" />
+                                        <TextBlock Text="{Binding AvailabilityLabel}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock" BasedOn="{StaticResource PhotoSift.Caption}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                                                            <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                     </StackPanel>
                                 </Grid>
                             </Button>
