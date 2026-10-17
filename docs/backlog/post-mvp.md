@@ -330,7 +330,7 @@ side-by-side comparison without changing the safety design. Design:
 
 ## PM-010 — Show look-alike photos as one set instead of many pairs
 
-**Status:** In progress — design proposed 2026-10-17, waiting for owner approval.
+**Status:** In progress — design approved by the owner 2026-10-17.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-17 to ship V1.0.0 with the new UI)
 
