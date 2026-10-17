@@ -306,3 +306,25 @@ extracts the ZIP and runs `Start-PhotoSift.cmd`. Design:
   review, one Recycle Bin move and restore, and the tamper check still rejects a changed file.
 - A small demo-photos ZIP ships next to the app ZIP.
 
+
+## PM-009 — Make the UI understandable and attractive
+
+**Status:** In progress — design approved 2026-10-17; PR 1 of 3 (theme, folder, options and
+scan screens) open.
+
+**Priority:** Post-V1 presentation
+
+**Origin:** Owner feedback from testing V1 with real photos, 2026-10-17
+
+V1 works but reads like an engineering tool: internal terms on screen, one photo at a time in
+Review, and no visual hierarchy. Restyle the app and rebuild Review around thumbnails and
+side-by-side comparison without changing the safety design. Design:
+`docs/superpowers/specs/2026-10-17-pm-009-ui-overhaul-design.md`; plan:
+`docs/superpowers/plans/2026-10-17-pm-009-ui-overhaul.md`.
+
+### Completion criteria
+
+- All three PRs merged with GitHub CI green.
+- Golden VM Full run passes on the final commit.
+- Owner click-through on Windows 11 with real photos, including High Contrast.
+- README screenshots updated.
