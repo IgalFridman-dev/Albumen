@@ -83,4 +83,4 @@ Key ideas:
 | `PhotoSift.Analysis.Tests` | hashing and perceptual signatures |
 | `PhotoSift.Infrastructure.Tests` | Win32/WIC/SQLite adapters + architecture rules |
 | `PhotoSift.Scenarios.Tests` | real WPF window, keyboard and automation flows |
-| `tests/tooling/*.Tests.ps1` | Pester tests for VM and release scripts |
+| `tests/tooling/*.Tests.ps1` | PowerShell tests for VM and release scripts |

@@ -68,3 +68,34 @@ jobs:
           name: test-results
           path: TestResults/**/*.trx
           if-no-files-found: ignore
+
+  tooling-tests:
+    name: Tooling tests (${{ matrix.shell }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only the tests that are self-contained on a hosted runner. ReleaseInputs
+      # needs a real SDK and sealed package cache; E1S6CrashHarness needs a built
+      # crash harness; the Golden VM and Hyper-V tests assume a non-elevated host,
+      # and hosted runners are elevated. Those run on the owner's machine.
+      # The runner shell is always pwsh; each file runs under the matrix shell.
+      - name: Run tooling tests
+        shell: pwsh
+        run: |
+          $failed = @()
+          foreach ($name in 'PhotoSiftNetworkAudit', 'PhotoSiftRelease', 'ReleaseNativeCommand', 'RuntimeBoundary') {
+            $path = "tests/tooling/$name.Tests.ps1"
+            Write-Output "::group::$name"
+            & $env:TEST_SHELL -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $path
+            if ($LASTEXITCODE -ne 0) { $failed += $name }
+            Write-Output '::endgroup::'
+          }
+          if ($failed) { throw "Failed: $($failed -join ', ')" }
+        env:
+          TEST_SHELL: ${{ matrix.shell }}

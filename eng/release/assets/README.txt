@@ -1,24 +1,24 @@
 PhotoSift V1 - Windows 11 x64
 
-Before first use
-Install the Microsoft .NET 10 Desktop Runtime (x64), version 10.0.11 or a
-later compatible 10.0 patch. An older .NET version, .NET Framework, or the
-plain .NET Runtime alone is not sufficient. You do not need the developer SDK.
-
-Official download: https://dotnet.microsoft.com/en-us/download/dotnet/10.0
-Choose .NET Desktop Runtime, Windows x64. You can transfer its installer
-separately to an offline computer. PhotoSift does not download or install it.
-
 Starting PhotoSift
-Extract the complete release folder, keep its files together, and run
-Start-PhotoSift.cmd. This checks the packaged files before starting the app.
-If the required runtime is missing, Windows/.NET displays a prerequisite
-message. Install the Desktop Runtime above, then start PhotoSift again.
+Extract the complete ZIP to a local folder, keep its files together, and run
+Start-PhotoSift.cmd. It checks the packaged files, then starts the app.
+Nothing needs to be installed: the .NET runtime is included in this folder.
 
-PhotoSift processes your photos locally and works without networking once
-the prerequisite is installed. No account or model download is required.
-Review proposed removals carefully; approved removals use the Recycle Bin.
+Windows SmartScreen
+This build is not code-signed, so Windows may show "Windows protected your
+PC" the first time. Choose "More info", then "Run anyway". If Windows blocks
+the extracted files, right-click the ZIP before extracting, open Properties,
+tick "Unblock" and extract again.
 
-Do not edit or replace packaged files: verification rejects changes. Consult
-THIRD-PARTY-NOTICES.md for the components included in this release. The .NET
-Desktop Runtime is installed separately and is not bundled with PhotoSift.
+Using it
+Choose one local folder, confirm the rules, scan, and review the groups.
+Only the files you approve are moved to the Recycle Bin, one at a time, and
+at least one copy in every group is always kept. Restore anything from the
+Recycle Bin if you change your mind.
+
+PhotoSift processes your photos locally and never uses the network. No
+account, install, or download is required.
+
+Do not edit or replace packaged files: verification rejects changes. See
+THIRD-PARTY-NOTICES.md for the components included in this release.
