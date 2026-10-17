@@ -319,18 +319,43 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Button Width="112" Height="84" VerticalAlignment="Top" Margin="0,0,12,0"
-                            Style="{StaticResource PhotoSift.ThumbnailButton}"
-                            Click="OnOpenReviewMemberClick"
-                            ToolTip="Open in the viewer"
-                            AutomationProperties.AutomationId="open-review-member"
-                            AutomationProperties.Name="{Binding AutomationName}"
-                            AutomationProperties.ItemStatus="{Binding ItemStatus}"
-                            AutomationProperties.PositionInSet="{Binding PositionInSet}"
-                            AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
-                        <app:PhotoThumbnail x:Name="Thumbnail" Member="{Binding}"
-                                Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
-                    </Button>
+                    <!-- Compare sits under the thumbnail so it is never clipped by a narrow card. -->
+                    <StackPanel Grid.Column="0" Width="124" VerticalAlignment="Top">
+                        <Button Width="112" Height="84" VerticalAlignment="Top" Margin="0,0,12,0"
+                                Style="{StaticResource PhotoSift.ThumbnailButton}"
+                                Click="OnOpenReviewMemberClick"
+                                ToolTip="Open in the viewer"
+                                AutomationProperties.AutomationId="open-review-member"
+                                AutomationProperties.Name="{Binding AutomationName}"
+                                AutomationProperties.ItemStatus="{Binding ItemStatus}"
+                                AutomationProperties.PositionInSet="{Binding PositionInSet}"
+                                AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
+                            <app:PhotoThumbnail x:Name="Thumbnail" Member="{Binding}"
+                                    Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
+                        </Button>
+                        <!-- The photo already in the viewer has nothing to be compared with. -->
+                        <Button Content="Compare" Margin="0,6,12,0" MinHeight="32" Padding="6,4" HorizontalAlignment="Stretch"
+                                Command="{Binding DataContext.CompareReviewMemberCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                CommandParameter="{Binding}"
+                                ToolTip="Show this photo beside the one in the viewer"
+                                AutomationProperties.Name="{Binding FileName, StringFormat='Compare {0} with the photo in the viewer'}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource PhotoSift.Button}">
+                                    <Style.Triggers>
+                                        <DataTrigger Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{StaticResource EqualValuesConverter}">
+                                                    <Binding Path="OccurrenceId" />
+                                                    <Binding Path="DataContext.ActiveReviewMember.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
                     <StackPanel Grid.Column="1">
                         <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
@@ -344,28 +369,6 @@
                                     AutomationProperties.Name="{Binding AutomationName}"
                                     AutomationProperties.ItemStatus="{Binding ItemStatus}"
                                     Content="{Binding EligibilityText}" />
-                            <!-- The photo already in the viewer has nothing to be compared with. -->
-                            <Button Content="Compare" Margin="8,0,0,0" MinHeight="32" Padding="12,4" VerticalAlignment="Top"
-                                    Command="{Binding DataContext.CompareReviewMemberCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    CommandParameter="{Binding}"
-                                    ToolTip="Show this photo beside the one in the viewer"
-                                    AutomationProperties.Name="{Binding FileName, StringFormat='Compare {0} with the photo in the viewer'}">
-                                <Button.Style>
-                                    <Style TargetType="Button" BasedOn="{StaticResource PhotoSift.Button}">
-                                        <Style.Triggers>
-                                            <DataTrigger Value="True">
-                                                <DataTrigger.Binding>
-                                                    <MultiBinding Converter="{StaticResource EqualValuesConverter}">
-                                                        <Binding Path="OccurrenceId" />
-                                                        <Binding Path="DataContext.ActiveReviewMember.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                                    </MultiBinding>
-                                                </DataTrigger.Binding>
-                                                <Setter Property="Visibility" Value="Collapsed" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Button.Style>
-                            </Button>
                         </StackPanel>
                         <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True"
                                  IsTabStop="False" TextWrapping="Wrap" FontSize="12" Margin="0,2,0,0"
