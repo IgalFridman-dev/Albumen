@@ -4,6 +4,8 @@ using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -47,7 +49,7 @@ public sealed class WpfScopeAccessibilityTests
                     window.FindName("RuleSetStatusText"));
                 var blocking = Assert.IsType<Border>(
                     window.FindName("BlockingNotice"));
-                var recursion = Assert.IsType<CheckBox>(
+                var recursion = Assert.IsType<CommandSwitchCheckBox>(
                     window.FindName("IncludeSubfoldersCheckBox"));
                 var summary = Assert.IsType<ItemsControl>(
                     window.FindName("ScopeSummaryList"));
@@ -96,7 +98,7 @@ public sealed class WpfScopeAccessibilityTests
             {
                 ShowAndDrain(window);
 
-                var recursion = Assert.IsType<CheckBox>(
+                var recursion = Assert.IsType<CommandSwitchCheckBox>(
                     window.FindName("IncludeSubfoldersCheckBox"));
                 Assert.Equal(string.Empty, viewModel.SelectedPath);
                 Assert.False(recursion.IsChecked);
@@ -302,6 +304,37 @@ public sealed class WpfScopeAccessibilityTests
             () => picker.PickSingleAsync(cancellation.Token));
 
         Assert.False(ownerWasAccessed);
+    }
+
+    [Fact]
+    public void AutomationToggleOnRecursionSwitchRequestsANewPreflight()
+    {
+        RunOnSta(() =>
+        {
+            var workflow = new PublishingChooseScopeWorkflow(
+                CheckingSnapshot(ScopeRecursion.TopLevelOnly));
+            var viewModel = new ShellViewModel(workflow);
+            var window = new MainWindow { DataContext = viewModel };
+            try
+            {
+                ShowAndDrain(window);
+                var recursion = Assert.IsType<CommandSwitchCheckBox>(
+                    window.FindName("IncludeSubfoldersCheckBox"));
+                var peer = UIElementAutomationPeer.CreatePeerForElement(recursion);
+                Assert.NotNull(peer);
+
+                Assert.IsAssignableFrom<IToggleProvider>(
+                    peer.GetPattern(PatternInterface.Toggle)).Toggle();
+                DrainDispatcher();
+
+                // Narrator and UI Automation must change the Scope, not only the switch.
+                Assert.True(Assert.Single(workflow.RecursionRequests));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
     }
 
     private static void AssertSystemBrushesRemainDynamic(Window window)
@@ -518,10 +551,15 @@ public sealed class WpfScopeAccessibilityTests
             CancellationToken cancellationToken) =>
             Task.CompletedTask;
 
+        public List<bool> RecursionRequests { get; } = [];
+
         public Task HandleAsync(
             ChangeScopeRecursionCommand command,
-            CancellationToken cancellationToken) =>
-            Task.CompletedTask;
+            CancellationToken cancellationToken)
+        {
+            RecursionRequests.Add(command.IncludeSubfolders);
+            return Task.CompletedTask;
+        }
 
         public Task HandleAsync(
             RetryScopePreflightCommand command,
