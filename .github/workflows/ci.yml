@@ -37,8 +37,29 @@ jobs:
       - name: Build (warnings as errors)
         run: dotnet build PhotoSift.slnx -c Release --no-restore
 
-      - name: Test
-        run: dotnet test PhotoSift.slnx -c Release --no-build --logger trx --results-directory TestResults
+      # Suites run one after another: the WPF scenario tests have wall-clock
+      # budgets that parallel suites on a shared runner can exceed.
+      - name: Test Domain
+        run: dotnet test tests/PhotoSift.Domain.Tests -c Release --no-build --logger trx --results-directory TestResults
+
+      - name: Test Application
+        if: success() || failure()
+        run: dotnet test tests/PhotoSift.Application.Tests -c Release --no-build --logger trx --results-directory TestResults
+
+      - name: Test Analysis
+        if: success() || failure()
+        run: dotnet test tests/PhotoSift.Analysis.Tests -c Release --no-build --logger trx --results-directory TestResults
+
+      # GoldenVm tests mutate real files and the Recycle Bin and refuse to run
+      # outside a disposable run of the isolated verification VM
+      # (eng/verification). They run there, not on hosted runners.
+      - name: Test Infrastructure (excluding GoldenVm)
+        if: success() || failure()
+        run: dotnet test tests/PhotoSift.Infrastructure.Tests -c Release --no-build --filter "Category!=GoldenVm" --logger trx --results-directory TestResults
+
+      - name: Test Scenarios (WPF)
+        if: success() || failure()
+        run: dotnet test tests/PhotoSift.Scenarios.Tests -c Release --no-build --logger trx --results-directory TestResults
 
       - name: Upload test results
         if: always()
