@@ -282,10 +282,9 @@ real app under light, dark and High Contrast, not only in tests that build
 ## PM-008 — Ship V1 as a self-contained release
 
 **Status:** In progress — design approved 2026-10-17; release built and clean-launch
-checked on 2026-10-17 at `8562f97`; inventory owner-approved 2026-10-17. Open: the
-demo-photos ZIP. The build used a fresh package cache restored on the owner's host,
-not the sealed offline Golden VM cache (the VM cache lacks the runtime packs); this
-was reported to the owner as sufficient for V1 but not separately signed off. Evidence: `docs/evidence/pm-008/`.
+checked on 2026-10-17 at `8562f97`; inventory owner-approved 2026-10-17; the published
+ZIP was rebuilt offline in the Golden VM from the sealed cache at `e1d6a9d` and passed the
+clean launch on 2026-10-17. Open: the demo-photos ZIP. Evidence: `docs/evidence/pm-008/`.
 
 **Priority:** Before the public V1 release
 
