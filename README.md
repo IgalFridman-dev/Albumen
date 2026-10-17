@@ -78,17 +78,22 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 - **Full suite: 1,757 / 1,757 passing** in the official gate on the release candidate.
 - **Isolated verification VM.** Official gates run in a Hyper-V VM with no network adapter, restored
   from a known checkpoint for every run. This proves the offline guarantee and keeps runs reproducible.
-- **Reproducible release.** Two independent locked publishes are compared file by file (path,
-  length, SHA-256) before the ZIP is produced, with a checksum-verifying launcher and third-party notices.
+- **Reproducible release.** Two independent locked, self-contained publishes are compared file by
+  file (path, length, SHA-256) before the ZIP is produced, with a checksum-verifying launcher and
+  third-party notices for every bundled component.
 - **CI.** Every pull request builds with warnings as errors and runs the test suites on `windows-latest`.
 - **Evidence over claims.** Every finished story has a written verification record, and the V1
   release decision lists its open limitations instead of hiding them (see below).
 
 ## Getting started
 
-**To run it** you need Windows 11 x64 and the
-[.NET 10 Desktop Runtime x64](https://dotnet.microsoft.com/download/dotnet/10.0) (10.0.11 or later).
-Extract the release ZIP and run `Start-PhotoSift.cmd`; the launcher verifies the package before starting.
+**To run it** you need Windows 11 x64 and nothing else: the release is self-contained, so no .NET
+install is required.
+
+1. Download the ZIP from the latest release and extract it to a local folder.
+2. Run `Start-PhotoSift.cmd`. It checks every packaged file against its manifest, then starts the app.
+3. The build is not code-signed, so Windows SmartScreen may warn on first run: choose
+   **More info → Run anyway**.
 
 **To build it** you need the .NET SDK `10.0.400`:
 
