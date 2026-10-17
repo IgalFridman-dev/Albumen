@@ -11,6 +11,7 @@ using PhotoSift.Application.Review;
 using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Workflow;
+using PhotoSift.Infrastructure.Windows.Action;
 using Xunit;
 
 namespace PhotoSift.Scenarios.Tests.Shell;
@@ -25,7 +26,9 @@ public sealed class WpfActionIdempotencyTests
         {
             WpfReviewSelectionTests.RunOnSta(() =>
             {
-                var viewModel = CompositionRoot.CreateShellViewModel();
+                using var database = new TemporaryDatabase();
+                var viewModel = CompositionRoot.CreateShellViewModel(
+                    database.Path, new WindowsRecycleBinExecutor());
                 try
                 {
                     var owned = Assert.Single(FieldValues(viewModel).OfType<IPhotoSiftWorkflow>());
