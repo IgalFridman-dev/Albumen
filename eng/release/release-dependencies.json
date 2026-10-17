@@ -14,7 +14,7 @@
       ],
       "officialSourceUrl": "https://github.com/dotnet/runtime/tree/v10.0.11",
       "redistributionTermUrl": "https://www.microsoft.com/net/dotnet_library_license.htm",
-      "redistributionApproval": "pending-owner-approval"
+      "redistributionApproval": "owner-approved"
     },
     {
       "name": ".NET Runtime",
@@ -215,7 +215,7 @@
       ],
       "officialSourceUrl": "https://github.com/dotnet/dotnet/tree/v10.0.11",
       "redistributionTermUrl": "https://licenses.nuget.org/MIT",
-      "redistributionApproval": "pending-owner-approval"
+      "redistributionApproval": "owner-approved"
     },
     {
       "name": "Microsoft.Data.Sqlite",
@@ -227,7 +227,7 @@
       ],
       "officialSourceUrl": "https://github.com/dotnet/dotnet/tree/v10.0.11",
       "redistributionTermUrl": "https://github.com/dotnet/dotnet/blob/v10.0.11/LICENSE.TXT",
-      "redistributionApproval": "pending-owner-approval"
+      "redistributionApproval": "owner-approved"
     },
     {
       "name": "Microsoft.Data.Sqlite.Core",
@@ -241,7 +241,7 @@
       ],
       "officialSourceUrl": "https://github.com/dotnet/dotnet/tree/v10.0.11",
       "redistributionTermUrl": "https://github.com/dotnet/dotnet/blob/v10.0.11/LICENSE.TXT",
-      "redistributionApproval": "pending-owner-approval"
+      "redistributionApproval": "owner-approved"
     },
     {
       "name": "Native SQLite",
@@ -255,7 +255,7 @@
       ],
       "officialSourceUrl": "https://sqlite.org/",
       "redistributionTermUrl": "https://sqlite.org/copyright.html",
-      "redistributionApproval": "pending-owner-approval"
+      "redistributionApproval": "owner-approved"
     },
     {
       "name": "SQLitePCLRaw.bundle_e_sqlite3",
@@ -270,7 +270,7 @@
       ],
       "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
       "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
-      "redistributionApproval": "pending-owner-approval"
+      "redistributionApproval": "owner-approved"
     },
     {
       "name": "SQLitePCLRaw.core",
@@ -285,7 +285,7 @@
       ],
       "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
       "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
-      "redistributionApproval": "pending-owner-approval"
+      "redistributionApproval": "owner-approved"
     },
     {
       "name": "SQLitePCLRaw.lib.e_sqlite3",
@@ -300,7 +300,7 @@
       ],
       "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
       "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
-      "redistributionApproval": "pending-owner-approval"
+      "redistributionApproval": "owner-approved"
     },
     {
       "name": "SQLitePCLRaw.provider.e_sqlite3",
@@ -315,7 +315,7 @@
       ],
       "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
       "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
-      "redistributionApproval": "pending-owner-approval"
+      "redistributionApproval": "owner-approved"
     },
     {
       "name": "Windows Desktop / WPF",
@@ -537,7 +537,7 @@
       ],
       "officialSourceUrl": "https://github.com/dotnet/dotnet/tree/v10.0.11",
       "redistributionTermUrl": "https://licenses.nuget.org/MIT",
-      "redistributionApproval": "pending-owner-approval"
+      "redistributionApproval": "owner-approved"
     }
   ]
 }

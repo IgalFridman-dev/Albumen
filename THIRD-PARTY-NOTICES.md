@@ -3,9 +3,8 @@
 This self-contained win-x64 package contains the components below, including
 the .NET runtime and the WPF part of the Windows Desktop runtime, so no
 separate .NET install is needed. The original inventory (host and SQLite
-components) was owner-approved on 2026-09-23. Adding the bundled runtime makes
-the whole inventory pending owner approval again; this notice is not a claim
-that the release is complete.
+components) was owner-approved on 2026-09-23, and the complete inventory with
+the bundled runtime was owner-approved on 2026-10-17.
 
 | Component | Version | Shipped file(s) | Terms and packaged notices |
 | --- | --- | --- | --- |
@@ -47,5 +46,4 @@ SDK tools and build-only packs are not shipped.
 
 The exact file list for every component is in the versioned machine-readable
 inventory `eng/release/release-dependencies.json` in the PhotoSift source
-repository. All entries have disposition `pending-owner-approval` until the
-product owner approves the bundled runtime.
+repository. All entries have disposition `owner-approved`.
