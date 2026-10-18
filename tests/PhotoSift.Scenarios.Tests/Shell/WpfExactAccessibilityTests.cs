@@ -36,24 +36,24 @@ public sealed class WpfExactAccessibilityTests
                 fixture.PublishPhase(WorkflowPhase.ConfirmRules);
                 Drain();
                 var scanFolder = Assert.IsType<Button>(window.FindName("ScanFolderButton"));
-                var exact = Assert.IsType<CheckBox>(window.FindName("ExactDuplicatesCheckBox"));
                 var near = Assert.IsType<CommandSwitchCheckBox>(window.FindName("NearDuplicatesCheckBox"));
+                var nearCaption = Assert.IsType<TextBlock>(window.FindName("NearDuplicatesCaption"));
                 var guidance = Assert.IsType<TextBlock>(window.FindName("ScanOptionsGuidanceText"));
                 var choose = Assert.IsType<Button>(window.FindName("ChooseAnotherScopeButton"));
                 // Folder and options are one screen: the folder controls stay in view with the options.
-                Assert.True(choose.IsVisible && exact.IsVisible && near.IsVisible && scanFolder.IsVisible);
-                Assert.True(exact.IsChecked);
-                Assert.False(exact.IsEnabled);
-                Assert.Equal("Identical copies are always included", AutomationProperties.GetName(exact));
+                Assert.True(choose.IsVisible && near.IsVisible && nearCaption.IsVisible && scanFolder.IsVisible);
+                Assert.Null(window.FindName("ExactDuplicatesCheckBox"));
+                // The promise about identical copies lives in the caption, not in a switch nobody can move.
                 Assert.Equal(
-                    "Identical copies match byte for byte and are always included.",
-                    AutomationProperties.GetHelpText(exact));
+                    "Bursts and near-identical shots. Identical copies are always found.",
+                    nearCaption.Text);
                 Assert.True(near.IsChecked);
                 Assert.True(near.IsTabStop && near.Focusable && near.IsEnabled);
                 Assert.Equal("Look-alikes", AutomationProperties.GetName(near));
                 Assert.Contains("Maybe similar", AutomationProperties.GetHelpText(near), StringComparison.Ordinal);
+                // Valid options before any scan: the guidance has nothing to add, so it is hidden.
+                Assert.Equal(Visibility.Collapsed, guidance.Visibility);
                 Assert.Contains("Identical copies are always included", guidance.Text, StringComparison.Ordinal);
-                Assert.Contains("Look-alikes", guidance.Text, StringComparison.Ordinal);
                 Assert.Equal("Scan 2 photos", scanFolder.Content);
                 Assert.Equal("Scan 2 photos", AutomationProperties.GetName(scanFolder));
                 Assert.Same(fixture.ViewModel.ScanFolderCommand, scanFolder.Command);
@@ -123,6 +123,7 @@ public sealed class WpfExactAccessibilityTests
                 var scanFolder = Assert.IsType<Button>(window.FindName("ScanFolderButton"));
 
                 Assert.Equal(invalid.ValidationGuidance, guidance.Text);
+                Assert.Equal(Visibility.Visible, guidance.Visibility);
                 Assert.Equal(
                     invalid.ValidationGuidance,
                     AutomationProperties.GetItemStatus(guidance));

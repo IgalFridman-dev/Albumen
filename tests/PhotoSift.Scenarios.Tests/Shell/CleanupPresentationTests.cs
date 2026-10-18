@@ -131,6 +131,7 @@ public sealed class CleanupPresentationTests
 
         fixture.PublishScope(checking, rechecking: true);
         Assert.Equal("Checking the folder again after the cleanup", fixture.ViewModel.ScopeStatus);
+        Assert.Equal("Checking the folder again after the cleanup.", fixture.ViewModel.FolderStatusSentence);
         Assert.True(fixture.ViewModel.IsChecking);
         Assert.Equal(WorkflowPhase.ChooseScope, fixture.ViewModel.CurrentPhase);
 
