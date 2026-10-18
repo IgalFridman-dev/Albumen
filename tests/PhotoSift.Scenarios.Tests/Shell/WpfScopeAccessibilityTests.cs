@@ -86,8 +86,8 @@ public sealed class WpfScopeAccessibilityTests
                     "Bursts and near-identical shots. Identical copies are always found.",
                     lookAlikesCaption.Text);
                 // The Scan button sits in the card's footer; the check summary waits under Details.
-                Assert.Contains(scanFolder, VisualDescendants<Button>(card));
-                Assert.Contains(summary, VisualDescendants<ItemsControl>(details));
+                Assert.Contains(card, LogicalAncestors(scanFolder));
+                Assert.Contains(details, LogicalAncestors(summary));
                 Assert.False(details.IsExpanded);
                 Assert.Equal("Details", details.Header);
                 Assert.Equal(7, summary.Items.Count);
@@ -482,6 +482,15 @@ public sealed class WpfScopeAccessibilityTests
         }
 
         Assert.Equal(expectedCount, recorder.Count);
+    }
+
+    private static IEnumerable<DependencyObject> LogicalAncestors(DependencyObject element)
+    {
+        for (var parent = LogicalTreeHelper.GetParent(element); parent is not null;
+             parent = LogicalTreeHelper.GetParent(parent))
+        {
+            yield return parent;
+        }
     }
 
     private static IEnumerable<T> VisualDescendants<T>(DependencyObject root)
