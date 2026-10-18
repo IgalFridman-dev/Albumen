@@ -290,8 +290,8 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
         new(
             InitialWorkflow.Create(),
             result.Decision is ScopePreflightDecision.Ready
-                ? "Scope is ready."
-                : "Scope is blocked.",
+                ? "The folder is ready to scan."
+                : "This folder can't be scanned yet.",
             result.Decision is ScopePreflightDecision.Ready
                 ? ScopeSessionState.Ready
                 : ScopeSessionState.Blocked,
@@ -305,7 +305,7 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
         long revision) =>
         new(
             InitialWorkflow.Create(),
-            "Scope was not verified.",
+            "The folder wasn't checked. Check it again or choose another folder.",
             ScopeSessionState.Canceled,
             selection,
             null,

@@ -24,7 +24,7 @@ public sealed class ScopeProjectionTests
         Assert.False(viewModel.IsReady);
         Assert.False(viewModel.IsBlocked);
         Assert.False(viewModel.IsCanceled);
-        Assert.Equal("Scope blocked", viewModel.BlockingNoticeAutomationName);
+        Assert.Equal("Folder can't be used", viewModel.BlockingNoticeAutomationName);
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public sealed class ScopeProjectionTests
         var viewModel = new ShellViewModel(
             new RecordingChooseScopeWorkflow(snapshot));
 
-        Assert.Equal("Scope blocked", viewModel.BlockingNoticeAutomationName);
+        Assert.Equal("Folder can't be used", viewModel.BlockingNoticeAutomationName);
     }
 
     [Fact]

@@ -45,12 +45,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private ImmutableArray<PhaseItemViewModel> phases = [];
     private ImmutableArray<ScopeSummaryItemViewModel> scopeSummary = [];
     private ImmutableArray<string> blockingReasons = [];
-    private string blockingNoticeAutomationName = "Scope blocked";
+    private string blockingNoticeAutomationName = "Folder can't be used";
     private string instruction = string.Empty;
     private string scopeStatus = string.Empty;
     private string selectedPath = string.Empty;
     private string resolvedPath = string.Empty;
     private string supportedCount = string.Empty;
+    private string scanFolderText = "Scan folder";
     private string ruleSetStatus = string.Empty;
     private bool includeSubfolders;
     private bool canChangeRecursion;
@@ -128,6 +129,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             canExecute: () => CanChangeScanOptions);
         ConfirmExactRulesCommand = new AsyncCommand(() => photoWorkflow?.ConfirmExactRulesAsync() ?? Task.CompletedTask);
         StartScanCommand = new AsyncCommand(() => photoWorkflow?.StartScanAsync() ?? Task.CompletedTask);
+        ScanFolderCommand = new AsyncCommand(ScanFolderAsync);
         CancelScanCommand = new AsyncCommand(() => photoWorkflow?.CancelScanAsync() ?? Task.CompletedTask);
         OpenReviewCommand = new AsyncCommand(OpenReviewAsync);
         ApproveReviewCommand = new AsyncCommand(ApproveReviewAsync);
@@ -186,6 +188,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand ChangeNearDuplicateModeCommand { get; }
     public AsyncCommand ConfirmExactRulesCommand { get; }
     public AsyncCommand StartScanCommand { get; }
+    public AsyncCommand ScanFolderCommand { get; }
     public AsyncCommand CancelScanCommand { get; }
     public AsyncCommand OpenReviewCommand { get; }
     public AsyncCommand ApproveReviewCommand { get; }
@@ -226,6 +229,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     internal ReviewSessionPin? ReviewSession => photoSnapshot?.Review.Pin;
     public bool IsChooseScopePhase => CurrentPhase == WorkflowPhase.ChooseScope;
     public bool IsConfirmRulesPhase => CurrentPhase == WorkflowPhase.ConfirmRules;
+    // One screen covers the folder and the scan options (PM-009 PR 3c).
+    public bool IsChooseFolderPhase => IsChooseScopePhase || IsConfirmRulesPhase;
     public bool IsScanPhase => CurrentPhase == WorkflowPhase.Scan;
     public bool IsReviewPhase => CurrentPhase == WorkflowPhase.Review;
     public bool IsActionPhase => CurrentPhase == WorkflowPhase.ApproveCleanup;
@@ -332,7 +337,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         { Status: ActionRecoveryStatus.Ready, ProbeOutstanding: false }
         && HasActionRecoveryDisclosure;
     public bool CanContinue => photoSnapshot?.Scope.ScopeState == ScopeSessionState.Ready;
-    public bool CanChangeScanOptions => CanContinue && IsConfirmRulesPhase && !IsScanBusy;
+    public bool CanChangeScanOptions => CanContinue && IsChooseFolderPhase && !IsScanBusy;
+    public bool CanScanFolder => CanChangeScanOptions && photoSnapshot is { Options.IsValid: true };
     public bool CanConfirmExactRules => CanChangeScanOptions
         && photoSnapshot is { Rules: null, Options.IsValid: true };
     public bool CanStartScan => photoSnapshot is { } snapshot && ShellPhasePolicy.CanStart(snapshot.Scope, snapshot.Rules) && !IsScanBusy;
@@ -341,14 +347,14 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         { Status: ScanSessionStatus.Checking or ScanSessionStatus.Running };
     public bool CanOpenReview => photoSnapshot?.Scan.Pin is not null;
     public bool NearDuplicatesEnabled => photoSnapshot?.Options.Near == NearDuplicateMode.Conservative;
-    public string ExactPreset { get; } = "Exact duplicates are always enabled. Files must contain identical bytes.";
+    public string ExactPreset { get; } = "Always included. Copies must match byte for byte.";
     public string ScanOptionsGuidance => photoSnapshot?.Options is { } options
         ? options.IsValid
             ? options.Near == NearDuplicateMode.Conservative
-                ? "Exact is always enabled. Near uses the fixed Conservative profile; ambiguous matches remain Uncertain. Selection stays manual."
-                : "Exact is always enabled. Near is disabled for the next Scan. Selection stays manual."
+                ? "Identical copies are always included. Look-alikes use one careful, fixed setting, and close calls are shown as Maybe similar. Nothing is marked for you."
+                : "Identical copies are always included. Look-alikes are off for the next scan. Nothing is marked for you."
             : options.ValidationGuidance
-        : "Exact is always enabled. Near defaults to the fixed Conservative profile. Selection stays manual.";
+        : "Identical copies are always included. Look-alikes are on unless you turn them off. Nothing is marked for you.";
     public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";
     // Announced as a live region, so it changes only when the stage changes, never per photo.
     public string ScanStatus => photoSnapshot is { Scan: var scan } snapshot
@@ -600,7 +606,31 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public ImmutableArray<PhaseItemViewModel> Phases
     {
         get => phases;
-        private set => SetField(ref phases, value);
+        private set
+        {
+            SetField(ref phases, value);
+            OnPropertyChanged(nameof(RailSteps));
+        }
+    }
+
+    // Scan options share the folder screen, so the step list shows one "Choose folder" step for
+    // both phases and marks it current while either one is. Phases keeps all five.
+    public ImmutableArray<PhaseItemViewModel> RailSteps
+    {
+        get
+        {
+            var optionsCurrent = phases.Any(phase => phase.Phase == WorkflowPhase.ConfirmRules && phase.IsCurrent);
+            return phases
+                .Where(phase => phase.Phase != WorkflowPhase.ConfirmRules)
+                .Select((phase, index) => phase with
+                {
+                    Availability = phase.Phase == WorkflowPhase.ChooseScope && optionsCurrent
+                        ? PhaseAvailability.Current
+                        : phase.Availability,
+                    StepNumber = index + 1,
+                })
+                .ToImmutableArray();
+        }
     }
 
     public string Instruction
@@ -631,6 +661,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         get => supportedCount;
         private set => SetField(ref supportedCount, value);
+    }
+
+    public string ScanFolderText
+    {
+        get => scanFolderText;
+        private set => SetField(ref scanFolderText, value);
     }
 
     public string RuleSetStatus
@@ -735,10 +771,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ProjectActionRecovery(previousRecovery, snapshot.ActionRecovery);
         Phases = Project(snapshot.Phases);
         RuleSetStatus = snapshot.Rules is null
-            ? "Scan options not confirmed"
+            ? "confirmed when the scan starts"
             : snapshot.Rules.Options.Near == NearDuplicateMode.Conservative
-                ? "Exact enabled; Near Conservative — confirmed"
-                : "Exact enabled; Near disabled — confirmed";
+                ? "identical copies and look-alikes, confirmed"
+                : "identical copies only, confirmed";
         if (!preserveReviewProjection)
         {
             var previousNavigationLevel = ReviewNavigationLevel;
@@ -765,8 +801,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (previousReview?.Status != snapshot.Review.Status) OnPropertyChanged(nameof(ReviewState));
         if (previousReview?.FaultReason != snapshot.Review.FaultReason) OnPropertyChanged(nameof(ReviewFaultReason));
         if (previousReviewStatusText != ReviewStatusText) OnPropertyChanged(nameof(ReviewStatusText));
-        foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsScanPhase), nameof(IsReviewPhase), nameof(IsActionPhase),
-            nameof(CanContinue), nameof(CanStartScan), nameof(CanOpenReview),
+        foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsChooseFolderPhase), nameof(IsScanPhase), nameof(IsReviewPhase), nameof(IsActionPhase),
+            nameof(CanContinue), nameof(CanStartScan), nameof(CanScanFolder), nameof(CanOpenReview),
             nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze),
             nameof(ScanOutcomeSummaries) })
             OnPropertyChanged(name);
@@ -1497,6 +1533,17 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ApplyReviewResult(await workflow.AffirmReviewOverrideAsync(affirmation, CancellationToken.None));
     }
 
+    // The one Scan button on the folder screen: the same three owner-checked steps the
+    // separate buttons ran (continue, confirm the options for this folder, start).
+    private async Task ScanFolderAsync()
+    {
+        if (photoWorkflow is not { } workflow || !CanScanFolder) return;
+        if (workflow.Current.CurrentPhase == WorkflowPhase.ChooseScope) await workflow.ContinueAsync();
+        if (workflow.Current.CurrentPhase != WorkflowPhase.ConfirmRules) return;
+        if (workflow.Current.Rules is null) await workflow.ConfirmExactRulesAsync();
+        await workflow.StartScanAsync();
+    }
+
     private async Task OpenReviewAsync()
     {
         if (photoWorkflow is not { } workflow) return;
@@ -1680,11 +1727,17 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         IncludeSubfolders = ProjectRecursion(snapshot.Selection);
         CanChangeRecursion = snapshot.Selection is not null;
         SupportedCount = FormatCount(snapshot.Preflight?.CompleteCounts?.Supported);
+        ScanFolderText = snapshot.Preflight?.CompleteCounts?.Supported switch
+        {
+            null => "Scan folder",
+            1 => "Scan 1 photo",
+            var count => $"Scan {count.Value.ToString("N0", CultureInfo.InvariantCulture)} photos",
+        };
         RuleSetStatus = snapshot.RuleSetStatus;
         ScopeSummary = ProjectSummary(snapshot.Preflight);
         BlockingReasons = ProjectBlockingReasons(snapshot.Preflight);
         BlockingNoticeAutomationName = BlockingReasons.IsDefaultOrEmpty
-            ? "Scope blocked"
+            ? "Folder can't be used"
             : BlockingReasons[0];
         IsChecking = snapshot.ScopeState is ScopeSessionState.Checking;
         IsReady = snapshot.ScopeState is ScopeSessionState.Ready;
@@ -1784,10 +1837,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private static ImmutableArray<PhaseItemViewModel> Project(
         ImmutableArray<WorkflowPhaseState> phases) =>
         phases
-            .Select(phase => new PhaseItemViewModel(
+            .Select((phase, index) => new PhaseItemViewModel(
                 phase.Phase,
                 phase.DisplayName,
-                phase.Availability))
+                phase.Availability,
+                index + 1))
             .ToImmutableArray();
 
     private void SetField<T>(

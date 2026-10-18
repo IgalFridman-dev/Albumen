@@ -131,7 +131,8 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         var invalidateScopeRevision = await inbox.InvokeAsync<long?>(() =>
         {
             RefreshScope();
-            if (current.CurrentPhase != WorkflowPhase.ConfirmRules
+            // The folder step shows the options too, so they can change there or on Confirm Rules.
+            if (current.CurrentPhase is not (WorkflowPhase.ChooseScope or WorkflowPhase.ConfirmRules)
                 || current.Scope.ScopeState != ScopeSessionState.Ready
                 || current.Scan.Status is ScanStatus.Checking or ScanStatus.Running
                 || current.Options == options)
@@ -145,7 +146,6 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
                 Rules = null,
                 Scan = EmptyScan(),
                 Review = ReviewSnapshot.Closed,
-                CurrentPhase = WorkflowPhase.ConfirmRules,
             });
             return hadCurrentScan ? current.Scope.Revision : null;
         }).ConfigureAwait(false);
