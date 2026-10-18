@@ -187,7 +187,8 @@ internal sealed class ReviewStore
         var decision = SurvivorPolicy.Evaluate(candidate, eligible, combined);
         if (!combined.SetEquals(proposed) && decision.Kind != SurvivorDecisionKind.Allowed)
             return Result(ReviewCommandOutcome.Invalid);
-        foreach (var other in Current.Groups.Where(candidateGroup => candidateGroup != group))
+        // A closed set holds no marks and takes no projection of the global selection.
+        foreach (var other in Current.Groups.Where(candidateGroup => candidateGroup != group && !candidateGroup.Closed))
         {
             var otherCombined = SelectionFor(other, globalSelection);
             if (otherCombined.SetEquals(other.SelectedOccurrenceIds)) continue;
@@ -464,7 +465,7 @@ internal sealed class ReviewStore
                     && holder != g.Candidate.GroupId ? holder : null,
             }).ToImmutableArray(),
             Recovery = SelectionAccounting.Calculate(ForPolicy(g), Eligible(g),
-                SelectionFor(g, selected)),
+                g.Closed ? ImmutableHashSet<long>.Empty : SelectionFor(g, selected)),
         }).ToImmutableArray();
         var counts = ReviewMemberCounts(groups, selected);
         Current = Current with
