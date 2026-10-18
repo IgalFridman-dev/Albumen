@@ -6,8 +6,10 @@ using PhotoSift.Domain.Scan;
 
 namespace PhotoSift.Application.Review;
 
+// Selected is the mark held in this group. SelectedInGroup names the other group that
+// holds the mark for the same occurrence, so every set shows the one global selection.
 public sealed record ReviewMemberSnapshot(ScanFileOccurrence Occurrence, ReviewEligibilityState Eligibility,
-    ReviewUnavailableReason Reason, bool Selected);
+    ReviewUnavailableReason Reason, bool Selected, Guid? SelectedInGroup = null);
 public sealed record ReviewGroupSnapshot(CandidateGroup Candidate, ImmutableArray<ReviewMemberSnapshot> Members,
     ImmutableHashSet<long> SelectedOccurrenceIds, SelectionRecovery Recovery, bool Sealed, OverrideEvidenceId? OverrideEvidenceId);
 public sealed record ReviewUnresolvedSummary(long IncompleteEnumeration, long FailedScanRows, long CanceledScanRows,

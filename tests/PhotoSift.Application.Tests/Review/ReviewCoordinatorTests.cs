@@ -252,6 +252,59 @@ public sealed class ReviewCoordinatorTests
     }
 
     [Fact]
+    public async Task AMarkHeldInOneSetIsProjectedOntoTheSameOccurrenceInEveryOtherSet()
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Open(request)).Outcome);
+        await f.Run();
+        foreach (var group in request.Scan.Groups)
+        foreach (var member in group.Members)
+            await CommitEvidence(f, request, group, member);
+        var exactGroupId = f.Owner.Current.Groups[0].Candidate.GroupId;
+
+        Assert.Equal(ReviewCommandOutcome.Committed,
+            (await Change(f, 0, SelectionCommandKind.Toggle, 1)).Outcome);
+        var marked = f.Owner.Current;
+        Assert.True(Member(marked, 0, 1).Selected);
+        Assert.Null(Member(marked, 0, 1).SelectedInGroup);
+        Assert.False(Member(marked, 1, 1).Selected);
+        Assert.Equal(exactGroupId, Member(marked, 1, 1).SelectedInGroup);
+        Assert.Null(Member(marked, 1, 2).SelectedInGroup);
+        Assert.Empty(marked.Groups[1].SelectedOccurrenceIds);
+
+        Assert.Equal(ReviewCommandOutcome.Committed,
+            (await Change(f, 0, SelectionCommandKind.Toggle, 1)).Outcome);
+        var unmarked = f.Owner.Current;
+        Assert.False(Member(unmarked, 0, 1).Selected);
+        Assert.Null(Member(unmarked, 1, 1).SelectedInGroup);
+    }
+
+    [Fact]
+    public async Task AMarkIsRefusedWhileTheSamePhotoIsStillBeingCheckedInAnotherSetSoNothingIsProjected()
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Open(request)).Outcome);
+        await f.Run();
+        var near = request.Scan.Groups[1];
+        foreach (var group in request.Scan.Groups)
+        foreach (var member in group.Members)
+        {
+            if (group == near && member.Token.OccurrenceId == 1) continue;
+            await CommitEvidence(f, request, group, member);
+        }
+
+        var refused = await Change(f, 0, SelectionCommandKind.Toggle, 1);
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, refused.Outcome);
+        Assert.Equal(ReviewEligibilityState.PendingRevalidation, Member(f.Owner.Current, 1, 1).Eligibility);
+        Assert.False(Member(f.Owner.Current, 0, 1).Selected);
+        Assert.Null(Member(f.Owner.Current, 1, 1).SelectedInGroup);
+        Assert.Empty(f.Owner.Current.Groups[0].SelectedOccurrenceIds);
+    }
+
+    [Fact]
     public async Task CompleteCoverageMayApproveWhileTerminalNearFailuresRemainDisclosed()
     {
         await using var f = new ReviewFixture();
@@ -689,6 +742,9 @@ public sealed class ReviewCoordinatorTests
                 ? new(ScanStageState.NotApplicable, ScanReason.ReadFailure)
                 : new(ScanStageState.FailedRetryable, ScanReason.ReadFailure),
         };
+
+    private static ReviewMemberSnapshot Member(ReviewSnapshot snapshot, int groupIndex, long occurrenceId) =>
+        snapshot.Groups[groupIndex].Members.Single(member => member.Occurrence.Token.OccurrenceId == occurrenceId);
 
     private static async Task CommitEvidence(
         ReviewFixture fixture,

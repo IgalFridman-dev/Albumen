@@ -768,6 +768,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var previousOptions = photoSnapshot?.Options;
         var previousGuidance = ScanOptionsGuidance;
         Apply(snapshot.Scope);
+        if (snapshot.IsRecheckingScopeAfterCleanup && IsChecking)
+            ScopeStatus = "Checking the folder again after the cleanup";
         photoSnapshot = snapshot;
         if (IsScanBusy && IsClearScanDataConfirmationPending)
             RetainScanDataForActiveScan();
@@ -908,18 +910,38 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 .ToImmutableArray();
     }
 
-    private ImmutableArray<ReviewCategoryViewModel> ProjectReviewCategories(PhotoSiftSnapshot snapshot) =>
-    [
-        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Exact, 1),
-        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Near, 2),
-        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Uncertain, 3),
-        ProjectCouldNotAnalyzeCategory(snapshot.Scan, 4),
-    ];
+    private ImmutableArray<ReviewCategoryViewModel> ProjectReviewCategories(PhotoSiftSnapshot snapshot)
+    {
+        var setNames = ProjectSetNames(snapshot.Review);
+        string DescribeSet(Guid groupId) => setNames.TryGetValue(groupId, out var name) ? name : "another set";
+        return
+        [
+            ProjectCandidateCategory(snapshot, ReviewCategoryKind.Exact, 1, DescribeSet),
+            ProjectCandidateCategory(snapshot, ReviewCategoryKind.Near, 2, DescribeSet),
+            ProjectCandidateCategory(snapshot, ReviewCategoryKind.Uncertain, 3, DescribeSet),
+            ProjectCouldNotAnalyzeCategory(snapshot.Scan, 4),
+        ];
+    }
+
+    // "Look-alike set 2": the name a photo's mark is reported under in its other sets.
+    private static ImmutableDictionary<Guid, string> ProjectSetNames(ReviewSnapshot review)
+    {
+        var names = ImmutableDictionary.CreateBuilder<Guid, string>();
+        foreach (var category in new[] { ReviewCategoryKind.Exact, ReviewCategoryKind.Near, ReviewCategoryKind.Uncertain })
+        {
+            var position = 0;
+            foreach (var group in review.Groups.Where(group => InCategory(group.Candidate, category)))
+                names[group.Candidate.GroupId] =
+                    $"{ReviewCategoryNames.For(category)} set {(++position).ToString(CultureInfo.InvariantCulture)}";
+        }
+        return names.ToImmutable();
+    }
 
     private ReviewCategoryViewModel ProjectCandidateCategory(
         PhotoSiftSnapshot snapshot,
         ReviewCategoryKind category,
-        int positionInSet)
+        int positionInSet,
+        Func<Guid, string> describeSet)
     {
         var name = ReviewCategoryNames.For(category);
         if (snapshot.Review.Pin is not null)
@@ -934,7 +956,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                     index + 1,
                     groups.Length,
                     snapshot.Review.Status == ReviewStatus.Ready && !snapshot.Review.Sealed,
-                    (kind, ids) => ChangeReviewSelectionAsync(groups[index].Candidate.GroupId, kind, ids)),
+                    (kind, ids) => ChangeReviewSelectionAsync(groups[index].Candidate.GroupId, kind, ids),
+                    describeSet),
                 groupId => FindGroupIndex(groups, groupId));
         }
 
