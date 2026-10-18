@@ -129,7 +129,8 @@ public sealed class WpfReviewSelectionTests
 
         Assert.Equal(before, fixture.ViewModel.ExactGroups[0].SelectedOccurrenceIds);
         Assert.All(fixture.ViewModel.ExactGroups[0].Members, member => Assert.False(member.IsSelected));
-        Assert.Contains("stale", fixture.ViewModel.ReviewAnnouncement, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("The review changed in the meantime, so nothing was changed. Try again.",
+            fixture.ViewModel.ReviewAnnouncement);
     }
 
     [Fact]
