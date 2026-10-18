@@ -369,7 +369,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         { Status: ScanSessionStatus.Checking or ScanSessionStatus.Running };
     public bool CanOpenReview => photoSnapshot?.Scan.Pin is not null;
     public bool NearDuplicatesEnabled => photoSnapshot?.Options.Near == NearDuplicateMode.Conservative;
-    public string ExactPreset { get; } = "Always included. Copies must match byte for byte.";
     public string ScanOptionsGuidance => photoSnapshot?.Options is { } options
         ? options.IsValid
             ? (options.Near == NearDuplicateMode.Conservative
