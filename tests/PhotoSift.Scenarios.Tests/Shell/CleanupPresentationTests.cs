@@ -5,6 +5,7 @@ using PhotoSift.App;
 using PhotoSift.App.Shell;
 using PhotoSift.Application.Action;
 using PhotoSift.Application.Review;
+using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Workflow;
 using Xunit;
@@ -115,6 +116,29 @@ public sealed class CleanupPresentationTests
         Assert.Contains("can't tell whether 1 photo moved", fixture.ViewModel.ActionOutcomeText, StringComparison.Ordinal);
         Assert.Contains("Nothing is retried automatically", fixture.ViewModel.ActionOutcomeText, StringComparison.Ordinal);
         Assert.Equal(ActionResultTone.Warning, fixture.ViewModel.ActionOutcomeTone);
+    }
+
+    [Fact]
+    public void RecheckingTheFolderAfterACleanupSaysSoOnTheFolderPage()
+    {
+        var fixture = new ActionShellFixture();
+        fixture.Publish(ActionShellFixture.Snapshot(Item(1, ActionItemState.Recycled))
+            with { Status = ActionStatus.Complete, RecycledCount = 1 });
+        var checking = fixture.Scope.Current with
+        {
+            ScopeState = ScopeSessionState.Checking, Preflight = null, Revision = fixture.Scope.Current.Revision + 1,
+        };
+
+        fixture.PublishScope(checking, rechecking: true);
+        Assert.Equal("Checking the folder again after the cleanup", fixture.ViewModel.ScopeStatus);
+        Assert.True(fixture.ViewModel.IsChecking);
+        Assert.Equal(WorkflowPhase.ChooseScope, fixture.ViewModel.CurrentPhase);
+
+        fixture.PublishScope(checking with { ScopeState = ScopeSessionState.Ready }, rechecking: false);
+        Assert.Equal("Ready", fixture.ViewModel.ScopeStatus);
+
+        fixture.PublishScope(checking with { Revision = checking.Revision + 1 }, rechecking: false);
+        Assert.Equal("Checking location and access", fixture.ViewModel.ScopeStatus);
     }
 
     [Fact]
