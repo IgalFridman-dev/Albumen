@@ -45,7 +45,7 @@ Deleting someone's photos is a one-way door, so PhotoSift is designed around one
 | **Guided workflow** | Five phases (Choose Scope → Confirm Rules → Scan → Review → Approve Cleanup), each unlocked only when the previous one is valid. |
 | **Safe scope** | Preflight rejects network shares, cloud-only placeholders and protected system folders before scanning. |
 | **Review** | Exact and Near categories, virtualized groups, bounded previews, keyboard navigation and a suggested survivor you can override. |
-| **Action Records** | Every outcome survives relaunch and can be revalidated read-only later. |
+| **History** | Every cleanup's per-photo outcome survives relaunch and can be checked again read-only later. |
 | **Crash-safe scans** | Scan state is checkpointed in SQLite with reconciled accounting; an interrupted scan is closed safely and restarted fresh. |
 
 ## Architecture

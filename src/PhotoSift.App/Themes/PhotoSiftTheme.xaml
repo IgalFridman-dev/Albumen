@@ -597,4 +597,124 @@
             </DataTrigger>
         </Style.Triggers>
     </Style>
+
+    <!-- A result label colored by its Tag, an ActionResultTone (Waiting, Busy, Done, Skipped, Warning). -->
+    <Style x:Key="PhotoSift.ToneChip" TargetType="Border">
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="8,2" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Top" />
+        <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+        <Setter Property="TextElement.FontWeight" Value="SemiBold" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Busy">
+                <Setter Property="Background" Value="{StaticResource PhotoSift.AccentSoftBrush}" />
+                <Setter Property="TextElement.Foreground" Value="{StaticResource PhotoSift.AccentBrush}" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Done">
+                <Setter Property="Background" Value="{StaticResource PhotoSift.SuccessSoftBrush}" />
+                <Setter Property="TextElement.Foreground" Value="{StaticResource PhotoSift.SuccessBrush}" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Warning">
+                <Setter Property="Background" Value="{StaticResource PhotoSift.WarningSoftBrush}" />
+                <Setter Property="TextElement.Foreground" Value="{StaticResource PhotoSift.MaybeSimilarBrush}" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- A full-width message in the same tone colors, for the result of a cleanup. -->
+    <Style x:Key="PhotoSift.ToneBanner" TargetType="Border" BasedOn="{StaticResource PhotoSift.ToneChip}">
+        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="Padding" Value="16,12" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="TextElement.FontWeight" Value="Normal" />
+    </Style>
+
+    <!-- The top bar: the views as a row of pills above the selected view. -->
+    <ControlTemplate x:Key="PhotoSift.HighContrastTopBarItemTemplate" TargetType="TabItem">
+        <Border x:Name="Chrome" CornerRadius="8" Padding="{TemplateBinding Padding}" Margin="0,0,2,0" BorderThickness="1"
+                Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" BorderBrush="Transparent">
+            <ContentPresenter x:Name="Header" ContentSource="Header" RecognizesAccessKey="True" HorizontalAlignment="Center"
+                              TextElement.FontWeight="SemiBold"
+                              TextElement.Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                <Setter TargetName="Header" Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+    <!-- A tab's content inherits the tab's text properties, so the header is styled on its
+         presenter, never on the TabItem itself. -->
+    <Style x:Key="PhotoSift.TopBarItem" TargetType="TabItem">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource PhotoSift.FocusVisual}" />
+        <Setter Property="Padding" Value="14,4" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabItem">
+                    <Border x:Name="Chrome" CornerRadius="8" Padding="{TemplateBinding Padding}" Margin="0,0,2,0"
+                            Background="Transparent" BorderThickness="1" BorderBrush="Transparent" SnapsToDevicePixels="True">
+                        <ContentPresenter x:Name="Header" ContentSource="Header" RecognizesAccessKey="True" HorizontalAlignment="Center"
+                                          TextElement.FontWeight="SemiBold"
+                                          TextElement.Foreground="{StaticResource PhotoSift.MutedTextBrush}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource PhotoSift.HoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource PhotoSift.BorderBrush}" />
+                            <Setter TargetName="Header" Property="TextElement.Foreground" Value="{StaticResource PhotoSift.AccentBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                <Setter Property="Template" Value="{StaticResource PhotoSift.HighContrastTopBarItemTemplate}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="PhotoSift.TopBar" TargetType="TabControl">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="ItemContainerStyle" Value="{StaticResource PhotoSift.TopBarItem}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabControl">
+                    <Grid KeyboardNavigation.TabNavigation="Local" SnapsToDevicePixels="True">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border x:Name="Strip" HorizontalAlignment="Left" Margin="8,0,0,0" Padding="3" CornerRadius="10"
+                                Background="{StaticResource PhotoSift.SubtleFillBrush}">
+                            <TabPanel IsItemsHost="True" KeyboardNavigation.TabIndex="1" />
+                        </Border>
+                        <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Row="1" ContentSource="SelectedContent"
+                                          Margin="{TemplateBinding Padding}" KeyboardNavigation.TabNavigation="Local" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                            <Setter TargetName="Strip" Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                            <Setter TargetName="Strip" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                            <Setter TargetName="Strip" Property="BorderThickness" Value="1" />
+                        </DataTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 </ResourceDictionary>
