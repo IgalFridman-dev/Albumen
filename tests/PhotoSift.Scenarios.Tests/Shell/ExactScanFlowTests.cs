@@ -318,6 +318,7 @@ internal sealed class ExactShellFixture
             Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current.Review));
         public Task RevalidateUnknownAsync(Guid requestId, CancellationToken token) => Task.CompletedTask;
         public Task NavigateAsync(WorkflowPhase phase) => Act(phase.ToString());
+        public Task ContinueReviewAsync() => Act("continue-review");
         public async ValueTask DisposeAsync()
         {
             DisposeCalls++;

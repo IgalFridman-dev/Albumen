@@ -175,6 +175,7 @@ public sealed class E2S1LocalDataFailureTests
         public Task OpenReviewAsync() => Task.CompletedTask;
         public Task RevalidateUnknownAsync(Guid requestId, CancellationToken token) => Task.CompletedTask;
         public Task NavigateAsync(WorkflowPhase phase) => Task.CompletedTask;
+        public Task ContinueReviewAsync() => Task.CompletedTask;
         public Task<ReviewCommandResult> ChangeReviewSelectionAsync(SelectionCommand command, CancellationToken token) =>
             Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current.Review));
         public Task<ReviewCommandResult> AffirmReviewOverrideAsync(OverrideAffirmationCommand command, CancellationToken token) =>
