@@ -48,6 +48,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string blockingNoticeAutomationName = "Folder can't be used";
     private string instruction = string.Empty;
     private string scopeStatus = string.Empty;
+    private string folderStatusSentence = string.Empty;
+    private string folderName = string.Empty;
+    private string subfoldersCaption = string.Empty;
     private string selectedPath = string.Empty;
     private string resolvedPath = string.Empty;
     private string supportedCount = string.Empty;
@@ -366,7 +369,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         { Status: ScanSessionStatus.Checking or ScanSessionStatus.Running };
     public bool CanOpenReview => photoSnapshot?.Scan.Pin is not null;
     public bool NearDuplicatesEnabled => photoSnapshot?.Options.Near == NearDuplicateMode.Conservative;
-    public string ExactPreset { get; } = "Always included. Copies must match byte for byte.";
     public string ScanOptionsGuidance => photoSnapshot?.Options is { } options
         ? options.IsValid
             ? (options.Near == NearDuplicateMode.Conservative
@@ -377,6 +379,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 : string.Empty)
             : options.ValidationGuidance
         : "Identical copies are always included. Look-alikes are on unless you turn them off. Nothing is marked for you.";
+    // The guidance is a live region, so it is shown only when it has something to say:
+    // invalid options, or the warning that changing an option clears the current results.
+    public bool HasScanOptionsGuidance => photoSnapshot is { } snapshot
+        && (!snapshot.Options.IsValid || snapshot.Scan.Pin is not null);
     public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";
     // Announced as a live region, so it changes only when the stage changes, never per photo.
     public string ScanStatus => photoSnapshot is { Scan: var scan } snapshot
@@ -686,6 +692,26 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         private set => SetField(ref scopeStatus, value);
     }
 
+    // The one sentence in the folder card's status strip. It is set before ScopeStatus so
+    // the live-region announcement queued on ScopeStatus already reads the new sentence.
+    public string FolderStatusSentence
+    {
+        get => folderStatusSentence;
+        private set => SetField(ref folderStatusSentence, value);
+    }
+
+    public string FolderName
+    {
+        get => folderName;
+        private set => SetField(ref folderName, value);
+    }
+
+    public string SubfoldersCaption
+    {
+        get => subfoldersCaption;
+        private set => SetField(ref subfoldersCaption, value);
+    }
+
     public string SelectedPath
     {
         get => selectedPath;
@@ -805,9 +831,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var previousCanChangeOptions = CanChangeScanOptions;
         var previousOptions = photoSnapshot?.Options;
         var previousGuidance = ScanOptionsGuidance;
+        var previousHasGuidance = HasScanOptionsGuidance;
         Apply(snapshot.Scope);
         if (snapshot.IsRecheckingScopeAfterCleanup && IsChecking)
+        {
+            FolderStatusSentence = "Checking the folder again after the cleanup.";
             ScopeStatus = "Checking the folder again after the cleanup";
+        }
         photoSnapshot = snapshot;
         if (IsScanBusy && IsClearScanDataConfirmationPending)
             RetainScanDataForActiveScan();
@@ -854,6 +884,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ContinueReviewCommand.NotifyCanExecuteChanged();
         if (previousOptions != snapshot.Options) OnPropertyChanged(nameof(NearDuplicatesEnabled));
         if (previousGuidance != ScanOptionsGuidance) OnPropertyChanged(nameof(ScanOptionsGuidance));
+        if (previousHasGuidance != HasScanOptionsGuidance) OnPropertyChanged(nameof(HasScanOptionsGuidance));
         if (!preserveReviewProjection)
         {
             OnPropertyChanged(nameof(ExactGroups));
@@ -1787,6 +1818,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         Phases = Project(snapshot.Phases);
         Instruction = snapshot.Instruction;
+        FolderName = ProjectFolderName(snapshot.Selection?.SelectedPath);
+        SubfoldersCaption = snapshot.Selection is null
+            ? "Also check folders inside the chosen folder."
+            : $"Also check folders inside {FolderName}.";
+        FolderStatusSentence = ProjectStatusSentence(
+            snapshot.ScopeState, snapshot.Preflight?.CompleteCounts?.Supported);
         ScopeStatus = snapshot.ScopeState switch
         {
             ScopeSessionState.Cold => "Choose one local folder",
@@ -1821,6 +1858,30 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         IsCanceled = snapshot.ScopeState is ScopeSessionState.Canceled;
         currentSnapshot = snapshot;
     }
+
+    private static string ProjectFolderName(string? selectedPath)
+    {
+        if (string.IsNullOrEmpty(selectedPath)) return "No folder chosen yet";
+        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(selectedPath));
+        return string.IsNullOrEmpty(name) ? selectedPath : name;
+    }
+
+    private static string ProjectStatusSentence(ScopeSessionState state, int? supported) =>
+        state switch
+        {
+            ScopeSessionState.Cold => "Choose a folder to start.",
+            ScopeSessionState.Checking => "Checking location and access.",
+            ScopeSessionState.Ready => supported switch
+            {
+                null => "Ready to scan.",
+                0 => "No JPEG or PNG photos were found in this folder.",
+                1 => "Ready to scan. 1 JPEG or PNG photo found.",
+                int count => $"Ready to scan. {count.ToString("N0", CultureInfo.InvariantCulture)} JPEG and PNG photos found.",
+            },
+            ScopeSessionState.Blocked => "This folder can't be scanned yet.",
+            ScopeSessionState.Canceled => "The folder wasn't checked. Check it again or choose another folder.",
+            _ => throw new InvalidOperationException($"Unknown Scope state: {state}"),
+        };
 
     private static bool ProjectRecursion(ScopeSelection? selection)
     {
