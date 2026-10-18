@@ -170,6 +170,95 @@ public sealed class PhotoSiftWorkflowTests
         Assert.True(workflow.Current.IsRecheckingScopeAfterCleanup);
     }
 
+    // PM-013: a settled cleanup does not end the session. The user continues with
+    // the same scan, without the photos that reached the Recycle Bin.
+    [Fact]
+    public async Task ContinuingAfterACleanupReopensTheReviewWithoutTheRemovedPhotosAndApprovesANewCleanup()
+    {
+        await using var f = new ReviewFixture();
+        var (workflow, action, request) = await SettleCleanupAsync(f, new ScopeOwner(f.Request.Scope), ActionItemState.Recycled);
+        var sealedReview = f.Owner.Current;
+        f.Executor.Arrived = ScanTestData.Signal<ReviewTestRun>();
+
+        await f.Pump(workflow.ContinueReviewAsync());
+
+        var review = f.Owner.Current;
+        Assert.NotEqual(sealedReview.Pin, review.Pin);
+        Assert.Equal(sealedReview.Pin!.Scan, review.Pin!.Scan);
+        Assert.False(review.Sealed);
+        Assert.Equal([2L, 3L], Assert.Single(review.Groups).Members.Select(member => member.Occurrence.Token.OccurrenceId));
+        Assert.Equal(WorkflowPhase.Review, workflow.Current.CurrentPhase);
+        Assert.Same(review, workflow.Current.Review);
+        Assert.Same(action.Current, ProjectedAction(workflow));
+        Assert.Equal(request.RequestId, ProjectedActionReview(workflow).ApprovedRequest!.RequestId);
+        await f.Eligible(2, 3);
+        await f.Change(f.Command(SelectionCommandKind.Toggle, 2));
+        var command = new ApproveSelectionCommand(f.Owner.Current.Pin!, f.Owner.Current.SelectionRevision,
+            Guid.NewGuid(), DateTimeOffset.UnixEpoch);
+
+        await f.Pump(workflow.ApproveReviewAsync(command, TestContext.Current.CancellationToken));
+
+        Assert.Equal(2, action.Requests.Count);
+        var again = action.Requests[1];
+        Assert.NotEqual(request.RequestId, again.RequestId);
+        Assert.Equal(review.Pin.ReviewSessionId, again.ReviewSessionId);
+        Assert.Equal([2L], again.SelectedOccurrenceIds);
+        Assert.Equal(f.Request.Scan.Groups[0].Members[1].ResolvedPath, Assert.Single(again.Items).ResolvedPath);
+        action.Publish(new ActionSnapshot(again.RequestId, ActionStatus.Claiming,
+            [new(again.Items[0], null, ActionItemState.Waiting, ActionSafetyReason.None)], 0, 0, 0, 0, 0, ActionSafetyReason.None));
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ApproveCleanup));
+        Assert.Equal(again.RequestId, ProjectedAction(workflow).RequestId);
+        Assert.Equal(again.RequestId, ProjectedActionReview(workflow).ApprovedRequest!.RequestId);
+    }
+
+    [Fact]
+    public async Task ContinuingAfterAnUncertainOutcomeClosesThatSetUntilTheNextScan()
+    {
+        await using var f = new ReviewFixture();
+        var (workflow, action, request) = await SettleCleanupAsync(f, new ScopeOwner(f.Request.Scope),
+            ActionItemState.Recycled, settle: false);
+        action.Publish(new ActionSnapshot(request.RequestId, ActionStatus.Incomplete,
+            [new(request.Items[0], Guid.NewGuid(), ActionItemState.UnknownPendingRevalidation, ActionSafetyReason.None)],
+            1, 1, 0, 0, 1, ActionSafetyReason.None));
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ApproveCleanup));
+        f.Executor.Arrived = ScanTestData.Signal<ReviewTestRun>();
+
+        await f.Pump(workflow.ContinueReviewAsync());
+
+        var review = f.Owner.Current;
+        Assert.False(review.Sealed);
+        var group = Assert.Single(review.Groups);
+        Assert.True(group.Closed);
+        Assert.Equal([1L, 2L, 3L], group.Members.Select(member => member.Occurrence.Token.OccurrenceId));
+        Assert.Equal(ReviewStatus.Ready, review.Status);
+        Assert.Equal(WorkflowPhase.Review, workflow.Current.CurrentPhase);
+        Assert.Same(review, workflow.Current.Review);
+    }
+
+    [Theory]
+    [InlineData("faulted")]
+    [InlineData("running")]
+    public async Task ContinuingIsIgnoredWhileTheCleanupRunsOrAfterItStopped(string state)
+    {
+        await using var f = new ReviewFixture();
+        var (workflow, action, request) = await SettleCleanupAsync(f, new ScopeOwner(f.Request.Scope),
+            ActionItemState.Recycled, settle: false);
+        if (state == "faulted")
+        {
+            action.Publish(Settled(request, ActionItemState.NotRemoved) with
+            { Status = ActionStatus.Faulted, FaultReason = ActionSafetyReason.ProgrammingFault });
+            await f.Pump(workflow.NavigateAsync(WorkflowPhase.ApproveCleanup));
+        }
+        var before = f.Owner.Current;
+
+        await f.Pump(workflow.ContinueReviewAsync());
+
+        Assert.Same(before, f.Owner.Current);
+        Assert.True(f.Owner.Current.Sealed);
+        Assert.Equal(WorkflowPhase.ApproveCleanup, workflow.Current.CurrentPhase);
+        Assert.Single(f.Executor.Runs);
+    }
+
     private static async Task<(PhotoSiftWorkflow Workflow, DeferredAction Action, ApprovedActionRequest Request)> SettleCleanupAsync(
         ReviewFixture f, ScopeOwner scope, ActionItemState outcome, bool settle = true)
     {

@@ -304,6 +304,135 @@ public sealed class ReviewCoordinatorTests
         Assert.Empty(f.Owner.Current.Groups[0].SelectedOccurrenceIds);
     }
 
+    // PM-013: after a cleanup the user keeps reviewing the same scan, without the
+    // photos that reached the Recycle Bin and with no marks carried over.
+    [Fact]
+    public async Task AContinuationAfterTheCleanupOpensANewSessionWithoutTheRemovedPhotos()
+    {
+        await using var f = new ReviewFixture();
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Open()).Outcome);
+        await f.Eligible(1, 2, 3);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Change(f.Command(SelectionCommandKind.Toggle, 1))).Outcome);
+        var approved = await Approve(f);
+        var sealedSession = f.Owner.Current.Pin!;
+        var firstRun = Assert.Single(f.Executor.Runs);
+        f.Executor.Arrived = ScanTestData.Signal<ReviewTestRun>();
+
+        var continued = await f.Open(Continuation(f.Request, approved.RequestId, excluded: [1]));
+
+        Assert.Equal(ReviewCommandOutcome.Committed, continued.Outcome);
+        var session = continued.Snapshot.Pin!;
+        Assert.NotEqual(sealedSession.ReviewSessionId, session.ReviewSessionId);
+        Assert.Equal(sealedSession.Scan, session.Scan);
+        Assert.False(continued.Snapshot.Sealed);
+        Assert.Null(continued.Snapshot.ApprovedRequest);
+        var group = Assert.Single(continued.Snapshot.Groups);
+        Assert.Same(f.Request.Scan.Groups[0], group.Candidate);
+        Assert.False(group.Closed);
+        Assert.Equal([2L, 3L], group.Members.Select(member => member.Occurrence.Token.OccurrenceId));
+        Assert.All(group.Members, member => Assert.Equal(ReviewEligibilityState.PendingRevalidation, member.Eligibility));
+        Assert.Empty(group.SelectedOccurrenceIds);
+        var run = await f.Run();
+        Assert.NotSame(firstRun, run);
+        Assert.Equal([2L, 3L], Assert.Single(run.Groups).Members.Select(member => member.Token.OccurrenceId));
+        await f.Pump(firstRun.Disposed.Task);
+        await f.Eligible(2, 3);
+        Assert.Equal(ReviewStatus.Ready, f.Owner.Current.Status);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Change(f.Command(SelectionCommandKind.Toggle, 2))).Outcome);
+        var again = await Approve(f);
+        Assert.NotEqual(approved.RequestId, again.RequestId);
+        Assert.Equal(session.ReviewSessionId, again.ReviewSessionId);
+        Assert.Equal([2L], again.SelectedOccurrenceIds);
+    }
+
+    [Theory]
+    [InlineData("other-cleanup")]
+    [InlineData("not-sealed")]
+    public async Task AContinuationThatDoesNotMatchTheSealedReviewIsStale(string mismatch)
+    {
+        await using var f = new ReviewFixture();
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Open()).Outcome);
+        await f.Eligible(1, 2, 3);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Change(f.Command(SelectionCommandKind.Toggle, 1))).Outcome);
+        if (mismatch == "other-cleanup") await Approve(f);
+        var before = f.Owner.Current;
+
+        var continued = await f.Open(Continuation(f.Request, Guid.NewGuid(), excluded: [1]));
+
+        Assert.Equal(ReviewCommandOutcome.Stale, continued.Outcome);
+        Assert.Same(before, f.Owner.Current);
+        Assert.Single(f.Executor.Runs);
+    }
+
+    [Fact]
+    public async Task ASetLeftWithOnePhotoOrAnUncertainOutcomeIsClosedUntilTheNextScan()
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Open(request)).Outcome);
+        await f.Run();
+        foreach (var group in request.Scan.Groups)
+        foreach (var member in group.Members)
+            await CommitEvidence(f, request, group, member);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await Change(f, 0, SelectionCommandKind.Toggle, 1)).Outcome);
+        var approved = await Approve(f);
+        var near = request.Scan.Groups[1];
+        var uncertain = request.Scan.Groups[2];
+        f.Executor.Arrived = ScanTestData.Signal<ReviewTestRun>();
+
+        var continued = await f.Open(Continuation(request, approved.RequestId, excluded: [1], closed: [uncertain.GroupId]));
+
+        Assert.Equal(ReviewCommandOutcome.Committed, continued.Outcome);
+        var snapshot = continued.Snapshot;
+        Assert.Equal(request.Scan.Groups, snapshot.Groups.Select(group => group.Candidate));
+        // The identical-copies set lost one of its two photos, so there is nothing left to compare.
+        Assert.True(snapshot.Groups[0].Closed);
+        Assert.Equal([2L], snapshot.Groups[0].Members.Select(member => member.Occurrence.Token.OccurrenceId));
+        Assert.False(snapshot.Groups[1].Closed);
+        Assert.Equal([2L, 3L], snapshot.Groups[1].Members.Select(member => member.Occurrence.Token.OccurrenceId));
+        Assert.True(snapshot.Groups[2].Closed);
+        Assert.Equal([3L, 4L], snapshot.Groups[2].Members.Select(member => member.Occurrence.Token.OccurrenceId));
+        Assert.All(snapshot.Groups.Where(group => group.Closed).SelectMany(group => group.Members),
+            member => Assert.Equal(ReviewEligibilityState.Unavailable, member.Eligibility));
+        Assert.Equal(2, snapshot.Unresolved.PendingReviewMembers);
+        Assert.Equal(0, snapshot.Unresolved.UnavailableReviewMembers);
+        var run = await f.Run();
+        Assert.Equal([near.GroupId], run.Groups.Select(group => group.GroupId));
+        Assert.Equal([2L, 3L], run.Groups[0].Members.Select(member => member.Token.OccurrenceId));
+        foreach (var member in near.Members.Where(member => member.Token.OccurrenceId != 1))
+            await CommitEvidence(f, request, near, member);
+        Assert.Equal(ReviewStatus.Ready, f.Owner.Current.Status);
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, (await Change(f, 0, SelectionCommandKind.Toggle, 2)).Outcome);
+        Assert.Equal(ReviewCommandOutcome.Invalid, (await Change(f, 2, SelectionCommandKind.Toggle, 3)).Outcome);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await Change(f, 1, SelectionCommandKind.Toggle, 2)).Outcome);
+        var again = await Approve(f);
+        Assert.Equal([2L], again.SelectedOccurrenceIds);
+        Assert.Equal(near.GroupId, Assert.Single(again.Items).GroupId);
+    }
+
+    [Theory]
+    [InlineData("unknown-photo")]
+    [InlineData("unknown-set")]
+    [InlineData("no-cleanup")]
+    public async Task AMalformedContinuationIsInvalid(string mismatch)
+    {
+        await using var f = new ReviewFixture();
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Open()).Outcome);
+        await f.Eligible(1, 2, 3);
+        Assert.Equal(ReviewCommandOutcome.Committed, (await f.Change(f.Command(SelectionCommandKind.Toggle, 1))).Outcome);
+        var approved = await Approve(f);
+        var request = mismatch switch
+        {
+            "unknown-photo" => Continuation(f.Request, approved.RequestId, excluded: [1, 99]),
+            "unknown-set" => Continuation(f.Request, approved.RequestId, excluded: [1], closed: [Guid.NewGuid()]),
+            _ => Continuation(f.Request, approved.RequestId, excluded: [1]) with { ContinuesRequestId = null },
+        };
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, (await f.Open(request)).Outcome);
+        Assert.Single(f.Executor.Runs);
+    }
+
     [Fact]
     public async Task CompleteCoverageMayApproveWhileTerminalNearFailuresRemainDisclosed()
     {
@@ -743,6 +872,25 @@ public sealed class ReviewCoordinatorTests
                 : new(ScanStageState.FailedRetryable, ScanReason.ReadFailure),
         };
 
+    private static async Task<ApprovedActionRequest> Approve(ReviewFixture fixture)
+    {
+        var snapshot = fixture.Owner.Current;
+        var approval = fixture.Owner.ApproveAsync(new(snapshot.Pin!, snapshot.SelectionRevision,
+            Guid.NewGuid(), DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
+        await fixture.Pump(approval);
+        var approved = await approval;
+        Assert.Equal(ReviewCommandOutcome.Approved, approved.Outcome);
+        return approved.ApprovedRequest!;
+    }
+
+    internal static ReviewOpenRequest Continuation(ReviewOpenRequest request, Guid continues,
+        ImmutableArray<long> excluded = default, ImmutableArray<Guid> closed = default) => request with
+        {
+            ContinuesRequestId = continues,
+            ExcludedOccurrenceIds = excluded.IsDefault ? ImmutableHashSet<long>.Empty : excluded.ToImmutableHashSet(),
+            ClosedGroupIds = closed.IsDefault ? ImmutableHashSet<Guid>.Empty : closed.ToImmutableHashSet(),
+        };
+
     private static ReviewMemberSnapshot Member(ReviewSnapshot snapshot, int groupIndex, long occurrenceId) =>
         snapshot.Groups[groupIndex].Members.Single(member => member.Occurrence.Token.OccurrenceId == occurrenceId);
 
@@ -909,7 +1057,7 @@ internal sealed class ReviewExecutor : IReviewRevalidationExecutor
     internal TaskCompletionSource<ReviewTestRun> Arrived { get; set; } = ScanTestData.Signal<ReviewTestRun>();
     public IReviewRun Start(ReviewSessionPin session, ScanRunContext context, ImmutableArray<CandidateGroup> groups, IReviewResultSink sink)
     {
-        var run = new ReviewTestRun(session, sink);
+        var run = new ReviewTestRun(session, sink) { Groups = groups };
         Runs.Enqueue(run);
         Arrived.TrySetResult(run);
         return run;
@@ -920,6 +1068,7 @@ internal sealed class ReviewTestRun(ReviewSessionPin pin, IReviewResultSink sink
 {
     internal ReviewSessionPin Pin { get; } = pin;
     internal IReviewResultSink Sink { get; } = sink;
+    internal ImmutableArray<CandidateGroup> Groups { get; init; } = [];
     internal TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal TaskCompletionSource Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal Func<Task>? OnCancel { get; set; }
