@@ -1002,6 +1002,38 @@ public sealed class PhotoSiftWorkflowTests
     }
 
     [Fact]
+    public async Task OptionsCanChangeOnTheFolderStepWithoutLeavingIt()
+    {
+        var scheduler = new ManualScheduler();
+        var scan = new ScanOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(Ready(1)), scan, scheduler);
+        var exactOnly = new ScanOptions(ExactDuplicateMode.Enabled, NearDuplicateMode.Disabled);
+
+        await scheduler.Finish(workflow.SetScanOptionsAsync(exactOnly));
+
+        Assert.Equal(WorkflowPhase.ChooseScope, workflow.Current.CurrentPhase);
+        Assert.Equal(exactOnly, workflow.Current.Options);
+        Assert.Null(workflow.Current.Rules);
+        await scheduler.Finish(workflow.ContinueAsync());
+        await scheduler.Finish(workflow.ConfirmExactRulesAsync());
+        await scheduler.Finish(workflow.StartScanAsync());
+        Assert.Equal(exactOnly, Assert.Single(scan.Starts).Options);
+    }
+
+    [Fact]
+    public async Task OptionsCannotChangeBeforeTheFolderIsReady()
+    {
+        var scheduler = new ManualScheduler();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(new(InitialWorkflow.Create(), "Choose")), new ScanOwner(), scheduler);
+        var before = workflow.Current.Options;
+
+        await scheduler.Finish(workflow.SetScanOptionsAsync(
+            new(ExactDuplicateMode.Enabled, NearDuplicateMode.Disabled)));
+
+        Assert.Equal(before, workflow.Current.Options);
+    }
+
+    [Fact]
     public async Task OptionChangeRevokesPriorGroupsAndPinsFreshRevisionToNextScan()
     {
         var scheduler = new ManualScheduler();
