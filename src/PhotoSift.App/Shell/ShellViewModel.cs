@@ -351,15 +351,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         : "Exact is always enabled. Near defaults to the fixed Conservative profile. Selection stays manual.";
     public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";
     // Announced as a live region, so it changes only when the stage changes, never per photo.
-    public string ScanStatus => photoSnapshot?.Scan is { } scan
+    public string ScanStatus => photoSnapshot is { Scan: var scan } snapshot
         ? scan.Status switch
         {
             ScanSessionStatus.Idle => "Not started",
             ScanSessionStatus.Checking => "Getting ready: checking the folder",
             ScanSessionStatus.Running => scan.Enumeration.State is ScanStageState.Pending or ScanStageState.Running
                 ? "Scanning: finding photos"
-                : scan.Counts.Outstanding > 0 ? "Scanning: comparing photos" : "Scanning: finishing up",
-            ScanSessionStatus.Complete => "Finished: every file was checked",
+                : scan.Counts.Outstanding > 0 ? "Scanning: reading photos"
+                : IsComparingLookAlikes(snapshot) ? "Scanning: comparing look-alikes" : "Scanning: finishing up",
+            ScanSessionStatus.Complete => "Finished: every file in the folder was included",
             ScanSessionStatus.Incomplete => "Stopped early: some files weren't checked",
             ScanSessionStatus.Faulted => "Stopped by an error: results may be incomplete",
             _ => throw new InvalidOperationException($"Unknown Scan status: {scan.Status}"),
@@ -378,9 +379,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public string ScanCountsText => photoSnapshot is { Scan.Counts: var count }
         ? FormatScanCounts(count) : string.Empty;
     public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
-        ? "Scan complete: every file in the folder was checked. Unsupported, failed, and canceled files are listed separately."
+        ? "Scan complete: every file in the folder was included. Unsupported, failed, and canceled files are listed separately."
         : "Partial results: the scan is incomplete, so these results don't cover every file in the folder.";
-    public string ReviewDisclaimer { get; } = "Results show your photos as they were when scanned, so scan again after files change. Results are kept in memory only and are gone after PhotoSift closes.";
+    public string ReviewDisclaimer { get; } = "Results show your photos as they were when scanned, so scan again after files change. Results aren't restored after PhotoSift closes.";
     public ImmutableArray<ExactGroupViewModel> ExactGroups =>
         legacyExactGroups ??= ProjectLegacyExactGroups();
     public ImmutableArray<ScanOccurrenceViewModel> CouldNotAnalyze =>
@@ -1444,7 +1445,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         actionRecoveryAnnouncement = active is not null
             ? $"{active.OriginalPath}. {active.StatusText}"
             : HasActionRecoveryDisclosure
-                ? "History updated. PhotoSift still can't tell whether some photos moved; revalidate them to find out."
+                ? "History updated. Some outcomes are unknown pending revalidation."
                 : HasActionRecoveryRecords ? "History updated." : string.Empty;
         OnPropertyChanged(nameof(ActionRecoveryAnnouncement));
     }
@@ -1484,7 +1485,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (reviewDialog is null || invokingFocus is null)
         {
-            SetReviewAnnouncement("To remove the last kept photo of a set, use the Keep or Remove switch on that photo.");
+            SetReviewAnnouncement("Removing the last kept photo of a set needs your confirmation, which couldn't be shown, so nothing changed.");
             return;
         }
 
@@ -1583,13 +1584,21 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private static string FormatScanCounts(PhotoSift.Application.Scan.ScanCounts count)
     {
-        var done = count.Discovered - count.Outstanding;
+        var done = count.Discovered - count.Outstanding - count.Canceled;
         var text = $"{done.ToString("N0", CultureInfo.InvariantCulture)} of {count.Discovered.ToString("N0", CultureInfo.InvariantCulture)} files checked";
         if (count.Unsupported > 0) text += $" · {count.Unsupported.ToString("N0", CultureInfo.InvariantCulture)} unsupported";
         if (count.Failed > 0) text += $" · {count.Failed.ToString("N0", CultureInfo.InvariantCulture)} failed";
         if (count.Canceled > 0) text += $" · {count.Canceled.ToString("N0", CultureInfo.InvariantCulture)} canceled";
         return text;
     }
+
+    // Exact work is counted as done before the look-alike pass, which runs afterwards
+    // under the same Running status and leaves visual features pending until it reaches a photo.
+    private static bool IsComparingLookAlikes(PhotoSiftSnapshot snapshot) =>
+        snapshot.Rules?.Options.Near == NearDuplicateMode.Conservative
+        && snapshot.Scan.Occurrences.Any(row => row.Exact.State == ScanStageState.Succeeded
+            && (row.VisualFeatures.State is ScanStageState.Pending or ScanStageState.Running
+                || row.NearDuplicate.State is ScanStageState.Pending or ScanStageState.Running));
 
     private static string PhotoCount(long count) => count == 1
         ? "1 photo"
