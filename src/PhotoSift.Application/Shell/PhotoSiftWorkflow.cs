@@ -119,6 +119,80 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         }
     }
 
+    // PM-013: a settled cleanup does not end the session. The review of the same
+    // scan reopens without the photos that reached the Recycle Bin, with no marks
+    // carried over; a set with an uncertain outcome closes until the next scan. The
+    // Review owner refuses the continuation unless its live review is the sealed
+    // one for that cleanup, so this never replaces a review the user moved on to.
+    public Task ContinueReviewAsync() => ObserveCommandAsync(async () =>
+    {
+        var request = await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            return CaptureContinuationRequest();
+        }).ConfigureAwait(false);
+        if (request is null) return;
+        var result = await review!.OpenAsync(request, CancellationToken.None).ConfigureAwait(false);
+        await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            var acceptedScan = scan.Current;
+            var acceptedReview = review.Current;
+            if (result.Outcome != ReviewCommandOutcome.Committed || current.Scope != request.Scope
+                || current.Rules != request.Rules || acceptedScan.Pin != request.Scan.Pin
+                || !SameScan(acceptedScan, request.Scan) || acceptedReview.Pin != result.Snapshot.Pin
+                || !ReviewMatchesScan(acceptedReview, acceptedScan)) return;
+            Publish(current with { Scan = acceptedScan, Review = acceptedReview, CurrentPhase = WorkflowPhase.Review });
+        }).ConfigureAwait(false);
+    });
+
+    // Called only in a workflow data turn. Removed photos and closed sets from
+    // earlier continuations of this scan are carried over from the live review.
+    private ReviewOpenRequest? CaptureContinuationRequest()
+    {
+        if (review is null || action is null) return null;
+        var settled = current.Action;
+        if (settled.RequestId is not { } requestId
+            || settled.Status is not (ActionStatus.Complete or ActionStatus.Incomplete)) return null;
+        var live = review.Current;
+        if (!live.Sealed || live.Status == ReviewStatus.Faulted || live.Pin is not { } pin
+            || live.ApprovedRequest?.RequestId != requestId) return null;
+        var acceptedScan = scan.Current;
+        if (acceptedScan.Pin != pin.Scan || !ReviewMatchesScan(live, acceptedScan)) return null;
+        if (CaptureReviewRequest(acceptedScan) is not { } request) return null;
+        var excluded = ImmutableHashSet.CreateBuilder<long>();
+        var closed = ImmutableHashSet.CreateBuilder<Guid>();
+        foreach (var group in live.Groups)
+        {
+            if (group.Closed) closed.Add(group.Candidate.GroupId);
+            var reviewed = group.Members.Select(member => member.Occurrence.Token.OccurrenceId).ToHashSet();
+            foreach (var member in group.Candidate.Members)
+                if (!reviewed.Contains(member.Token.OccurrenceId)) excluded.Add(member.Token.OccurrenceId);
+        }
+        foreach (var item in settled.Items)
+        {
+            switch (item.State)
+            {
+                case ActionItemState.Recycled:
+                    excluded.Add(item.Item.Occurrence.OccurrenceId);
+                    break;
+                case ActionItemState.NotRemoved or ActionItemState.NotRequested:
+                    break;
+                default:
+                    // Executing, interrupted or unknown: the Action treats the set's
+                    // other photos as dependent on this one, and so does the review.
+                    closed.Add(item.Item.GroupId);
+                    break;
+            }
+        }
+        return request with
+        {
+            ExcludedOccurrenceIds = excluded.ToImmutable(),
+            ClosedGroupIds = closed.ToImmutable(),
+            ContinuesRequestId = requestId,
+        };
+    }
+
     public Task ContinueAsync() => ObserveCommandAsync(() => inbox.InvokeAsync(() =>
     {
         RefreshScope();

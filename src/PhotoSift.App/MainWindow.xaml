@@ -1061,6 +1061,11 @@
                     <TextBlock x:Name="ReviewStatusText" Margin="0,6,0,0" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
                                AutomationProperties.Name="Review status" AutomationProperties.ItemStatus="{Binding ReviewStatusText}"
                                AutomationProperties.LiveSetting="Polite" />
+                    <!-- What a review continued after a cleanup leaves out (PM-013). -->
+                    <TextBlock x:Name="ReviewContinuationText" Margin="0,6,0,0" Text="{Binding ReviewContinuationText}" TextWrapping="Wrap"
+                               Style="{StaticResource PhotoSift.MutedText}"
+                               Visibility="{Binding HasReviewContinuation, Converter={StaticResource BooleanToVisibilityConverter}}"
+                               AutomationProperties.Name="Review continuation" />
                     <DockPanel Margin="0,8,0,4">
                         <Button x:Name="ReviewBackButton" Content="Back" MinHeight="34" Padding="14,4" Margin="0,0,10,0"
                                 Style="{StaticResource PhotoSift.Button}"
@@ -1361,6 +1366,24 @@
                             Visibility="{Binding HasActionOutcome, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <TextBlock Text="{Binding ActionOutcomeText}" TextWrapping="Wrap" />
                     </Border>
+                    <!-- A finished cleanup is not the end of the session: keep reviewing the
+                         same scan without the removed photos, or start over. -->
+                    <StackPanel x:Name="ActionNextStepsPanel" Margin="0,12,0,0"
+                                Visibility="{Binding HasActionOutcome, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock x:Name="ContinueReviewHintText" Text="{Binding ContinueReviewHint}" TextWrapping="Wrap"
+                                   Style="{StaticResource PhotoSift.MutedText}"
+                                   Visibility="{Binding HasContinueReviewHint, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <WrapPanel Margin="0,4,0,0">
+                            <Button x:Name="ContinueReviewButton" Content="Continue reviewing" MinHeight="44" MinWidth="180" Margin="0,4,10,0"
+                                    Style="{StaticResource PhotoSift.LargePrimaryButton}"
+                                    AutomationProperties.Name="Continue reviewing the remaining sets"
+                                    Command="{Binding ContinueReviewCommand}" IsEnabled="{Binding CanContinueReview}" />
+                            <Button x:Name="ActionScanAgainButton" Content="Scan again" MinHeight="44" Margin="0,4,10,0" Padding="12,6"
+                                    Style="{StaticResource PhotoSift.Button}"
+                                    AutomationProperties.Name="Start a fresh scan from the cleanup"
+                                    Command="{Binding StartScanCommand}" IsEnabled="{Binding CanStartScan}" />
+                        </WrapPanel>
+                    </StackPanel>
                     <ListBox x:Name="ActionItemsList" Margin="0,10,0,0" Height="300" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActionRows}"
                              Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ActionItemTemplate}"
                              AutomationProperties.Name="Photos in this cleanup and what happened to each"
