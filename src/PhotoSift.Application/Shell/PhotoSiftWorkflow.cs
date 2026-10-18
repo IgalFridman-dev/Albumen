@@ -218,7 +218,7 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
                 await action.ApproveAsync(request, cancellationToken).ConfigureAwait(false);
                 // Completion can race the coalesced presentation notification.
                 // Read the sole owner's current snapshot through the same inbox.
-                await inbox.InvokeAsync(RefreshAction).ConfigureAwait(false);
+                if (await inbox.InvokeAsync(RefreshAction).ConfigureAwait(false)) RecheckScopeAfterCleanup();
             }
             return result;
         });
@@ -250,21 +250,38 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     }
 
     // The folder page still shows the counts from before a cleanup that removed
-    // photos. Re-check the folder once; the check bumps the Scope revision, so the
-    // approved request no longer matches and nothing runs twice. The retry is
-    // submitted outside the inbox turn and observed like any adapter call.
+    // photos. Re-check the folder once: scopeRecheckPending holds the submit until
+    // the Scope publishes the check under its next revision (RefreshScope consumes
+    // it there), and that revision no longer matches the approved request. The
+    // retry runs outside the inbox turn and is observed like any adapter call.
     private bool ShouldRecheckScopeAfterCleanup() =>
         current.CurrentPhase == WorkflowPhase.ChooseScope
         && current.Action.Status is ActionStatus.Complete or ActionStatus.Incomplete or ActionStatus.Faulted
         && current.Action.RecycledCount > 0
         && current.ActionReview.ApprovedRequest is { } approved
         && approved.Scan.ScopeRevision == current.Scope.Revision
-        && current.Scope.ScopeState != ScopeSessionState.Checking;
+        && current.Scope.ScopeState != ScopeSessionState.Checking
+        && Volatile.Read(ref scopeRecheckPending) == 0;
 
     private void RecheckScopeAfterCleanup()
     {
-        Volatile.Write(ref scopeRecheckPending, 1);
-        ObserveAdapter(() => scope.HandleAsync(new RetryScopePreflightCommand(), CancellationToken.None), origin: null);
+        if (Interlocked.CompareExchange(ref scopeRecheckPending, 1, 0) != 0) return;
+        var revision = scope.Current.Revision;
+        ObserveAdapter(async () =>
+        {
+            try
+            {
+                await scope.HandleAsync(new RetryScopePreflightCommand(), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                Volatile.Write(ref scopeRecheckPending, 0);
+                throw;
+            }
+            // The Scope declined to check (a folder picker is open): nothing was
+            // published under a new revision, so release the hold here.
+            if (scope.Current.Revision == revision) Volatile.Write(ref scopeRecheckPending, 0);
+        }, origin: null);
     }
 
     private void OnScopeChanged(object? sender, ShellSnapshot snapshot)
@@ -287,8 +304,11 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         var accepted = scope.Current;
         if (accepted.Revision != current.Scope.Revision)
         {
+            // The re-check keeps the selection; a different folder or recursion is
+            // the user's own check, whatever is pending.
             var rechecking = Interlocked.Exchange(ref scopeRecheckPending, 0) == 1
-                && accepted.ScopeState == ScopeSessionState.Checking;
+                && accepted.ScopeState == ScopeSessionState.Checking
+                && accepted.Selection == current.Scope.Selection;
             Publish(current with { Scope = accepted, Rules = null, Scan = EmptyScan(), Review = ReviewSnapshot.Closed,
                 CurrentPhase = WorkflowPhase.ChooseScope, IsRecheckingScopeAfterCleanup = rechecking });
         }
