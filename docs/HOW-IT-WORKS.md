@@ -14,7 +14,11 @@ Each phase unlocks only when the previous one is valid (`Domain/Workflow/Workflo
 | 2 | **Confirm Rules** | Exact duplicates are always on; "Conservative Near duplicates" can be switched off. "Confirm Scan options". |
 | 3 | **Scan** | Progress and live counts; "Cancel Scan". Outcome categories show what was grouped, skipped or unsupported. |
 | 4 | **Review** | Categories (Exact / Near) → groups → side-by-side comparison with bounded previews. The user ticks files to remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). |
-| 5 | **Approve Cleanup** | A disclosure lists the exact original paths. "Approve Cleanup" moves them one by one to the Recycle Bin and shows progress. Below it, **Action Records** list every past outcome, survive relaunch, and can be revalidated read-only. |
+| 5 | **Approve Cleanup** | The Review page ends with "Move N photos to the Recycle Bin?": the first marked photos with thumbnails and paths, then the full accounting. "Move to Recycle Bin" sends them one at a time and shows a progress bar, a card per photo (moved, skipped and why, or unknown) and a summary when it ends. |
+
+A **History** view in the top bar lists every saved cleanup (one card each, with every photo's
+outcome); records survive relaunch and unknown outcomes can be checked again read-only. "Clear scan
+data" lives there too.
 
 ## Code layers
 
@@ -56,7 +60,7 @@ sequenceDiagram
   Act->>OS: revalidate file is unchanged
   Act->>DB: journal Requested → Executing
   Act->>OS: move ONE item to Recycle Bin
-  Act->>DB: record outcome (shown in Action Records)
+  Act->>DB: record outcome (shown in History)
 ```
 
 Key ideas:
@@ -70,7 +74,7 @@ Key ideas:
 ## Where data lives
 
 - `%LOCALAPPDATA%\PhotoSift\photosift.db` — SQLite (scan identity, checkpoints, override
-  evidence, action journal and records). "Clear local Scan data" removes scan data only.
+  evidence, action journal and records). "Clear scan data" (in History) removes scan data only.
 - Photos are only read, never modified; removal = Windows Recycle Bin (restorable).
 - No network access at all (verified by network audits in a VM with no network adapter).
 
