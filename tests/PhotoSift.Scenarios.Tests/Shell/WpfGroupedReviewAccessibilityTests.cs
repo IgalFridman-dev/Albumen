@@ -8,6 +8,7 @@ using System.Windows.Media;
 using PhotoSift.App;
 using PhotoSift.App.Shell;
 using PhotoSift.Application.Review;
+using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Review;
 using Xunit;
 
@@ -178,6 +179,59 @@ public sealed class WpfGroupedReviewAccessibilityTests
                     control => control.IsKeyboardFocusWithin
                         && control.DataContext is ScanOccurrenceViewModel member
                         && member.OccurrenceId == 1);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void AMarkHeldInAnotherSetIsShownCheckedAndDisabledAndItsSettledSetIsDimmed()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = GroupedWpfFixture.Create(
+                review: scope => GroupedReviewData.OverlappingSnapshot(scope).Review);
+            var near = fixture.ViewModel.ReviewCategories[1];
+            fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(near).GetAwaiter().GetResult();
+            var window = new MainWindow { DataContext = fixture.ViewModel, Width = 1280, Height = 800 };
+            try
+            {
+                ShowAndDrain(window);
+                var groups = NamedList(window, "ReviewGroupsList");
+                var groupRow = Realize(groups, groups.Items[0]);
+                var caption = Descendants<TextBlock>(groupRow).Single(text =>
+                    text.Text == "Nothing left to decide: 1 marked elsewhere");
+                Assert.True(caption.IsVisible);
+                var card = Descendants<Grid>(groupRow).First(grid => Descendants<TextBlock>(grid).Contains(caption));
+                Assert.Equal(SystemParameters.HighContrast ? 1.0 : 0.55, card.Opacity, 2);
+
+                fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(near.Groups[0]).GetAwaiter().GetResult();
+                WpfReviewSelectionTests.Drain();
+                window.UpdateLayout();
+                var comparisons = NamedList(window, "ReviewComparisonsList");
+                var row = Realize(comparisons, comparisons.Items[0]);
+                var selection = Assert.Single(Descendants<ReviewSelectionCheckBox>(row));
+                Assert.False(selection.IsEnabled);
+                Assert.True(selection.IsChecked);
+                Assert.Equal("Marked for removal in Identical copies set 1", selection.Content);
+                Assert.StartsWith("Marked for removal:", AutomationProperties.GetName(selection),
+                    StringComparison.Ordinal);
+                Assert.StartsWith("Marked for removal in Identical copies set 1;",
+                    AutomationProperties.GetItemStatus(selection), StringComparison.Ordinal);
+                var kept = Assert.Single(Descendants<ReviewSelectionCheckBox>(
+                    Realize(comparisons, comparisons.Items[1])));
+                Assert.True(kept.IsEnabled);
+                Assert.Equal("Kept", kept.Content);
+
+                var openMember = Descendants<Button>(row).First(button =>
+                    AutomationProperties.GetAutomationId(button) == "open-review-member");
+                Click(openMember);
+                Assert.NotNull(fixture.ViewModel.ActiveReviewMember);
+                Assert.Equal(1, fixture.ViewModel.ActiveReviewMember!.OccurrenceId);
+                Assert.Empty(fixture.Workflow.SelectionCommands);
             }
             finally
             {
@@ -484,11 +538,12 @@ internal sealed class GroupedWpfFixture
     public ControllableReviewPreviewSource Preview { get; }
     public ShellViewModel ViewModel { get; }
 
-    public static GroupedWpfFixture Create(IReviewDialogService? dialog = null)
+    public static GroupedWpfFixture Create(IReviewDialogService? dialog = null,
+        Func<ShellSnapshot, ReviewSnapshot>? review = null)
     {
         var scope = new ReviewStaticScope();
         var workflow = new RecordingReviewWorkflow(
-            scope.Current, ReviewData.CreateSnapshot(twoGroups: true));
+            scope.Current, review?.Invoke(scope.Current) ?? ReviewData.CreateSnapshot(twoGroups: true));
         return new(scope, workflow,
             new ControllableReviewPreviewSource(autoComplete: true),
             dialog ?? new RecordingReviewDialogService());
