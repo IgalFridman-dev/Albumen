@@ -506,7 +506,7 @@ public sealed class WpfScopeAccessibilityTests
             BlockingReasons: ImmutableArray<ScopeBlockingReason>.Empty);
         return new ShellSnapshot(
             InitialWorkflow.Create(),
-            "Scope is ready.",
+            "The folder is ready to scan.",
             ScopeSessionState.Ready,
             selection,
             result,
@@ -531,7 +531,7 @@ public sealed class WpfScopeAccessibilityTests
             BlockingReasons: ImmutableArray.Create(ScopeBlockingReason.NonLocalRoot));
         return new ShellSnapshot(
             InitialWorkflow.Create(),
-            "Scope is blocked.",
+            "This folder can't be scanned yet.",
             ScopeSessionState.Blocked,
             selection,
             result,

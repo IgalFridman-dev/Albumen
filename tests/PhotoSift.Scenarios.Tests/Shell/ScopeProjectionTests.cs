@@ -472,7 +472,7 @@ public sealed class ScopeProjectionTests
             BlockingReasons: ImmutableArray<ScopeBlockingReason>.Empty);
         return new ShellSnapshot(
             InitialWorkflow.Create(),
-            "Scope is ready.",
+            "The folder is ready to scan.",
             ScopeSessionState.Ready,
             selection,
             result,
@@ -499,7 +499,7 @@ public sealed class ScopeProjectionTests
             BlockingReasons: ImmutableArray.Create(reason));
         return new ShellSnapshot(
             InitialWorkflow.Create(),
-            "Scope is blocked.",
+            "This folder can't be scanned yet.",
             ScopeSessionState.Blocked,
             selection,
             result,
@@ -510,7 +510,7 @@ public sealed class ScopeProjectionTests
     private static ShellSnapshot CanceledSnapshot() =>
         new(
             InitialWorkflow.Create(),
-            "Scope was not verified.",
+            "The folder wasn't checked. Check it again or choose another folder.",
             ScopeSessionState.Canceled,
             new ScopeSelection(
                 @"C:\Photos",

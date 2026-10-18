@@ -339,7 +339,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public bool CanContinue => photoSnapshot?.Scope.ScopeState == ScopeSessionState.Ready;
     public bool CanChangeScanOptions => CanContinue && IsChooseFolderPhase && !IsScanBusy;
     public bool CanScanFolder => CanChangeScanOptions && photoSnapshot is { Options.IsValid: true };
-    public bool CanConfirmExactRules => CanChangeScanOptions
+    public bool CanConfirmExactRules => CanChangeScanOptions && IsConfirmRulesPhase
         && photoSnapshot is { Rules: null, Options.IsValid: true };
     public bool CanStartScan => photoSnapshot is { } snapshot && ShellPhasePolicy.CanStart(snapshot.Scope, snapshot.Rules) && !IsScanBusy;
     public bool IsScanBusy => photoSnapshot?.Scan is
@@ -350,9 +350,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public string ExactPreset { get; } = "Always included. Copies must match byte for byte.";
     public string ScanOptionsGuidance => photoSnapshot?.Options is { } options
         ? options.IsValid
-            ? options.Near == NearDuplicateMode.Conservative
+            ? (options.Near == NearDuplicateMode.Conservative
                 ? "Identical copies are always included. Look-alikes use one careful, fixed setting, and close calls are shown as Maybe similar. Nothing is marked for you."
-                : "Identical copies are always included. Look-alikes are off for the next scan. Nothing is marked for you."
+                : "Identical copies are always included. Look-alikes are off for the next scan. Nothing is marked for you.")
+              + (photoSnapshot.Scan.Pin is not null
+                ? " Changing an option clears the current results and your marks, and you scan again."
+                : string.Empty)
             : options.ValidationGuidance
         : "Identical copies are always included. Look-alikes are on unless you turn them off. Nothing is marked for you.";
     public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";
@@ -763,6 +766,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var previousCanConfirm = CanConfirmExactRules;
         var previousCanChangeOptions = CanChangeScanOptions;
         var previousOptions = photoSnapshot?.Options;
+        var previousGuidance = ScanOptionsGuidance;
         Apply(snapshot.Scope);
         photoSnapshot = snapshot;
         if (IsScanBusy && IsClearScanDataConfirmationPending)
@@ -771,7 +775,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ProjectActionRecovery(previousRecovery, snapshot.ActionRecovery);
         Phases = Project(snapshot.Phases);
         RuleSetStatus = snapshot.Rules is null
-            ? "confirmed when the scan starts"
+            ? "not confirmed yet (Scan confirms them)"
             : snapshot.Rules.Options.Near == NearDuplicateMode.Conservative
                 ? "identical copies and look-alikes, confirmed"
                 : "identical copies only, confirmed";
@@ -806,11 +810,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze),
             nameof(ScanOutcomeSummaries) })
             OnPropertyChanged(name);
-        if (previousOptions != snapshot.Options)
-        {
-            OnPropertyChanged(nameof(NearDuplicatesEnabled));
-            OnPropertyChanged(nameof(ScanOptionsGuidance));
-        }
+        if (previousOptions != snapshot.Options) OnPropertyChanged(nameof(NearDuplicatesEnabled));
+        if (previousGuidance != ScanOptionsGuidance) OnPropertyChanged(nameof(ScanOptionsGuidance));
         if (!preserveReviewProjection)
         {
             OnPropertyChanged(nameof(ExactGroups));
@@ -1534,13 +1535,19 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
 
     // The one Scan button on the folder screen: the same three owner-checked steps the
-    // separate buttons ran (continue, confirm the options for this folder, start).
+    // separate buttons ran (continue, confirm the options for this folder, start), pinned to
+    // the folder revision and options on screen when it was clicked.
     private async Task ScanFolderAsync()
     {
-        if (photoWorkflow is not { } workflow || !CanScanFolder) return;
+        if (photoWorkflow is not { } workflow || !CanScanFolder || photoSnapshot is not { } seen) return;
+        var seenRevision = seen.Scope.Revision;
+        var seenOptions = seen.Options;
+        bool StillSeen() => workflow.Current.Scope.Revision == seenRevision && workflow.Current.Options == seenOptions;
         if (workflow.Current.CurrentPhase == WorkflowPhase.ChooseScope) await workflow.ContinueAsync();
-        if (workflow.Current.CurrentPhase != WorkflowPhase.ConfirmRules) return;
+        if (workflow.Current.CurrentPhase != WorkflowPhase.ConfirmRules || !StillSeen()) return;
         if (workflow.Current.Rules is null) await workflow.ConfirmExactRulesAsync();
+        if (!StillSeen() || workflow.Current.Rules is not { } rules
+            || rules.ScopeRevision != seenRevision || rules.Options != seenOptions) return;
         await workflow.StartScanAsync();
     }
 
@@ -1730,8 +1737,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ScanFolderText = snapshot.Preflight?.CompleteCounts?.Supported switch
         {
             null => "Scan folder",
+            0 => "Scan folder (no photos found yet)",
             1 => "Scan 1 photo",
-            var count => $"Scan {count.Value.ToString("N0", CultureInfo.InvariantCulture)} photos",
+            int count => $"Scan {count.ToString("N0", CultureInfo.InvariantCulture)} photos",
         };
         RuleSetStatus = snapshot.RuleSetStatus;
         ScopeSummary = ProjectSummary(snapshot.Preflight);

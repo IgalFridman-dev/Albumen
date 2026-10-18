@@ -600,7 +600,7 @@
                           VerticalScrollBarVisibility="Auto">
                 <ItemsControl x:Name="PhaseRail"
                               Margin="4,4,0,0"
-                              AutomationProperties.Name="Workflow phases"
+                              AutomationProperties.Name="Workflow steps"
                               ItemsSource="{Binding RailSteps}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>

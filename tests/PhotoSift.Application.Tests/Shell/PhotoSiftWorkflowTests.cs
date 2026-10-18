@@ -1060,6 +1060,29 @@ public sealed class PhotoSiftWorkflowTests
     }
 
     [Fact]
+    public async Task OptionChangeOnTheFolderStepAfterAScanRevokesItsResults()
+    {
+        var scheduler = new ManualScheduler();
+        var scan = new ScanOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(Ready(1)), scan, scheduler);
+        await scheduler.Finish(workflow.ContinueAsync());
+        await scheduler.Finish(workflow.ConfirmExactRulesAsync());
+        var oldRules = workflow.Current.Rules!;
+        scan.Publish(EmptyScan(new(Guid.NewGuid(), 1, oldRules.RuleSetRevision, 1), ScanStatus.Complete));
+        scheduler.Drain();
+        await scheduler.Finish(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+
+        await scheduler.Finish(workflow.SetScanOptionsAsync(
+            new(ExactDuplicateMode.Enabled, NearDuplicateMode.Disabled)));
+
+        Assert.Equal(WorkflowPhase.ChooseScope, workflow.Current.CurrentPhase);
+        Assert.Null(workflow.Current.Rules);
+        Assert.Null(workflow.Current.Scan.Pin);
+        Assert.Equal(ReviewSnapshot.Closed, workflow.Current.Review);
+        Assert.Equal([(1L, (long?)null)], scan.Invalidations);
+    }
+
+    [Fact]
     public async Task ScanAdmissionRejectsOptionMutationAfterLeavingConfirmRules()
     {
         var scheduler = new ManualScheduler();
