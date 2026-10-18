@@ -376,7 +376,7 @@ reported, because it cannot be told apart from a file cut right after its last s
 
 ## PM-012 — Show a marked photo as marked in every set it belongs to
 
-**Status:** Backlog — owner asked for it before V1.0.0 on 2026-10-18.
+**Status:** Done in PR #25 (merged 2026-10-18); Golden VM Full run still owed with PM-009.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -397,7 +397,9 @@ photo is the only one that can stay.
 
 ## PM-013 — Keep reviewing after a cleanup without scanning again
 
-**Status:** Backlog — owner asked for it before V1.0.0 on 2026-10-18.
+**Status:** Done in PR #26 (merged 2026-10-18); Golden VM Full run still owed with PM-009.
+Marks on photos that were not removed are not carried over; a set touched by an uncertain
+outcome is closed until the next scan; after a faulted cleanup only "Scan again" is offered.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -419,7 +421,7 @@ photo dropped, and approve another cleanup. Design:
 
 ## PM-014 — Re-check the folder after a cleanup removed photos
 
-**Status:** Backlog — owner asked for it before V1.0.0 on 2026-10-18.
+**Status:** Done in PR #25 (merged 2026-10-18); Golden VM Full run still owed with PM-009.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -434,16 +436,44 @@ cleanup removed photos, going back to the folder page still shows the old counts
   folder re-checks the folder by itself; the page says why while it checks.
 - Application test for the automatic re-check and for the case where nothing was removed.
 
-## PM-015 — A home page that shows the photos as cards
+## PM-015 — The folder page gets the prototype's simplicity
 
-**Status:** Backlog — scope to be confirmed with the owner.
+**Status:** In review — PR #27 (CI green, reviewer Ship, seen by the owner on the desktop on
+2026-10-18: "Otherwise good work"). Golden VM Full run still owed with PM-009.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
-**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18: "I don't see any
-main page that looks beautiful with the windows photos cards when in the app."
+**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18: "You showed me a
+prototype like this, but end product looks different." and "We can keep the side bar being a
+side bar, but I do like the simple design of the prototype." Design:
+`docs/superpowers/specs/2026-10-18-post-test-fixes-design.md`.
 
 ### Completion criteria
 
-- To be written once the owner confirms which page: a card grid of the chosen folder's photos
-  on the folder page, or a start page before a folder is chosen.
+- The folder page has the prototype's layout: one hero (illustration drawn in XAML, headline,
+  one line), one card with the folder's name and path, one status strip that says one sentence
+  per state, the two switches with captions, the check summary under "Details", the Scan
+  button in the card's footer, and three trust lines under the card. The step rail stays.
+- Pinned automation names and the smoke marker `phases=5` are unchanged.
+- WPF scenario tests for the strip text per state, the captions, the trust lines and the
+  Scan button inside the card.
+
+## PM-016 — Category navigation on the Review page skips the middle categories at the default window size
+
+**Status:** Backlog — owner asked for it on 2026-10-18 ("Mark 1 small fix for UI").
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of the PM-015 build (commit 29d416e) on the desktop, 2026-10-18: on the
+Review page, at the normal (not maximized) window size, moving between the four categories
+(Identical copies, Look-alikes, Maybe similar, Couldn't check) jumps from the top one to the
+bottom one and skips the two in the middle; with the window enlarged it works fine.
+
+### Completion criteria
+
+- Reproduce at the default window size (960×720) with four categories present: find which
+  control moves the selection (keyboard, mouse wheel over the category list, or the scroll
+  viewer paging) and why it skips two items.
+- Every category is reachable in order at the default window size and at the minimum window
+  size (680×520), by keyboard and by mouse wheel.
+- A WPF scenario test that walks the four categories at the default size.
