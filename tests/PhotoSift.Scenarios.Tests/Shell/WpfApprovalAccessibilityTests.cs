@@ -29,9 +29,9 @@ public sealed class WpfApprovalAccessibilityTests
     private const string DiagnosticPathCanary = @"C:\E5S3-PATH-CANARY\private-photo.jpg";
     private const string DiagnosticPixelCanary = "E5S3-PIXEL-CANARY-255-0-127-64";
     private const string PersistenceFailureAnnouncement =
-        "Override evidence persistence failed; Selection is unchanged.";
+        "PhotoSift couldn't save your confirmation, so your marks are unchanged.";
     private const string StaleFailureAnnouncement =
-        "The Review changed; the stale command made no change.";
+        "The review changed in the meantime, so nothing was changed. Try again.";
 
     [Fact]
     public void ProductionDiagnosticCaptureExcludesSensitiveAnnouncementTextAndClearsOnStop()
@@ -160,7 +160,7 @@ public sealed class WpfApprovalAccessibilityTests
                 var group = FindPeer(root, "open-review-group");
                 var groupName = group.GetName();
                 var groupStatus = group.GetItemStatus();
-                Assert.Contains("group 1 of 1", groupName, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("Identical copies set 1 of 1", groupName, StringComparison.Ordinal);
                 Assert.Contains("4 paths", groupName, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("4 physical", groupName, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("1 selected", groupStatus, StringComparison.OrdinalIgnoreCase);
@@ -169,8 +169,8 @@ public sealed class WpfApprovalAccessibilityTests
                 Assert.Contains("Estimated recovery", groupStatus, StringComparison.OrdinalIgnoreCase);
 
                 var selection = FindPeer(root, "selection-control");
-                Assert.Contains("Eligible", selection.GetItemStatus(), StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("selected", selection.GetName(), StringComparison.OrdinalIgnoreCase);
+                Assert.StartsWith("Marked for removal;", selection.GetItemStatus(), StringComparison.Ordinal);
+                Assert.StartsWith("Marked for removal:", selection.GetName(), StringComparison.Ordinal);
 
                 var approval = FindPeer(root, "approval-panel");
                 Assert.Contains("Cleanup approval disclosure", approval.GetName(), StringComparison.OrdinalIgnoreCase);
@@ -207,10 +207,10 @@ public sealed class WpfApprovalAccessibilityTests
         await Assert.IsType<AsyncCommand>(fixture.ViewModel.ExactGroups[0].Members[0].ToggleSelectionCommand).ExecuteAsync();
 
         Assert.Equal(4, announcements.Count);
-        Assert.Contains("persistence", announcements[0], StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("persistence", announcements[1], StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("stale", announcements[2], StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("stale", announcements[3], StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(PersistenceFailureAnnouncement, announcements[0]);
+        Assert.Equal(PersistenceFailureAnnouncement, announcements[1]);
+        Assert.Equal(StaleFailureAnnouncement, announcements[2]);
+        Assert.Equal(StaleFailureAnnouncement, announcements[3]);
     }
 
     [Fact]

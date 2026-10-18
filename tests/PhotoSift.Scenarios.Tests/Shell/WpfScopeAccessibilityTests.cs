@@ -55,18 +55,18 @@ public sealed class WpfScopeAccessibilityTests
                     window.FindName("ScopeSummaryList"));
 
                 Assert.Equal(@"C:\Photos", selectedPath.Text);
-                Assert.Equal("Selected Scope", AutomationProperties.GetName(selectedPath));
+                Assert.Equal("Selected folder", AutomationProperties.GetName(selectedPath));
                 Assert.True(selectedPath.IsReadOnly);
                 Assert.Equal(TextWrapping.Wrap, selectedPath.TextWrapping);
                 Assert.Equal(@"\\?\C:\Photos", resolvedPath.Text);
-                Assert.Equal("Resolved Scope", AutomationProperties.GetName(resolvedPath));
+                Assert.Equal("Resolved folder path", AutomationProperties.GetName(resolvedPath));
                 Assert.True(resolvedPath.IsReadOnly);
                 Assert.Equal(TextWrapping.Wrap, resolvedPath.TextWrapping);
                 Assert.Equal("Ready", status.Text);
                 Assert.Equal(
                     AutomationLiveSetting.Polite,
                     AutomationProperties.GetLiveSetting(status));
-                Assert.Equal("Rule Set: Not configured", ruleSet.Text);
+                Assert.Equal("Scan options: Not configured", ruleSet.Text);
                 Assert.Equal("Include subfolders", AutomationProperties.GetName(recursion));
                 Assert.True(recursion.IsChecked);
                 Assert.Equal(7, summary.Items.Count);
@@ -212,7 +212,7 @@ public sealed class WpfScopeAccessibilityTests
                 var readyGeometry = Assert.IsAssignableFrom<Geometry>(icon.Data)
                     .ToString(CultureInfo.InvariantCulture);
                 Assert.Equal(Visibility.Visible, icon.Visibility);
-                Assert.Equal("Scope status: Ready", AutomationProperties.GetName(icon));
+                Assert.Equal("Folder status: Ready", AutomationProperties.GetName(icon));
                 Assert.Equal("Ready", AutomationProperties.GetItemStatus(icon));
 
                 var systemTextBrush = new SolidColorBrush(
@@ -227,7 +227,7 @@ public sealed class WpfScopeAccessibilityTests
                 var blockedGeometry = Assert.IsAssignableFrom<Geometry>(icon.Data)
                     .ToString(CultureInfo.InvariantCulture);
                 Assert.NotEqual(readyGeometry, blockedGeometry);
-                Assert.Equal("Scope status: Blocked", AutomationProperties.GetName(icon));
+                Assert.Equal("Folder status: Blocked", AutomationProperties.GetName(icon));
                 Assert.Equal("Blocked", AutomationProperties.GetItemStatus(icon));
                 Assert.Same(systemTextBrush, icon.Fill);
             }
@@ -271,7 +271,7 @@ public sealed class WpfScopeAccessibilityTests
                 Assert.True(retry.IsEnabled);
                 Assert.True(retry.Focusable);
                 Assert.True(retry.IsTabStop);
-                Assert.Equal("Retry Scope verification", AutomationProperties.GetName(retry));
+                Assert.Equal("Check the folder again", AutomationProperties.GetName(retry));
                 Assert.Same(viewModel.RetryScopeCommand, retry.Command);
                 Assert.True(chooseAnother.IsEnabled);
                 Assert.True(chooseAnother.Focusable);
@@ -358,7 +358,7 @@ public sealed class WpfScopeAccessibilityTests
             .Where(button => button.DataContext is PhaseItemViewModel)
             .ToArray();
 
-        Assert.Equal(5, phaseButtons.Length);
+        Assert.Equal(4, phaseButtons.Length);
         Assert.True(phaseButtons[0].IsEnabled);
         Assert.All(phaseButtons.Skip(1), button => Assert.False(button.IsEnabled));
     }
@@ -506,7 +506,7 @@ public sealed class WpfScopeAccessibilityTests
             BlockingReasons: ImmutableArray<ScopeBlockingReason>.Empty);
         return new ShellSnapshot(
             InitialWorkflow.Create(),
-            "Scope is ready.",
+            "The folder is ready to scan.",
             ScopeSessionState.Ready,
             selection,
             result,
@@ -531,7 +531,7 @@ public sealed class WpfScopeAccessibilityTests
             BlockingReasons: ImmutableArray.Create(ScopeBlockingReason.NonLocalRoot));
         return new ShellSnapshot(
             InitialWorkflow.Create(),
-            "Scope is blocked.",
+            "This folder can't be scanned yet.",
             ScopeSessionState.Blocked,
             selection,
             result,

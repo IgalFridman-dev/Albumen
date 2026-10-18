@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using PhotoSift.Application.Action;
 using PhotoSift.Domain.Action;
 
@@ -24,6 +25,7 @@ public sealed class ActionRecordItemViewModel : INotifyPropertyChanged
         this.total = total;
         ActionItemId = snapshot.Requested.ActionItemId;
         OriginalPath = snapshot.Requested.Safety.Item.DiscoveredPath;
+        FileName = Path.GetFileName(OriginalPath.TrimEnd('\\', '/')) is { Length: > 0 } name ? name : OriginalPath;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -37,6 +39,17 @@ public sealed class ActionRecordItemViewModel : INotifyPropertyChanged
     public string AutomationName => string.Create(CultureInfo.InvariantCulture,
         $"Action record item {position} of {total}; {OriginalPath}; {StatusText}");
 
+    // The History card shows the E1-S6 result words with the reason in plain words.
+    public string FileName { get; }
+    public ActionResultTone Tone => isVerifying ? ActionResultTone.Busy : snapshot.State switch
+    {
+        ActionRecordEvidenceState.Recycled => ActionResultTone.Done,
+        ActionRecordEvidenceState.NotRemoved or ActionRecordEvidenceState.ConfirmedPresent => ActionResultTone.Skipped,
+        _ => ActionResultTone.Warning,
+    };
+    public string DetailText => isVerifying ? "Verifying current file state…" : PlainReason(snapshot);
+    public bool HasDetail => DetailText.Length != 0;
+
     internal void Update(ActionRecordItemSnapshot next, bool verifying)
     {
         ArgumentNullException.ThrowIfNull(next);
@@ -46,7 +59,8 @@ public sealed class ActionRecordItemViewModel : INotifyPropertyChanged
         snapshot = next;
         isVerifying = verifying;
         foreach (var property in new[] { nameof(State), nameof(ResultText), nameof(ReasonText),
-            nameof(IsVerifying), nameof(StatusText), nameof(AutomationName) })
+            nameof(IsVerifying), nameof(StatusText), nameof(AutomationName),
+            nameof(Tone), nameof(DetailText), nameof(HasDetail) })
             PropertyChanged?.Invoke(this, new(property));
     }
 
@@ -56,6 +70,27 @@ public sealed class ActionRecordItemViewModel : INotifyPropertyChanged
         ActionRecordEvidenceState.NotRemoved or ActionRecordEvidenceState.ConfirmedPresent => "not removed",
         _ => "outcome unknown pending revalidation",
     };
+
+    private static string PlainReason(ActionRecordItemSnapshot snapshot)
+    {
+        if (snapshot.RevalidationReason is { } revalidation)
+            return revalidation switch
+            {
+                ActionRevalidationReason.OriginalFileConfirmed => "Checked again: the photo is still at its original path.",
+                ActionRevalidationReason.OriginalPathMissing => "Checked again: nothing is at its original path any more.",
+                ActionRevalidationReason.OriginalPathChanged => "Checked again: a different file is at its original path now.",
+                ActionRevalidationReason.AccessUnavailable => "Checked again, but the file could not be read.",
+                ActionRevalidationReason.LocationUnavailable => "Checked again, but its folder could not be reached.",
+                ActionRevalidationReason.TimedOut => "Checking again took too long.",
+                _ => "Checking again did not finish.",
+            };
+        var reason = snapshot.ExecutionReason == ActionSafetyReason.None
+            ? string.Empty : ActionItemViewModel.DescribeReason(snapshot.ExecutionReason);
+        return snapshot.State is ActionRecordEvidenceState.Requested or ActionRecordEvidenceState.Executing
+            or ActionRecordEvidenceState.Unknown
+            ? $"{reason} PhotoSift can't tell whether this photo moved. Revalidate it above.".TrimStart()
+            : reason;
+    }
 
     private static string Reason(ActionRecordItemSnapshot snapshot)
     {
@@ -104,6 +139,37 @@ public sealed class ActionRecordViewModel : INotifyPropertyChanged
     public string RecoveredBytesText => string.Create(CultureInfo.InvariantCulture,
         $"Recovered bytes: {snapshot.Summary.RecoveredBytes}");
     public bool HasUnknown => snapshot.Summary.Certainty == ActionRecordCertainty.HasUnknown;
+    public string DateText => RequestedUtc.ToLocalTime().ToString("f", CultureInfo.CurrentCulture);
+    public string OutcomeLabel => HasUnknown ? "Needs a check" : snapshot.Summary.OutcomeMix switch
+    {
+        ActionRecordOutcomeMix.AllMoved => "All moved",
+        ActionRecordOutcomeMix.NoneMoved => "Nothing moved",
+        _ => "Some moved",
+    };
+    public ActionResultTone Tone => HasUnknown ? ActionResultTone.Warning : snapshot.Summary.OutcomeMix switch
+    {
+        ActionRecordOutcomeMix.AllMoved => ActionResultTone.Done,
+        _ => ActionResultTone.Skipped,
+    };
+    public string SummaryText
+    {
+        get
+        {
+            var moved = snapshot.Items.Count(item => item.State == ActionRecordEvidenceState.Recycled);
+            var skipped = snapshot.Items.Count(item => item.State is ActionRecordEvidenceState.NotRemoved
+                or ActionRecordEvidenceState.ConfirmedPresent);
+            var parts = new List<string>
+            {
+                Plural(snapshot.Items.Length, "photo", "photos"),
+                string.Create(CultureInfo.InvariantCulture, $"{moved} moved"),
+                string.Create(CultureInfo.InvariantCulture, $"{skipped} skipped"),
+            };
+            if (UnknownCount > 0) parts.Add(string.Create(CultureInfo.InvariantCulture, $"{UnknownCount} unknown"));
+            if (snapshot.Summary.RecoveredBytes > 0)
+                parts.Add($"about {ScanOccurrenceViewModel.FormatSize(snapshot.Summary.RecoveredBytes)} sent to the Recycle Bin");
+            return string.Join(" · ", parts);
+        }
+    }
     public int UnknownCount => snapshot.Items.Count(item => item.State is ActionRecordEvidenceState.Requested
         or ActionRecordEvidenceState.Executing or ActionRecordEvidenceState.Unknown);
 
@@ -113,7 +179,8 @@ public sealed class ActionRecordViewModel : INotifyPropertyChanged
         snapshot = next;
         ProjectRows(next, activeActionItemId, previous);
         foreach (var property in new[] { nameof(RequestedUtc), nameof(CertaintyText), nameof(OutcomeMixText),
-            nameof(RecoveredBytesText), nameof(HasUnknown), nameof(UnknownCount) })
+            nameof(RecoveredBytesText), nameof(HasUnknown), nameof(UnknownCount), nameof(DateText),
+            nameof(OutcomeLabel), nameof(Tone), nameof(SummaryText) })
             PropertyChanged?.Invoke(this, new(property));
     }
 
@@ -139,6 +206,9 @@ public sealed class ActionRecordViewModel : INotifyPropertyChanged
             items[index].Update(next.Items[index], verifying);
         }
     }
+
+    private static string Plural(int count, string one, string many) =>
+        string.Create(CultureInfo.InvariantCulture, $"{count} {(count == 1 ? one : many)}");
 
     private static ActionRecordItemViewModel Row(ActionRecordSnapshot record, Guid? activeActionItemId, int index) =>
         new(record.Items[index], activeActionItemId == record.Items[index].Requested.ActionItemId,

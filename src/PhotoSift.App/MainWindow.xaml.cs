@@ -90,10 +90,8 @@ public partial class MainWindow : Window
         object? sender,
         PropertyChangedEventArgs eventArgs)
     {
-        if ((eventArgs.PropertyName == nameof(ShellViewModel.CanConfirmExactRules)
-                && shellViewModel is { IsConfirmRulesPhase: true, CanConfirmExactRules: false, CanStartScan: true })
-            || (eventArgs.PropertyName == nameof(ShellViewModel.IsScanBusy)
-                && shellViewModel is { IsScanPhase: true, IsScanBusy: true }))
+        if (eventArgs.PropertyName == nameof(ShellViewModel.IsScanBusy)
+            && shellViewModel is { IsScanPhase: true, IsScanBusy: true })
         {
             QueuePhaseFocus();
         }
@@ -348,7 +346,7 @@ public partial class MainWindow : Window
     }
 
     // The Recycle Bin item list gets the same bounded height so the progress summary
-    // and Action Records below it stay reachable at small window sizes.
+    // and the earlier cleanups below it stay reachable at small window sizes.
     private void OnActionPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
     {
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
@@ -499,6 +497,15 @@ public partial class MainWindow : Window
             },
             DispatcherPriority.Input);
 
+    // Leaving History cancels a pending clear, so coming back never lands keyboard focus
+    // on the destructive confirmation the user did not just ask for.
+    private void OnHistoryUnselected(object sender, RoutedEventArgs eventArgs)
+    {
+        if (!ReferenceEquals(eventArgs.OriginalSource, ActionRecordsTab)
+            || shellViewModel?.IsClearScanDataConfirmationPending is not true) return;
+        shellViewModel.CancelClearScanDataCommand.Execute(null);
+    }
+
     private void OnClearScanDataConfirmationVisibilityChanged(
         object sender,
         DependencyPropertyChangedEventArgs eventArgs)
@@ -619,7 +626,8 @@ public partial class MainWindow : Window
             UIElement? target = phase switch
             {
                 WorkflowPhase.ChooseScope => expected.IsBlocked ? BlockingNotice : ChooseAnotherScopeButton,
-                WorkflowPhase.ConfirmRules => expected.CanConfirmExactRules ? ConfirmExactRulesButton : StartScanButton,
+                // Folder and options share one screen; its Scan button is the next step.
+                WorkflowPhase.ConfirmRules => expected.CanScanFolder ? ScanFolderButton : ChooseAnotherScopeButton,
                 WorkflowPhase.Scan => expected.IsScanBusy ? CancelScanButton : null,
                 WorkflowPhase.Review => ReviewHeading,
                 WorkflowPhase.ApproveCleanup => ActionHeading,

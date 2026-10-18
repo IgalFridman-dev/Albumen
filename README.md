@@ -17,7 +17,7 @@ never deletes permanently, and keeps a durable record of every action it takes.
 
 | 1. Choose a folder | 2. Approve exactly what goes | 3. See every outcome |
 |---|---|---|
-| ![Choose Scope with a ready preflight summary](docs/images/choose-scope.png) | ![Approval listing the selected path, recovery estimate and Recycle Bin destination](docs/images/approve-cleanup.png) | ![Recycle Bin progress showing one original path recycled](docs/images/recycle-bin-progress.png) |
+| ![Choose Scope screen before the PM-009 redesign, with a ready preflight summary](docs/images/choose-scope.png) | ![Approval listing the selected path, recovery estimate and Recycle Bin destination](docs/images/approve-cleanup.png) | ![Recycle Bin progress showing one original path recycled](docs/images/recycle-bin-progress.png) |
 | Preflight checks the folder is local and readable before any scan. | The approval lists every path, the estimated space recovered and the destination. | Each file is sent on its own and its result is recorded. |
 
 ## Why it is interesting
@@ -42,10 +42,10 @@ Deleting someone's photos is a one-way door, so PhotoSift is designed around one
 |---|---|
 | **Exact duplicates** | Streaming SHA-256 over file bytes; hard links are recognized as aliases of the same file, not as copies. |
 | **Near duplicates** | Managed dHash plus a color signature with conservative thresholds; borderline pairs are left ungrouped. |
-| **Guided workflow** | Five phases (Choose Scope → Confirm Rules → Scan → Review → Approve Cleanup), each unlocked only when the previous one is valid. |
+| **Guided workflow** | Four steps (Choose folder → Scan → Review → Clean up), each unlocked only when the previous one is valid. The folder and the scan options share one screen. |
 | **Safe scope** | Preflight rejects network shares, cloud-only placeholders and protected system folders before scanning. |
 | **Review** | Exact and Near categories, virtualized groups, bounded previews, keyboard navigation and a suggested survivor you can override. |
-| **Action Records** | Every outcome survives relaunch and can be revalidated read-only later. |
+| **History** | Every cleanup's per-photo outcome survives relaunch and can be checked again read-only later. |
 | **Crash-safe scans** | Scan state is checkpointed in SQLite with reconciled accounting; an interrupted scan is closed safely and restarted fresh. |
 
 ## Architecture

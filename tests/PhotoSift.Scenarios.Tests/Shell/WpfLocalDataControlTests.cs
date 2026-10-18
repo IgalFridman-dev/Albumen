@@ -36,7 +36,7 @@ public sealed class WpfLocalDataControlTests
             try
             {
                 window.Show();
-                Drain();
+                ShowHistory(window);
                 var request = Assert.IsType<Button>(window.FindName("ClearScanDataButton"));
                 var confirm = Assert.IsType<Button>(window.FindName("ConfirmClearScanDataButton"));
                 var consequence = Assert.IsType<TextBlock>(window.FindName("ClearScanDataConsequenceText"));
@@ -105,7 +105,7 @@ public sealed class WpfLocalDataControlTests
             {
                 window.Show();
                 window.Activate();
-                Drain();
+                ShowHistory(window);
                 var request = Assert.IsType<Button>(window.FindName("ClearScanDataButton"));
                 var confirm = Assert.IsType<Button>(window.FindName("ConfirmClearScanDataButton"));
                 Assert.True(request.Focus());
@@ -122,6 +122,47 @@ public sealed class WpfLocalDataControlTests
                     && request.IsVisible && request.IsEnabled);
 
                 Assert.True(request.IsKeyboardFocusWithin);
+            }
+            finally
+            {
+                window.Close();
+                await viewModel.DisposeAsync();
+            }
+        });
+    }
+
+    [Fact]
+    public void LeavingHistoryCancelsAPendingClearSoReturningDoesNotFocusTheConfirmation()
+    {
+        RunOnSta(async () =>
+        {
+            var fixture = new ExactShellFixture();
+            var control = new RecordingScanDataControl();
+            var viewModel = new ShellViewModel(
+                fixture.Scope, fixture.Workflow, localScanDataControl: control);
+            var window = new MainWindow { DataContext = viewModel };
+            try
+            {
+                window.Show();
+                window.Activate();
+                ShowHistory(window);
+                var request = Assert.IsType<Button>(window.FindName("ClearScanDataButton"));
+                var confirm = Assert.IsType<Button>(window.FindName("ConfirmClearScanDataButton"));
+                InvokeButton(request);
+                PumpUntil(() => viewModel.IsClearScanDataConfirmationPending
+                    && confirm.IsVisible && confirm.IsKeyboardFocusWithin);
+
+                var history = Assert.IsType<TabItem>(window.FindName("ActionRecordsTab"));
+                var photos = Assert.IsType<TabControl>(history.Parent).Items.OfType<TabItem>()
+                    .Single(tab => !ReferenceEquals(tab, history));
+                photos.IsSelected = true;
+                PumpUntil(() => !viewModel.IsClearScanDataConfirmationPending);
+                ShowHistory(window);
+                PumpUntil(() => request.IsVisible);
+
+                Assert.False(confirm.IsVisible);
+                Assert.False(confirm.IsKeyboardFocusWithin);
+                Assert.Equal(0, control.Calls);
             }
             finally
             {
@@ -234,6 +275,14 @@ public sealed class WpfLocalDataControlTests
         Dispatcher.CurrentDispatcher.BeginInvoke(
             DispatcherPriority.Background, new Action(() => frame.Continue = false));
         Dispatcher.PushFrame(frame);
+    }
+
+    // Clearing scan data lives on the History view.
+    private static void ShowHistory(MainWindow window)
+    {
+        Assert.IsType<TabItem>(window.FindName("ActionRecordsTab")).IsSelected = true;
+        window.UpdateLayout();
+        Drain();
     }
 
     private static void InvokeButton(Button button)
