@@ -17,7 +17,7 @@ never deletes permanently, and keeps a durable record of every action it takes.
 
 | 1. Choose a folder | 2. Approve exactly what goes | 3. See every outcome |
 |---|---|---|
-| ![Choose Scope with a ready preflight summary](docs/images/choose-scope.png) | ![Approval listing the selected path, recovery estimate and Recycle Bin destination](docs/images/approve-cleanup.png) | ![Recycle Bin progress showing one original path recycled](docs/images/recycle-bin-progress.png) |
+| ![Choose Scope screen before the PM-009 redesign, with a ready preflight summary](docs/images/choose-scope.png) | ![Approval listing the selected path, recovery estimate and Recycle Bin destination](docs/images/approve-cleanup.png) | ![Recycle Bin progress showing one original path recycled](docs/images/recycle-bin-progress.png) |
 | Preflight checks the folder is local and readable before any scan. | The approval lists every path, the estimated space recovered and the destination. | Each file is sent on its own and its result is recorded. |
 
 ## Why it is interesting

@@ -9,12 +9,12 @@ One window (`src/PhotoSift.App/MainWindow.xaml`) with a left-hand list of steps.
 phases (`Domain/Workflow/WorkflowPhase.cs`), each unlocked only when the previous one is valid; the
 first two share one screen, so the list shows four steps.
 
-| # | Phase | What happens on screen |
+| Step | Phase | What happens on screen |
 |---|---|---|
-| 1–2 | **Choose folder** (phases ChooseScope + ConfirmRules) | Pick one local folder, "Include subfolders", and what to look for: Identical copies are always on, "Look-alikes" can be switched off. A folder check shows supported counts, restrictions and blocking reasons (network, cloud-only, protected folders), plus the scan options' status. One "Scan N photos" button continues, confirms the options for this folder and starts the scan, each step checked by the workflow owner as before. |
-| 3 | **Scan** | Progress and live counts; "Cancel Scan". Outcome categories show what was grouped, skipped or unsupported. |
-| 4 | **Review** | Kinds shown as Identical copies / Look-alike / Maybe similar / Couldn't check (internally Exact / Near / Uncertain / CouldNotAnalyze) → sets → photos with bounded previews and side-by-side compare. The user switches photos to Remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). |
-| 5 | **Clean up** (phase ApproveCleanup) | The Review page ends with "Move N photos to the Recycle Bin?": the first marked photos with thumbnails and paths, then the full accounting. "Move to Recycle Bin" sends them one at a time and shows a progress bar, a card per photo (moved, skipped and why, or unknown) and a summary when it ends. |
+| 1 | **Choose folder** (phases ChooseScope + ConfirmRules) | Pick one local folder, "Include subfolders", and what to look for: Identical copies are always on, "Look-alikes" can be switched off. A folder check shows supported counts, restrictions and blocking reasons (network, cloud-only, protected folders), plus the scan options' status. One "Scan N photos" button continues, confirms the options for this folder and starts the scan, each step checked by the workflow owner as before. |
+| 2 | **Scan** | Progress and live counts; "Cancel Scan". Outcome categories show what was grouped, skipped or unsupported. |
+| 3 | **Review** | Kinds shown as Identical copies / Look-alike / Maybe similar / Couldn't check (internally Exact / Near / Uncertain / CouldNotAnalyze) → sets → photos with bounded previews and side-by-side compare. The user switches photos to Remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). |
+| 4 | **Clean up** (phase ApproveCleanup) | The Review page ends with "Move N photos to the Recycle Bin?": the first marked photos with thumbnails and paths, then the full accounting. "Move to Recycle Bin" sends them one at a time and shows a progress bar, a card per photo (moved, skipped and why, or unknown) and a summary when it ends. |
 
 A **History** view in the top bar lists every saved cleanup (one card each, with every photo's
 outcome); records survive relaunch and unknown outcomes can be checked again read-only. "Clear scan
