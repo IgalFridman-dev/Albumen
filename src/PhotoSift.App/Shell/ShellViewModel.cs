@@ -289,7 +289,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 or ActionItemState.Executing or ActionItemState.Requested);
             var notMoved = action.Items.Length - moved - unknown;
             if (unknown > 0)
-                return $"PhotoSift can't tell whether {PhotoCount(unknown)} moved. They need a later check, which PhotoSift offers in History the next time it starts. Nothing is retried automatically.";
+                return $"PhotoSift can't tell whether {PhotoCount(unknown)} moved. {(unknown == 1 ? "It needs" : "They need")} a later check, which PhotoSift offers in History the next time it starts. Nothing is retried automatically.";
             if (notMoved == 0)
                 return $"{PhotoCount(moved)} {(moved == 1 ? "is" : "are")} in the Windows Recycle Bin. If you need one back, restore it from there.";
             return moved == 0

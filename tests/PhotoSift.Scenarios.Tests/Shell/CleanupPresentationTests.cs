@@ -144,9 +144,9 @@ public sealed class CleanupPresentationTests
         var projected = Assert.Single(fixture.ViewModel.ActionRecoveryRecords);
         Assert.Equal("Needs a check", projected.OutcomeLabel);
         Assert.Equal(ActionResultTone.Warning, projected.Tone);
-        Assert.Equal("3 photos · 1 moved · 1 skipped · 1 unknown · about 8 KB in the Recycle Bin", projected.SummaryText);
-        Assert.Equal(["Moved to the Recycle Bin", "Outcome unknown", "Skipped"],
-            projected.Items.Select(item => item.ResultLabel));
+        Assert.Equal("3 photos · 1 moved · 1 skipped · 1 unknown · about 8 KB sent to the Recycle Bin", projected.SummaryText);
+        Assert.Equal([ActionResultTone.Done, ActionResultTone.Warning, ActionResultTone.Skipped],
+            projected.Items.Select(item => item.Tone));
         Assert.Contains("can't tell whether this photo moved", projected.Items[1].DetailText, StringComparison.Ordinal);
         Assert.False(projected.Items[0].HasDetail);
         Assert.False(fixture.ViewModel.HasNoActionRecords);
@@ -249,7 +249,7 @@ public sealed class CleanupScreenTests
                 var records = Assert.IsType<ItemsControl>(window.FindName("ActionRecordsHistoryList"));
                 var texts = WpfReviewSelectionTests.Descendants<TextBlock>(records).Select(text => text.Text).ToArray();
                 Assert.Contains("All moved", texts);
-                Assert.Contains("Moved to the Recycle Bin", texts);
+                Assert.Contains("moved to Recycle Bin", texts);
                 Assert.Contains(texts, text => text.StartsWith("Cleanup on ", StringComparison.Ordinal));
             }
             finally { window.Close(); WpfReviewSelectionTests.Drain(); }
