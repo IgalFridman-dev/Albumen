@@ -363,6 +363,49 @@ public sealed class ApprovedActionAuthorityTests
         if (!fault) Assert.Null(fixture.Owner.Current.ApprovedRequest);
     }
 
+    // PM-013: continuing the review waits for the cleanup's claim to settle, and the
+    // next cleanup's probe opens only the photos still under review.
+    [Fact]
+    public async Task AContinuationWaitsForTheClaimAndTheNextProbeOpensOnlyTheRemainingPhotos()
+    {
+        var entered = ScanTestData.Signal<bool>();
+        var release = ScanTestData.Signal<StreamDigest>();
+        var reader = Reader();
+        var analyzer = new ScanTestAnalyzer { Hash = (_, _) => { entered.TrySetResult(true); return new(release.Task); } };
+        await using var fixture = new ApprovalFixture(new(), actionSafety: new(reader, analyzer));
+        var request = await ApproveAsync(fixture);
+        var continuation = ReviewCoordinatorTests.Continuation(fixture.Request, request.RequestId,
+            excluded: request.SelectedOccurrenceIds);
+        var pending = fixture.Owner.ClaimAsync(request, [], TestContext.Current.CancellationToken);
+        await fixture.PumpAsync(entered.Task);
+
+        Assert.Equal(ReviewCommandOutcome.Stale, (await fixture.OpenAsync(continuation)).Outcome);
+        Assert.True(fixture.Owner.Current.Sealed);
+        release.TrySetResult(new(1, ScanTestData.Digest));
+        await fixture.PumpAsync(pending);
+        Assert.Equal(ApprovedActionClaimOutcome.Claimed, (await pending).Outcome);
+        analyzer.Hash = null;
+        var probed = reader.Leases.Count;
+        fixture.Executor.Arrived = ScanTestData.Signal<ReviewTestRun>();
+
+        var continued = await fixture.OpenAsync(continuation);
+
+        Assert.Equal(ReviewCommandOutcome.Committed, continued.Outcome);
+        // The first set kept one of its three paths, so it is closed; the second set stays open.
+        Assert.True(continued.Snapshot.Groups[0].Closed);
+        Assert.False(continued.Snapshot.Groups[1].Closed);
+        await fixture.PumpAsync(fixture.Executor.Arrived.Task);
+        await fixture.RevalidateAsync(4, 5);
+        Assert.Equal(ReviewCommandOutcome.Committed,
+            (await fixture.ChangeAsync(fixture.SelectionCommand(1, SelectionCommandKind.Toggle, 4))).Outcome);
+        var again = (await fixture.ApproveAsync(fixture.ApprovalCommand(Guid.NewGuid()))).ApprovedRequest!;
+        Assert.Equal([4L], again.SelectedOccurrenceIds);
+        Assert.Equal(ApprovedActionClaimOutcome.Claimed, (await ClaimAsync(fixture, again)).Outcome);
+        var opened = reader.Leases.Skip(probed).Select(lease => lease.OpenedFacts.ResolvedPath).Order().ToArray();
+        Assert.Equal([@"C:\Photos\4.jpg", @"C:\Photos\5.jpg"], opened);
+        Assert.All(reader.Leases, lease => Assert.True(lease.Disposed));
+    }
+
     [Fact]
     public async Task RefreshUsesClaimAndFreshDependentGroupWithPriorRecycledPathAbsent()
     {
