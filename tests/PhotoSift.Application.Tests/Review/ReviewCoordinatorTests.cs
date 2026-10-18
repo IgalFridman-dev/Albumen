@@ -430,6 +430,7 @@ public sealed class ReviewCoordinatorTests
         };
 
         Assert.Equal(ReviewCommandOutcome.Invalid, (await f.Open(request)).Outcome);
+        Assert.Equal(ReviewStatus.Closed, f.Owner.Current.Status);
         Assert.Single(f.Executor.Runs);
     }
 

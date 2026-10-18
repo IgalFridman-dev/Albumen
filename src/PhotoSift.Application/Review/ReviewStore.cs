@@ -700,7 +700,8 @@ internal sealed class ReviewStore
         ImmutableHashSet<long> selected)
     {
         var membersById = new Dictionary<long, ScanFileOccurrence>();
-        foreach (var member in groups.SelectMany(group => group.Members)
+        var open = groups.Where(group => !group.Closed).ToImmutableArray();
+        foreach (var member in open.SelectMany(group => group.Members)
                      .Select(member => member.Occurrence))
         {
             var id = member.Token.OccurrenceId;
@@ -710,7 +711,7 @@ internal sealed class ReviewStore
         }
         var members = membersById.Values.OrderBy(member => member.Token.OccurrenceId)
             .ToImmutableArray();
-        var eligible = groups.SelectMany(group => group.Members)
+        var eligible = open.SelectMany(group => group.Members)
             .Where(member => member.Eligibility == ReviewEligibilityState.Eligible)
             .Select(member => member.Occurrence.Token.OccurrenceId)
             .ToImmutableHashSet();

@@ -326,6 +326,8 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
 
     // PM-013: a continuation replaces only the sealed review of the cleanup it
     // names, and only once no claim or safety refresh still holds that review.
+    // Whether the cleanup itself finished (Complete/Incomplete, not Faulted or still running)
+    // is checked by the workflow before it asks to continue; here only the sealed review matters.
     private bool ContinuesSealedReview(Guid requestId, ScanPin pin) =>
         active is { Invalidated: false, ClaimAttempt: null } operation
         && operation.Request.Scan.Pin == pin
