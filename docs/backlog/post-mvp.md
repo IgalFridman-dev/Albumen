@@ -373,3 +373,77 @@ The preview decoder walks a JPEG's segments and compressed data before decoding 
 marker. Data after that marker, such as a motion-photo video, is accepted. Accepted
 limitation: a JPEG whose image data is complete but whose end marker was never written is also
 reported, because it cannot be told apart from a file cut right after its last scan.
+
+## PM-012 — Show a marked photo as marked in every set it belongs to
+
+**Status:** Backlog — owner asked for it before V1.0.0 on 2026-10-18.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18
+
+A photo can sit in a Look-alike set and in a leftover Maybe similar pair. Marking it in one
+place already counts everywhere (the second mark is refused and every set keeps a survivor),
+but the other sets still show it as "Kept". The user sees no reason to open a pair whose other
+photo is the only one that can stay.
+
+### Completion criteria
+
+- A member marked in another set reads "Marked for removal in Set N" everywhere it appears,
+  can't be marked again there, and Compare still works.
+- A set whose remaining photos can't change (every other member is marked elsewhere) shows
+  that on its card and in the set list.
+- Scenario tests for both; no change to the survivor rule or the approval.
+
+## PM-013 — Keep reviewing after a cleanup without scanning again
+
+**Status:** Backlog — owner asked for it before V1.0.0 on 2026-10-18.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18
+
+Approving a cleanup seals the review, so removing more photos needs a new scan. The owner wants
+to go back to the sets after a cleanup, with the removed photos gone and any set that lost a
+photo dropped, and approve another cleanup. Design:
+`docs/superpowers/specs/2026-10-18-post-test-fixes-design.md`.
+
+### Completion criteria
+
+- After a cleanup ends, "Continue reviewing" reopens Review on the same scan. Removed photos
+  are checked on disk and shown as gone; a set with one photo left disappears from the lists.
+- Each further cleanup is a fresh sealed approval with a fresh check of every file, its own
+  journal rows, and at least one survivor per set, exactly like the first.
+- Application tests for the reopen, the dropped sets and a second approval; Golden VM Full run
+  before release.
+
+## PM-014 — Re-check the folder after a cleanup removed photos
+
+**Status:** Backlog — owner asked for it before V1.0.0 on 2026-10-18.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18
+
+The folder page keeps the counts from the check that ran when the folder was chosen. After a
+cleanup removed photos, going back to the folder page still shows the old counts.
+
+### Completion criteria
+
+- Going to the folder page after a cleanup that removed at least one photo from the current
+  folder re-checks the folder by itself; the page says why while it checks.
+- Application test for the automatic re-check and for the case where nothing was removed.
+
+## PM-015 — A home page that shows the photos as cards
+
+**Status:** Backlog — scope to be confirmed with the owner.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18: "I don't see any
+main page that looks beautiful with the windows photos cards when in the app."
+
+### Completion criteria
+
+- To be written once the owner confirms which page: a card grid of the chosen folder's photos
+  on the folder page, or a start page before a folder is chosen.

@@ -276,6 +276,21 @@
                     </Style>
                 </Button.Style>
                 <Grid>
+                    <Grid.Style>
+                        <!-- A set settled by marks held in other sets reads as done: dimmed,
+                             except in High Contrast where the caption alone says so. -->
+                        <Style TargetType="Grid">
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsSettledElsewhere}" Value="True" />
+                                        <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Opacity" Value="0.55" />
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Grid.Style>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />

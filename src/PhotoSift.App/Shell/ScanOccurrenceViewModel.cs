@@ -16,30 +16,37 @@ public sealed class ScanOccurrenceViewModel
     {
     }
 
+    // markedElsewhereIn names the set that holds this photo's mark when it is marked in
+    // another set ("Look-alike set 2"); the mark is shown here too and can't be changed here.
     internal ScanOccurrenceViewModel(
         ReviewMemberSnapshot member,
         bool isAlias,
         bool selectionEnabled,
         Func<Task> toggle,
         int positionInSet = 0,
-        int sizeOfSet = 0)
+        int sizeOfSet = 0,
+        string? markedElsewhereIn = null)
         : this(member.Occurrence, isAlias, new AsyncCommand(toggle,
-            canExecute: () => selectionEnabled && member.Eligibility == ReviewEligibilityState.Eligible),
-            member.Selected, positionInSet, sizeOfSet)
+            canExecute: () => selectionEnabled && member.Eligibility == ReviewEligibilityState.Eligible
+                && member.SelectedInGroup is null),
+            member.Selected || member.SelectedInGroup is not null, positionInSet, sizeOfSet)
     {
         Eligibility = member.Eligibility;
         UnavailableReason = member.Reason;
-        CanSelect = member.Eligibility == ReviewEligibilityState.Eligible && selectionEnabled;
-        EligibilityText = member.Eligibility switch
-        {
-            ReviewEligibilityState.PendingRevalidation => "Being checked again, so it can't be marked yet",
-            ReviewEligibilityState.Eligible => member.Selected ? "Marked for removal" : "Kept",
-            ReviewEligibilityState.Unavailable => $"Can't be marked: {DescribeUnavailable(member.Reason)}",
-            _ => throw new InvalidOperationException($"Unknown Review eligibility: {member.Eligibility}"),
-        };
-        if (member.Eligibility == ReviewEligibilityState.Eligible && !CanSelect)
+        IsMarkedElsewhere = member.SelectedInGroup is not null;
+        CanSelect = member.Eligibility == ReviewEligibilityState.Eligible && selectionEnabled && !IsMarkedElsewhere;
+        EligibilityText = IsMarkedElsewhere
+            ? $"Marked for removal in {markedElsewhereIn ?? "another set"}"
+            : member.Eligibility switch
+            {
+                ReviewEligibilityState.PendingRevalidation => "Being checked again, so it can't be marked yet",
+                ReviewEligibilityState.Eligible => member.Selected ? "Marked for removal" : "Kept",
+                ReviewEligibilityState.Unavailable => $"Can't be marked: {DescribeUnavailable(member.Reason)}",
+                _ => throw new InvalidOperationException($"Unknown Review eligibility: {member.Eligibility}"),
+            };
+        if (member.Eligibility == ReviewEligibilityState.Eligible && !CanSelect && !IsMarkedElsewhere)
             EligibilityText += "; can't be changed right now";
-        AutomationName = $"{(member.Selected ? "Marked for removal" : "Kept")}: {member.Occurrence.DiscoveredPath}";
+        AutomationName = $"{(IsSelected ? "Marked for removal" : "Kept")}: {member.Occurrence.DiscoveredPath}";
         ItemStatus = $"{EligibilityText}; {PathKind}; {Allocation}";
     }
 
@@ -92,7 +99,9 @@ public sealed class ScanOccurrenceViewModel
     public string Allocation { get; }
     public ReviewEligibilityState Eligibility { get; }
     public ReviewUnavailableReason UnavailableReason { get; }
+    // True when the photo is marked for removal, in this set or in another one.
     public bool IsSelected { get; }
+    public bool IsMarkedElsewhere { get; }
     public bool CanSelect { get; }
     public string EligibilityText { get; }
     public string AutomationName { get; }

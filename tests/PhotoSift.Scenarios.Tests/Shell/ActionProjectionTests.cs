@@ -142,6 +142,15 @@ internal sealed class ActionShellFixture : IPhotoSiftWorkflow
         property.SetValue(Current, action);
         SnapshotChanged?.Invoke(this, Current);
     }
+    internal void PublishScope(ShellSnapshot scope, bool rechecking)
+    {
+        Current = Current with
+        {
+            Scope = scope, CurrentPhase = WorkflowPhase.ChooseScope, Rules = null,
+            Review = ReviewSnapshot.Closed, IsRecheckingScopeAfterCleanup = rechecking,
+        };
+        SnapshotChanged?.Invoke(this, Current);
+    }
     internal void PublishRecovery(ActionRecoverySnapshot recovery,
         WorkflowPhase phase = WorkflowPhase.ApproveCleanup)
     {

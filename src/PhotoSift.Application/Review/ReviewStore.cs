@@ -436,8 +436,15 @@ internal sealed class ReviewStore
     private void Refresh(ImmutableArray<ReviewGroupSnapshot> groups)
     {
         var selected = GlobalSelection(groups);
+        var holders = SelectionHolders(groups);
         groups = groups.Select(g => g with
         {
+            Members = g.Members.Select(m => m with
+            {
+                SelectedInGroup = !m.Selected
+                    && holders.TryGetValue(m.Occurrence.Token.OccurrenceId, out var holder)
+                    && holder != g.Candidate.GroupId ? holder : null,
+            }).ToImmutableArray(),
             Recovery = SelectionAccounting.Calculate(ForPolicy(g), Eligible(g),
                 SelectionFor(g, selected)),
         }).ToImmutableArray();
@@ -789,6 +796,15 @@ internal sealed class ReviewStore
     private static ImmutableHashSet<long> GlobalSelection(
         ImmutableArray<ReviewGroupSnapshot> groups) => groups
         .SelectMany(group => group.SelectedOccurrenceIds).ToImmutableHashSet();
+    private static ImmutableDictionary<long, Guid> SelectionHolders(
+        ImmutableArray<ReviewGroupSnapshot> groups)
+    {
+        var holders = ImmutableDictionary.CreateBuilder<long, Guid>();
+        foreach (var group in groups)
+        foreach (var id in group.SelectedOccurrenceIds)
+            holders.TryAdd(id, group.Candidate.GroupId);
+        return holders.ToImmutable();
+    }
     private static ImmutableHashSet<long> SelectionFor(
         ReviewGroupSnapshot group,
         ImmutableHashSet<long> selected) => group.Members
