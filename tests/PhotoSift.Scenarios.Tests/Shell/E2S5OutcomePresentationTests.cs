@@ -71,7 +71,7 @@ public sealed class E2S5OutcomePresentationTests
             },
         });
         Assert.Equal(
-            "Complete scope coverage. Unsupported, failed, and canceled/unprocessed files are reported separately.",
+            "Scan complete: every file in the folder was checked. Unsupported, failed, and canceled files are listed separately.",
             fixture.ViewModel.CoverageStatus);
     }
 

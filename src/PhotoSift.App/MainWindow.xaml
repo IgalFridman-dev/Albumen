@@ -1198,7 +1198,7 @@
                             <TextBlock x:Name="ReviewEvidenceDimensionsText" Text="{Binding Dimensions, StringFormat='Dimensions: {0}'}" TextWrapping="Wrap" />
                             <TextBlock x:Name="ReviewEvidenceSizeText" Text="{Binding Size, StringFormat='Size: {0}'}" TextWrapping="Wrap" />
                             <TextBlock x:Name="ReviewEvidenceRelevantDateText" Text="{Binding RelevantDate, StringFormat='Relevant date: {0}'}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceCategoryText" Text="{Binding Category, StringFormat='Category: {0}'}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceCategoryText" Text="{Binding Category, StringFormat='Kind: {0}'}" TextWrapping="Wrap" />
                             <TextBlock x:Name="ReviewEvidenceConfidenceText" Text="{Binding Confidence, StringFormat='Confidence: {0}'}" TextWrapping="Wrap" />
                             <TextBlock x:Name="ReviewEvidenceUncertaintyText" Text="{Binding Uncertainty, StringFormat='Uncertainty: {0}'}" TextWrapping="Wrap" />
                             <TextBlock x:Name="ReviewEvidenceTransformationsText" Text="{Binding Transformations, StringFormat='Transformations: {0}'}" TextWrapping="Wrap" />

@@ -61,7 +61,7 @@ public sealed class GroupedReviewEvidenceTests
         var evidence = Assert.IsType<ReviewComparisonEvidenceViewModel>(
             viewModel.ActiveReviewEvidence);
         Assert.Equal(group.Members[0].ResolvedPath, evidence.FullPath);
-        Assert.Equal("Near", evidence.Category);
+        Assert.Equal("Look-alike", evidence.Category);
         Assert.Equal("Unavailable", evidence.Dimensions);
         Assert.Equal("512 bytes", evidence.Size);
         Assert.Equal("Unavailable", evidence.RelevantDate);
@@ -69,7 +69,7 @@ public sealed class GroupedReviewEvidenceTests
         Assert.Equal("Unavailable", evidence.Uncertainty);
         Assert.Equal("Unavailable", evidence.Transformations);
         Assert.Equal("Unavailable", evidence.Reason);
-        Assert.Equal("No recommendation; manual Selection.", evidence.Recommendation);
+        Assert.Equal("PhotoSift doesn't mark photos for you. You choose what to remove.", evidence.Recommendation);
     }
 
     [Fact]
