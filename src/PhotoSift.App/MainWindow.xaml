@@ -822,7 +822,6 @@
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock x:Name="FolderNameText" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
-                                                   AutomationProperties.Name="Folder name"
                                                    Text="{Binding FolderName}" />
                                         <!-- The path as the name's caption; hidden until a folder is chosen. -->
                                         <TextBox x:Name="SelectedPathTextBox"
@@ -885,6 +884,10 @@
                                                 <DataTrigger Binding="{Binding IsReady}" Value="True">
                                                     <Setter Property="Background" Value="{StaticResource PhotoSift.SuccessSoftBrush}" />
                                                 </DataTrigger>
+                                                <!-- An empty folder passes the check but is nothing to celebrate. -->
+                                                <DataTrigger Binding="{Binding SupportedCount}" Value="0">
+                                                    <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+                                                </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsBlocked}" Value="True">
                                                     <Setter Property="Background" Value="{StaticResource PhotoSift.WarningSoftBrush}" />
                                                 </DataTrigger>
@@ -921,6 +924,10 @@
                                                         <DataTrigger Binding="{Binding IsReady}" Value="True">
                                                             <Setter Property="Data"
                                                                     Value="M 1,9 L 6,14 L 17,3 L 14,0 L 6,8 L 4,6 Z" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding SupportedCount}" Value="0">
+                                                            <Setter Property="Data"
+                                                                    Value="M 9,0 A 9,9 0 1 0 9,18 A 9,9 0 1 0 9,0 Z M 8,4 L 10,4 L 10,6 L 8,6 Z M 8,8 L 10,8 L 10,14 L 8,14 Z" />
                                                         </DataTrigger>
                                                         <DataTrigger Binding="{Binding IsBlocked}" Value="True">
                                                             <Setter Property="Data"
