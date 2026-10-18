@@ -86,11 +86,11 @@ public sealed class WpfReviewSelectionTests
         Assert.Empty(group.SelectedOccurrenceIds);
         Assert.Equal(4, group.Members.Length);
         Assert.True(group.Members[0].CanSelect);
-        Assert.Contains("Eligible", group.Members[0].EligibilityText);
+        Assert.Equal("Kept", group.Members[0].EligibilityText);
         Assert.False(group.Members[1].CanSelect);
-        Assert.Contains("Pending", group.Members[1].EligibilityText);
+        Assert.Contains("checked again", group.Members[1].EligibilityText);
         Assert.False(group.Members[2].CanSelect);
-        Assert.Contains("Changed", group.Members[2].EligibilityText);
+        Assert.Contains("changed since the scan", group.Members[2].EligibilityText);
         Assert.True(group.Members[3].CanSelect);
         Assert.Contains(@"C:\Photos\照片-very-long-name-one.jpg", group.Members[0].DiscoveredPath);
         Assert.Contains("Volume", group.Members[0].PhysicalIdentity);

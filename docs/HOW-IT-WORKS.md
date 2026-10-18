@@ -13,7 +13,7 @@ Each phase unlocks only when the previous one is valid (`Domain/Workflow/Workflo
 | 1 | **Choose Scope** | Pick one local folder, "Include subfolders" toggle. A preflight summary shows the resolved path, readable files and blocking reasons (network, cloud-only, protected folders). |
 | 2 | **Confirm Rules** | Exact duplicates are always on; "Conservative Near duplicates" can be switched off. "Confirm Scan options". |
 | 3 | **Scan** | Progress and live counts; "Cancel Scan". Outcome categories show what was grouped, skipped or unsupported. |
-| 4 | **Review** | Categories (Exact / Near) → groups → side-by-side comparison with bounded previews. The user ticks files to remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). |
+| 4 | **Review** | Kinds shown as Identical copies / Look-alike / Maybe similar / Couldn't check (internally Exact / Near / Uncertain / CouldNotAnalyze) → sets → photos with bounded previews and side-by-side compare. The user switches photos to Remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). |
 | 5 | **Approve Cleanup** | The Review page ends with "Move N photos to the Recycle Bin?": the first marked photos with thumbnails and paths, then the full accounting. "Move to Recycle Bin" sends them one at a time and shows a progress bar, a card per photo (moved, skipped and why, or unknown) and a summary when it ends. |
 
 A **History** view in the top bar lists every saved cleanup (one card each, with every photo's
