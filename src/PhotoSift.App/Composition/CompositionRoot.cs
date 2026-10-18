@@ -125,6 +125,7 @@ public static class CompositionRoot
         public Task RevalidateUnknownAsync(Guid requestId, CancellationToken cancellationToken) =>
             workflow.RevalidateUnknownAsync(requestId, cancellationToken);
         public Task NavigateAsync(WorkflowPhase phase) => workflow.NavigateAsync(phase);
+        public Task ContinueReviewAsync() => workflow.ContinueReviewAsync();
 
         public ValueTask DisposeAsync()
         {

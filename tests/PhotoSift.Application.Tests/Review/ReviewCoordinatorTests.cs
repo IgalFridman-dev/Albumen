@@ -384,7 +384,7 @@ public sealed class ReviewCoordinatorTests
 
         Assert.Equal(ReviewCommandOutcome.Committed, continued.Outcome);
         var snapshot = continued.Snapshot;
-        Assert.Equal(request.Scan.Groups, snapshot.Groups.Select(group => group.Candidate));
+        Assert.Equal(request.Scan.Groups.ToArray(), snapshot.Groups.Select(group => group.Candidate).ToArray());
         // The identical-copies set lost one of its two photos, so there is nothing left to compare.
         Assert.True(snapshot.Groups[0].Closed);
         Assert.Equal([2L], snapshot.Groups[0].Members.Select(member => member.Occurrence.Token.OccurrenceId));
