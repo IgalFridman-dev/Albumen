@@ -176,7 +176,7 @@ public sealed class WpfExactAccessibilityTests
                 Assert.All(selectionControls, control => Assert.True(control.IsTabStop));
                 Assert.DoesNotContain(Descendants<Button>(window), button => button.IsEnabled &&
                     (button.Content?.ToString()?.Contains("Remove", StringComparison.OrdinalIgnoreCase) == true ||
-                     button.Content?.ToString() == "Approve Cleanup"));
+                     button.Name == "ApproveCleanupButton"));
                 var textBrush = new SolidColorBrush(Colors.Coral);
                 window.Resources[SystemColors.WindowTextBrushKey] = textBrush;
                 Drain();

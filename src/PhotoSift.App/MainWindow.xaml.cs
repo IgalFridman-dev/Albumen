@@ -348,7 +348,7 @@ public partial class MainWindow : Window
     }
 
     // The Recycle Bin item list gets the same bounded height so the progress summary
-    // and Action Records below it stay reachable at small window sizes.
+    // and the earlier cleanups below it stay reachable at small window sizes.
     private void OnActionPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
     {
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;

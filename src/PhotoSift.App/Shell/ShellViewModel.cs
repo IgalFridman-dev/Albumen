@@ -76,6 +76,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private long approvalIdentityRevision;
     private Guid approvalIdentityKey;
     private string approvalAutomationStatus = string.Empty;
+    private string approvalTitle = "No photos marked for removal yet";
+    private ImmutableArray<ScanOccurrenceViewModel> approvalMarkedPhotos = [];
+    private string approvalMoreMarkedText = string.Empty;
     private string actionAnnouncement = string.Empty;
     private string actionRecoveryAnnouncement = string.Empty;
     private bool isClearScanDataConfirmationPending;
@@ -240,6 +243,66 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public string ActionCertaintyText => CurrentAction.Items.Any(item => item.State is ActionItemState.Executing or ActionItemState.UnknownPendingRevalidation)
         ? "Some outcomes are uncertain. Inspect each original path and its recorded reason. A later safe review is required for uncertain items."
         : "Per-item states and reasons show what was recorded; an overall result does not replace them.";
+    public int ActionTotalCount => CurrentAction.Items.Length;
+    public int ActionDoneCount => CurrentAction.Items.Count(item => item.State is not
+        (ActionItemState.Waiting or ActionItemState.Requested or ActionItemState.Executing));
+    public bool HasActionItems => ActionTotalCount != 0;
+    private bool IsActionSettled => CurrentAction.Status is ActionStatus.Complete or ActionStatus.Incomplete
+        or ActionStatus.Faulted;
+    public string ActionHeadline
+    {
+        get
+        {
+            var action = CurrentAction;
+            if (action.RequestId is null) return "Recycle Bin cleanup";
+            if (!IsActionSettled) return $"Moving {PhotoCount(action.Items.Length)} to the Recycle Bin";
+            if (action.Status == ActionStatus.Faulted) return "Cleanup stopped";
+            var moved = action.Items.Count(item => item.State == ActionItemState.Recycled);
+            return moved == action.Items.Length
+                ? "Cleanup finished"
+                : string.Create(CultureInfo.InvariantCulture, $"Cleanup finished: {moved} of {action.Items.Length} moved");
+        }
+    }
+    public string ActionProgressText
+    {
+        get
+        {
+            var items = CurrentAction.Items;
+            var moved = items.Count(item => item.State == ActionItemState.Recycled);
+            var skipped = items.Count(item => item.State is ActionItemState.NotRemoved or ActionItemState.NotRequested
+                or ActionItemState.InterruptedBeforeExecution);
+            var unknown = items.Count(item => item.State == ActionItemState.UnknownPendingRevalidation);
+            var text = string.Create(CultureInfo.InvariantCulture,
+                $"{ActionDoneCount} of {items.Length} done · {moved} moved · {skipped} skipped");
+            return unknown == 0 ? text : string.Create(CultureInfo.InvariantCulture, $"{text} · {unknown} unknown");
+        }
+    }
+    // Shown once the cleanup has settled: what happened, in plain words.
+    public string ActionOutcomeText
+    {
+        get
+        {
+            var action = CurrentAction;
+            if (action.RequestId is null || !IsActionSettled) return string.Empty;
+            var moved = action.Items.Count(item => item.State == ActionItemState.Recycled);
+            var unknown = action.Items.Count(item => item.State is ActionItemState.UnknownPendingRevalidation
+                or ActionItemState.Executing or ActionItemState.Requested);
+            var notMoved = action.Items.Length - moved - unknown;
+            if (unknown > 0)
+                return $"PhotoSift can't tell whether {PhotoCount(unknown)} moved. They need a later check, which PhotoSift offers in History the next time it starts. Nothing is retried automatically.";
+            if (notMoved == 0)
+                return $"{PhotoCount(moved)} {(moved == 1 ? "is" : "are")} in the Windows Recycle Bin. If you need one back, restore it from there.";
+            return moved == 0
+                ? "Nothing was moved. Each photo below says why."
+                : $"{PhotoCount(moved)} moved to the Windows Recycle Bin and {PhotoCount(notMoved)} left where {(notMoved == 1 ? "it is" : "they are")}. Each photo below says why.";
+        }
+    }
+    public bool HasActionOutcome => ActionOutcomeText.Length != 0;
+    public ActionResultTone ActionOutcomeTone => CurrentAction.Items.Any(item => item.State is
+            ActionItemState.UnknownPendingRevalidation or ActionItemState.Executing or ActionItemState.Requested)
+        ? ActionResultTone.Warning
+        : CurrentAction.Items.All(item => item.State == ActionItemState.Recycled)
+            ? ActionResultTone.Done : ActionResultTone.Skipped;
     public string ActionReplayNotice { get; } = "No automatic replay or retry is performed. Interrupted or uncertain items require a later safe review.";
     public string ActionRecoveryNotice { get; } = "Actual recovered space is not measured. A Recycle Bin result does not establish physical-file deletion or freed disk space.";
     public string ActionSelectionText => photoSnapshot?.ActionReview.ApprovedRequest is { } approved
@@ -250,6 +313,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public string ActionAnnouncement => actionAnnouncement;
     public ReadOnlyObservableCollection<ActionRecordViewModel> ActionRecoveryRecords { get; }
     public bool HasActionRecoveryRecords => ActionRecoveryRecords.Count != 0;
+    public bool HasNoActionRecords => photoSnapshot?.ActionRecovery.Status == ActionRecoveryStatus.Ready
+        && ActionRecoveryRecords.Count == 0;
     public bool HasActionRecoveryDisclosure => photoSnapshot?.ActionRecovery.Records.Any(record =>
         record.Summary.Certainty == ActionRecordCertainty.HasUnknown) is true;
     public string ActionRecoveryDisclosure { get; } = "PhotoSift found an unfinished cleanup from a previous session. The outcome of one or more items is unknown. Revalidate their current file state. Revalidation will not remove files.";
@@ -467,6 +532,35 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         get => approvalUnselectedSurvivorsText;
         private set => SetField(ref approvalUnselectedSurvivorsText, value);
     }
+
+    public string ApprovalTitle
+    {
+        get => approvalTitle;
+        private set => SetField(ref approvalTitle, value);
+    }
+
+    // The first few marked photos, shown with thumbnails above the approval button.
+    public ImmutableArray<ScanOccurrenceViewModel> ApprovalMarkedPhotos
+    {
+        get => approvalMarkedPhotos;
+        private set
+        {
+            approvalMarkedPhotos = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string ApprovalMoreMarkedText
+    {
+        get => approvalMoreMarkedText;
+        private set
+        {
+            SetField(ref approvalMoreMarkedText, value);
+            OnPropertyChanged(nameof(HasMoreMarkedPhotos));
+        }
+    }
+
+    public bool HasMoreMarkedPhotos => ApprovalMoreMarkedText.Length != 0;
 
     public string ApprovalDestinationText { get; } = "Destination: Windows Recycle Bin.";
     public string ApprovalRevalidationText { get; } =
@@ -1295,7 +1389,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             foreach (var row in ActionItems) actionRows.Add(row);
         }
         foreach (var property in new[] { nameof(ActionItems), nameof(ActionStatusText), nameof(ActionCountsText),
-            nameof(ActionCertaintyText), nameof(ActionSelectionText), nameof(SourceMutationNotice) })
+            nameof(ActionCertaintyText), nameof(ActionSelectionText), nameof(SourceMutationNotice),
+            nameof(ActionTotalCount), nameof(ActionDoneCount), nameof(HasActionItems), nameof(ActionHeadline),
+            nameof(ActionProgressText), nameof(ActionOutcomeText), nameof(HasActionOutcome), nameof(ActionOutcomeTone) })
             OnPropertyChanged(property);
         if (snapshot.Action.RequestId is null) return;
         var changedIndex = -1;
@@ -1331,7 +1427,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             actionRecoveryRecords.Clear();
             foreach (var record in projected) actionRecoveryRecords.Add(record);
         }
-        foreach (var property in new[] { nameof(ActionRecoveryRecords), nameof(HasActionRecoveryRecords),
+        foreach (var property in new[] { nameof(ActionRecoveryRecords), nameof(HasActionRecoveryRecords), nameof(HasNoActionRecords),
             nameof(HasActionRecoveryDisclosure), nameof(ActionRecoveryStatusText), nameof(HasActionRecoveryStatus),
             nameof(IsLocalDataFaulted), nameof(CanRevalidateUnknownItems) })
             OnPropertyChanged(property);
@@ -1459,6 +1555,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ApprovalUnresolvedText = $"Unresolved total: {review.Unresolved.Total.ToString(CultureInfo.InvariantCulture)}";
         ApprovalUnresolvedSubtotals = $"Incomplete enumeration: {review.Unresolved.IncompleteEnumeration.ToString(CultureInfo.InvariantCulture)}; failed Scan rows: {review.Unresolved.FailedScanRows.ToString(CultureInfo.InvariantCulture)}; canceled Scan rows: {review.Unresolved.CanceledScanRows.ToString(CultureInfo.InvariantCulture)}; unprocessed Scan rows: {review.Unresolved.UnprocessedScanRows.ToString(CultureInfo.InvariantCulture)}; pending Review members: {review.Unresolved.PendingReviewMembers.ToString(CultureInfo.InvariantCulture)}; unavailable Review members: {review.Unresolved.UnavailableReviewMembers.ToString(CultureInfo.InvariantCulture)}";
         ApprovalUnselectedSurvivorsText = $"Ordinary unselected survivors: {review.Unresolved.UnselectedSurvivorMembers.ToString(CultureInfo.InvariantCulture)}";
+        ApprovalTitle = selectedCount switch
+        {
+            0 => "No photos marked for removal yet",
+            1 => "Move 1 photo to the Recycle Bin?",
+            _ => $"Move {selectedCount.ToString(CultureInfo.InvariantCulture)} photos to the Recycle Bin?",
+        };
+        ProjectMarkedPhotos(selectedMembers);
         ApprovalAutomationStatus = $"{ApprovalSelectedOccurrenceText}; {ApprovalSelectedPathText}; {ApprovalSelectedPhysicalText}; {ApprovalRecoveryText} {ApprovalCoverageText}; {ApprovalUnresolvedText}; {ApprovalUnresolvedSubtotals}; {ApprovalUnselectedSurvivorsText}; {ApprovalDestinationText} {ApprovalRevalidationText}";
         SelectionSummary = $"{ApprovalSelectedOccurrenceText}; {ApprovalRecoveryText} {ApprovalCoverageText}; unresolved total {review.Unresolved.Total.ToString(CultureInfo.InvariantCulture)}.";
         ReviewSelectionBarText = FormatSelectionBar(review, selectedCount);
@@ -1467,6 +1570,27 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             && selectedCount > 0 && !review.Sealed
             && photoSnapshot?.ActionRecovery.Status != ActionRecoveryStatus.Faulted
             && selectedMembers.All(member => member.Eligibility == ReviewEligibilityState.Eligible);
+    }
+
+    private static string PhotoCount(long count) => count == 1
+        ? "1 photo"
+        : $"{count.ToString(CultureInfo.InvariantCulture)} photos";
+
+    private void ProjectMarkedPhotos(ReviewMemberSnapshot[] selectedMembers)
+    {
+        const int Shown = 6;
+        var shown = selectedMembers.Take(Shown).ToArray();
+        if (shown.Length != ApprovalMarkedPhotos.Length
+            || shown.Where((member, index) => member.Occurrence.Token.OccurrenceId != ApprovalMarkedPhotos[index].OccurrenceId
+                || member.Occurrence.DiscoveredPath != ApprovalMarkedPhotos[index].DiscoveredPath).Any())
+            ApprovalMarkedPhotos = shown.Select(member => new ScanOccurrenceViewModel(member.Occurrence)).ToImmutableArray();
+        var more = selectedMembers.LongLength - shown.Length;
+        ApprovalMoreMarkedText = more switch
+        {
+            <= 0 => string.Empty,
+            1 => "and 1 more photo",
+            _ => $"and {more.ToString(CultureInfo.InvariantCulture)} more photos",
+        };
     }
 
     private static string FormatSelectionBar(ReviewSnapshot review, long selectedCount)
