@@ -330,7 +330,11 @@ public sealed class WpfScopeAccessibilityTests
                 var guidance = Assert.IsType<TextBlock>(window.FindName("ScanOptionsGuidanceText"));
                 var retry = Assert.IsType<Button>(window.FindName("RetryScopeButton"));
 
+                var headline = Assert.IsType<TextBlock>(window.FindName("FolderHeadline"));
+                Assert.Equal("Find duplicate and look-alike photos", headline.Text);
                 Assert.Equal("No folder chosen yet", folderName.Text);
+                // No automation name overrides the text, so a screen reader hears the folder's name.
+                Assert.Equal(string.Empty, AutomationProperties.GetName(folderName));
                 Assert.Equal("Choose a folder to start.", status.Text);
                 Assert.Equal("Also check folders inside the chosen folder.", subfoldersCaption.Text);
                 // Nothing to say about the options yet, so the live region stays out of the way.
