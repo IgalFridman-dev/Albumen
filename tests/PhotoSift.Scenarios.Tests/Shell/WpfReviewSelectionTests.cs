@@ -803,6 +803,7 @@ internal sealed class RecordingReviewWorkflow : IPhotoSiftWorkflow
     public Task OpenReviewAsync() => Task.CompletedTask;
     public Task RevalidateUnknownAsync(Guid requestId, CancellationToken token) => Task.CompletedTask;
     public Task NavigateAsync(WorkflowPhase phase) => Task.CompletedTask;
+    public Task ContinueReviewAsync() => Task.CompletedTask;
 
     public TaskCompletionSource<ReviewCommandResult> DeferNextSelection() =>
         deferredSelection = new(TaskCreationOptions.RunContinuationsAsynchronously);

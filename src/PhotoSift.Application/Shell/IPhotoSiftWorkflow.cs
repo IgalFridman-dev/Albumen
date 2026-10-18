@@ -15,6 +15,8 @@ public interface IPhotoSiftWorkflow
     Task StartScanAsync();
     Task CancelScanAsync();
     Task OpenReviewAsync();
+    // PM-013: reopen the review of the same scan after its cleanup settled.
+    Task ContinueReviewAsync();
     Task<ReviewCommandResult> ChangeReviewSelectionAsync(
         SelectionCommand command, CancellationToken cancellationToken);
     Task<ReviewCommandResult> AffirmReviewOverrideAsync(
