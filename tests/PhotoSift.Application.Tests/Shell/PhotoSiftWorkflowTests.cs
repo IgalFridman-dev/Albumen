@@ -10,6 +10,7 @@ using PhotoSift.Application.Scope;
 using PhotoSift.Application.Tests.Scan;
 using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Scan;
+using PhotoSift.Domain.Scope;
 using PhotoSift.Domain.Workflow;
 using Xunit;
 
@@ -106,6 +107,33 @@ public sealed class PhotoSiftWorkflowTests
         Assert.Single(scope.Retries);
         Assert.False(workflow.Current.IsRecheckingScopeAfterCleanup);
         Assert.Equal(WorkflowPhase.ChooseScope, workflow.Current.CurrentPhase);
+    }
+
+    [Fact]
+    public async Task ARecheckStillBeingAcceptedByTheScopeIsNotSubmittedTwice()
+    {
+        await using var f = new ReviewFixture();
+        var release = ScanTestData.Signal<bool>();
+        var scope = new ScopeOwner(f.Request.Scope) { RetryRelease = release };
+        try
+        {
+            var (workflow, _, _) = await SettleCleanupAsync(f, scope, ActionItemState.Recycled);
+
+            await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+            await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+            Assert.Single(scope.Retries);
+            Assert.False(workflow.Current.IsRecheckingScopeAfterCleanup);
+
+            // The user picked another folder before the re-check was accepted:
+            // that check is theirs, and the pending re-check label is dropped.
+            scope.Publish(scope.Current with { ScopeState = ScopeSessionState.Checking, Preflight = null, Revision = 2,
+                Selection = new(@"C:\Elsewhere", ScopeRecursion.TopLevelOnly) });
+            await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+            Assert.Single(scope.Retries);
+            Assert.False(workflow.Current.IsRecheckingScopeAfterCleanup);
+            Assert.Equal(2, workflow.Current.Scope.Revision);
+        }
+        finally { release.TrySetResult(true); }
     }
 
     [Fact]
@@ -1611,16 +1639,18 @@ public sealed class PhotoSiftWorkflowTests
         public TaskCompletionSource<bool> RetryEntered { get; } = ScanTestData.Signal<bool>();
         // Like the real owner: a retry publishes Checking under the next revision.
         public bool ChecksOnRetry { get; init; }
+        // Like the real owner: the retry call does not return until the check ends.
+        public TaskCompletionSource<bool>? RetryRelease { get; init; }
         public void Publish(ShellSnapshot snapshot) { Current = snapshot; SnapshotChanged?.Invoke(this, snapshot); }
         public Task HandleAsync(ChooseScopeCommand command, CancellationToken token) => Task.CompletedTask;
         public Task HandleAsync(ChangeScopeRecursionCommand command, CancellationToken token) => Task.CompletedTask;
-        public Task HandleAsync(RetryScopePreflightCommand command, CancellationToken token)
+        public async Task HandleAsync(RetryScopePreflightCommand command, CancellationToken token)
         {
             Retries.Add(command);
             if (ChecksOnRetry)
                 Publish(Current with { ScopeState = ScopeSessionState.Checking, Preflight = null, Revision = Current.Revision + 1 });
             RetryEntered.TrySetResult(true);
-            return Task.CompletedTask;
+            if (RetryRelease is not null) await RetryRelease.Task;
         }
     }
     private sealed class ScanOwner : IScanCoordinator
