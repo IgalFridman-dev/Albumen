@@ -100,6 +100,13 @@ public sealed class ChooseScopeWorkflow : IChooseScopeWorkflow
                 ?? throw new InvalidOperationException(
                     "Scope preflight cannot be retried before a Scope is selected.");
             cancellationToken.ThrowIfCancellationRequested();
+            // A retry never takes an open folder picker away from the user: the
+            // pick that follows is the newer intent and runs its own check.
+            if (pendingPicker is not null)
+            {
+                return null;
+            }
+
             var operation = Accept(request, selection);
             return () => RunPreflightAsync(operation);
         }, cancellationToken).ConfigureAwait(false);

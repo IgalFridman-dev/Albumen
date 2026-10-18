@@ -338,6 +338,43 @@ public sealed class ChooseScopeWorkflowTests
     }
 
     [Fact]
+    public async Task RetryWhileTheFolderPickerIsOpenDoesNothingAndKeepsThePick()
+    {
+        var nextFolder = new TaskCompletionSource<string?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var picker = new SequenceFolderPicker(
+            Task.FromResult<string?>(@"C:\First"), nextFolder.Task);
+        var workflow = new ChooseScopeWorkflow(picker, new SelectionPreflight());
+        await workflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None);
+        Assert.Equal(1, workflow.Current.Revision);
+        var observed = new List<(long Revision, ScopeSessionState State)>();
+        workflow.SnapshotChanged += (_, snapshot) => observed.Add((snapshot.Revision, snapshot.ScopeState));
+        var picking = workflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None);
+        try
+        {
+            await workflow.HandleAsync(new RetryScopePreflightCommand(), CancellationToken.None);
+
+            Assert.Empty(observed);
+            Assert.False(picking.IsCompleted);
+            Assert.Equal(ScopeSessionState.Ready, workflow.Current.ScopeState);
+            Assert.Equal(1, workflow.Current.Revision);
+
+            nextFolder.SetResult(@"C:\Second");
+            await picking;
+        }
+        finally
+        {
+            nextFolder.TrySetResult(null);
+        }
+
+        Assert.Equal(@"C:\Second", workflow.Current.Selection?.SelectedPath);
+        Assert.Equal(2, workflow.Current.Revision);
+        Assert.Equal(
+            new[] { (2L, ScopeSessionState.Checking), (2L, ScopeSessionState.Ready) },
+            observed);
+    }
+
+    [Fact]
     public async Task RetryWithoutSelectionIsRejected()
     {
         var workflow = new ChooseScopeWorkflow(
