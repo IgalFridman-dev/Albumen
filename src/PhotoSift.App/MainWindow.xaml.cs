@@ -90,10 +90,8 @@ public partial class MainWindow : Window
         object? sender,
         PropertyChangedEventArgs eventArgs)
     {
-        if ((eventArgs.PropertyName == nameof(ShellViewModel.CanConfirmExactRules)
-                && shellViewModel is { IsConfirmRulesPhase: true, CanConfirmExactRules: false, CanStartScan: true })
-            || (eventArgs.PropertyName == nameof(ShellViewModel.IsScanBusy)
-                && shellViewModel is { IsScanPhase: true, IsScanBusy: true }))
+        if (eventArgs.PropertyName == nameof(ShellViewModel.IsScanBusy)
+            && shellViewModel is { IsScanPhase: true, IsScanBusy: true })
         {
             QueuePhaseFocus();
         }
@@ -628,7 +626,8 @@ public partial class MainWindow : Window
             UIElement? target = phase switch
             {
                 WorkflowPhase.ChooseScope => expected.IsBlocked ? BlockingNotice : ChooseAnotherScopeButton,
-                WorkflowPhase.ConfirmRules => expected.CanConfirmExactRules ? ConfirmExactRulesButton : StartScanButton,
+                // Folder and options share one screen; its Scan button is the next step.
+                WorkflowPhase.ConfirmRules => expected.CanScanFolder ? ScanFolderButton : ChooseAnotherScopeButton,
                 WorkflowPhase.Scan => expected.IsScanBusy ? CancelScanButton : null,
                 WorkflowPhase.Review => ReviewHeading,
                 WorkflowPhase.ApproveCleanup => ActionHeading,

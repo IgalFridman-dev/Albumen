@@ -77,7 +77,7 @@ public sealed class ExactScanFlowTests
         fixture.PublishPhase(WorkflowPhase.ConfirmRules);
 
         Assert.True(fixture.ViewModel.NearDuplicatesEnabled);
-        Assert.Contains("Exact is always enabled", fixture.ViewModel.ScanOptionsGuidance, StringComparison.Ordinal);
+        Assert.Contains("Identical copies are always included", fixture.ViewModel.ScanOptionsGuidance, StringComparison.Ordinal);
         Assert.All(fixture.Workflow.Current.Review.Groups,
             group => Assert.Empty(group.SelectedOccurrenceIds));
         await fixture.ViewModel.ChangeNearDuplicateModeCommand.ExecuteAsync(false)

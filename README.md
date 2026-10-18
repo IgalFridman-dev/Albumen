@@ -42,7 +42,7 @@ Deleting someone's photos is a one-way door, so PhotoSift is designed around one
 |---|---|
 | **Exact duplicates** | Streaming SHA-256 over file bytes; hard links are recognized as aliases of the same file, not as copies. |
 | **Near duplicates** | Managed dHash plus a color signature with conservative thresholds; borderline pairs are left ungrouped. |
-| **Guided workflow** | Five phases (Choose Scope → Confirm Rules → Scan → Review → Approve Cleanup), each unlocked only when the previous one is valid. |
+| **Guided workflow** | Four steps (Choose folder → Scan → Review → Clean up), each unlocked only when the previous one is valid. The folder and the scan options share one screen. |
 | **Safe scope** | Preflight rejects network shares, cloud-only placeholders and protected system folders before scanning. |
 | **Review** | Exact and Near categories, virtualized groups, bounded previews, keyboard navigation and a suggested survivor you can override. |
 | **History** | Every cleanup's per-photo outcome survives relaunch and can be checked again read-only later. |
