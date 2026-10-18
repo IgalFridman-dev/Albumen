@@ -499,6 +499,15 @@ public partial class MainWindow : Window
             },
             DispatcherPriority.Input);
 
+    // Leaving History cancels a pending clear, so coming back never lands keyboard focus
+    // on the destructive confirmation the user did not just ask for.
+    private void OnHistoryUnselected(object sender, RoutedEventArgs eventArgs)
+    {
+        if (!ReferenceEquals(eventArgs.OriginalSource, ActionRecordsTab)
+            || shellViewModel?.IsClearScanDataConfirmationPending is not true) return;
+        shellViewModel.CancelClearScanDataCommand.Execute(null);
+    }
+
     private void OnClearScanDataConfirmationVisibilityChanged(
         object sender,
         DependencyPropertyChangedEventArgs eventArgs)

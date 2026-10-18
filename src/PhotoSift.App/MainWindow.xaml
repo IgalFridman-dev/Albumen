@@ -87,7 +87,7 @@
                     <DockPanel>
                         <Border DockPanel.Dock="Right" Margin="12,0,0,0" Style="{StaticResource PhotoSift.ToneChip}"
                                 Tag="{Binding Tone}">
-                            <TextBlock Text="{Binding ResultLabel}" FontSize="12" />
+                            <TextBlock Text="{Binding ResultText}" FontSize="12" />
                         </Border>
                         <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
                     </DockPanel>
@@ -1235,8 +1235,19 @@
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
-                                            <Border Width="64" Height="48" CornerRadius="6" VerticalAlignment="Top"
-                                                    Background="{StaticResource PhotoSift.SubtleFillBrush}">
+                                            <Border Width="64" Height="48" CornerRadius="6" VerticalAlignment="Top">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                                                <Setter Property="BorderThickness" Value="1" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
                                                 <app:PhotoThumbnail Member="{Binding}" CornerRadius="6"
                                                         Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
                                             </Border>
@@ -1407,10 +1418,10 @@
                             <StackPanel>
                                 <TextBlock Text="{Binding ActionRecoveryDisclosure}" TextWrapping="Wrap"
                                            AutomationProperties.AutomationId="action-recovery-disclosure" />
-                                <Button x:Name="RevalidateUnknownItemsButton" Content="Check these photos again"
+                                <Button x:Name="RevalidateUnknownItemsButton" Content="Revalidate unknown items"
                                         MinHeight="36" Margin="0,8,0,0" Padding="14,6" HorizontalAlignment="Left"
                                         Style="{StaticResource PhotoSift.Button}"
-                                        AutomationProperties.Name="Check the photos with an unknown outcome again"
+                                        AutomationProperties.Name="Revalidate unknown items"
                                         Command="{Binding RevalidateUnknownCommand}"
                                         IsEnabled="{Binding CanRevalidateUnknownItems}" />
                             </StackPanel>
@@ -1429,7 +1440,7 @@
             </app:ReviewAutomationBorder>
         </Grid>
           </TabItem>
-          <TabItem x:Name="ActionRecordsTab" Header="History"
+          <TabItem x:Name="ActionRecordsTab" Header="History" Selector.Unselected="OnHistoryUnselected"
                    AutomationProperties.Name="History">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel Margin="4,4,20,12" MaxWidth="960" HorizontalAlignment="Left">
@@ -1440,10 +1451,10 @@
                         Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <StackPanel>
                         <TextBlock Text="{Binding ActionRecoveryDisclosure}" TextWrapping="Wrap" />
-                        <Button x:Name="HistoryRevalidateUnknownItemsButton" Content="Check these photos again"
+                        <Button x:Name="HistoryRevalidateUnknownItemsButton" Content="Revalidate unknown items"
                                 MinHeight="36" Margin="0,8,0,0" Padding="14,6" HorizontalAlignment="Left"
                                 Style="{StaticResource PhotoSift.Button}"
-                                AutomationProperties.Name="Check the photos with an unknown outcome again"
+                                AutomationProperties.Name="Revalidate unknown items"
                                 Command="{Binding RevalidateUnknownCommand}"
                                 IsEnabled="{Binding CanRevalidateUnknownItems}" />
                     </StackPanel>
@@ -1453,7 +1464,7 @@
                 <Border Margin="0,8,0,12" Style="{StaticResource PhotoSift.Card}" Padding="18,14"
                         Visibility="{Binding HasNoActionRecords, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <TextBlock Style="{StaticResource PhotoSift.MutedText}"
-                               Text="No cleanups yet. When you move photos to the Recycle Bin, each one is recorded here." />
+                               Text="No saved cleanups yet. Each cleanup is recorded here once PhotoSift restarts after it." />
                 </Border>
                 <ItemsControl x:Name="ActionRecordsHistoryList" Margin="0,8,0,0" Focusable="False"
                               ItemsSource="{Binding ActionRecoveryRecords}"
