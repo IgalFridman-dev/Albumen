@@ -583,8 +583,8 @@ public partial class MainWindow : Window
 
     private void QueueScopeStatusAnnouncement()
     {
-        var expectedViewModel = shellViewModel;
-        var expectedStatus = expectedViewModel?.ScopeStatus;
+        if (shellViewModel is not { } expectedViewModel) return;
+        var expectedStatus = expectedViewModel.ScopeStatus;
         if (expectedStatus is not "Checking location and access" and
             not "Ready" and
             not "Blocked")
@@ -592,6 +592,8 @@ public partial class MainWindow : Window
             return;
         }
 
+        // The strip shows and announces the one-sentence form of that status.
+        var expectedSentence = expectedViewModel.FolderStatusSentence;
         var expectedGeneration = dataContextGeneration;
         Dispatcher.InvokeAsync(
             () =>
@@ -599,9 +601,10 @@ public partial class MainWindow : Window
                 if (isClosed ||
                     expectedGeneration != dataContextGeneration ||
                     !ReferenceEquals(expectedViewModel, shellViewModel) ||
-                    ScopeStatusText.Text != expectedStatus ||
+                    expectedViewModel.ScopeStatus != expectedStatus ||
+                    ScopeStatusText.Text != expectedSentence ||
                     AutomationProperties.GetItemStatus(ScopeStatusText) !=
-                        expectedStatus)
+                        expectedSentence)
                 {
                     return;
                 }
