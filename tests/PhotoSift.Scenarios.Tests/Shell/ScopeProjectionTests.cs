@@ -17,6 +17,9 @@ public sealed class ScopeProjectionTests
             new RecordingChooseScopeWorkflow(ColdSnapshot()));
 
         Assert.Equal("Choose one local folder", viewModel.ScopeStatus);
+        Assert.Equal("Choose a folder to start.", viewModel.FolderStatusSentence);
+        Assert.Equal("No folder chosen yet", viewModel.FolderName);
+        Assert.Equal("Also check folders inside the chosen folder.", viewModel.SubfoldersCaption);
         Assert.Equal(string.Empty, viewModel.SelectedPath);
         Assert.Equal(string.Empty, viewModel.ResolvedPath);
         Assert.Equal("Unavailable", viewModel.SupportedCount);
@@ -34,6 +37,9 @@ public sealed class ScopeProjectionTests
             new RecordingChooseScopeWorkflow(CheckingSnapshot()));
 
         Assert.Equal("Checking location and access", viewModel.ScopeStatus);
+        Assert.Equal("Checking location and access.", viewModel.FolderStatusSentence);
+        Assert.Equal("Photos", viewModel.FolderName);
+        Assert.Equal("Also check folders inside Photos.", viewModel.SubfoldersCaption);
         Assert.Equal(@"C:\Photos", viewModel.SelectedPath);
         Assert.Equal(string.Empty, viewModel.ResolvedPath);
         Assert.Equal("Unavailable", viewModel.SupportedCount);
@@ -50,6 +56,7 @@ public sealed class ScopeProjectionTests
         var viewModel = new ShellViewModel(workflow);
 
         Assert.Equal("Ready", viewModel.ScopeStatus);
+        Assert.Equal("Ready to scan. 12 JPEG and PNG photos found.", viewModel.FolderStatusSentence);
         Assert.Equal(@"C:\Photos", viewModel.SelectedPath);
         Assert.Equal(@"\\?\C:\Photos", viewModel.ResolvedPath);
         Assert.True(viewModel.IncludeSubfolders);
@@ -159,6 +166,9 @@ public sealed class ScopeProjectionTests
             new RecordingChooseScopeWorkflow(CanceledSnapshot()));
 
         Assert.Equal("Not verified", viewModel.ScopeStatus);
+        Assert.Equal(
+            "The folder wasn't checked. Check it again or choose another folder.",
+            viewModel.FolderStatusSentence);
         Assert.Equal(@"C:\Photos", viewModel.SelectedPath);
         Assert.Equal(string.Empty, viewModel.ResolvedPath);
         Assert.Equal("Unavailable", viewModel.SupportedCount);
@@ -166,6 +176,52 @@ public sealed class ScopeProjectionTests
         Assert.False(viewModel.IsChecking);
         Assert.False(viewModel.IsReady);
         Assert.False(viewModel.IsBlocked);
+    }
+
+    [Theory]
+    [InlineData(0, "No JPEG or PNG photos were found in this folder.")]
+    [InlineData(1, "Ready to scan. 1 JPEG or PNG photo found.")]
+    [InlineData(1284, "Ready to scan. 1,284 JPEG and PNG photos found.")]
+    public void TheReadySentenceCountsThePhotosTheScanWillRead(int supported, string expected)
+    {
+        var ready = ReadySnapshot();
+        var snapshot = ready with
+        {
+            Preflight = ready.Preflight! with
+            {
+                CompleteCounts = new ScopeOutcomeCounts(supported, 0, 0, 0),
+            },
+        };
+
+        var viewModel = new ShellViewModel(new RecordingChooseScopeWorkflow(snapshot));
+
+        Assert.Equal(expected, viewModel.FolderStatusSentence);
+    }
+
+    [Theory]
+    [InlineData(@"C:\Users\Igal\Pictures\2024 trip", "2024 trip")]
+    [InlineData(@"C:\Photos\", "Photos")]
+    [InlineData(@"D:\", @"D:\")]
+    public void TheFolderNameIsTheLastPartOfThePath(string path, string expected)
+    {
+        var checking = CheckingSnapshot() with
+        {
+            Selection = new ScopeSelection(path, ScopeRecursion.IncludeSubfolders),
+        };
+
+        var viewModel = new ShellViewModel(new RecordingChooseScopeWorkflow(checking));
+
+        Assert.Equal(expected, viewModel.FolderName);
+        Assert.Equal($"Also check folders inside {expected}.", viewModel.SubfoldersCaption);
+    }
+
+    [Fact]
+    public void BlockedSnapshotSaysTheFolderCannotBeScannedYet()
+    {
+        var viewModel = new ShellViewModel(
+            new RecordingChooseScopeWorkflow(BlockedSnapshot(ScopeBlockingReason.NonLocalRoot)));
+
+        Assert.Equal("This folder can't be scanned yet.", viewModel.FolderStatusSentence);
     }
 
     [Fact]
