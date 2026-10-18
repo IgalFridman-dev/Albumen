@@ -54,7 +54,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
 
                 var openCategory = Descendants<Button>(categories).First(button =>
                     AutomationProperties.GetAutomationId(button) == "open-review-category");
-                Assert.Contains("Exact", AutomationProperties.GetName(openCategory),
+                Assert.Contains("Identical copies", AutomationProperties.GetName(openCategory),
                     StringComparison.Ordinal);
                 Assert.Equal(1, AutomationProperties.GetPositionInSet(openCategory));
                 Assert.Equal(4, AutomationProperties.GetSizeOfSet(openCategory));
@@ -86,13 +86,13 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 var breadcrumb = Assert.IsType<TextBlock>(
                     window.FindName("ReviewBreadcrumbText"));
                 Assert.Contains("Review", breadcrumb.Text, StringComparison.Ordinal);
-                Assert.Contains("Exact", breadcrumb.Text, StringComparison.Ordinal);
+                Assert.Contains("Identical copies", breadcrumb.Text, StringComparison.Ordinal);
 
                 var evidence = Assert.IsAssignableFrom<FrameworkElement>(
                     window.FindName("ReviewEvidencePanel"));
-                Assert.Contains("Exact", AutomationProperties.GetName(evidence),
+                Assert.Contains("Identical copies", AutomationProperties.GetName(evidence),
                     StringComparison.Ordinal);
-                Assert.Contains("No recommendation", AutomationProperties.GetItemStatus(evidence),
+                Assert.Contains("You choose what to remove", AutomationProperties.GetItemStatus(evidence),
                     StringComparison.Ordinal);
                 Assert.Contains("Uncertainty: Unavailable",
                     AutomationProperties.GetItemStatus(evidence), StringComparison.Ordinal);
@@ -158,9 +158,9 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 Assert.Empty(fixture.Workflow.SelectionCommands);
 
                 var selection = Assert.Single(Descendants<ReviewSelectionCheckBox>(row));
-                Assert.Contains("Not selected", AutomationProperties.GetName(selection),
+                Assert.StartsWith("Kept:", AutomationProperties.GetName(selection),
                     StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("Eligible", AutomationProperties.GetItemStatus(selection),
+                Assert.StartsWith("Kept;", AutomationProperties.GetItemStatus(selection),
                     StringComparison.Ordinal);
                 selection.Focus();
                 Keyboard.Focus(selection);

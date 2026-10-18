@@ -52,57 +52,73 @@
                 <TextBlock Text="{Binding NextStep}" TextWrapping="Wrap" />
             </StackPanel>
         </DataTemplate>
+        <!-- One photo in a cleanup: what it is, where it was, and what happened to it. -->
         <DataTemplate x:Key="ActionItemTemplate">
-            <app:ReviewAutomationBorder Margin="4,6" Padding="8" BorderThickness="1"
+            <app:ReviewAutomationBorder Margin="0,4" Padding="14,10" BorderThickness="1" CornerRadius="10"
+                    Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                     BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                     AutomationProperties.AutomationId="action-item"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding ItemStatus}">
                 <StackPanel>
-                    <TextBlock Text="Windows Recycle Bin — original path" FontWeight="SemiBold" TextWrapping="Wrap" />
-                    <TextBox Text="{Binding OriginalPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
-                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                    <DockPanel>
+                        <Border DockPanel.Dock="Right" Margin="12,0,0,0" Style="{StaticResource PhotoSift.ToneChip}"
+                                Tag="{Binding Tone}">
+                            <TextBlock Text="{Binding ResultLabel}" FontSize="12" />
+                        </Border>
+                        <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    </DockPanel>
+                    <TextBox Text="{Binding OriginalPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,0"
+                             Style="{StaticResource PhotoSift.PathText}"
                              AutomationProperties.Name="{Binding AutomationName}"
                              AutomationProperties.ItemStatus="{Binding ItemStatus}" />
-                    <TextBlock Text="{Binding StateText}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding ReasonText}" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding CertaintyText}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,4,0,0" Text="{Binding DetailText}" TextWrapping="Wrap"
+                               Visibility="{Binding HasDetail, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </StackPanel>
             </app:ReviewAutomationBorder>
         </DataTemplate>
         <DataTemplate x:Key="ActionRecordItemTemplate">
-            <app:ReviewAutomationBorder Margin="4,6" Padding="8" BorderThickness="1"
+            <app:ReviewAutomationBorder Margin="0,8,0,0" Padding="0,8,0,0" BorderThickness="0,1,0,0"
                     BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                     AutomationProperties.AutomationId="action-record-item"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding StatusText}">
                 <StackPanel>
-                    <TextBox Text="{Binding OriginalPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
-                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                    <DockPanel>
+                        <Border DockPanel.Dock="Right" Margin="12,0,0,0" Style="{StaticResource PhotoSift.ToneChip}"
+                                Tag="{Binding Tone}">
+                            <TextBlock Text="{Binding ResultText}" FontSize="12" />
+                        </Border>
+                        <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    </DockPanel>
+                    <TextBox Text="{Binding OriginalPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,0"
+                             Style="{StaticResource PhotoSift.PathText}"
                              AutomationProperties.Name="Action record original path"
                              AutomationProperties.ItemStatus="{Binding StatusText}" />
-                    <TextBlock Text="{Binding ResultText}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding ReasonText}" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap"
-                               Visibility="{Binding IsVerifying, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <ProgressBar Height="8" Margin="0,5,0,0" IsIndeterminate="{Binding IsVerifying}"
+                    <TextBlock Margin="0,4,0,0" Text="{Binding DetailText}" TextWrapping="Wrap"
+                               Visibility="{Binding HasDetail, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <ProgressBar Height="6" Margin="0,6,0,0" IsIndeterminate="{Binding IsVerifying}"
                                  Visibility="{Binding IsVerifying, Converter={StaticResource BooleanToVisibilityConverter}}"
                                  AutomationProperties.Name="Current file state verification progress"
                                  AutomationProperties.ItemStatus="{Binding StatusText}" />
                 </StackPanel>
             </app:ReviewAutomationBorder>
         </DataTemplate>
+        <!-- One saved cleanup: when it ran, how it ended, and every photo in it. -->
         <DataTemplate x:Key="ActionRecordHistoryTemplate">
-            <StackPanel Margin="0,8,0,4">
-                <TextBlock Text="{Binding RequestedUtc, StringFormat='Requested: {0:u}'}" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding CertaintyText}" />
-                <TextBlock Text="{Binding OutcomeMixText}" />
-                <TextBlock Text="{Binding RecoveredBytesText}" />
-                <TextBlock Text="{Binding UnknownCount, StringFormat='Unknown items: {0}'}" />
-                <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource ActionRecordItemTemplate}" />
-            </StackPanel>
+            <Border Margin="0,0,0,12" Style="{StaticResource PhotoSift.Card}" Padding="18,14">
+                <StackPanel>
+                    <DockPanel>
+                        <Border DockPanel.Dock="Right" Margin="12,0,0,0" Style="{StaticResource PhotoSift.ToneChip}"
+                                Tag="{Binding Tone}">
+                            <TextBlock Text="{Binding OutcomeLabel}" FontSize="12" />
+                        </Border>
+                        <TextBlock Text="{Binding DateText, StringFormat='Cleanup on {0}'}" Style="{StaticResource PhotoSift.SectionTitle}" />
+                    </DockPanel>
+                    <TextBlock Margin="0,2,0,0" Text="{Binding SummaryText}" Style="{StaticResource PhotoSift.MutedText}" />
+                    <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource ActionRecordItemTemplate}" Focusable="False" />
+                </StackPanel>
+            </Border>
         </DataTemplate>
         <Style x:Key="ReviewListStyle" TargetType="ListBox">
             <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
@@ -520,56 +536,6 @@
                                Text="Choose one local photo folder. PhotoSift checks it without changing or uploading your photos." />
                 </StackPanel>
             </Grid>
-            <StackPanel Grid.Column="1" Margin="16,4,0,0" MaxWidth="360" VerticalAlignment="Top"
-                        Visibility="{Binding HasLocalScanDataControl, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <Button x:Name="ClearScanDataButton"
-                        Style="{StaticResource PhotoSift.Button}"
-                        Content="Clear local Scan data"
-                        HorizontalAlignment="Right"
-                        MinHeight="34"
-                        Padding="12,6"
-                        IsDefault="False"
-                        IsCancel="False"
-                        AutomationProperties.Name="Clear local Scan data"
-                        AutomationProperties.HelpText="Starts confirmation. Source photos and Action records are not cleared."
-                        Command="{Binding RequestClearScanDataCommand}" />
-                <StackPanel Margin="0,8,0,0"
-                            Visibility="{Binding IsClearScanDataConfirmationPending, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <TextBlock x:Name="ClearScanDataConsequenceText"
-                               Text="This clears local Scan history and checkpoints. Source photos are unchanged. Action records are retained."
-                               TextWrapping="Wrap" />
-                    <WrapPanel Margin="0,6,0,0">
-                        <Button x:Name="ConfirmClearScanDataButton"
-                                Content="Confirm clear local Scan data"
-                                MinHeight="34"
-                                Padding="12,6"
-                                Margin="0,0,8,0"
-                                IsDefault="False"
-                                IsCancel="False"
-                                IsTabStop="True"
-                                Style="{StaticResource DangerButtonStyle}"
-                                AutomationProperties.Name="Confirm clear local Scan data"
-                                AutomationProperties.HelpText="Clears local Scan data. Source photos and Action records remain unchanged."
-                                IsVisibleChanged="OnClearScanDataConfirmationVisibilityChanged"
-                                Command="{Binding ConfirmClearScanDataCommand}" />
-                        <Button Content="Cancel"
-                                MinHeight="34"
-                                Padding="12,6"
-                                IsDefault="False"
-                                IsCancel="False"
-                                AutomationProperties.Name="Cancel clearing local Scan data"
-                                Command="{Binding CancelClearScanDataCommand}" />
-                    </WrapPanel>
-                </StackPanel>
-                <TextBlock x:Name="LocalDataClearStatusText"
-                           Margin="0,6,0,0"
-                           Text="{Binding LocalDataClearStatus}"
-                           TextWrapping="Wrap"
-                           Focusable="True"
-                           AutomationProperties.Name="Local Scan data clear status"
-                           AutomationProperties.ItemStatus="{Binding LocalDataClearStatus}"
-                           AutomationProperties.LiveSetting="Polite" />
-            </StackPanel>
             <!-- Shown only while Action records load or after local data failed to load. -->
             <Border x:Name="LocalDataStatusBanner" Grid.Row="1" Grid.ColumnSpan="2"
                     Margin="0,8,0,0" CornerRadius="4"
@@ -619,9 +585,9 @@
             </Border>
         </Grid>
 
-        <TabControl Grid.Row="1" Background="Transparent" BorderBrush="{StaticResource PhotoSift.BorderBrush}" Padding="8,12,4,4"
+        <TabControl Grid.Row="1" Style="{StaticResource PhotoSift.TopBar}" Padding="8,6,4,4"
                     AutomationProperties.Name="PhotoSift views">
-          <TabItem Header="Workflow" IsSelected="True" AutomationProperties.Name="Workflow">
+          <TabItem Header="Photos" IsSelected="True" AutomationProperties.Name="Photos">
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="200" />
@@ -634,8 +600,8 @@
                           VerticalScrollBarVisibility="Auto">
                 <ItemsControl x:Name="PhaseRail"
                               Margin="4,4,0,0"
-                              AutomationProperties.Name="Workflow phases"
-                              ItemsSource="{Binding Phases}">
+                              AutomationProperties.Name="Workflow steps"
+                              ItemsSource="{Binding RailSteps}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <Button Margin="0,0,8,4"
@@ -714,7 +680,7 @@
                 </ItemsControl>
             </ScrollViewer>
 
-            <Grid Grid.Column="2" Visibility="{Binding IsChooseScopePhase, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid Grid.Column="2" Visibility="{Binding IsChooseFolderPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
@@ -723,7 +689,7 @@
                     <StackPanel Margin="4,4,20,8" MaxWidth="760" HorizontalAlignment="Stretch">
                         <TextBlock Style="{StaticResource PhotoSift.PageTitle}" Text="Choose a photo folder" />
                         <TextBlock Margin="0,6,0,0" Style="{StaticResource PhotoSift.MutedText}"
-                                   Text="PhotoSift reads the photos in one folder and shows you copies and look-alikes. Nothing changes until you approve it." />
+                                   Text="PhotoSift reads the photos in one folder and shows you copies and look-alikes. Scanning only reads your photos, and nothing changes until you approve it." />
 
                         <Border Margin="0,18,0,0" Style="{StaticResource PhotoSift.Card}">
                             <StackPanel>
@@ -755,7 +721,7 @@
                                               HorizontalAlignment="Center"
                                               VerticalAlignment="Center"
                                               AutomationProperties.ItemStatus="{Binding ScopeStatus}"
-                                              AutomationProperties.Name="{Binding ScopeStatus, StringFormat='Scope status: {0}'}"
+                                              AutomationProperties.Name="{Binding ScopeStatus, StringFormat='Folder status: {0}'}"
                                               Fill="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
                                               Stretch="Uniform">
                                             <Path.Style>
@@ -783,7 +749,7 @@
                                                    AutomationProperties.HelpText="{Binding Instruction}"
                                                    AutomationProperties.ItemStatus="{Binding ScopeStatus}"
                                                    AutomationProperties.LiveSetting="Polite"
-                                                   AutomationProperties.Name="Scope status"
+                                                   AutomationProperties.Name="Folder status"
                                                    Text="{Binding ScopeStatus}" />
                                         <TextBlock Margin="0,3,0,0"
                                                    Style="{StaticResource PhotoSift.MutedText}"
@@ -852,7 +818,7 @@
                                                      IsReadOnly="True"
                                                      Text="{Binding SelectedPath, Mode=OneWay}"
                                                      TextWrapping="Wrap"
-                                                     AutomationProperties.Name="Selected Scope" />
+                                                     AutomationProperties.Name="Selected folder" />
                                         </Grid>
                                     </Border>
                                     <Button x:Name="ChooseAnotherScopeButton"
@@ -893,11 +859,46 @@
                                           Content="Include subfolders"
                                           IsEnabled="{Binding CanChangeRecursion}"
                                           IsChecked="{Binding IncludeSubfolders, Mode=OneWay}" />
+                                <Border Height="1" Margin="0,18" Background="{StaticResource PhotoSift.BorderBrush}" />
 
-                                <TextBlock Margin="0,18,0,0" Style="{StaticResource PhotoSift.Caption}" Text="Preflight summary" />
+                                <TextBlock Style="{StaticResource PhotoSift.Caption}" Text="What to look for" />
+                                <CheckBox x:Name="ExactDuplicatesCheckBox"
+                                          Margin="0,8,0,0"
+                                          Style="{StaticResource PhotoSift.SwitchCheckBox}"
+                                          Content="Identical copies"
+                                          IsChecked="True"
+                                          IsEnabled="False"
+                                          AutomationProperties.Name="Identical copies are always included"
+                                          AutomationProperties.HelpText="Identical copies match byte for byte and are always included." />
+                                <TextBlock Margin="56,4,0,0" Style="{StaticResource PhotoSift.MutedText}" Text="{Binding ExactPreset}" />
+
+                                <app:CommandSwitchCheckBox x:Name="NearDuplicatesCheckBox"
+                                          Margin="0,14,0,0"
+                                          Style="{StaticResource PhotoSift.SwitchCheckBox}"
+                                          Content="Look-alikes"
+                                          IsChecked="{Binding NearDuplicatesEnabled, Mode=OneWay}"
+                                          IsEnabled="{Binding CanChangeScanOptions}"
+                                          Command="{Binding ChangeNearDuplicateModeCommand}"
+                                          CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
+                                          AutomationProperties.Name="Look-alikes"
+                                          AutomationProperties.HelpText="Finds a resized or re-saved copy of the same photo with one careful, fixed setting. Close calls are shown as Maybe similar." />
+                                <TextBlock Margin="56,4,0,0" Style="{StaticResource PhotoSift.MutedText}"
+                                           Text="Such as a resized or re-saved copy of the same photo. Close calls are shown separately as Maybe similar." />
+
+                                <TextBlock x:Name="ScanOptionsGuidanceText"
+                                           Margin="0,14,0,0"
+                                           Style="{StaticResource PhotoSift.MutedText}"
+                                           Text="{Binding ScanOptionsGuidance}"
+                                           AutomationProperties.Name="Scan options guidance"
+                                           AutomationProperties.ItemStatus="{Binding ScanOptionsGuidance}"
+                                           AutomationProperties.LiveSetting="Polite" />
+
+                                <Border Height="1" Margin="0,18" Background="{StaticResource PhotoSift.BorderBrush}" />
+
+                                <TextBlock Style="{StaticResource PhotoSift.Caption}" Text="Folder check" />
                                 <ItemsControl x:Name="ScopeSummaryList"
                                               Margin="0,6,0,0"
-                                              AutomationProperties.Name="Scope preflight summary"
+                                              AutomationProperties.Name="Folder check summary"
                                               Grid.IsSharedSizeScope="True"
                                               ItemsSource="{Binding ScopeSummary}">
                                     <ItemsControl.ItemTemplate>
@@ -921,19 +922,19 @@
                                 <TextBlock x:Name="RuleSetStatusText"
                                            Margin="0,10,0,0"
                                            Style="{StaticResource PhotoSift.MutedText}"
-                                           Text="{Binding RuleSetStatus, StringFormat='Rule Set: {0}'}" />
+                                           Text="{Binding RuleSetStatus, StringFormat='Scan options: {0}'}" />
 
                                 <Expander Margin="0,16,0,0" Header="Full folder path" IsExpanded="False"
                                           AutomationProperties.Name="Full folder path">
                                     <StackPanel Margin="0,10,0,0">
-                                        <TextBlock Style="{StaticResource PhotoSift.Caption}" Text="Resolved Scope" />
+                                        <TextBlock Style="{StaticResource PhotoSift.Caption}" Text="As Windows resolves it" />
                                         <TextBox x:Name="ResolvedPathTextBox"
                                                  Margin="0,4,0,0"
                                                  Style="{StaticResource PhotoSift.PathText}"
                                                  IsReadOnly="True"
                                                  Text="{Binding ResolvedPath, Mode=OneWay}"
                                                  TextWrapping="Wrap"
-                                                 AutomationProperties.Name="Resolved Scope" />
+                                                 AutomationProperties.Name="Resolved folder path" />
                                     </StackPanel>
                                 </Expander>
                             </StackPanel>
@@ -942,16 +943,18 @@
                 </ScrollViewer>
                 <!-- The main actions stay in view while the details above scroll. -->
                 <WrapPanel Grid.Row="1" Margin="4,12,20,0" MaxWidth="760" HorizontalAlignment="Stretch">
-                    <Button x:Name="ContinueButton" Margin="0,0,10,10" MinWidth="160"
+                    <Button x:Name="ScanFolderButton" Margin="0,0,10,10" MinWidth="160"
                             Style="{StaticResource PhotoSift.LargePrimaryButton}"
-                            Content="Continue" AutomationProperties.Name="Continue to Confirm Rules"
-                            Command="{Binding ContinueCommand}" IsEnabled="{Binding CanContinue}" />
+                            Content="{Binding ScanFolderText}"
+                            AutomationProperties.Name="{Binding ScanFolderText}"
+                            AutomationProperties.HelpText="Confirms the options above for this folder and starts reading the photos. Nothing is changed or moved."
+                            Command="{Binding ScanFolderCommand}" IsEnabled="{Binding CanScanFolder}" />
                     <Button x:Name="RetryScopeButton"
                             MinWidth="160"
                             Margin="0,0,10,10"
-                            AutomationProperties.Name="Retry Scope verification"
+                            AutomationProperties.Name="Check the folder again"
                             Command="{Binding RetryScopeCommand}"
-                            Content="Retry verification">
+                            Content="Check again">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource PhotoSift.Button}">
                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -970,72 +973,6 @@
                 </WrapPanel>
             </Grid>
 
-            <Grid Grid.Column="2" Visibility="{Binding IsConfirmRulesPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="4,4,20,8" MaxWidth="760" HorizontalAlignment="Stretch">
-                        <TextBlock Style="{StaticResource PhotoSift.PageTitle}" Text="What should PhotoSift look for?" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource PhotoSift.MutedText}"
-                                   Text="Scanning only reads your photos. You review every match before anything is moved." />
-
-                        <Border Margin="0,18,0,0" Style="{StaticResource PhotoSift.Card}">
-                            <StackPanel>
-                                <TextBlock Style="{StaticResource PhotoSift.Caption}" Text="Folder" />
-                                <TextBox Margin="0,4,0,0" Style="{StaticResource PhotoSift.PathText}" FontWeight="SemiBold"
-                                         Text="{Binding SelectedPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
-                                         AutomationProperties.Name="Scope for Exact rules" />
-                                <TextBlock Margin="0,4,0,0" Style="{StaticResource PhotoSift.MutedText}" Text="{Binding RecursionSummary}" />
-
-                                <Border Height="1" Margin="0,18" Background="{StaticResource PhotoSift.BorderBrush}" />
-
-                                <CheckBox x:Name="ExactDuplicatesCheckBox"
-                                          Style="{StaticResource PhotoSift.SwitchCheckBox}"
-                                          Content="Exact duplicates"
-                                          IsChecked="True"
-                                          IsEnabled="False"
-                                          AutomationProperties.Name="Exact duplicates are always enabled"
-                                          AutomationProperties.HelpText="Exact requires identical bytes and cannot be disabled." />
-                                <TextBlock Margin="56,4,0,0" Style="{StaticResource PhotoSift.MutedText}" Text="{Binding ExactPreset}" />
-
-                                <app:CommandSwitchCheckBox x:Name="NearDuplicatesCheckBox"
-                                          Margin="0,18,0,0"
-                                          Style="{StaticResource PhotoSift.SwitchCheckBox}"
-                                          Content="Conservative Near duplicates"
-                                          IsChecked="{Binding NearDuplicatesEnabled, Mode=OneWay}"
-                                          IsEnabled="{Binding CanChangeScanOptions}"
-                                          Command="{Binding ChangeNearDuplicateModeCommand}"
-                                          CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
-                                          AutomationProperties.Name="Conservative Near duplicates"
-                                          AutomationProperties.HelpText="Uses the fixed precision-first Near profile. Ambiguous matches remain Uncertain." />
-                                <TextBlock Margin="56,4,0,0" Style="{StaticResource PhotoSift.MutedText}"
-                                           Text="Look-alikes, such as a resized or re-saved copy of the same photo. Close calls are shown separately as Uncertain." />
-
-                                <TextBlock x:Name="ScanOptionsGuidanceText"
-                                           Margin="0,18,0,0"
-                                           Style="{StaticResource PhotoSift.MutedText}"
-                                           Text="{Binding ScanOptionsGuidance}"
-                                           AutomationProperties.Name="Scan options guidance"
-                                           AutomationProperties.ItemStatus="{Binding ScanOptionsGuidance}"
-                                           AutomationProperties.LiveSetting="Polite" />
-                                <TextBlock Margin="0,4,0,0" Style="{StaticResource PhotoSift.MutedText}" Text="{Binding RuleSetStatus}" />
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-                </ScrollViewer>
-                <!-- The main actions stay in view while the details above scroll. -->
-                <WrapPanel Grid.Row="1" Margin="4,12,20,0" MaxWidth="760" HorizontalAlignment="Stretch">
-                    <Button x:Name="ConfirmExactRulesButton" Content="Confirm Scan options" Margin="0,0,10,10" MinHeight="44"
-                            Style="{StaticResource PhotoSift.Button}"
-                            AutomationProperties.Name="Confirm Scan options" Command="{Binding ConfirmExactRulesCommand}"
-                            IsEnabled="{Binding CanConfirmExactRules}" />
-                    <Button x:Name="StartScanButton" Content="Start Scan" Margin="0,0,10,10" MinWidth="160"
-                            Style="{StaticResource PhotoSift.LargePrimaryButton}"
-                            AutomationProperties.Name="Start Scan" Command="{Binding StartScanCommand}" IsEnabled="{Binding CanStartScan}" />
-                </WrapPanel>
-            </Grid>
 
             <Grid Grid.Column="2" Visibility="{Binding IsScanPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid.RowDefinitions>
@@ -1232,7 +1169,7 @@
                             <TextBlock x:Name="ReviewEvidenceDimensionsText" Text="{Binding Dimensions, StringFormat='Dimensions: {0}'}" TextWrapping="Wrap" />
                             <TextBlock x:Name="ReviewEvidenceSizeText" Text="{Binding Size, StringFormat='Size: {0}'}" TextWrapping="Wrap" />
                             <TextBlock x:Name="ReviewEvidenceRelevantDateText" Text="{Binding RelevantDate, StringFormat='Relevant date: {0}'}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceCategoryText" Text="{Binding Category, StringFormat='Category: {0}'}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewEvidenceCategoryText" Text="{Binding Category, StringFormat='Kind: {0}'}" TextWrapping="Wrap" />
                             <TextBlock x:Name="ReviewEvidenceConfidenceText" Text="{Binding Confidence, StringFormat='Confidence: {0}'}" TextWrapping="Wrap" />
                             <TextBlock x:Name="ReviewEvidenceUncertaintyText" Text="{Binding Uncertainty, StringFormat='Uncertainty: {0}'}" TextWrapping="Wrap" />
                             <TextBlock x:Name="ReviewEvidenceTransformationsText" Text="{Binding Transformations, StringFormat='Transformations: {0}'}" TextWrapping="Wrap" />
@@ -1255,24 +1192,83 @@
                             AutomationProperties.Name="Cleanup approval disclosure"
                             AutomationProperties.ItemStatus="{Binding ApprovalAutomationStatus}">
                         <StackPanel>
-                            <TextBlock Text="Approval" Style="{StaticResource PhotoSift.SectionTitle}" />
-                            <TextBlock Margin="0,2,0,6" Style="{StaticResource PhotoSift.MutedText}"
-                                       Text="Marked photos go to the Recycle Bin only, and each file is checked again right before it moves." />
-                            <TextBlock Text="{Binding ApprovalSelectedOccurrenceText}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ApprovalSelectedPathText}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ApprovalSelectedPhysicalText}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ApprovalRecoveryText}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ApprovalCoverageText}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ApprovalUnresolvedText}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ApprovalUnresolvedSubtotals}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ApprovalUnselectedSurvivorsText}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ApprovalDestinationText}" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ApprovalRevalidationText}" TextWrapping="Wrap" />
-                            <Button x:Name="ApproveCleanupButton" Content="Approve Cleanup" MinHeight="38"
-                                    Margin="0,12,0,0" Padding="18,7" HorizontalAlignment="Left"
+                            <TextBlock x:Name="ApprovalTitleText" Text="{Binding ApprovalTitle}" FontSize="20"
+                                       Style="{StaticResource PhotoSift.SectionTitle}" />
+                            <TextBlock Margin="0,4,0,10" Style="{StaticResource PhotoSift.MutedText}"
+                                       Text="Nothing changes until you approve. Marked photos go to the Windows Recycle Bin only, and each file is checked again right before it moves." />
+                            <!-- The first marked photos, so the approval names what it moves. -->
+                            <ItemsControl x:Name="ApprovalMarkedPhotosList" ItemsSource="{Binding ApprovalMarkedPhotos}" Focusable="False"
+                                          AutomationProperties.Name="Photos marked for removal">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="64" Height="48" CornerRadius="6" VerticalAlignment="Top">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                                                <Setter Property="BorderThickness" Value="1" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <app:PhotoThumbnail Member="{Binding}" CornerRadius="6"
+                                                        Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsTabStop="False" FontSize="12"
+                                                         Style="{StaticResource PhotoSift.PathText}"
+                                                         AutomationProperties.Name="{Binding DiscoveredPath}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Margin="76,0,0,8" Style="{StaticResource PhotoSift.MutedText}" Text="{Binding ApprovalMoreMarkedText}"
+                                       Visibility="{Binding HasMoreMarkedPhotos, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button x:Name="ApproveCleanupButton" Content="Move to Recycle Bin" MinHeight="40"
+                                    Margin="0,4,0,0" Padding="20,8" HorizontalAlignment="Left"
                                     Style="{StaticResource PhotoSift.PrimaryButton}"
-                                    IsDefault="False" IsCancel="False" AutomationProperties.Name="Approve Cleanup"
+                                    IsDefault="False" IsCancel="False" AutomationProperties.Name="Move the marked photos to the Recycle Bin"
                                     Command="{Binding ApproveReviewCommand}" IsEnabled="{Binding CanApproveReview}" />
+                            <!-- The full accounting the approval covers, kept on screen as the record of it. -->
+                            <Border Margin="0,16,0,0" Padding="12,10" CornerRadius="8">
+                                <StackPanel>
+                                    <TextBlock Text="What this covers" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                    <TextBlock Text="{Binding ApprovalSelectedOccurrenceText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ApprovalSelectedPathText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ApprovalSelectedPhysicalText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ApprovalRecoveryText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ApprovalCoverageText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ApprovalUnresolvedText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ApprovalUnresolvedSubtotals}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ApprovalUnselectedSurvivorsText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ApprovalDestinationText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ApprovalRevalidationText}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+                                        <Setter Property="TextElement.Foreground" Value="{StaticResource PhotoSift.MutedTextBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                                <Setter Property="BorderThickness" Value="1" />
+                                                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                            </Border>
                         </StackPanel>
                     </app:ReviewAutomationBorder>
                 <StackPanel Margin="0,10,0,0">
@@ -1308,49 +1304,101 @@
             <app:ReviewAutomationBorder x:Name="ActionPanel" Grid.Column="2"
                     Visibility="{Binding IsActionPhase, Converter={StaticResource BooleanToVisibilityConverter}}"
                     AutomationProperties.AutomationId="action-panel"
-                    AutomationProperties.Name="Approved Recycle Bin Action"
+                    AutomationProperties.Name="Recycle Bin cleanup"
                     AutomationProperties.ItemStatus="{Binding ActionStatusText}">
                 <!-- Like Review, the Action page scrolls as one surface; the item list keeps a
                      bounded height from the page viewport so it stays virtualized. -->
                 <ScrollViewer x:Name="ActionPageScrollViewer"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               SizeChanged="OnActionPageSizeChanged">
-                <StackPanel Margin="0,0,20,0">
-                    <TextBlock x:Name="ActionHeading" Text="Recycle Bin progress" FontSize="24" FontWeight="SemiBold"
-                               Focusable="True" FocusVisualStyle="{StaticResource ActionFocusVisual}" TextWrapping="Wrap"
-                               AutomationProperties.Name="Recycle Bin progress" />
-                      <StackPanel Margin="0,8,0,8">
-                        <TextBlock Text="{Binding ActionSelectionText}" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding ActionStatusText}" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding ActionCountsText}" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding ActionCertaintyText}" TextWrapping="Wrap" />
-                        <app:ReviewAnnouncementTextBlock x:Name="ActionAnnouncementText" Text="{Binding ActionAnnouncement}"
-                                TextWrapping="Wrap" AutomationProperties.AutomationId="action-announcement"
-                                AutomationProperties.Name="Recycle Bin progress announcement"
-                                AutomationProperties.LiveSetting="Polite" />
-                      </StackPanel>
-                    <ListBox x:Name="ActionItemsList" Height="300" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActionRows}"
+                <StackPanel Margin="4,4,20,0" MaxWidth="960" HorizontalAlignment="Left">
+                    <TextBlock x:Name="ActionHeading" Text="{Binding ActionHeadline}" Style="{StaticResource PhotoSift.PageTitle}"
+                               Focusable="True" FocusVisualStyle="{StaticResource ActionFocusVisual}"
+                               AutomationProperties.Name="{Binding ActionHeadline}" />
+                    <TextBlock Margin="0,4,0,0" Style="{StaticResource PhotoSift.MutedText}"
+                               Text="Photos go to the Windows Recycle Bin one at a time. Each one is checked again right before it moves, and nothing is retried on its own." />
+                    <StackPanel Margin="0,14,0,0"
+                                Visibility="{Binding HasActionItems, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <ProgressBar x:Name="ActionProgressBar" Height="8" Minimum="0"
+                                     Maximum="{Binding ActionTotalCount, Mode=OneWay}" Value="{Binding ActionDoneCount, Mode=OneWay}"
+                                     AutomationProperties.Name="Cleanup progress"
+                                     AutomationProperties.ItemStatus="{Binding ActionProgressText}">
+                            <ProgressBar.Style>
+                                <Style TargetType="ProgressBar">
+                                    <Setter Property="Foreground" Value="{StaticResource PhotoSift.AccentBrush}" />
+                                    <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                                            <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            <Setter Property="BorderThickness" Value="1" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ProgressBar.Style>
+                        </ProgressBar>
+                        <TextBlock Margin="0,6,0,0" FontWeight="SemiBold" Text="{Binding ActionProgressText}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Border x:Name="ActionOutcomeBanner" Margin="0,12,0,0" Style="{StaticResource PhotoSift.ToneBanner}"
+                            Tag="{Binding ActionOutcomeTone}"
+                            Visibility="{Binding HasActionOutcome, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Text="{Binding ActionOutcomeText}" TextWrapping="Wrap" />
+                    </Border>
+                    <ListBox x:Name="ActionItemsList" Margin="0,10,0,0" Height="300" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActionRows}"
                              Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ActionItemTemplate}"
-                             AutomationProperties.Name="Approved original paths and Recycle Bin results"
-                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                             AutomationProperties.Name="Photos in this cleanup and what happened to each"
+                             BorderThickness="0" Background="Transparent"
                              Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                      <StackPanel x:Name="ActionNoticesPanel" Margin="0,8,0,0">
-                        <TextBlock Text="{Binding ActionReplayNotice}" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding ActionRecoveryNotice}" TextWrapping="Wrap" />
-                        <Separator Margin="0,10,0,8" Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <TextBlock Text="Action Records" FontSize="18" FontWeight="SemiBold"
+                      <StackPanel x:Name="ActionNoticesPanel" Margin="0,12,0,0">
+                        <!-- The recorded detail behind the summary above. -->
+                        <Border Padding="12,10" CornerRadius="8">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="{StaticResource PhotoSift.SubtleFillBrush}" />
+                                    <Setter Property="TextElement.Foreground" Value="{StaticResource PhotoSift.MutedTextBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            <Setter Property="BorderThickness" Value="1" />
+                                            <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel>
+                                <TextBlock Text="Cleanup record" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                <TextBlock Text="{Binding ActionSelectionText}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding ActionStatusText}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding ActionCountsText}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding ActionCertaintyText}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding ActionReplayNotice}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding ActionRecoveryNotice}" TextWrapping="Wrap" />
+                                <app:ReviewAnnouncementTextBlock x:Name="ActionAnnouncementText" Text="{Binding ActionAnnouncement}"
+                                        Margin="0,6,0,0" TextWrapping="Wrap" AutomationProperties.AutomationId="action-announcement"
+                                        AutomationProperties.Name="Recycle Bin progress announcement"
+                                        AutomationProperties.LiveSetting="Polite" />
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="Earlier cleanups" Margin="0,18,0,0" Style="{StaticResource PhotoSift.SectionTitle}"
                                    Visibility="{Binding HasActionRecoveryRecords, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <TextBlock Text="{Binding ActionRecoveryDisclosure}" TextWrapping="Wrap"
-                                   AutomationProperties.AutomationId="action-recovery-disclosure"
-                                   Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <Button x:Name="RevalidateUnknownItemsButton" Content="Revalidate unknown items"
-                                MinHeight="38" Margin="0,8,0,0" Padding="14,7" HorizontalAlignment="Left"
-                                AutomationProperties.Name="Revalidate unknown items"
-                                Command="{Binding RevalidateUnknownCommand}"
-                                IsEnabled="{Binding CanRevalidateUnknownItems}"
-                                Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <Border Margin="0,8,0,0" Style="{StaticResource PhotoSift.ToneBanner}" Tag="Warning"
+                                Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding ActionRecoveryDisclosure}" TextWrapping="Wrap"
+                                           AutomationProperties.AutomationId="action-recovery-disclosure" />
+                                <Button x:Name="RevalidateUnknownItemsButton" Content="Revalidate unknown items"
+                                        MinHeight="36" Margin="0,8,0,0" Padding="14,6" HorizontalAlignment="Left"
+                                        Style="{StaticResource PhotoSift.Button}"
+                                        AutomationProperties.Name="Revalidate unknown items"
+                                        Command="{Binding RevalidateUnknownCommand}"
+                                        IsEnabled="{Binding CanRevalidateUnknownItems}" />
+                            </StackPanel>
+                        </Border>
                         <app:ReviewAnnouncementTextBlock x:Name="ActionRecoveryAnnouncementText"
-                                Text="{Binding ActionRecoveryAnnouncement}" TextWrapping="Wrap"
+                                Text="{Binding ActionRecoveryAnnouncement}" TextWrapping="Wrap" Margin="0,6,0,0"
                                 AutomationProperties.AutomationId="action-recovery-announcement"
                                 AutomationProperties.Name="Action record status announcement"
                                 AutomationProperties.LiveSetting="Polite" />
@@ -1363,26 +1411,92 @@
             </app:ReviewAutomationBorder>
         </Grid>
           </TabItem>
-          <TabItem x:Name="ActionRecordsTab" Header="Action Records"
-                   AutomationProperties.Name="Action Records">
+          <TabItem x:Name="ActionRecordsTab" Header="History" Selector.Unselected="OnHistoryUnselected"
+                   AutomationProperties.Name="History">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-              <StackPanel Margin="12">
-                <TextBlock Text="Action Records" FontSize="24" FontWeight="SemiBold" />
-                <TextBlock Margin="0,8,0,0" Text="Saved Recycle Bin outcomes from this device appear here."
-                           TextWrapping="Wrap" />
-                <TextBlock Margin="0,8,0,0" Text="{Binding ActionRecoveryDisclosure}"
-                           TextWrapping="Wrap"
-                           Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <Button x:Name="HistoryRevalidateUnknownItemsButton" Content="Revalidate unknown items"
-                        MinHeight="38" Margin="0,8,0,0" Padding="14,7" HorizontalAlignment="Left"
-                        Command="{Binding RevalidateUnknownCommand}"
-                        IsEnabled="{Binding CanRevalidateUnknownItems}"
-                        Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <app:ReviewAnnouncementTextBlock Text="{Binding ActionRecoveryAnnouncement}"
-                        TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
-                <ItemsControl x:Name="ActionRecordsHistoryList"
+              <StackPanel Margin="4,4,20,12" MaxWidth="960" HorizontalAlignment="Left">
+                <TextBlock Text="History" Style="{StaticResource PhotoSift.PageTitle}" />
+                <TextBlock Margin="0,4,0,0" Style="{StaticResource PhotoSift.MutedText}"
+                           Text="Every cleanup saved on this PC: what moved to the Recycle Bin, what was skipped, and why. A cleanup you run now is listed on its own screen and appears here the next time PhotoSift starts." />
+                <Border Margin="0,14,0,0" Style="{StaticResource PhotoSift.ToneBanner}" Tag="Warning"
+                        Visibility="{Binding HasActionRecoveryDisclosure, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel>
+                        <TextBlock Text="{Binding ActionRecoveryDisclosure}" TextWrapping="Wrap" />
+                        <Button x:Name="HistoryRevalidateUnknownItemsButton" Content="Revalidate unknown items"
+                                MinHeight="36" Margin="0,8,0,0" Padding="14,6" HorizontalAlignment="Left"
+                                Style="{StaticResource PhotoSift.Button}"
+                                AutomationProperties.Name="Revalidate unknown items"
+                                Command="{Binding RevalidateUnknownCommand}"
+                                IsEnabled="{Binding CanRevalidateUnknownItems}" />
+                    </StackPanel>
+                </Border>
+                <app:ReviewAnnouncementTextBlock Text="{Binding ActionRecoveryAnnouncement}" Margin="0,8,0,0"
+                        Style="{StaticResource PhotoSift.MutedText}" AutomationProperties.LiveSetting="Polite" />
+                <Border Margin="0,8,0,12" Style="{StaticResource PhotoSift.Card}" Padding="18,14"
+                        Visibility="{Binding HasNoActionRecords, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock Style="{StaticResource PhotoSift.MutedText}"
+                               Text="No saved cleanups yet. Each cleanup is recorded here once PhotoSift restarts after it." />
+                </Border>
+                <ItemsControl x:Name="ActionRecordsHistoryList" Margin="0,8,0,0" Focusable="False"
                               ItemsSource="{Binding ActionRecoveryRecords}"
                               ItemTemplate="{StaticResource ActionRecordHistoryTemplate}" />
+                <!-- Local scan data lives with the history it does not touch. -->
+                <Border Margin="0,12,0,0" Style="{StaticResource PhotoSift.Card}" Padding="18,14"
+                        Visibility="{Binding HasLocalScanDataControl, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel>
+                        <TextBlock Text="Scan data on this PC" Style="{StaticResource PhotoSift.SectionTitle}" />
+                        <TextBlock Margin="0,2,0,8" Style="{StaticResource PhotoSift.MutedText}"
+                                   Text="PhotoSift keeps scan results and checkpoints so a scan can pick up where it stopped. Clearing them does not touch your photos or this history." />
+                        <Button x:Name="ClearScanDataButton"
+                                Style="{StaticResource PhotoSift.Button}"
+                                Content="Clear scan data"
+                                HorizontalAlignment="Left"
+                                MinHeight="34"
+                                Padding="12,6"
+                                IsDefault="False"
+                                IsCancel="False"
+                                AutomationProperties.Name="Clear local Scan data"
+                                AutomationProperties.HelpText="Starts confirmation. Source photos and Action records are not cleared."
+                                Command="{Binding RequestClearScanDataCommand}" />
+                        <StackPanel Margin="0,8,0,0"
+                                    Visibility="{Binding IsClearScanDataConfirmationPending, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock x:Name="ClearScanDataConsequenceText"
+                                       Text="This clears saved scan results and checkpoints. Source photos are unchanged. Action records are retained, so this history stays."
+                                       TextWrapping="Wrap" />
+                            <WrapPanel Margin="0,6,0,0">
+                                <Button x:Name="ConfirmClearScanDataButton"
+                                        Content="Clear scan data now"
+                                        MinHeight="34"
+                                        Padding="12,6"
+                                        Margin="0,0,8,0"
+                                        IsDefault="False"
+                                        IsCancel="False"
+                                        IsTabStop="True"
+                                        Style="{StaticResource DangerButtonStyle}"
+                                        AutomationProperties.Name="Confirm clear local Scan data"
+                                        AutomationProperties.HelpText="Clears local Scan data. Source photos and Action records remain unchanged."
+                                        IsVisibleChanged="OnClearScanDataConfirmationVisibilityChanged"
+                                        Command="{Binding ConfirmClearScanDataCommand}" />
+                                <Button Content="Cancel"
+                                        Style="{StaticResource PhotoSift.Button}"
+                                        MinHeight="34"
+                                        Padding="12,6"
+                                        IsDefault="False"
+                                        IsCancel="False"
+                                        AutomationProperties.Name="Cancel clearing local Scan data"
+                                        Command="{Binding CancelClearScanDataCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                        <TextBlock x:Name="LocalDataClearStatusText"
+                                   Margin="0,6,0,0"
+                                   Text="{Binding LocalDataClearStatus}"
+                                   TextWrapping="Wrap"
+                                   Focusable="True"
+                                   AutomationProperties.Name="Local Scan data clear status"
+                                   AutomationProperties.ItemStatus="{Binding LocalDataClearStatus}"
+                                   AutomationProperties.LiveSetting="Polite" />
+                    </StackPanel>
+                </Border>
               </StackPanel>
             </ScrollViewer>
           </TabItem>

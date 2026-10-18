@@ -23,11 +23,11 @@ public sealed class InitialWorkflowTests
             phases.Select(phase => phase.Phase));
         Assert.Equal(
             [
-                "Choose Scope",
-                "Confirm Rules",
+                "Choose folder",
+                "Scan options",
                 "Scan",
                 "Review",
-                "Approve Cleanup",
+                "Clean up",
             ],
             phases.Select(phase => phase.DisplayName));
     }

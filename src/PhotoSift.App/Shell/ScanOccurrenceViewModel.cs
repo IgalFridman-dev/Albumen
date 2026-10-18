@@ -32,14 +32,14 @@ public sealed class ScanOccurrenceViewModel
         CanSelect = member.Eligibility == ReviewEligibilityState.Eligible && selectionEnabled;
         EligibilityText = member.Eligibility switch
         {
-            ReviewEligibilityState.PendingRevalidation => "Pending revalidation — not selectable",
-            ReviewEligibilityState.Eligible => member.Selected ? "Eligible; selected" : "Eligible; not selected",
-            ReviewEligibilityState.Unavailable => $"Unavailable ({member.Reason}) — not selectable",
+            ReviewEligibilityState.PendingRevalidation => "Being checked again, so it can't be marked yet",
+            ReviewEligibilityState.Eligible => member.Selected ? "Marked for removal" : "Kept",
+            ReviewEligibilityState.Unavailable => $"Can't be marked: {DescribeUnavailable(member.Reason)}",
             _ => throw new InvalidOperationException($"Unknown Review eligibility: {member.Eligibility}"),
         };
         if (member.Eligibility == ReviewEligibilityState.Eligible && !CanSelect)
-            EligibilityText += "; Review selection unavailable";
-        AutomationName = $"{(member.Selected ? "Selected" : "Not selected")} occurrence: {member.Occurrence.DiscoveredPath}";
+            EligibilityText += "; can't be changed right now";
+        AutomationName = $"{(member.Selected ? "Marked for removal" : "Kept")}: {member.Occurrence.DiscoveredPath}";
         ItemStatus = $"{EligibilityText}; {PathKind}; {Allocation}";
     }
 
@@ -69,8 +69,8 @@ public sealed class ScanOccurrenceViewModel
         (OutcomeLabel, NextStep) = DescribeOutcome(occurrence);
         ToggleSelectionCommand = toggle;
         IsSelected = selected;
-        EligibilityText = "Not part of the active Review";
-        AutomationName = $"Occurrence: {occurrence.DiscoveredPath}";
+        EligibilityText = "Not part of this review";
+        AutomationName = $"Photo: {occurrence.DiscoveredPath}";
         ItemStatus = $"{PathKind}; {Allocation}";
         PositionInSet = positionInSet;
         SizeOfSet = sizeOfSet;
@@ -107,6 +107,21 @@ public sealed class ScanOccurrenceViewModel
         < 1024 * 1024 => $"{(bytes / 1024d).ToString("0", CultureInfo.InvariantCulture)} KB",
         < 1024L * 1024 * 1024 => $"{(bytes / (1024d * 1024)).ToString("0.0", CultureInfo.InvariantCulture)} MB",
         _ => $"{(bytes / (1024d * 1024 * 1024)).ToString("0.00", CultureInfo.InvariantCulture)} GB",
+    };
+
+    private static string DescribeUnavailable(ReviewUnavailableReason reason) => reason switch
+    {
+        ReviewUnavailableReason.Missing => "the file is missing",
+        ReviewUnavailableReason.Changed => "the file changed since the scan",
+        ReviewUnavailableReason.AccessDenied => "Windows denied access to the file",
+        ReviewUnavailableReason.SharingViolation => "another app has the file open",
+        ReviewUnavailableReason.UnsafeLocation => "the file is no longer in a safe location",
+        ReviewUnavailableReason.UnknownSafety => "PhotoSift can't confirm it is safe to remove",
+        ReviewUnavailableReason.ReadFailure => "the file couldn't be read",
+        ReviewUnavailableReason.Canceled => "the check was canceled",
+        ReviewUnavailableReason.Stale => "the scan is out of date",
+        ReviewUnavailableReason.StoreUnavailable => "local data is unavailable",
+        _ => $"unavailable ({reason})",
     };
 
     private static (string Label, string NextStep) DescribeOutcome(ScanFileOccurrence occurrence)

@@ -82,8 +82,9 @@ public sealed class ReviewComparisonEvidenceViewModel
     public string Uncertainty { get; }
     public string Transformations { get; }
     public string Reason { get; }
-    public string Recommendation { get; } = "No recommendation; manual Selection.";
-    public string AutomationName => $"{Category} comparison evidence for {FullPath}";
+    // No Keeper advice in V1 (E3-S5): the "Suggested best" badge is a hint, never a choice.
+    public string Recommendation { get; } = "PhotoSift doesn't mark photos for you. You choose what to remove.";
+    public string AutomationName => $"{Category} details for {FullPath}";
     public string ItemStatus =>
         $"{Confidence}; Uncertainty: {Uncertainty}; {Recommendation}";
 }
