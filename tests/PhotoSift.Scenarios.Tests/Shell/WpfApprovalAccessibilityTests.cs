@@ -207,10 +207,10 @@ public sealed class WpfApprovalAccessibilityTests
         await Assert.IsType<AsyncCommand>(fixture.ViewModel.ExactGroups[0].Members[0].ToggleSelectionCommand).ExecuteAsync();
 
         Assert.Equal(4, announcements.Count);
-        Assert.Contains("persistence", announcements[0], StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("persistence", announcements[1], StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("stale", announcements[2], StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("stale", announcements[3], StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(PersistenceFailureAnnouncement, announcements[0]);
+        Assert.Equal(PersistenceFailureAnnouncement, announcements[1]);
+        Assert.Equal(StaleFailureAnnouncement, announcements[2]);
+        Assert.Equal(StaleFailureAnnouncement, announcements[3]);
     }
 
     [Fact]

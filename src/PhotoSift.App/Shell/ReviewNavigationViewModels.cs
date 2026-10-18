@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using System.IO;
 using PhotoSift.Application.Review;
 using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Scan;
