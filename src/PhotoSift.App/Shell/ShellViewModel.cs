@@ -132,6 +132,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ScanFolderCommand = new AsyncCommand(ScanFolderAsync);
         CancelScanCommand = new AsyncCommand(() => photoWorkflow?.CancelScanAsync() ?? Task.CompletedTask);
         OpenReviewCommand = new AsyncCommand(OpenReviewAsync);
+        ContinueReviewCommand = new AsyncCommand(
+            () => photoWorkflow?.ContinueReviewAsync() ?? Task.CompletedTask,
+            canExecute: () => CanContinueReview);
         ApproveReviewCommand = new AsyncCommand(ApproveReviewAsync);
         RevalidateUnknownCommand = new AsyncCommand(RevalidateUnknownAsync,
             canExecute: () => CanRevalidateUnknownItems);
@@ -191,6 +194,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand ScanFolderCommand { get; }
     public AsyncCommand CancelScanCommand { get; }
     public AsyncCommand OpenReviewCommand { get; }
+    public AsyncCommand ContinueReviewCommand { get; }
     public AsyncCommand ApproveReviewCommand { get; }
     public AsyncCommand RevalidateUnknownCommand { get; }
     public AsyncCommand RequestClearScanDataCommand { get; }
@@ -336,6 +340,21 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public bool CanRevalidateUnknownItems => photoSnapshot?.ActionRecovery is
         { Status: ActionRecoveryStatus.Ready, ProbeOutstanding: false }
         && HasActionRecoveryDisclosure;
+    // PM-013: a finished cleanup is not the end of the session. Its review can
+    // continue while it is still the live review of the current scan; a cleanup
+    // that stopped with an error offers only a fresh scan.
+    public bool CanContinueReview => photoSnapshot is { } snapshot
+        && snapshot.Action.Status is ActionStatus.Complete or ActionStatus.Incomplete
+        && snapshot.Action.RequestId is { } requestId
+        && snapshot.Review is { Sealed: true, Pin: { } pin, ApprovedRequest: { } approved }
+        && approved.RequestId == requestId
+        && snapshot.Review.Status != ReviewStatus.Faulted
+        && pin.Scan == snapshot.Scan.Pin
+        && !IsScanBusy;
+    public string ContinueReviewHint => photoSnapshot?.Action.Status == ActionStatus.Faulted
+        ? "The cleanup stopped with an error, so reviewing can't continue from here. Scan again to start over."
+        : string.Empty;
+    public bool HasContinueReviewHint => ContinueReviewHint.Length != 0;
     public bool CanContinue => photoSnapshot?.Scope.ScopeState == ScopeSessionState.Ready;
     public bool CanChangeScanOptions => CanContinue && IsChooseFolderPhase && !IsScanBusy;
     public bool CanScanFolder => CanChangeScanOptions && photoSnapshot is { Options.IsValid: true };
@@ -385,6 +404,25 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             ReviewStatus.Revalidating => "Checking the photos again…",
             _ => "Review is closed",
         };
+    // PM-013: what a continued review leaves out. The removed photos are the scan's
+    // set members that the review no longer holds; closed sets are hidden below.
+    public string ReviewContinuationText
+    {
+        get
+        {
+            if (photoSnapshot is not { } snapshot || snapshot.Review.Pin is not { } pin
+                || pin.Scan != snapshot.Scan.Pin) return string.Empty;
+            var reviewed = snapshot.Review.Groups.SelectMany(group => group.Members)
+                .Select(member => member.Occurrence.Token.OccurrenceId).ToHashSet();
+            var removed = snapshot.Review.Groups.SelectMany(group => group.Candidate.Members)
+                .Select(member => member.Token.OccurrenceId)
+                .Where(id => !reviewed.Contains(id)).Distinct().LongCount();
+            var closed = snapshot.Review.Groups.LongCount(group => group.Closed);
+            if (removed == 0 && closed == 0) return string.Empty;
+            return $"Continued after the cleanup: {PhotoCount(removed)} removed, {SetCount(closed)} closed until the next scan.";
+        }
+    }
+    public bool HasReviewContinuation => ReviewContinuationText.Length != 0;
     public string ScanCountsText => photoSnapshot is { Scan.Counts: var count }
         ? FormatScanCounts(count) : string.Empty;
     public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
@@ -810,8 +848,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsChooseFolderPhase), nameof(IsScanPhase), nameof(IsReviewPhase), nameof(IsActionPhase),
             nameof(CanContinue), nameof(CanStartScan), nameof(CanScanFolder), nameof(CanOpenReview),
             nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze),
-            nameof(ScanOutcomeSummaries) })
+            nameof(ScanOutcomeSummaries), nameof(CanContinueReview), nameof(ContinueReviewHint),
+            nameof(HasContinueReviewHint), nameof(ReviewContinuationText), nameof(HasReviewContinuation) })
             OnPropertyChanged(name);
+        ContinueReviewCommand.NotifyCanExecuteChanged();
         if (previousOptions != snapshot.Options) OnPropertyChanged(nameof(NearDuplicatesEnabled));
         if (previousGuidance != ScanOptionsGuidance) OnPropertyChanged(nameof(ScanOptionsGuidance));
         if (!preserveReviewProjection)
@@ -903,9 +943,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (photoSnapshot is not { } snapshot) return [];
         return snapshot.Review.Pin is null
             ? snapshot.Scan.Groups.Select(group => new ExactGroupViewModel(group)).ToImmutableArray()
-            : snapshot.Review.Groups.Select((group, index) => new ExactGroupViewModel(group,
+            : snapshot.Review.Groups.Where(group => !group.Closed).Select((group, index) => new ExactGroupViewModel(group,
                 snapshot.Review.Status == ReviewStatus.Ready && !snapshot.Review.Sealed,
-                snapshot.Review.SelectionRevision, index + 1, snapshot.Review.Groups.Length,
+                snapshot.Review.SelectionRevision, index + 1, snapshot.Review.Groups.Count(open => !open.Closed),
                 (kind, ids) => ChangeReviewSelectionAsync(group.Candidate.GroupId, kind, ids)))
                 .ToImmutableArray();
     }
@@ -930,7 +970,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         foreach (var category in new[] { ReviewCategoryKind.Exact, ReviewCategoryKind.Near, ReviewCategoryKind.Uncertain })
         {
             var position = 0;
-            foreach (var group in review.Groups.Where(group => InCategory(group.Candidate, category)))
+            foreach (var group in review.Groups.Where(group => !group.Closed && InCategory(group.Candidate, category)))
                 names[group.Candidate.GroupId] =
                     $"{ReviewCategoryNames.For(category)} set {(++position).ToString(CultureInfo.InvariantCulture)}";
         }
@@ -946,8 +986,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var name = ReviewCategoryNames.For(category);
         if (snapshot.Review.Pin is not null)
         {
+            // A set closed after a cleanup (PM-013) is left out; ReviewContinuationText counts it.
             var groups = snapshot.Review.Groups
-                .Where(group => InCategory(group.Candidate, category))
+                .Where(group => !group.Closed && InCategory(group.Candidate, category))
                 .ToImmutableArray();
             return new(category, name, groups.Length, positionInSet, 4, index =>
                 new ReviewGroupViewModel(
@@ -1680,6 +1721,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private static string PhotoCount(long count) => count == 1
         ? "1 photo"
         : $"{count.ToString(CultureInfo.InvariantCulture)} photos";
+
+    private static string SetCount(long count) => count == 1
+        ? "1 set"
+        : $"{count.ToString(CultureInfo.InvariantCulture)} sets";
 
     private void ProjectMarkedPhotos(ReviewMemberSnapshot[] selectedMembers)
     {

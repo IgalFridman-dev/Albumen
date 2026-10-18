@@ -141,6 +141,82 @@ public sealed class CleanupPresentationTests
         Assert.Equal("Checking location and access", fixture.ViewModel.ScopeStatus);
     }
 
+    // PM-013: a finished cleanup offers to keep reviewing the same scan; a cleanup
+    // that stopped with an error offers only a fresh scan and says why.
+    [Fact]
+    public async Task AFinishedCleanupOffersToContinueReviewingUnlessItStopped()
+    {
+        var fixture = new ActionShellFixture();
+        fixture.Publish(ActionShellFixture.Snapshot(Item(1, ActionItemState.Executing)), approved: true);
+        Assert.False(fixture.ViewModel.CanContinueReview);
+        Assert.False(fixture.ViewModel.HasContinueReviewHint);
+
+        fixture.Publish(ActionShellFixture.Snapshot(Item(1, ActionItemState.Recycled))
+            with { Status = ActionStatus.Complete, RecycledCount = 1 }, approved: true);
+        Assert.True(fixture.ViewModel.CanContinueReview);
+        Assert.True(fixture.ViewModel.ContinueReviewCommand.CanExecute(null));
+        Assert.False(fixture.ViewModel.HasContinueReviewHint);
+        await fixture.ViewModel.ContinueReviewCommand.ExecuteAsync();
+        Assert.Equal(1, fixture.Continuations);
+
+        fixture.Publish(ActionShellFixture.Snapshot(Item(1, ActionItemState.UnknownPendingRevalidation))
+            with { Status = ActionStatus.Incomplete, UnknownCount = 1 }, approved: true);
+        Assert.True(fixture.ViewModel.CanContinueReview);
+
+        fixture.Publish(ActionShellFixture.Snapshot(Item(1, ActionItemState.NotRemoved, ActionSafetyReason.ProgrammingFault))
+            with { Status = ActionStatus.Faulted, FaultReason = ActionSafetyReason.ProgrammingFault }, approved: true);
+        Assert.False(fixture.ViewModel.CanContinueReview);
+        Assert.False(fixture.ViewModel.ContinueReviewCommand.CanExecute(null));
+        Assert.Equal("The cleanup stopped with an error, so reviewing can't continue from here. Scan again to start over.",
+            fixture.ViewModel.ContinueReviewHint);
+
+        // Once the review moved on (a new session, or none), this cleanup can't be continued from.
+        fixture.Publish(ActionShellFixture.Snapshot(Item(1, ActionItemState.Recycled))
+            with { Status = ActionStatus.Complete, RecycledCount = 1 });
+        Assert.False(fixture.ViewModel.CanContinueReview);
+        Assert.False(fixture.ViewModel.HasContinueReviewHint);
+    }
+
+    // PM-013: a continued review says what it leaves out and hides the closed sets.
+    [Fact]
+    public void AContinuedReviewSaysWhatItLeavesOutAndHidesClosedSets()
+    {
+        var review = ReviewData.CreateSnapshot(twoGroups: true);
+        var first = review.Groups[0];
+        var second = review.Groups[1];
+        review = review with
+        {
+            Groups =
+            [
+                first with { Members = first.Members.RemoveAt(0) },
+                second with
+                {
+                    Closed = true,
+                    Members = second.Members.Select(member => member with
+                    {
+                        Eligibility = ReviewEligibilityState.Unavailable, Reason = ReviewUnavailableReason.Stale,
+                    }).ToImmutableArray(),
+                },
+            ],
+        };
+        var scope = new ReviewStaticScope();
+        var viewModel = new ShellViewModel(scope, new RecordingReviewWorkflow(scope.Current, review));
+
+        Assert.Equal("Continued after the cleanup: 1 photo removed, 1 set closed until the next scan.",
+            viewModel.ReviewContinuationText);
+        Assert.True(viewModel.HasReviewContinuation);
+        Assert.Equal(1, viewModel.ReviewCategories[0].GroupCount);
+        var shown = Assert.Single(viewModel.ReviewCategories[0].Groups);
+        Assert.Equal(first.Candidate.GroupId, shown.GroupId);
+        Assert.Equal(3, shown.MemberCount);
+        Assert.StartsWith("1 set to review", viewModel.ReviewResultsSummary, StringComparison.Ordinal);
+
+        var plain = new ShellViewModel(scope, new RecordingReviewWorkflow(scope.Current, ReviewData.CreateSnapshot(twoGroups: true)));
+        Assert.Equal(string.Empty, plain.ReviewContinuationText);
+        Assert.False(plain.HasReviewContinuation);
+        Assert.Equal(2, plain.ReviewCategories[0].GroupCount);
+    }
+
     [Fact]
     public void ACleanupWhereEveryPhotoMovedFinishesWithoutCaveats()
     {
@@ -234,17 +310,25 @@ public sealed class CleanupScreenTests
                 Assert.Equal("Moving 2 photos to the Recycle Bin", heading.Text);
                 var banner = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("ActionOutcomeBanner"));
                 Assert.False(banner.IsVisible);
+                var continueButton = Assert.IsType<Button>(window.FindName("ContinueReviewButton"));
+                Assert.False(continueButton.IsVisible);
 
                 fixture.Publish(ActionShellFixture.Snapshot(
                     new ActionItemSnapshot(ActionShellFixture.Item(1), Guid.NewGuid(), ActionItemState.Recycled, ActionSafetyReason.None),
                     new ActionItemSnapshot(ActionShellFixture.Item(2), Guid.NewGuid(), ActionItemState.Recycled, ActionSafetyReason.None))
-                    with { Status = ActionStatus.Complete });
+                    with { Status = ActionStatus.Complete, RecycledCount = 2 }, approved: true);
                 window.UpdateLayout();
                 WpfReviewSelectionTests.Drain();
 
                 Assert.Equal(2d, progress.Value);
                 Assert.Equal("Cleanup finished", heading.Text);
                 Assert.True(banner.IsVisible);
+                // PM-013: the finished cleanup offers to keep reviewing.
+                Assert.True(continueButton.IsVisible);
+                Assert.True(continueButton.IsEnabled);
+                Assert.Equal("Continue reviewing", continueButton.Content);
+                var hint = Assert.IsType<TextBlock>(window.FindName("ContinueReviewHintText"));
+                Assert.False(hint.IsVisible);
             }
             finally { window.Close(); WpfReviewSelectionTests.Drain(); }
         });
