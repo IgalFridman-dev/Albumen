@@ -39,22 +39,15 @@ public sealed class ActionRecordItemViewModel : INotifyPropertyChanged
     public string AutomationName => string.Create(CultureInfo.InvariantCulture,
         $"Action record item {position} of {total}; {OriginalPath}; {StatusText}");
 
-    // Plain words for the History card; ResultText and ReasonText stay the recorded detail.
+    // The History card shows the E1-S6 result words with the reason in plain words.
     public string FileName { get; }
-    public string ResultLabel => snapshot.State switch
-    {
-        ActionRecordEvidenceState.Recycled => "Moved to the Recycle Bin",
-        ActionRecordEvidenceState.NotRemoved => "Skipped",
-        ActionRecordEvidenceState.ConfirmedPresent => "Still in its folder",
-        _ => "Outcome unknown",
-    };
     public ActionResultTone Tone => isVerifying ? ActionResultTone.Busy : snapshot.State switch
     {
         ActionRecordEvidenceState.Recycled => ActionResultTone.Done,
         ActionRecordEvidenceState.NotRemoved or ActionRecordEvidenceState.ConfirmedPresent => ActionResultTone.Skipped,
         _ => ActionResultTone.Warning,
     };
-    public string DetailText => isVerifying ? "Checking this photo again…" : PlainReason(snapshot);
+    public string DetailText => isVerifying ? "Verifying current file state…" : PlainReason(snapshot);
     public bool HasDetail => DetailText.Length != 0;
 
     internal void Update(ActionRecordItemSnapshot next, bool verifying)
@@ -66,7 +59,7 @@ public sealed class ActionRecordItemViewModel : INotifyPropertyChanged
         snapshot = next;
         isVerifying = verifying;
         foreach (var property in new[] { nameof(State), nameof(ResultText), nameof(ReasonText),
-            nameof(IsVerifying), nameof(StatusText), nameof(AutomationName), nameof(ResultLabel),
+            nameof(IsVerifying), nameof(StatusText), nameof(AutomationName),
             nameof(Tone), nameof(DetailText), nameof(HasDetail) })
             PropertyChanged?.Invoke(this, new(property));
     }
@@ -95,7 +88,7 @@ public sealed class ActionRecordItemViewModel : INotifyPropertyChanged
             ? string.Empty : ActionItemViewModel.DescribeReason(snapshot.ExecutionReason);
         return snapshot.State is ActionRecordEvidenceState.Requested or ActionRecordEvidenceState.Executing
             or ActionRecordEvidenceState.Unknown
-            ? $"{reason} PhotoSift can't tell whether this photo moved. Check it again above.".TrimStart()
+            ? $"{reason} PhotoSift can't tell whether this photo moved. Revalidate it above.".TrimStart()
             : reason;
     }
 
@@ -173,7 +166,7 @@ public sealed class ActionRecordViewModel : INotifyPropertyChanged
             };
             if (UnknownCount > 0) parts.Add(string.Create(CultureInfo.InvariantCulture, $"{UnknownCount} unknown"));
             if (snapshot.Summary.RecoveredBytes > 0)
-                parts.Add($"about {ScanOccurrenceViewModel.FormatSize(snapshot.Summary.RecoveredBytes)} in the Recycle Bin");
+                parts.Add($"about {ScanOccurrenceViewModel.FormatSize(snapshot.Summary.RecoveredBytes)} sent to the Recycle Bin");
             return string.Join(" · ", parts);
         }
     }

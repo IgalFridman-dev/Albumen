@@ -132,6 +132,47 @@ public sealed class WpfLocalDataControlTests
     }
 
     [Fact]
+    public void LeavingHistoryCancelsAPendingClearSoReturningDoesNotFocusTheConfirmation()
+    {
+        RunOnSta(async () =>
+        {
+            var fixture = new ExactShellFixture();
+            var control = new RecordingScanDataControl();
+            var viewModel = new ShellViewModel(
+                fixture.Scope, fixture.Workflow, localScanDataControl: control);
+            var window = new MainWindow { DataContext = viewModel };
+            try
+            {
+                window.Show();
+                window.Activate();
+                ShowHistory(window);
+                var request = Assert.IsType<Button>(window.FindName("ClearScanDataButton"));
+                var confirm = Assert.IsType<Button>(window.FindName("ConfirmClearScanDataButton"));
+                InvokeButton(request);
+                PumpUntil(() => viewModel.IsClearScanDataConfirmationPending
+                    && confirm.IsVisible && confirm.IsKeyboardFocusWithin);
+
+                var history = Assert.IsType<TabItem>(window.FindName("ActionRecordsTab"));
+                var photos = Assert.IsType<TabControl>(history.Parent).Items.OfType<TabItem>()
+                    .Single(tab => !ReferenceEquals(tab, history));
+                photos.IsSelected = true;
+                PumpUntil(() => !viewModel.IsClearScanDataConfirmationPending);
+                ShowHistory(window);
+                PumpUntil(() => request.IsVisible);
+
+                Assert.False(confirm.IsVisible);
+                Assert.False(confirm.IsKeyboardFocusWithin);
+                Assert.Equal(0, control.Calls);
+            }
+            finally
+            {
+                window.Close();
+                await viewModel.DisposeAsync();
+            }
+        });
+    }
+
+    [Fact]
     public async Task ActiveScanDisablesClearAndClosesEarlierConfirmationWithWaitOrCancelResult()
     {
         var fixture = new ExactShellFixture();
