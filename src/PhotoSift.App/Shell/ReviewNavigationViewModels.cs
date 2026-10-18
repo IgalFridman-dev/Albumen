@@ -14,6 +14,19 @@ public enum ReviewCategoryKind
     CouldNotAnalyze,
 }
 
+// The names people see for each kind. The enum keeps the internal Exact / Near / Uncertain terms.
+public static class ReviewCategoryNames
+{
+    public static string For(ReviewCategoryKind category) => category switch
+    {
+        ReviewCategoryKind.Exact => "Identical copies",
+        ReviewCategoryKind.Near => "Look-alike",
+        ReviewCategoryKind.Uncertain => "Maybe similar",
+        ReviewCategoryKind.CouldNotAnalyze => "Couldn't check",
+        _ => throw new InvalidOperationException($"Unknown Review category: {category}"),
+    };
+}
+
 public enum ReviewNavigationLevel
 {
     Categories,
@@ -48,12 +61,12 @@ public sealed class ReviewCategoryViewModel
     public int GroupCount { get; }
     public int PositionInSet { get; }
     public int SizeOfSet { get; }
-    public string AutomationName => $"{Name}: {GroupCount.ToString(CultureInfo.InvariantCulture)} groups";
+    public string AutomationName => $"{Name}: {CountText}";
     public string Description => Category switch
     {
-        ReviewCategoryKind.Exact => "Identical copies: the same file saved more than once. Keeping one loses nothing.",
-        ReviewCategoryKind.Near => "Look-alike: the same photo resized, recompressed or lightly edited.",
-        ReviewCategoryKind.Uncertain => "Maybe similar: photos that look close. Check them yourself before removing any.",
+        ReviewCategoryKind.Exact => "The same file saved more than once. Keeping one loses nothing.",
+        ReviewCategoryKind.Near => "The same photo resized, recompressed or lightly edited.",
+        ReviewCategoryKind.Uncertain => "Photos that look close. Check them yourself before removing any.",
         _ => "Files PhotoSift couldn't read or doesn't support. Nothing here can be removed.",
     };
     public string CountText => GroupCount == 1
@@ -88,9 +101,9 @@ public sealed class ReviewGroupViewModel
         Members = new(members.Length, index => new ScanOccurrenceViewModel(
             members[index], IsAlias(members, index), index + 1, members.Length));
         MemberCount = members.Length;
-        Summary = FormatSummary(category, MemberCount);
-        AutomationName = Summary;
-        ItemStatus = $"{category}; {MemberCount.ToString(CultureInfo.InvariantCulture)} comparison paths";
+        Summary = FormatSummary(positionInSet, MemberCount);
+        AutomationName = FormatAutomationName(category, positionInSet, sizeOfSet, MemberCount);
+        ItemStatus = $"{ReviewCategoryNames.For(category)}; {FormatPhotos(MemberCount)}";
         SelectAllCommand = DisabledCommand();
         ReplaceSelectionCommand = DisabledCommand(parameterized: true);
     }
@@ -118,16 +131,16 @@ public sealed class ReviewGroupViewModel
                 ImmutableArray.Create(members[index].Occurrence.Token.OccurrenceId)),
             index + 1, members.Length));
         MemberCount = members.Length;
-        Summary = FormatSummary(category, MemberCount);
+        Summary = FormatSummary(positionInSet, MemberCount);
         SelectionStatus = FormatSelectionStatus(group.SelectedOccurrenceIds.Count);
         var physicalFileCount = members.Select(member => member.Occurrence.PhysicalFileKey)
             .Where(key => key is not null).Distinct().Count();
         AutomationName = category == ReviewCategoryKind.Exact
-            ? $"Exact group {positionInSet.ToString(CultureInfo.InvariantCulture)} of {sizeOfSet.ToString(CultureInfo.InvariantCulture)}; {MemberCount.ToString(CultureInfo.InvariantCulture)} paths; {physicalFileCount.ToString(CultureInfo.InvariantCulture)} physical files"
-            : Summary;
+            ? $"{ReviewCategoryNames.For(category)} set {positionInSet.ToString(CultureInfo.InvariantCulture)} of {sizeOfSet.ToString(CultureInfo.InvariantCulture)}; {MemberCount.ToString(CultureInfo.InvariantCulture)} paths; {physicalFileCount.ToString(CultureInfo.InvariantCulture)} physical files"
+            : FormatAutomationName(category, positionInSet, sizeOfSet, MemberCount);
         ItemStatus = category == ReviewCategoryKind.Exact
             ? $"{group.SelectedOccurrenceIds.Count.ToString(CultureInfo.InvariantCulture)} selected; {ExactGroupViewModel.FormatSurvivor(group)}; {ExactGroupViewModel.FormatSelectionRecovery(group.Recovery)}"
-            : $"{category}; {MemberCount.ToString(CultureInfo.InvariantCulture)} comparison paths";
+            : $"{ReviewCategoryNames.For(category)}; {FormatPhotos(MemberCount)}";
         var selectable = members
             .Where(member => member.Eligibility == ReviewEligibilityState.Eligible)
             .Select(member => member.Occurrence.Token.OccurrenceId)
@@ -151,9 +164,11 @@ public sealed class ReviewGroupViewModel
         Members = new(1, _ => new ScanOccurrenceViewModel(occurrence,
             positionInSet: 1, sizeOfSet: 1));
         MemberCount = 1;
-        Summary = $"Could Not Analyze: {occurrence.DiscoveredPath}";
-        AutomationName = Summary;
-        ItemStatus = "CouldNotAnalyze; 1 comparison path";
+        var fileName = Path.GetFileName(occurrence.DiscoveredPath.TrimEnd('\\', '/')) is { Length: > 0 } name
+            ? name : occurrence.DiscoveredPath;
+        Summary = $"{ReviewCategoryNames.For(ReviewCategoryKind.CouldNotAnalyze)}: {fileName}";
+        AutomationName = $"{Summary}; {occurrence.DiscoveredPath}";
+        ItemStatus = $"{ReviewCategoryNames.For(ReviewCategoryKind.CouldNotAnalyze)}; 1 file";
         SelectAllCommand = DisabledCommand();
         ReplaceSelectionCommand = DisabledCommand(parameterized: true);
     }
@@ -186,14 +201,15 @@ public sealed class ReviewGroupViewModel
         return key is not null && members.Take(index).Any(member => member.Occurrence.PhysicalFileKey == key);
     }
 
-    private static string FormatSummary(ReviewCategoryKind category, int count) =>
-        $"{category switch
-        {
-            ReviewCategoryKind.Exact => "Exact duplicate",
-            ReviewCategoryKind.Near => "Near duplicate",
-            ReviewCategoryKind.Uncertain => "Uncertain",
-            _ => "Could Not Analyze",
-        }} group: {count.ToString(CultureInfo.InvariantCulture)} paths";
+    private static string FormatSummary(int positionInSet, int count) =>
+        $"Set {positionInSet.ToString(CultureInfo.InvariantCulture)}: {FormatPhotos(count)}";
+
+    private static string FormatAutomationName(ReviewCategoryKind category, int positionInSet, int sizeOfSet, int count) =>
+        $"{ReviewCategoryNames.For(category)} set {positionInSet.ToString(CultureInfo.InvariantCulture)} of {sizeOfSet.ToString(CultureInfo.InvariantCulture)}; {FormatPhotos(count)}";
+
+    private static string FormatPhotos(int count) => count == 1
+        ? "1 photo"
+        : $"{count.ToString(CultureInfo.InvariantCulture)} photos";
 
     private static string FormatSelectionStatus(int selected) => selected switch
     {

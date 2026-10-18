@@ -19,10 +19,10 @@ public sealed class GroupedReviewNavigationTests
         var fixture = GroupedReviewFixture.Create();
 
         Assert.Collection(fixture.ViewModel.ReviewCategories,
-            row => AssertCategory(row, ReviewCategoryKind.Exact, "Exact", 1),
-            row => AssertCategory(row, ReviewCategoryKind.Near, "Near", 1),
-            row => AssertCategory(row, ReviewCategoryKind.Uncertain, "Uncertain", 1),
-            row => AssertCategory(row, ReviewCategoryKind.CouldNotAnalyze, "Could Not Analyze", 1));
+            row => AssertCategory(row, ReviewCategoryKind.Exact, "Identical copies", 1),
+            row => AssertCategory(row, ReviewCategoryKind.Near, "Look-alike", 1),
+            row => AssertCategory(row, ReviewCategoryKind.Uncertain, "Maybe similar", 1),
+            row => AssertCategory(row, ReviewCategoryKind.CouldNotAnalyze, "Couldn't check", 1));
     }
 
     [Fact]
@@ -42,7 +42,7 @@ public sealed class GroupedReviewNavigationTests
         Assert.Same(near, fixture.ViewModel.ActiveReviewCategory);
         Assert.Null(fixture.ViewModel.ActiveReviewGroup);
         Assert.Null(fixture.ViewModel.ActiveReviewMember);
-        Assert.Equal(["Review", "Near"], fixture.ViewModel.ReviewBreadcrumbs);
+        Assert.Equal(["Review", "Look-alike"], fixture.ViewModel.ReviewBreadcrumbs);
 
         var group = near.Groups[0];
         await fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(group);
@@ -50,7 +50,8 @@ public sealed class GroupedReviewNavigationTests
         Assert.Equal(ReviewNavigationLevel.Comparisons, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Same(group, fixture.ViewModel.ActiveReviewGroup);
         Assert.Null(fixture.ViewModel.ActiveReviewMember);
-        Assert.Equal(["Review", "Near", group.Summary], fixture.ViewModel.ReviewBreadcrumbs);
+        Assert.StartsWith("Set 1: ", group.Summary, StringComparison.Ordinal);
+        Assert.Equal(["Review", "Look-alike", group.Summary], fixture.ViewModel.ReviewBreadcrumbs);
 
         var member = group.Members[1];
         await fixture.ViewModel.OpenReviewMemberCommand.ExecuteAsync(member);

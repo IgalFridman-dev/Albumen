@@ -67,7 +67,7 @@ public sealed class WpfExactAccessibilityTests
                 Assert.Equal("Cancel Scan", AutomationProperties.GetName(cancel));
                 var status = Assert.IsType<TextBlock>(window.FindName("ScanStatusText"));
                 Assert.Equal(AutomationLiveSetting.Polite, AutomationProperties.GetLiveSetting(status));
-                Assert.Contains("Running", AutomationProperties.GetItemStatus(status));
+                Assert.StartsWith("Scanning:", AutomationProperties.GetItemStatus(status), StringComparison.Ordinal);
                 fixture.PublishPhase(WorkflowPhase.ChooseScope);
                 Drain();
                 Assert.True(Assert.IsType<Button>(window.FindName("ChooseAnotherScopeButton")).IsKeyboardFocusWithin);
@@ -339,9 +339,9 @@ public sealed class WpfExactAccessibilityTests
                 try
                 {
                     dispatcher.BeginInvoke(publishRunning);
-                    Assert.StartsWith("Running;", NextAnnouncement(statuses, "Running", cancellationToken));
+                    Assert.StartsWith("Scanning:", NextAnnouncement(statuses, "Scanning", cancellationToken));
                     dispatcher.BeginInvoke(publishComplete);
-                    Assert.StartsWith("Complete;", NextAnnouncement(statuses, "Complete", cancellationToken));
+                    Assert.StartsWith("Finished:", NextAnnouncement(statuses, "Finished", cancellationToken));
                 }
                 finally
                 {
@@ -385,7 +385,7 @@ public sealed class WpfExactAccessibilityTests
             Assert.True(remaining > 0 && statuses.TryTake(out observed, remaining, cancellationToken),
                 $"No {requiredStatus} live-region announcement arrived within four seconds. Last status: {observed ?? "none"}.");
             var status = Assert.IsType<string>(observed);
-            if (status.StartsWith(requiredStatus + ";", StringComparison.Ordinal)) return status;
+            if (status.StartsWith(requiredStatus + ":", StringComparison.Ordinal)) return status;
         }
     }
 

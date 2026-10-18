@@ -33,7 +33,7 @@ public sealed class ExactScanFlowTests
         Assert.Contains("UnknownAllocation", group.PotentialRecovery);
         Assert.Equal(@"C:\Photos\denied.jpg", Assert.Single(vm.CouldNotAnalyze).DiscoveredPath);
         Assert.Contains("AccessDenied", vm.CouldNotAnalyze[0].Outcome);
-        Assert.Contains("Analyzed revisions", vm.ReviewDisclaimer);
+        Assert.Contains("as they were when scanned", vm.ReviewDisclaimer);
         Assert.False(vm.Phases.Single(p => p.Phase == WorkflowPhase.ApproveCleanup).IsAvailable);
         fixture.PublishReview(ScanStatus.Complete);
         Assert.Contains("complete", vm.CoverageStatus, StringComparison.OrdinalIgnoreCase);

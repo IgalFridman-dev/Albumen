@@ -321,7 +321,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public string ActionRecoveryAnnouncement => actionRecoveryAnnouncement;
     public string ActionRecoveryStatusText => photoSnapshot?.ActionRecovery.Status switch
     {
-        ActionRecoveryStatus.Loading => "Loading Action records…",
+        ActionRecoveryStatus.Loading => "Loading History…",
         ActionRecoveryStatus.Faulted =>
             "Local data could not be safely loaded. PhotoSift will not modify files until the database is available.",
         _ => string.Empty,
@@ -350,19 +350,37 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             : options.ValidationGuidance
         : "Exact is always enabled. Near defaults to the fixed Conservative profile. Selection stays manual.";
     public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";
-    public string ScanStatus => photoSnapshot is { } snapshot
-        ? $"{snapshot.Scan.Status}; Enumeration: {snapshot.Scan.Enumeration.State}; Exact: {(snapshot.Scan.Counts.Outstanding > 0 ? "Running" : snapshot.Scan.Status is ScanSessionStatus.Complete or ScanSessionStatus.Incomplete ? "Finished" : "Pending")}" : "Idle";
+    // Announced as a live region, so it changes only when the stage changes, never per photo.
+    public string ScanStatus => photoSnapshot?.Scan is { } scan
+        ? scan.Status switch
+        {
+            ScanSessionStatus.Idle => "Not started",
+            ScanSessionStatus.Checking => "Getting ready: checking the folder",
+            ScanSessionStatus.Running => scan.Enumeration.State is ScanStageState.Pending or ScanStageState.Running
+                ? "Scanning: finding photos"
+                : scan.Counts.Outstanding > 0 ? "Scanning: comparing photos" : "Scanning: finishing up",
+            ScanSessionStatus.Complete => "Finished: every file was checked",
+            ScanSessionStatus.Incomplete => "Stopped early: some files weren't checked",
+            ScanSessionStatus.Faulted => "Stopped by an error: results may be incomplete",
+            _ => throw new InvalidOperationException($"Unknown Scan status: {scan.Status}"),
+        }
+        : "Not started";
     public ReviewStatus ReviewState => photoSnapshot?.Review.Status ?? ReviewStatus.Closed;
     public ReviewUnavailableReason ReviewFaultReason => photoSnapshot?.Review.FaultReason ?? ReviewUnavailableReason.None;
     public string ReviewStatusText => ReviewState == ReviewStatus.Faulted
-        ? $"Review is faulted ({ReviewFaultReason}); controls are unavailable."
-        : $"Review: {ReviewState}";
+        ? $"Review stopped after a fault ({ReviewFaultReason}), so its controls are unavailable."
+        : ReviewState switch
+        {
+            ReviewStatus.Ready => "Ready to review",
+            ReviewStatus.Revalidating => "Checking the photos again…",
+            _ => "Review is closed",
+        };
     public string ScanCountsText => photoSnapshot is { Scan.Counts: var count }
-        ? $"Discovered: {count.Discovered}; Analyzed: {count.Analyzed}; Unsupported: {count.Unsupported}; Failed: {count.Failed}; Canceled: {count.Canceled}; Outstanding: {count.Outstanding}" : string.Empty;
+        ? FormatScanCounts(count) : string.Empty;
     public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
-        ? "Complete scope coverage. Unsupported, failed, and canceled/unprocessed files are reported separately."
-        : "Partial results — incomplete scope coverage. Results do not represent every file in the Scope.";
-    public string ReviewDisclaimer { get; } = "Analyzed revisions; scan again after files change. Results are memory-only and are not restored after restart.";
+        ? "Scan complete: every file in the folder was checked. Unsupported, failed, and canceled files are listed separately."
+        : "Partial results: the scan is incomplete, so these results don't cover every file in the folder.";
+    public string ReviewDisclaimer { get; } = "Results show your photos as they were when scanned, so scan again after files change. Results are kept in memory only and are gone after PhotoSift closes.";
     public ImmutableArray<ExactGroupViewModel> ExactGroups =>
         legacyExactGroups ??= ProjectLegacyExactGroups();
     public ImmutableArray<ScanOccurrenceViewModel> CouldNotAnalyze =>
@@ -854,18 +872,18 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private ImmutableArray<ReviewCategoryViewModel> ProjectReviewCategories(PhotoSiftSnapshot snapshot) =>
     [
-        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Exact, "Exact", 1),
-        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Near, "Near", 2),
-        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Uncertain, "Uncertain", 3),
+        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Exact, 1),
+        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Near, 2),
+        ProjectCandidateCategory(snapshot, ReviewCategoryKind.Uncertain, 3),
         ProjectCouldNotAnalyzeCategory(snapshot.Scan, 4),
     ];
 
     private ReviewCategoryViewModel ProjectCandidateCategory(
         PhotoSiftSnapshot snapshot,
         ReviewCategoryKind category,
-        string name,
         int positionInSet)
     {
+        var name = ReviewCategoryNames.For(category);
         if (snapshot.Review.Pin is not null)
         {
             var groups = snapshot.Review.Groups
@@ -896,7 +914,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         int positionInSet)
     {
         var rows = scan.Occurrences.Where(IsCouldNotAnalyze).ToImmutableArray();
-        return new(ReviewCategoryKind.CouldNotAnalyze, "Could Not Analyze", rows.Length,
+        return new(ReviewCategoryKind.CouldNotAnalyze, ReviewCategoryNames.For(ReviewCategoryKind.CouldNotAnalyze), rows.Length,
             positionInSet, 4,
             index => new ReviewGroupViewModel(rows[index], index + 1, rows.Length),
             _ => null);
@@ -1270,13 +1288,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             || edge.Right.OccurrenceId == occurrence.Token.OccurrenceId);
         var confidence = category switch
         {
-            ReviewCategoryKind.Exact => "Byte-identical content.",
+            ReviewCategoryKind.Exact => "The files are identical, byte for byte.",
             ReviewCategoryKind.Near or ReviewCategoryKind.Uncertain when similarity is not null =>
-                $"Hamming distance: {similarity.HammingDistance.ToString(CultureInfo.InvariantCulture)}; color distance: {similarity.ColorDistance.ToString(CultureInfo.InvariantCulture)}",
+                $"Picture difference {similarity.HammingDistance.ToString(CultureInfo.InvariantCulture)}, color difference {similarity.ColorDistance.ToString(CultureInfo.InvariantCulture)} (lower is closer)",
             _ => unavailable,
         };
         var uncertainty = category == ReviewCategoryKind.Uncertain
-            ? "Uncertain relationship."
+            ? "A close call. Check these photos yourself."
             : unavailable;
         var reason = new[]
             {
@@ -1288,7 +1306,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             .FirstOrDefault(value => value != ScanReason.None);
         return new(
             occurrence.ResolvedPath,
-            CategoryName(category),
+            ReviewCategoryNames.For(category),
             result.SourcePixelWidth is { } width && result.SourcePixelHeight is { } height
                 ? $"{width.ToString(CultureInfo.InvariantCulture)} × {height.ToString(CultureInfo.InvariantCulture)} pixels"
                 : unavailable,
@@ -1301,15 +1319,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             unavailable,
             reason == ScanReason.None ? unavailable : reason.ToString());
     }
-
-    private static string CategoryName(ReviewCategoryKind category) => category switch
-    {
-        ReviewCategoryKind.Exact => "Exact",
-        ReviewCategoryKind.Near => "Near",
-        ReviewCategoryKind.Uncertain => "Uncertain",
-        ReviewCategoryKind.CouldNotAnalyze => "Could Not Analyze",
-        _ => throw new InvalidOperationException($"Unknown Review category: {category}"),
-    };
 
     private void ClearActiveReviewPreview()
     {
@@ -1435,8 +1444,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         actionRecoveryAnnouncement = active is not null
             ? $"{active.OriginalPath}. {active.StatusText}"
             : HasActionRecoveryDisclosure
-                ? "Action record updated. One or more outcomes remain unknown pending revalidation."
-                : HasActionRecoveryRecords ? "Action record updated." : string.Empty;
+                ? "History updated. PhotoSift still can't tell whether some photos moved; revalidate them to find out."
+                : HasActionRecoveryRecords ? "History updated." : string.Empty;
         OnPropertyChanged(nameof(ActionRecoveryAnnouncement));
     }
 
@@ -1475,7 +1484,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (reviewDialog is null || invokingFocus is null)
         {
-            SetReviewAnnouncement("Final-survivor override requires an explicitly focused invoking control.");
+            SetReviewAnnouncement("To remove the last kept photo of a set, use the Keep or Remove switch on that photo.");
             return;
         }
 
@@ -1521,10 +1530,10 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             ApplyCombined(workflow.Current);
         var announcement = result.Outcome switch
         {
-            ReviewCommandOutcome.Stale => "The Review changed; the stale command made no change.",
-            ReviewCommandOutcome.PersistenceFailed => "Override evidence persistence failed; Selection is unchanged.",
-            ReviewCommandOutcome.EvidenceUnavailable => "Override evidence is unavailable; approval is blocked.",
-            ReviewCommandOutcome.Sealed => "Selection is sealed by explicit approval.",
+            ReviewCommandOutcome.Stale => "The review changed in the meantime, so nothing was changed. Try again.",
+            ReviewCommandOutcome.PersistenceFailed => "PhotoSift couldn't save your confirmation, so your marks are unchanged.",
+            ReviewCommandOutcome.EvidenceUnavailable => "PhotoSift can't read your saved confirmation, so the cleanup can't be approved.",
+            ReviewCommandOutcome.Sealed => "Your marks are locked because the cleanup was approved.",
             _ => null,
         };
         if (announcement is not null) SetReviewAnnouncement(announcement);
@@ -1570,6 +1579,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             && selectedCount > 0 && !review.Sealed
             && photoSnapshot?.ActionRecovery.Status != ActionRecoveryStatus.Faulted
             && selectedMembers.All(member => member.Eligibility == ReviewEligibilityState.Eligible);
+    }
+
+    private static string FormatScanCounts(PhotoSift.Application.Scan.ScanCounts count)
+    {
+        var done = count.Discovered - count.Outstanding;
+        var text = $"{done.ToString("N0", CultureInfo.InvariantCulture)} of {count.Discovered.ToString("N0", CultureInfo.InvariantCulture)} files checked";
+        if (count.Unsupported > 0) text += $" · {count.Unsupported.ToString("N0", CultureInfo.InvariantCulture)} unsupported";
+        if (count.Failed > 0) text += $" · {count.Failed.ToString("N0", CultureInfo.InvariantCulture)} failed";
+        if (count.Canceled > 0) text += $" · {count.Canceled.ToString("N0", CultureInfo.InvariantCulture)} canceled";
+        return text;
     }
 
     private static string PhotoCount(long count) => count == 1
