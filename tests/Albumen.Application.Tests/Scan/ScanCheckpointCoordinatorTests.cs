@@ -789,6 +789,10 @@ public sealed class ScanCheckpointCoordinatorTests
             var late = fixture.Owner.RegisterAsync(
                 run.Context, ScanTestData.Work(1, run.Context).File).AsTask();
             await AssertOwnerResponsiveWhilePersistenceWaits(fixture);
+            // The rejection of the late registration can land after the owner goes idle, so wait
+            // for it or for the checkpoint write it would cause instead of sampling it once.
+            var lateAttemptTask = fixture.Checkpoints.NextAttemptAsync();
+            await fixture.Pump(Task.WhenAny(late, lateAttemptTask));
             var admissionClosedBeforeCommit = late.IsCompleted;
 
             if (admissionClosedBeforeCommit)
@@ -796,7 +800,7 @@ public sealed class ScanCheckpointCoordinatorTests
             terminalAttempt.Release();
             if (!admissionClosedBeforeCommit)
             {
-                lateAttempt = await PumpNext(fixture, fixture.Checkpoints.NextAttemptAsync());
+                lateAttempt = await PumpNext(fixture, lateAttemptTask);
                 Assert.IsType<InitialOccurrenceCheckpointCommand>(lateAttempt.Command);
                 fixture.Checkpoints.HoldWrites = false;
                 lateAttempt.Release(ScanCheckpointWriteOutcome.IllegalTransition);
