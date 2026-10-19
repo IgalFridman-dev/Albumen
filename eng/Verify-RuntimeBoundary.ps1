@@ -186,22 +186,22 @@ function Read-SelfContainedFrameworkClosure {
         throw 'Framework closure paths are not in canonical ordinal order.'
     }
 
-    $runtimeConfigPath = Join-Path $OutputDirectory 'PhotoSift.App.runtimeconfig.json'
-    $appAssemblyPath = Join-Path $OutputDirectory 'PhotoSift.App.dll'
-    $appHostPath = Join-Path $OutputDirectory 'PhotoSift.App.exe'
+    $runtimeConfigPath = Join-Path $OutputDirectory 'Albumen.App.runtimeconfig.json'
+    $appAssemblyPath = Join-Path $OutputDirectory 'Albumen.App.dll'
+    $appHostPath = Join-Path $OutputDirectory 'Albumen.App.exe'
     if (-not [System.IO.File]::Exists($runtimeConfigPath)) {
-        throw 'Self-contained folder publish is missing PhotoSift.App.runtimeconfig.json.'
+        throw 'Self-contained folder publish is missing Albumen.App.runtimeconfig.json.'
     }
     if (-not [System.IO.File]::Exists($appAssemblyPath)) {
-        throw 'Single-file-shaped output is not allowed; folder publish must contain PhotoSift.App.dll.'
+        throw 'Single-file-shaped output is not allowed; folder publish must contain Albumen.App.dll.'
     }
     if (-not [System.IO.File]::Exists($appHostPath)) {
-        throw 'Self-contained folder publish is missing PhotoSift.App.exe.'
+        throw 'Self-contained folder publish is missing Albumen.App.exe.'
     }
     $runtimeConfig = Get-Content -Raw -LiteralPath $runtimeConfigPath | ConvertFrom-Json
     if ($null -eq $runtimeConfig.runtimeOptions -or
         [string]$runtimeConfig.runtimeOptions.tfm -cne 'net10.0') {
-        throw 'PhotoSift.App.runtimeconfig.json runtime TFM must be exactly net10.0.'
+        throw 'Albumen.App.runtimeconfig.json runtime TFM must be exactly net10.0.'
     }
     $runtimeOptionProperties = @(Get-JsonPropertyNames -Value $runtimeConfig.runtimeOptions)
     if ($runtimeOptionProperties -contains 'framework' -or
@@ -259,12 +259,12 @@ function Assert-FrameworkDependentRelease {
     if (-not [string]::IsNullOrWhiteSpace($FrameworkClosureManifestPath)) {
         throw 'Framework-dependent release cannot include a bundled framework closure.'
     }
-    foreach ($name in @('PhotoSift.App.exe', 'PhotoSift.App.dll', 'PhotoSift.App.runtimeconfig.json')) {
+    foreach ($name in @('Albumen.App.exe', 'Albumen.App.dll', 'Albumen.App.runtimeconfig.json')) {
         if (-not [System.IO.File]::Exists((Join-Path $OutputDirectory $name))) {
             throw "Framework-dependent folder release is missing $name."
         }
     }
-    $config = Get-Content -Raw -LiteralPath (Join-Path $OutputDirectory 'PhotoSift.App.runtimeconfig.json') | ConvertFrom-Json
+    $config = Get-Content -Raw -LiteralPath (Join-Path $OutputDirectory 'Albumen.App.runtimeconfig.json') | ConvertFrom-Json
     $options = $config.runtimeOptions
     $properties = @(Get-JsonPropertyNames -Value $options)
     if ($null -eq $options -or [string]$options.tfm -cne 'net10.0' -or
@@ -287,8 +287,8 @@ function Assert-FrameworkDependentRelease {
     if (($frameworks -join '|') -cne 'Microsoft.NETCore.App/10.0.11|Microsoft.WindowsDesktop.App/10.0.11') {
         throw 'Framework-dependent runtimeconfig must request exactly NETCore and WindowsDesktop 10.0.11.'
     }
-    $firstPartyNames = @('PhotoSift.App', 'PhotoSift.Analysis', 'PhotoSift.Application',
-        'PhotoSift.Domain', 'PhotoSift.Infrastructure.Sqlite', 'PhotoSift.Infrastructure.Windows')
+    $firstPartyNames = @('Albumen.App', 'Albumen.Analysis', 'Albumen.Application',
+        'Albumen.Domain', 'Albumen.Infrastructure.Sqlite', 'Albumen.Infrastructure.Windows')
     foreach ($library in $DependencyManifest.libraries.PSObject.Properties) {
         $projectName = ($library.Name -split '/')[0]
         if ($approvedPackageLibraries -ccontains $library.Name) { continue }
@@ -296,7 +296,7 @@ function Assert-FrameworkDependentRelease {
         throw "Unexpected framework-dependent runtime library: $($library.Name)"
     }
     $allowedBinaries = @($firstPartyNames | ForEach-Object { $_ + '.dll' }) + @(
-        'PhotoSift.App.exe', 'Microsoft.Data.Sqlite.dll', 'SQLitePCLRaw.batteries_v2.dll',
+        'Albumen.App.exe', 'Microsoft.Data.Sqlite.dll', 'SQLitePCLRaw.batteries_v2.dll',
         'SQLitePCLRaw.core.dll', 'SQLitePCLRaw.provider.e_sqlite3.dll', 'e_sqlite3.dll')
     foreach ($file in @(Get-ChildItem -Force -File -Recurse -LiteralPath $OutputDirectory)) {
         if ($file.Extension -in @('.dll', '.exe') -and
@@ -428,8 +428,8 @@ function Assert-NoForbiddenProductionApis {
             }
         }
 
-        $isWindowsInfrastructure = $relativePath -like 'PhotoSift.Infrastructure.Windows\*'
-        $isApp = $relativePath -like 'PhotoSift.App\*'
+        $isWindowsInfrastructure = $relativePath -like 'Albumen.Infrastructure.Windows\*'
+        $isApp = $relativePath -like 'Albumen.App\*'
         if ($source -match '\[\s*(?:(?:global\s*::\s*)?System\s*\.\s*Runtime\s*\.\s*InteropServices\s*\.\s*)?(?:LibraryImport|DllImport)(?:Attribute)?\b' -and
             -not $isWindowsInfrastructure) {
             $violations.Add("$relativePath -> native interop outside Windows infrastructure")
@@ -456,7 +456,7 @@ function Assert-NoForbiddenProductionApis {
 
 if ([string]::IsNullOrWhiteSpace($DependencyManifestPath)) {
     $manifestPath = Join-Path $repositoryRoot (
-        'src\PhotoSift.App\bin\{0}\net10.0-windows\{1}\PhotoSift.App.deps.json' -f `
+        'src\Albumen.App\bin\{0}\net10.0-windows\{1}\Albumen.App.deps.json' -f `
             $Configuration,
             $RuntimeIdentifier)
 }
@@ -495,7 +495,7 @@ else {
 $sourceFileCount = Assert-NoForbiddenProductionApis -RootPath $resolvedSourceRootPath
 
 if (-not [string]::IsNullOrWhiteSpace($DependencyManifestPath)) {
-    Write-Output "PHOTOSIFT_RUNTIME_BOUNDARY_OK manifest=$manifestPath"
+    Write-Output "ALBUMEN_RUNTIME_BOUNDARY_OK manifest=$manifestPath"
     Write-Output "SourceFilesScanned=$sourceFileCount"
     Write-Output "RuntimeFilesScanned=$($artifactInspection.Files.Count)"
     Write-Output "RuntimeBinariesScanned=$($artifactInspection.BinaryCount)"
@@ -506,12 +506,12 @@ if (-not [string]::IsNullOrWhiteSpace($DependencyManifestPath)) {
 }
 
 $expectedProjects = @(
-    'PhotoSift.Analysis',
-    'PhotoSift.App',
-    'PhotoSift.Application',
-    'PhotoSift.Domain',
-    'PhotoSift.Infrastructure.Sqlite',
-    'PhotoSift.Infrastructure.Windows')
+    'Albumen.Analysis',
+    'Albumen.App',
+    'Albumen.Application',
+    'Albumen.Domain',
+    'Albumen.Infrastructure.Sqlite',
+    'Albumen.Infrastructure.Windows')
 $projectPaths = @(Get-ChildItem -Recurse -File -Filter '*.csproj' -LiteralPath (
     Join-Path $repositoryRoot 'src'))
 $projectNames = @($projectPaths.BaseName | Sort-Object)
@@ -565,7 +565,7 @@ foreach ($projectPath in $projectPaths) {
     }
 }
 
-$expectedDirectPackageReferences = @('PhotoSift.Infrastructure.Sqlite=Microsoft.Data.Sqlite')
+$expectedDirectPackageReferences = @('Albumen.Infrastructure.Sqlite=Microsoft.Data.Sqlite')
 $actualDirectPackageReferences = @($directPackageReferences | Sort-Object -Unique)
 if ([string]::Join('|', $actualDirectPackageReferences) -cne
     [string]::Join('|', $expectedDirectPackageReferences)) {
@@ -624,7 +624,7 @@ if ($nativeSqliteSha256 -cne 'B7385D722C83FB52142A00477A726723745916D22A555711EE
     throw "SQLite native runtime hash differs from the approved win-x64 closure: $nativeSqliteSha256"
 }
 
-Write-Output 'PHOTOSIFT_RUNTIME_BOUNDARY_OK'
+Write-Output 'ALBUMEN_RUNTIME_BOUNDARY_OK'
 Write-Output "TargetFramework=net10.0-windows"
 Write-Output "RuntimeIdentifier=$RuntimeIdentifier"
 Write-Output "ProductionProjects=$($projectNames -join ',')"

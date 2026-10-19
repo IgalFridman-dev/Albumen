@@ -1,6 +1,6 @@
 ---
 name: verify-gates
-description: Build, test and run PhotoSift's verification gates (local dotnet test, GitHub CI, Golden Hyper-V VM Architecture/Core/Full stages, release packaging) and report what actually passed. Use when asked to test, verify, or package PhotoSift.
+description: Build, test and run Albumen's verification gates (local dotnet test, GitHub CI, Golden Hyper-V VM Architecture/Core/Full stages, release packaging) and report what actually passed. Use when asked to test, verify, or package Albumen.
 ---
 
 # Verification gates
@@ -19,10 +19,10 @@ Never report CI green or a host run as Architecture/Core/Full PASS.
 
 ## Quick local loop
 ```powershell
-dotnet restore PhotoSift.slnx --locked-mode
-dotnet build PhotoSift.slnx -c Release --no-restore
-dotnet test tests/PhotoSift.Domain.Tests -c Release --no-build      # fastest
-dotnet test PhotoSift.slnx -c Release --no-build --filter "Category!=GoldenVm"
+dotnet restore Albumen.slnx --locked-mode
+dotnet build Albumen.slnx -c Release --no-restore
+dotnet test tests/Albumen.Domain.Tests -c Release --no-build      # fastest
+dotnet test Albumen.slnx -c Release --no-build --filter "Category!=GoldenVm"
 Get-ChildItem tests/tooling -Filter *.Tests.ps1 | % { pwsh -NoProfile -File $_.FullName }  # tooling
 ```
 The tooling tests are plain scripts, not Pester. CI runs the four that are safe on a hosted
@@ -35,19 +35,19 @@ tests have wall-clock budgets that parallel runs can exceed.
 ## Official gates (owner's machine, elevated PowerShell)
 The dev host's Application Control blocks unsigned builds, so gates run in a NIC-free Hyper-V
 "Golden VM" restored from `Toolchain-Evaluation-Base`.
-- One-time: `eng/verification/Repair-PhotoSiftGoldenVmCredential.ps1`, then
-  `eng/verification/Initialize-PhotoSiftGoldenVm.ps1`.
-- One stage: `pwsh -NoProfile -File eng/verification/Invoke-PhotoSiftHyperV.ps1 -Stage Full`
+- One-time: `eng/verification/Repair-AlbumenGoldenVmCredential.ps1`, then
+  `eng/verification/Initialize-AlbumenGoldenVm.ps1`.
+- One stage: `pwsh -NoProfile -File eng/verification/Invoke-AlbumenHyperV.ps1 -Stage Full`
   (`Architecture` = Infrastructure/architecture tests, `Core` = Domain+Application+Analysis+
   Scenarios, `Full` = all five suites + runtime boundary + offline WPF smoke).
-- All stages, one prompt: `eng/verification/Invoke-PhotoSiftHyperVStages.ps1`.
+- All stages, one prompt: `eng/verification/Invoke-AlbumenHyperVStages.ps1`.
 - Record the run id (e.g. `20260921-131737-full-3eefc956`) and the pass counts in the evidence file.
 - Known flaky: the routed Ctrl+A focus test `RoutedCtrlASelectsOnlyTheGroupContainingKeyboardFocus`
   in `WpfReviewSelectionTests.cs`. Report a failure; never skip it.
 
 ## Release
-`eng/release/New-PhotoSiftRelease.ps1` builds the self-contained `win-x64` ZIP (bundled .NET and
+`eng/release/New-AlbumenRelease.ps1` builds the self-contained `win-x64` ZIP (bundled .NET and
 WPF runtime, PM-008) and
-`Test-PhotoSiftRelease.ps1` re-verifies it. Required: two identical publishes, SHA256SUMS, and
+`Test-AlbumenRelease.ps1` re-verifies it. Required: two identical publishes, SHA256SUMS, and
 owner approval of the dependency inventory (`release-dependencies.json`). Any package change goes
 through that gate.

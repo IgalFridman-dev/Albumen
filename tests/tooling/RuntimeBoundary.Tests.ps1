@@ -4,7 +4,7 @@ $repositoryRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $PSScriptRoot '..\..'))
 $checkerPath = Join-Path $repositoryRoot 'eng\Verify-RuntimeBoundary.ps1'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
-    'PhotoSift-RuntimeBoundary-Tests-' + [System.Guid]::NewGuid().ToString('N'))
+    'Albumen-RuntimeBoundary-Tests-' + [System.Guid]::NewGuid().ToString('N'))
 [System.IO.Directory]::CreateDirectory($testRoot) | Out-Null
 $script:passed = 26
 
@@ -50,14 +50,14 @@ try {
     $cleanManifestPath = Join-Path $cleanManifestRoot 'clean.deps.json'
     @{
         libraries = @{
-            'PhotoSift.App/1.0.0' = @{ type = 'project' }
+            'Albumen.App/1.0.0' = @{ type = 'project' }
         }
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $cleanManifestPath -Encoding utf8
 
     $forbiddenManifestPath = Join-Path $testRoot 'forbidden.deps.json'
     @{
         libraries = @{
-            'PhotoSift.App/1.0.0' = @{ type = 'project' }
+            'Albumen.App/1.0.0' = @{ type = 'project' }
             'System.Net.Http/10.0.0' = @{ type = 'package' }
         }
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $forbiddenManifestPath -Encoding utf8
@@ -84,10 +84,10 @@ try {
         [System.IO.Directory]::CreateDirectory($source) | Out-Null
         'public static class CleanProductionFixture { }' |
             Set-Content -LiteralPath (Join-Path $source 'CleanProductionFixture.cs') -Encoding utf8
-        $manifest = Join-Path $root 'PhotoSift.App.deps.json'
+        $manifest = Join-Path $root 'Albumen.App.deps.json'
         @{
             libraries = @{
-                'PhotoSift.App/1.0.0' = @{ type = 'project' }
+                'Albumen.App/1.0.0' = @{ type = 'project' }
             }
         } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifest -Encoding utf8
         return [pscustomobject]@{ Root = $root; Source = $source; Manifest = $manifest }
@@ -102,21 +102,21 @@ try {
         $fixture = New-RuntimeArtifactFixture -Name $Name
         [pscustomobject]@{
             libraries = [ordered]@{
-                'PhotoSift.App/1.0.0' = @{ type = 'project' }
+                'Albumen.App/1.0.0' = @{ type = 'project' }
                 'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
                 'Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.11' = @{ type = 'package' }
             }
         } | ConvertTo-Json -Depth 6 |
             Set-Content -LiteralPath $fixture.Manifest -Encoding utf8
         [System.IO.File]::WriteAllBytes(
-            (Join-Path $fixture.Root 'PhotoSift.App.dll'),
+            (Join-Path $fixture.Root 'Albumen.App.dll'),
             [System.Text.Encoding]::ASCII.GetBytes('clean first-party binary fixture'))
         [System.IO.File]::WriteAllBytes(
-            (Join-Path $fixture.Root 'PhotoSift.App.exe'),
+            (Join-Path $fixture.Root 'Albumen.App.exe'),
             [System.Text.Encoding]::ASCII.GetBytes('clean apphost fixture'))
         '{"runtimeOptions":{"tfm":"net10.0","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}' |
             Set-Content -LiteralPath (
-                Join-Path $fixture.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+                Join-Path $fixture.Root 'Albumen.App.runtimeconfig.json') -Encoding utf8
         $frameworkManifest = Join-Path $fixture.Root 'framework-closure.json'
         [pscustomobject][ordered]@{
             schemaVersion = 1
@@ -193,11 +193,11 @@ try {
 
     Assert-RuntimeArtifactRejected `
         -CaseName 'test-assembly' `
-        -ArtifactName 'PhotoSift.Scenarios.Tests.dll' `
+        -ArtifactName 'Albumen.Scenarios.Tests.dll' `
         -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
     Assert-RuntimeArtifactRejected `
         -CaseName 'nested-test-assembly' `
-        -ArtifactName 'nested\PhotoSift.Scenarios.Tests.dll' `
+        -ArtifactName 'nested\Albumen.Scenarios.Tests.dll' `
         -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
     Assert-RuntimeArtifactRejected `
         -CaseName 'test-host' `
@@ -213,7 +213,7 @@ try {
         -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
     Assert-RuntimeArtifactRejected `
         -CaseName 'tooling-assembly' `
-        -ArtifactName 'PhotoSift.Tooling.dll' `
+        -ArtifactName 'Albumen.Tooling.dll' `
         -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
     Assert-RuntimeArtifactRejected `
         -CaseName 'updater-executable' `
@@ -225,19 +225,19 @@ try {
         -Content ([System.Text.Encoding]::UTF8.GetBytes('clean fixture'))
     Assert-RuntimeArtifactRejected `
         -CaseName 'remote-config' `
-        -ArtifactName 'PhotoSift.App.runtimeconfig.json' `
+        -ArtifactName 'Albumen.App.runtimeconfig.json' `
         -Content ([System.Text.Encoding]::UTF8.GetBytes('{"service":"https://telemetry.invalid"}'))
     Assert-RuntimeArtifactRejected `
         -CaseName 'binary-capability' `
-        -ArtifactName 'PhotoSift.App.dll' `
+        -ArtifactName 'Albumen.App.dll' `
         -Content ([System.Text.Encoding]::ASCII.GetBytes('binary-prefix System.Net.Http binary-suffix'))
 
     $cleanRuntime = New-RuntimeArtifactFixture -Name 'clean-runtime'
     [System.IO.File]::WriteAllBytes(
-        (Join-Path $cleanRuntime.Root 'PhotoSift.App.dll'),
+        (Join-Path $cleanRuntime.Root 'Albumen.App.dll'),
         [System.Text.Encoding]::ASCII.GetBytes('clean binary fixture'))
     '{"runtimeOptions":{"tfm":"net10.0"}}' |
-        Set-Content -LiteralPath (Join-Path $cleanRuntime.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $cleanRuntime.Root 'Albumen.App.runtimeconfig.json') -Encoding utf8
     $cleanRuntimeResult = Invoke-BoundaryChecker `
         -Arguments @(
             '-DependencyManifestPath', $cleanRuntime.Manifest,
@@ -259,7 +259,7 @@ try {
     $projectAliasTfm = New-SelfContainedRuntimeFixture -Name 'project-alias-tfm'
     '{"runtimeOptions":{"tfm":"net10.0-windows","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}' |
         Set-Content -LiteralPath (
-            Join-Path $projectAliasTfm.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+            Join-Path $projectAliasTfm.Root 'Albumen.App.runtimeconfig.json') -Encoding utf8
     $projectAliasTfmResult = Invoke-SelfContainedBoundaryChecker `
         -Fixture $projectAliasTfm `
         -OutputPrefix 'project-alias-tfm'
@@ -272,7 +272,7 @@ try {
     $frameworkDependent = New-SelfContainedRuntimeFixture -Name 'framework-dependent'
     '{"runtimeOptions":{"tfm":"net10.0","framework":{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}}}' |
         Set-Content -LiteralPath (
-            Join-Path $frameworkDependent.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+            Join-Path $frameworkDependent.Root 'Albumen.App.runtimeconfig.json') -Encoding utf8
     $frameworkDependentResult = Invoke-SelfContainedBoundaryChecker `
         -Fixture $frameworkDependent `
         -OutputPrefix 'framework-dependent'
@@ -283,12 +283,12 @@ try {
     $script:passed++
 
     $singleFileShaped = New-SelfContainedRuntimeFixture -Name 'single-file-shaped'
-    Remove-Item -LiteralPath (Join-Path $singleFileShaped.Root 'PhotoSift.App.dll')
+    Remove-Item -LiteralPath (Join-Path $singleFileShaped.Root 'Albumen.App.dll')
     $singleFileResult = Invoke-SelfContainedBoundaryChecker `
         -Fixture $singleFileShaped `
         -OutputPrefix 'single-file-shaped'
     if ($singleFileResult.ExitCode -eq 0 -or
-        $singleFileResult.Output -notmatch 'single-file|PhotoSift.App.dll') {
+        $singleFileResult.Output -notmatch 'single-file|Albumen.App.dll') {
         throw "Single-file-shaped output was not rejected: $($singleFileResult.Output)"
     }
     $script:passed++
@@ -296,7 +296,7 @@ try {
     $wrongIncludedFramework = New-SelfContainedRuntimeFixture -Name 'wrong-included-framework'
     '{"runtimeOptions":{"tfm":"net10.0","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.10"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]}}' |
         Set-Content -LiteralPath (
-            Join-Path $wrongIncludedFramework.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+            Join-Path $wrongIncludedFramework.Root 'Albumen.App.runtimeconfig.json') -Encoding utf8
     $wrongIncludedFrameworkResult = Invoke-SelfContainedBoundaryChecker `
         -Fixture $wrongIncludedFramework `
         -OutputPrefix 'wrong-included-framework'
@@ -341,13 +341,13 @@ try {
 
     $firstPartyBinary = New-SelfContainedRuntimeFixture -Name 'first-party-binary'
     [System.IO.File]::WriteAllBytes(
-        (Join-Path $firstPartyBinary.Root 'PhotoSift.App.dll'),
+        (Join-Path $firstPartyBinary.Root 'Albumen.App.dll'),
         [System.Text.Encoding]::ASCII.GetBytes('first-party System.Net.Http HttpClient marker'))
     $firstPartyBinaryResult = Invoke-SelfContainedBoundaryChecker `
         -Fixture $firstPartyBinary `
         -OutputPrefix 'first-party-binary'
     if ($firstPartyBinaryResult.ExitCode -eq 0 -or
-        $firstPartyBinaryResult.Output -notmatch 'PhotoSift.App.dll') {
+        $firstPartyBinaryResult.Output -notmatch 'Albumen.App.dll') {
         throw "First-party network-capability marker was incorrectly accepted: $($firstPartyBinaryResult.Output)"
     }
     $script:passed++
@@ -355,12 +355,12 @@ try {
     $firstPartyConfig = New-SelfContainedRuntimeFixture -Name 'first-party-config'
     '{"runtimeOptions":{"tfm":"net10.0","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"10.0.11"},{"name":"Microsoft.WindowsDesktop.App","version":"10.0.11"}]},"telemetryUrl":"https://telemetry.invalid"}' |
         Set-Content -LiteralPath (
-            Join-Path $firstPartyConfig.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+            Join-Path $firstPartyConfig.Root 'Albumen.App.runtimeconfig.json') -Encoding utf8
     $firstPartyConfigResult = Invoke-SelfContainedBoundaryChecker `
         -Fixture $firstPartyConfig `
         -OutputPrefix 'first-party-config'
     if ($firstPartyConfigResult.ExitCode -eq 0 -or
-        $firstPartyConfigResult.Output -notmatch 'PhotoSift.App.runtimeconfig.json') {
+        $firstPartyConfigResult.Output -notmatch 'Albumen.App.runtimeconfig.json') {
         throw "First-party remote-config marker was incorrectly accepted: $($firstPartyConfigResult.Output)"
     }
     $script:passed++
@@ -472,7 +472,7 @@ public static class AllowedFixture
     }
 
     $nativeInteropSourceRoot = Join-Path $testRoot 'native-interop-source'
-    $nativeInteropProjectPath = Join-Path $nativeInteropSourceRoot 'PhotoSift.Application'
+    $nativeInteropProjectPath = Join-Path $nativeInteropSourceRoot 'Albumen.Application'
     [System.IO.Directory]::CreateDirectory($nativeInteropProjectPath) | Out-Null
     @'
 using System.Runtime.InteropServices;
@@ -517,20 +517,20 @@ public static partial class HiddenNativeInteropFixture
         throw 'Native interop outside Windows infrastructure fixture was incorrectly accepted.'
     }
     if ($nativeInteropResult.Output -notmatch [regex]::Escape(
-            'PhotoSift.Application\NativeInteropFixture.cs -> native interop outside Windows infrastructure')) {
+            'Albumen.Application\NativeInteropFixture.cs -> native interop outside Windows infrastructure')) {
         throw 'Failure output did not identify the native interop path-policy violation.'
     }
     if ($nativeInteropResult.Output -notmatch [regex]::Escape(
-            'PhotoSift.Application\QualifiedNativeInteropFixture.cs -> native interop outside Windows infrastructure')) {
+            'Albumen.Application\QualifiedNativeInteropFixture.cs -> native interop outside Windows infrastructure')) {
         throw 'Failure output did not identify the qualified native interop path-policy violation.'
     }
     if ($nativeInteropResult.Output -notmatch [regex]::Escape(
-            'PhotoSift.Application\HiddenNativeInteropFixture.cs -> native interop outside Windows infrastructure')) {
+            'Albumen.Application\HiddenNativeInteropFixture.cs -> native interop outside Windows infrastructure')) {
         throw 'Failure output did not identify the hidden native interop path-policy violation.'
     }
 
     $filesystemInspectionSourceRoot = Join-Path $testRoot 'filesystem-inspection-source'
-    $filesystemInspectionProjectPath = Join-Path $filesystemInspectionSourceRoot 'PhotoSift.Application'
+    $filesystemInspectionProjectPath = Join-Path $filesystemInspectionSourceRoot 'Albumen.Application'
     [System.IO.Directory]::CreateDirectory($filesystemInspectionProjectPath) | Out-Null
     @'
 using Microsoft.Win32.SafeHandles;
@@ -550,12 +550,12 @@ public static class ForbiddenFilesystemInspectionFixture
         throw 'Direct filesystem inspection outside Windows infrastructure fixture was incorrectly accepted.'
     }
     if ($filesystemInspectionResult.Output -notmatch [regex]::Escape(
-            'PhotoSift.Application\FilesystemInspectionFixture.cs -> direct filesystem inspection outside Windows infrastructure')) {
+            'Albumen.Application\FilesystemInspectionFixture.cs -> direct filesystem inspection outside Windows infrastructure')) {
         throw 'Failure output did not identify the direct filesystem inspection path-policy violation.'
     }
 
     $folderPickerSourceRoot = Join-Path $testRoot 'folder-picker-source'
-    $folderPickerProjectPath = Join-Path $folderPickerSourceRoot 'PhotoSift.Application'
+    $folderPickerProjectPath = Join-Path $folderPickerSourceRoot 'Albumen.Application'
     [System.IO.Directory]::CreateDirectory($folderPickerProjectPath) | Out-Null
     @'
 public static class ForbiddenFolderPickerFixture
@@ -573,14 +573,14 @@ public static class ForbiddenFolderPickerFixture
         throw 'Folder picker outside App fixture was incorrectly accepted.'
     }
     if ($folderPickerResult.Output -notmatch [regex]::Escape(
-            'PhotoSift.Application\FolderPickerFixture.cs -> folder picker outside App')) {
+            'Albumen.Application\FolderPickerFixture.cs -> folder picker outside App')) {
         throw 'Failure output did not identify the folder picker path-policy violation.'
     }
 
     $allowedPathPolicySourceRoot = Join-Path $testRoot 'allowed-path-policy-source'
     $allowedWindowsInfrastructurePath = Join-Path `
         $allowedPathPolicySourceRoot `
-        'PhotoSift.Infrastructure.Windows'
+        'Albumen.Infrastructure.Windows'
     [System.IO.Directory]::CreateDirectory($allowedWindowsInfrastructurePath) | Out-Null
     @'
 using Microsoft.Win32.SafeHandles;
@@ -598,7 +598,7 @@ public static partial class AllowedWindowsInfrastructureFixture
 }
 '@ | Set-Content -LiteralPath (
         Join-Path $allowedWindowsInfrastructurePath 'AllowedWindowsInfrastructureFixture.cs') -Encoding utf8
-    $allowedAppPath = Join-Path $allowedPathPolicySourceRoot 'PhotoSift.App'
+    $allowedAppPath = Join-Path $allowedPathPolicySourceRoot 'Albumen.App'
     [System.IO.Directory]::CreateDirectory($allowedAppPath) | Out-Null
     @'
 public static class AllowedAppFixture
@@ -628,8 +628,8 @@ public static class AllowedAppFixture
                 @{ name = 'Microsoft.NETCore.App'; version = '10.0.11' },
                 @{ name = 'Microsoft.WindowsDesktop.App'; version = '10.0.11' })
         }
-        [System.IO.File]::WriteAllText((Join-Path $fixture.Root 'PhotoSift.App.exe'), 'apphost fixture')
-        [System.IO.File]::WriteAllText((Join-Path $fixture.Root 'PhotoSift.App.dll'), 'app fixture')
+        [System.IO.File]::WriteAllText((Join-Path $fixture.Root 'Albumen.App.exe'), 'apphost fixture')
+        [System.IO.File]::WriteAllText((Join-Path $fixture.Root 'Albumen.App.dll'), 'app fixture')
         switch ($case) {
             'latest-patch' { $options.rollForward = 'LatestPatch' }
             'included-frameworks' { $options.includedFrameworks = $options.frameworks }
@@ -640,8 +640,8 @@ public static class AllowedAppFixture
             'disabled-rollforward' { $options.rollForward = 'Disable' }
             'major-rollforward' { $options.rollForward = 'Major' }
             'framework-override' { $options.frameworks[0].rollForward = 'Disable' }
-            'missing-apphost' { Remove-Item -LiteralPath (Join-Path $fixture.Root 'PhotoSift.App.exe') }
-            'missing-assembly' { Remove-Item -LiteralPath (Join-Path $fixture.Root 'PhotoSift.App.dll') }
+            'missing-apphost' { Remove-Item -LiteralPath (Join-Path $fixture.Root 'Albumen.App.exe') }
+            'missing-assembly' { Remove-Item -LiteralPath (Join-Path $fixture.Root 'Albumen.App.dll') }
             'runtime-library' {
                 @{ libraries = @{ 'Microsoft.NETCore.App.Runtime.win-x64/10.0.11' = @{ type = 'package' } } } |
                     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $fixture.Manifest -Encoding utf8
@@ -653,7 +653,7 @@ public static class AllowedAppFixture
             }
         }
         @{ runtimeOptions = $options } | ConvertTo-Json -Depth 6 |
-            Set-Content -LiteralPath (Join-Path $fixture.Root 'PhotoSift.App.runtimeconfig.json') -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $fixture.Root 'Albumen.App.runtimeconfig.json') -Encoding utf8
         $result = Invoke-BoundaryChecker -Arguments @(
             '-DependencyManifestPath', $fixture.Manifest, '-SourceRootPath', $fixture.Source,
             '-FrameworkDependentRelease') -OutputPrefix ('fdd-' + $case)
