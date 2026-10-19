@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Albumen.Application\Albumen.Application.csproj" />
+    <ProjectReference Include="..\Albumen.Domain\Albumen.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+</Project>

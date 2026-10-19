@@ -1,6 +1,6 @@
 ---
 name: design-and-plan
-description: Turn a PhotoSift story SPEC or idea into an approved design doc and a step-by-step implementation plan before writing code. Use before implementing any non-trivial story; skip for one-file fixes.
+description: Turn a Albumen story SPEC or idea into an approved design doc and a step-by-step implementation plan before writing code. Use before implementing any non-trivial story; skip for one-file fixes.
 ---
 
 # Design, then plan (Superpowers brainstorming + writing-plans, converted)

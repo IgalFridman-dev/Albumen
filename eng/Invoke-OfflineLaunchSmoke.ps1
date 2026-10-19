@@ -17,7 +17,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$modulePath = Join-Path $PSScriptRoot 'verification\PhotoSiftVerification.psm1'
+$modulePath = Join-Path $PSScriptRoot 'verification\AlbumenVerification.psm1'
 Import-Module $modulePath -Force
 
 function Get-NetworkAuditRecords {
@@ -46,7 +46,7 @@ function Get-NetworkAuditRecords {
     }
 
     return @($events | ForEach-Object {
-        ConvertFrom-PhotoSiftNetworkAuditXml -Xml $_.ToXml()
+        ConvertFrom-AlbumenNetworkAuditXml -Xml $_.ToXml()
     } | Where-Object {
         $_.ProcessId -eq $ProcessId -and
         [System.String]::Equals($_.ExecutableName, $ExecutableName, [System.StringComparison]::OrdinalIgnoreCase)
@@ -68,7 +68,7 @@ function Wait-NetworkAuditRecords {
         [int]$MinimumCount = 0
     )
 
-    return @(Wait-PhotoSiftNetworkAuditRecords `
+    return @(Wait-AlbumenNetworkAuditRecords `
         -ReadRecords {
             Get-NetworkAuditRecords `
                 -StartedUtc $StartedUtc `
@@ -88,12 +88,12 @@ function Invoke-NetworkObservationCanary {
     $canaryScript = @'
 $client = New-Object System.Net.Sockets.UdpClient
 try {
-    $bytes = [System.Text.Encoding]::ASCII.GetBytes('PhotoSift network observer canary')
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes('Albumen network observer canary')
     [void]$client.Send($bytes, $bytes.Length, '127.0.0.1', 9)
 }
 finally { $client.Dispose() }
 '@
-    $canary = Invoke-PhotoSiftProcess `
+    $canary = Invoke-AlbumenProcess `
         -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
         -Arguments @('-NoProfile', '-NonInteractive', '-Command', $canaryScript) `
         -WorkingDirectory $WorkingDirectory `
@@ -121,11 +121,11 @@ if ($activeNetworkAdapters.Count -ne 0) {
 }
 
 $executablePath = Join-Path $repositoryRoot (
-    'src\PhotoSift.App\bin\{0}\net10.0-windows\{1}\PhotoSift.App.exe' -f `
+    'src\Albumen.App\bin\{0}\net10.0-windows\{1}\Albumen.App.exe' -f `
         $Configuration,
         $RuntimeIdentifier)
 if (-not [System.IO.File]::Exists($executablePath)) {
-    throw "PhotoSift executable does not exist: $executablePath"
+    throw "Albumen executable does not exist: $executablePath"
 }
 
 $principal = New-Object Security.Principal.WindowsPrincipal(
@@ -135,7 +135,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 $profileRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
-    'PhotoSift-FirstLaunch-' + [System.Guid]::NewGuid().ToString('N'))
+    'Albumen-FirstLaunch-' + [System.Guid]::NewGuid().ToString('N'))
 $auditPolicyBackupPath = Join-Path $profileRoot 'audit-policy.csv'
 $previousLocalAppData = $env:LOCALAPPDATA
 $previousAppData = $env:APPDATA
@@ -144,7 +144,7 @@ $auditRestoreFailure = $null
 $result = $null
 $canaryEvents = @()
 $fenceEvents = @()
-$photoSiftEvents = @()
+$albumenEvents = @()
 
 try {
     [System.IO.Directory]::CreateDirectory($profileRoot) | Out-Null
@@ -164,22 +164,22 @@ try {
 
     $canaryEvents = @(Invoke-NetworkObservationCanary -WorkingDirectory $profileRoot)
 
-    $photoSiftStartedUtc = [System.DateTime]::UtcNow.AddSeconds(-1)
-    $result = Invoke-PhotoSiftProcess `
+    $albumenStartedUtc = [System.DateTime]::UtcNow.AddSeconds(-1)
+    $result = Invoke-AlbumenProcess `
         -FilePath $executablePath `
         -Arguments @('--smoke-test') `
         -WorkingDirectory (Split-Path -Parent $executablePath) `
         -TimeoutSeconds $TimeoutSeconds
     $fenceEvents = @(Invoke-NetworkObservationCanary -WorkingDirectory $profileRoot)
-    $photoSiftEvents = @(Get-NetworkAuditRecords `
-        -StartedUtc $photoSiftStartedUtc `
+    $albumenEvents = @(Get-NetworkAuditRecords `
+        -StartedUtc $albumenStartedUtc `
         -ProcessId $result.ProcessId `
-        -ExecutableName 'PhotoSift.App.exe')
-    if ($photoSiftEvents.Count -ne 0) {
-        throw "PhotoSift produced $($photoSiftEvents.Count) observed runtime network attempt event(s)."
+        -ExecutableName 'Albumen.App.exe')
+    if ($albumenEvents.Count -ne 0) {
+        throw "Albumen produced $($albumenEvents.Count) observed runtime network attempt event(s)."
     }
 
-    Assert-PhotoSiftSmokeResult `
+    Assert-AlbumenSmokeResult `
         -ExitCode $result.ExitCode `
         -StandardOutput $result.StandardOutput `
         -TimedOut $result.TimedOut
@@ -214,6 +214,6 @@ if (-not [string]::IsNullOrWhiteSpace($result.StandardError)) {
 Write-Output 'NetworkAdaptersUp=0'
 Write-Output "NetworkObserverCanaryEvents=$($canaryEvents.Count)"
 Write-Output "NetworkObserverFenceEvents=$($fenceEvents.Count)"
-Write-Output 'PhotoSiftNetworkAttemptEvents=0'
+Write-Output 'AlbumenNetworkAttemptEvents=0'
 Write-Output 'FreshProfile=true'
 Write-Output "SmokeExitCode=$($result.ExitCode)"
