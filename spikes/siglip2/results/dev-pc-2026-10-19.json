@@ -1,0 +1,694 @@
+{
+ "machine": "Intel Core Ultra 7 270K Plus, 24 logical processors, 47.4 GB RAM, Windows 10.0.26300, idle, no VM running",
+ "photos": "37 Wikimedia Commons CC0/public-domain camera images (35 JPEG 3-16 MP, 8 EXIF-rotated; 2 PNG), not in the repo",
+ "prompts": 15,
+ "python": "3.12.10",
+ "note": "In the 8c2f8ea runs 'int8' means MatMulNBits 8-bit weights plus an 8-bit vocabulary Gather, and the 'decode_256' field times whatever decode edge was used.",
+ "exports": {
+  "8c2f8ea": {
+   "p16": {
+    "sizes_mb": {
+     "text.int8.onnx": 281.6,
+     "text.onnx": 1077.1,
+     "vision.int8.onnx": 108.4,
+     "vision.onnx": 354.5
+    },
+    "min_cosine_torch_vs_onnx": {
+     "vision.onnx": 1.0,
+     "vision.int8.onnx": 0.920224,
+     "text.onnx": 1.0,
+     "text.int8.onnx": 0.989516
+    }
+   },
+   "p32": {
+    "sizes_mb": {
+     "text.int8.onnx": 281.6,
+     "text.onnx": 1077.1,
+     "vision.int8.onnx": 115.0,
+     "vision.onnx": 360.9
+    },
+    "min_cosine_torch_vs_onnx": {
+     "vision.onnx": 1.0,
+     "vision.int8.onnx": 0.876861,
+     "text.onnx": 1.0,
+     "text.int8.onnx": 0.989822
+    }
+   }
+  },
+  "8471579": {
+   "p16": {
+    "sizes_mb": {
+     "text.emb8.onnx": 514.5,
+     "text.onnx": 1077.1,
+     "vision.onnx": 354.5
+    },
+    "min_cosine_torch_vs_onnx": {
+     "vision.onnx": 1.0,
+     "text.onnx": 1.0,
+     "text.emb8.onnx": 0.989792
+    }
+   },
+   "p32": {
+    "sizes_mb": {
+     "text.emb8.onnx": 514.5,
+     "text.onnx": 1077.1,
+     "vision.onnx": 360.9
+    },
+    "min_cosine_torch_vs_onnx": {
+     "vision.onnx": 1.0,
+     "text.onnx": 1.0,
+     "text.emb8.onnx": 0.989774
+    }
+   }
+  },
+  "tokenizer": {
+   "adds_bos": false,
+   "adds_eos": true,
+   "pads_left": false
+  }
+ },
+ "earlier_dynamic_int8_min_cosine_torch_vs_onnx_on_4_screenshots": {
+  "p16": {
+   "vision": 0.717,
+   "text": 0.839
+  },
+  "p32": {
+   "vision": 0.797,
+   "text": 0.834
+  }
+ },
+ "runs": [
+  {
+   "model": "google/siglip2-base-patch16-224",
+   "precision": "fp32",
+   "decode_edge": "256",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "text.onnx": 1077.1,
+    "vision.onnx": 354.5
+   },
+   "load_ms": {
+    "text": 1430,
+    "vision": 608
+   },
+   "peak_working_set_mb": 2043,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 1,
+    "min_image_cosine": 0.90455,
+    "mean_image_cosine": 0.97051,
+    "same_top_photo_per_prompt": "8/15"
+   },
+   "ms_per_prompt": {
+    "median": 11.9,
+    "p95": 21.9
+   },
+   "ms_per_photo": {
+    "decode_256": {
+     "median": 26.8,
+     "p95": 96
+    },
+    "preprocess": {
+     "median": 4,
+     "p95": 20.6
+    },
+    "inference_all_threads": {
+     "median": 29.6,
+     "p95": 60.7
+    },
+    "inference_one_thread": {
+     "median": 263.9,
+     "p95": 393.8
+    }
+   },
+   "photos": 37,
+   "commit": "8c2f8ea",
+   "run": "p16-fp32-256"
+  },
+  {
+   "model": "google/siglip2-base-patch16-224",
+   "precision": "fp32",
+   "decode_edge": "full",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "text.onnx": 1077.1,
+    "vision.onnx": 354.5
+   },
+   "load_ms": {
+    "text": 1363,
+    "vision": 530
+   },
+   "peak_working_set_mb": 2381,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 1,
+    "min_image_cosine": 0.99716,
+    "mean_image_cosine": 0.99938,
+    "same_top_photo_per_prompt": "13/15"
+   },
+   "ms_per_prompt": {
+    "median": 10.7,
+    "p95": 13.2
+   },
+   "ms_per_photo": {
+    "decode_256": {
+     "median": 190.2,
+     "p95": 284.1
+    },
+    "preprocess": {
+     "median": 92.6,
+     "p95": 122.2
+    },
+    "inference_all_threads": {
+     "median": 30.3,
+     "p95": 51.9
+    },
+    "inference_one_thread": {
+     "median": 393.7,
+     "p95": 425.5
+    }
+   },
+   "photos": 37,
+   "commit": "8c2f8ea",
+   "run": "p16-fp32-full"
+  },
+  {
+   "model": "google/siglip2-base-patch16-224",
+   "precision": "int8",
+   "decode_edge": "256",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "text.int8.onnx": 281.6,
+    "vision.int8.onnx": 108.4
+   },
+   "load_ms": {
+    "text": 457,
+    "vision": 346
+   },
+   "peak_working_set_mb": 751,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 0.98952,
+    "min_image_cosine": 0.8613,
+    "mean_image_cosine": 0.94126,
+    "same_top_photo_per_prompt": "7/15"
+   },
+   "ms_per_prompt": {
+    "median": 109.8,
+    "p95": 139.9
+   },
+   "ms_per_photo": {
+    "decode_256": {
+     "median": 24.8,
+     "p95": 93.9
+    },
+    "preprocess": {
+     "median": 4.6,
+     "p95": 21
+    },
+    "inference_all_threads": {
+     "median": 138.1,
+     "p95": 181.5
+    },
+    "inference_one_thread": {
+     "median": 469.7,
+     "p95": 627.4
+    }
+   },
+   "photos": 37,
+   "commit": "8c2f8ea",
+   "run": "p16-int8-256"
+  },
+  {
+   "model": "google/siglip2-base-patch32-256",
+   "precision": "fp32",
+   "decode_edge": "256",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "text.onnx": 1077.1,
+    "vision.onnx": 360.9
+   },
+   "load_ms": {
+    "text": 1403,
+    "vision": 803
+   },
+   "peak_working_set_mb": 2033,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 1,
+    "min_image_cosine": 0.92665,
+    "mean_image_cosine": 0.97831,
+    "same_top_photo_per_prompt": "6/15"
+   },
+   "ms_per_prompt": {
+    "median": 11.7,
+    "p95": 20.8
+   },
+   "ms_per_photo": {
+    "decode_256": {
+     "median": 26.9,
+     "p95": 105.3
+    },
+    "preprocess": {
+     "median": 3.9,
+     "p95": 23.8
+    },
+    "inference_all_threads": {
+     "median": 14.6,
+     "p95": 27.7
+    },
+    "inference_one_thread": {
+     "median": 89.2,
+     "p95": 113.7
+    }
+   },
+   "photos": 37,
+   "commit": "8c2f8ea",
+   "run": "p32-fp32-256"
+  },
+  {
+   "model": "google/siglip2-base-patch32-256",
+   "precision": "fp32",
+   "decode_edge": "full",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "text.onnx": 1077.1,
+    "vision.onnx": 360.9
+   },
+   "load_ms": {
+    "text": 1403,
+    "vision": 807
+   },
+   "peak_working_set_mb": 2365,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 1,
+    "min_image_cosine": 0.99281,
+    "mean_image_cosine": 0.99906,
+    "same_top_photo_per_prompt": "13/15"
+   },
+   "ms_per_prompt": {
+    "median": 11.5,
+    "p95": 14.9
+   },
+   "ms_per_photo": {
+    "decode_256": {
+     "median": 179.2,
+     "p95": 255.4
+    },
+    "preprocess": {
+     "median": 91.8,
+     "p95": 107
+    },
+    "inference_all_threads": {
+     "median": 14.4,
+     "p95": 20.3
+    },
+    "inference_one_thread": {
+     "median": 87,
+     "p95": 137.1
+    }
+   },
+   "photos": 37,
+   "commit": "8c2f8ea",
+   "run": "p32-fp32-full"
+  },
+  {
+   "model": "google/siglip2-base-patch32-256",
+   "precision": "int8",
+   "decode_edge": "256",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "text.int8.onnx": 281.6,
+    "vision.int8.onnx": 115
+   },
+   "load_ms": {
+    "text": 480,
+    "vision": 326
+   },
+   "peak_working_set_mb": 743,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 0.98982,
+    "min_image_cosine": 0.85527,
+    "mean_image_cosine": 0.93235,
+    "same_top_photo_per_prompt": "6/15"
+   },
+   "ms_per_prompt": {
+    "median": 112.1,
+    "p95": 159.7
+   },
+   "ms_per_photo": {
+    "decode_256": {
+     "median": 24.5,
+     "p95": 93.3
+    },
+    "preprocess": {
+     "median": 3.7,
+     "p95": 22.8
+    },
+    "inference_all_threads": {
+     "median": 116.4,
+     "p95": 150
+    },
+    "inference_one_thread": {
+     "median": 289.9,
+     "p95": 354.9
+    }
+   },
+   "photos": 37,
+   "commit": "8c2f8ea",
+   "run": "p32-int8-256"
+  },
+  {
+   "model": "google/siglip2-base-patch16-224",
+   "precision": "fp32",
+   "decode_edge": "384",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "vision.onnx": 354.5,
+    "text.onnx": 1077.1
+   },
+   "load_ms": {
+    "text": 1448,
+    "vision": 776
+   },
+   "peak_working_set_mb": 2042,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 1,
+    "min_image_cosine": 0.95599,
+    "mean_image_cosine": 0.99055,
+    "same_top_photo_per_prompt": "12/15"
+   },
+   "ms_per_prompt": {
+    "median": 11.5,
+    "p95": 14.2
+   },
+   "ms_per_photo": {
+    "decode": {
+     "median": 26.7,
+     "p95": 88.2
+    },
+    "preprocess": {
+     "median": 4.3,
+     "p95": 21.2
+    },
+    "inference_all_threads": {
+     "median": 27.3,
+     "p95": 43.2
+    },
+    "inference_one_thread": {
+     "median": 254.9,
+     "p95": 264.8
+    }
+   },
+   "photos": 37,
+   "commit": "8471579",
+   "run": "p16-fp32-384"
+  },
+  {
+   "model": "google/siglip2-base-patch16-224",
+   "precision": "fp32",
+   "decode_edge": "512",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "vision.onnx": 354.5,
+    "text.onnx": 1077.1
+   },
+   "load_ms": {
+    "text": 1406,
+    "vision": 758
+   },
+   "peak_working_set_mb": 2044,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 1,
+    "min_image_cosine": 0.9459,
+    "mean_image_cosine": 0.99459,
+    "same_top_photo_per_prompt": "13/15"
+   },
+   "ms_per_prompt": {
+    "median": 11.9,
+    "p95": 16.4
+   },
+   "ms_per_photo": {
+    "decode": {
+     "median": 28.4,
+     "p95": 96.7
+    },
+    "preprocess": {
+     "median": 5.3,
+     "p95": 25.6
+    },
+    "inference_all_threads": {
+     "median": 27.9,
+     "p95": 34.4
+    },
+    "inference_one_thread": {
+     "median": 257.4,
+     "p95": 269.4
+    }
+   },
+   "photos": 37,
+   "commit": "8471579",
+   "run": "p16-fp32-512"
+  },
+  {
+   "model": "google/siglip2-base-patch16-224",
+   "precision": "emb8",
+   "decode_edge": "512",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "vision.onnx": 354.5,
+    "text.emb8.onnx": 514.5
+   },
+   "load_ms": {
+    "text": 709,
+    "vision": 463
+   },
+   "peak_working_set_mb": 1481,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 0.98979,
+    "min_image_cosine": 0.9459,
+    "mean_image_cosine": 0.99459,
+    "same_top_photo_per_prompt": "10/15"
+   },
+   "ms_per_prompt": {
+    "median": 12.2,
+    "p95": 25.2
+   },
+   "ms_per_photo": {
+    "decode": {
+     "median": 31.4,
+     "p95": 94
+    },
+    "preprocess": {
+     "median": 5.9,
+     "p95": 23.9
+    },
+    "inference_all_threads": {
+     "median": 29.5,
+     "p95": 40.7
+    },
+    "inference_one_thread": {
+     "median": 255.6,
+     "p95": 266.7
+    }
+   },
+   "photos": 37,
+   "commit": "8471579",
+   "run": "p16-emb8-512"
+  },
+  {
+   "model": "google/siglip2-base-patch32-256",
+   "precision": "fp32",
+   "decode_edge": "384",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "vision.onnx": 360.9,
+    "text.onnx": 1077.1
+   },
+   "load_ms": {
+    "text": 1435,
+    "vision": 661
+   },
+   "peak_working_set_mb": 2033,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 1,
+    "min_image_cosine": 0.95541,
+    "mean_image_cosine": 0.99032,
+    "same_top_photo_per_prompt": "10/15"
+   },
+   "ms_per_prompt": {
+    "median": 12.7,
+    "p95": 16.8
+   },
+   "ms_per_photo": {
+    "decode": {
+     "median": 26.1,
+     "p95": 88.4
+    },
+    "preprocess": {
+     "median": 5.4,
+     "p95": 22.5
+    },
+    "inference_all_threads": {
+     "median": 13.7,
+     "p95": 31.4
+    },
+    "inference_one_thread": {
+     "median": 85.3,
+     "p95": 89.9
+    }
+   },
+   "photos": 37,
+   "commit": "8471579",
+   "run": "p32-fp32-384"
+  },
+  {
+   "model": "google/siglip2-base-patch32-256",
+   "precision": "fp32",
+   "decode_edge": "512",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "vision.onnx": 360.9,
+    "text.onnx": 1077.1
+   },
+   "load_ms": {
+    "text": 1412,
+    "vision": 562
+   },
+   "peak_working_set_mb": 2036,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 1,
+    "min_image_cosine": 0.9701,
+    "mean_image_cosine": 0.99517,
+    "same_top_photo_per_prompt": "11/15"
+   },
+   "ms_per_prompt": {
+    "median": 12.5,
+    "p95": 15.8
+   },
+   "ms_per_photo": {
+    "decode": {
+     "median": 26.8,
+     "p95": 97.6
+    },
+    "preprocess": {
+     "median": 6.3,
+     "p95": 24.3
+    },
+    "inference_all_threads": {
+     "median": 12.8,
+     "p95": 17.9
+    },
+    "inference_one_thread": {
+     "median": 85,
+     "p95": 87.5
+    }
+   },
+   "photos": 37,
+   "commit": "8471579",
+   "run": "p32-fp32-512"
+  },
+  {
+   "model": "google/siglip2-base-patch32-256",
+   "precision": "emb8",
+   "decode_edge": "512",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "vision.onnx": 360.9,
+    "text.emb8.onnx": 514.5
+   },
+   "load_ms": {
+    "text": 698,
+    "vision": 563
+   },
+   "peak_working_set_mb": 1472,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 0.98977,
+    "min_image_cosine": 0.9701,
+    "mean_image_cosine": 0.99517,
+    "same_top_photo_per_prompt": "9/15"
+   },
+   "ms_per_prompt": {
+    "median": 11.9,
+    "p95": 22
+   },
+   "ms_per_photo": {
+    "decode": {
+     "median": 31.8,
+     "p95": 96.9
+    },
+    "preprocess": {
+     "median": 6.8,
+     "p95": 33.5
+    },
+    "inference_all_threads": {
+     "median": 13.7,
+     "p95": 34.6
+    },
+    "inference_one_thread": {
+     "median": 86.7,
+     "p95": 97.6
+    }
+   },
+   "photos": 37,
+   "commit": "8471579",
+   "run": "p32-emb8-512"
+  }
+ ]
+}
