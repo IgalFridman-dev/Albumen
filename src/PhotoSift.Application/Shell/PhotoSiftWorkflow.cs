@@ -27,6 +27,7 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     private int reviewRefreshScheduled;
     private ActionSnapshot? pendingAction;
     private int actionRefreshScheduled;
+    private int scopeRecheckPending;
     private ActionRecoverySnapshot? pendingRecovery;
     private int recoveryRefreshScheduled;
     private ReviewSnapshot? approvedReviewProjection;
@@ -118,6 +119,80 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         }
     }
 
+    // PM-013: a settled cleanup does not end the session. The review of the same
+    // scan reopens without the photos that reached the Recycle Bin, with no marks
+    // carried over; a set with an uncertain outcome closes until the next scan. The
+    // Review owner refuses the continuation unless its live review is the sealed
+    // one for that cleanup, so this never replaces a review the user moved on to.
+    public Task ContinueReviewAsync() => ObserveCommandAsync(async () =>
+    {
+        var request = await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            return CaptureContinuationRequest();
+        }).ConfigureAwait(false);
+        if (request is null) return;
+        var result = await review!.OpenAsync(request, CancellationToken.None).ConfigureAwait(false);
+        await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            var acceptedScan = scan.Current;
+            var acceptedReview = review.Current;
+            if (result.Outcome != ReviewCommandOutcome.Committed || current.Scope != request.Scope
+                || current.Rules != request.Rules || acceptedScan.Pin != request.Scan.Pin
+                || !SameScan(acceptedScan, request.Scan) || acceptedReview.Pin != result.Snapshot.Pin
+                || !ReviewMatchesScan(acceptedReview, acceptedScan)) return;
+            Publish(current with { Scan = acceptedScan, Review = acceptedReview, CurrentPhase = WorkflowPhase.Review });
+        }).ConfigureAwait(false);
+    });
+
+    // Called only in a workflow data turn. Removed photos and closed sets from
+    // earlier continuations of this scan are carried over from the live review.
+    private ReviewOpenRequest? CaptureContinuationRequest()
+    {
+        if (review is null || action is null) return null;
+        var settled = current.Action;
+        if (settled.RequestId is not { } requestId
+            || settled.Status is not (ActionStatus.Complete or ActionStatus.Incomplete)) return null;
+        var live = review.Current;
+        if (!live.Sealed || live.Status == ReviewStatus.Faulted || live.Pin is not { } pin
+            || live.ApprovedRequest?.RequestId != requestId) return null;
+        var acceptedScan = scan.Current;
+        if (acceptedScan.Pin != pin.Scan || !ReviewMatchesScan(live, acceptedScan)) return null;
+        if (CaptureReviewRequest(acceptedScan) is not { } request) return null;
+        var excluded = ImmutableHashSet.CreateBuilder<long>();
+        var closed = ImmutableHashSet.CreateBuilder<Guid>();
+        foreach (var group in live.Groups)
+        {
+            if (group.Closed) closed.Add(group.Candidate.GroupId);
+            var reviewed = group.Members.Select(member => member.Occurrence.Token.OccurrenceId).ToHashSet();
+            foreach (var member in group.Candidate.Members)
+                if (!reviewed.Contains(member.Token.OccurrenceId)) excluded.Add(member.Token.OccurrenceId);
+        }
+        foreach (var item in settled.Items)
+        {
+            switch (item.State)
+            {
+                case ActionItemState.Recycled:
+                    excluded.Add(item.Item.Occurrence.OccurrenceId);
+                    break;
+                case ActionItemState.NotRemoved or ActionItemState.NotRequested:
+                    break;
+                default:
+                    // Executing, interrupted or unknown: the Action treats the set's
+                    // other photos as dependent on this one, and so does the review.
+                    closed.Add(item.Item.GroupId);
+                    break;
+            }
+        }
+        return request with
+        {
+            ExcludedOccurrenceIds = excluded.ToImmutable(),
+            ClosedGroupIds = closed.ToImmutable(),
+            ContinuesRequestId = requestId,
+        };
+    }
+
     public Task ContinueAsync() => ObserveCommandAsync(() => inbox.InvokeAsync(() =>
     {
         RefreshScope();
@@ -131,7 +206,8 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         var invalidateScopeRevision = await inbox.InvokeAsync<long?>(() =>
         {
             RefreshScope();
-            if (current.CurrentPhase != WorkflowPhase.ConfirmRules
+            // The folder step shows the options too, so they can change there or on Confirm Rules.
+            if (current.CurrentPhase is not (WorkflowPhase.ChooseScope or WorkflowPhase.ConfirmRules)
                 || current.Scope.ScopeState != ScopeSessionState.Ready
                 || current.Scan.Status is ScanStatus.Checking or ScanStatus.Running
                 || current.Options == options)
@@ -145,7 +221,6 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
                 Rules = null,
                 Scan = EmptyScan(),
                 Review = ReviewSnapshot.Closed,
-                CurrentPhase = WorkflowPhase.ConfirmRules,
             });
             return hadCurrentScan ? current.Scope.Revision : null;
         }).ConfigureAwait(false);
@@ -217,7 +292,7 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
                 await action.ApproveAsync(request, cancellationToken).ConfigureAwait(false);
                 // Completion can race the coalesced presentation notification.
                 // Read the sole owner's current snapshot through the same inbox.
-                await inbox.InvokeAsync(RefreshAction).ConfigureAwait(false);
+                if (await inbox.InvokeAsync(RefreshAction).ConfigureAwait(false)) RecheckScopeAfterCleanup();
             }
             return result;
         });
@@ -235,11 +310,53 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
     public Task NavigateAsync(WorkflowPhase phase) => ObserveCommandAsync(() =>
         phase == WorkflowPhase.Review && review is not null
             ? OpenReviewCoreAsync(navigate: true)
-            : inbox.InvokeAsync(() =>
+            : NavigateCoreAsync(phase));
+
+    private async Task NavigateCoreAsync(WorkflowPhase phase)
+    {
+        var recheck = await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            if (CanNavigate(current, phase)) Publish(current with { CurrentPhase = phase });
+            return ShouldRecheckScopeAfterCleanup();
+        }).ConfigureAwait(false);
+        if (recheck) RecheckScopeAfterCleanup();
+    }
+
+    // The folder page still shows the counts from before a cleanup that removed
+    // photos. Re-check the folder once: scopeRecheckPending holds the submit until
+    // the Scope publishes the check under its next revision (RefreshScope consumes
+    // it there), and that revision no longer matches the approved request. The
+    // retry runs outside the inbox turn and is observed like any adapter call.
+    private bool ShouldRecheckScopeAfterCleanup() =>
+        current.CurrentPhase == WorkflowPhase.ChooseScope
+        && current.Action.Status is ActionStatus.Complete or ActionStatus.Incomplete or ActionStatus.Faulted
+        && current.Action.RecycledCount > 0
+        && current.ActionReview.ApprovedRequest is { } approved
+        && approved.Scan.ScopeRevision == current.Scope.Revision
+        && current.Scope.ScopeState != ScopeSessionState.Checking
+        && Volatile.Read(ref scopeRecheckPending) == 0;
+
+    private void RecheckScopeAfterCleanup()
+    {
+        if (Interlocked.CompareExchange(ref scopeRecheckPending, 1, 0) != 0) return;
+        var revision = scope.Current.Revision;
+        ObserveAdapter(async () =>
+        {
+            try
             {
-                RefreshScope();
-                if (CanNavigate(current, phase)) Publish(current with { CurrentPhase = phase });
-            }));
+                await scope.HandleAsync(new RetryScopePreflightCommand(), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                Volatile.Write(ref scopeRecheckPending, 0);
+                throw;
+            }
+            // The Scope declined to check (a folder picker is open): nothing was
+            // published under a new revision, so release the hold here.
+            if (scope.Current.Revision == revision) Volatile.Write(ref scopeRecheckPending, 0);
+        }, origin: null);
+    }
 
     private void OnScopeChanged(object? sender, ShellSnapshot snapshot)
     {
@@ -261,11 +378,18 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         var accepted = scope.Current;
         if (accepted.Revision != current.Scope.Revision)
         {
-            Publish(current with { Scope = accepted, Rules = null, Scan = EmptyScan(), Review = ReviewSnapshot.Closed, CurrentPhase = WorkflowPhase.ChooseScope });
+            // The re-check keeps the selection; a different folder or recursion is
+            // the user's own check, whatever is pending.
+            var rechecking = Interlocked.Exchange(ref scopeRecheckPending, 0) == 1
+                && accepted.ScopeState == ScopeSessionState.Checking
+                && accepted.Selection == current.Scope.Selection;
+            Publish(current with { Scope = accepted, Rules = null, Scan = EmptyScan(), Review = ReviewSnapshot.Closed,
+                CurrentPhase = WorkflowPhase.ChooseScope, IsRecheckingScopeAfterCleanup = rechecking });
         }
         else if (!ReferenceEquals(accepted, current.Scope))
         {
-            Publish(current with { Scope = accepted });
+            Publish(current with { Scope = accepted, IsRecheckingScopeAfterCleanup =
+                current.IsRecheckingScopeAfterCleanup && accepted.ScopeState == ScopeSessionState.Checking });
         }
     }
 
@@ -346,12 +470,12 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
 
     private async Task ApplyActionAsync()
     {
-        await inbox.InvokeAsync(() =>
+        var recheck = await inbox.InvokeAsync(() =>
         {
             try
             {
                 Interlocked.Exchange(ref pendingAction, null);
-                RefreshAction();
+                return RefreshAction();
             }
             finally
             {
@@ -359,12 +483,13 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
                 if (Volatile.Read(ref pendingAction) is not null) ScheduleActionRefresh();
             }
         }).ConfigureAwait(false);
+        if (recheck) RecheckScopeAfterCleanup();
     }
 
-    private void RefreshAction()
+    private bool RefreshAction()
     {
         var snapshot = action?.Current;
-        if (snapshot is null || ReferenceEquals(snapshot, current.Action)) return;
+        if (snapshot is null || ReferenceEquals(snapshot, current.Action)) return false;
         var disclosure = current.ActionReview;
         if (disclosure.ApprovedRequest?.RequestId != snapshot.RequestId)
         {
@@ -376,6 +501,7 @@ public sealed class PhotoSiftWorkflow : IPhotoSiftWorkflow
         var newlyAdmitted = snapshot.RequestId is not null && snapshot.RequestId != current.Action.RequestId;
         Publish(current with { Action = snapshot, ActionReview = disclosure,
             CurrentPhase = newlyAdmitted ? WorkflowPhase.ApproveCleanup : current.CurrentPhase }, snapshot.RequestId);
+        return ShouldRecheckScopeAfterCleanup();
     }
 
     private void ScheduleReviewRefresh()

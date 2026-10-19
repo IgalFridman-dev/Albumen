@@ -21,4 +21,7 @@ public sealed record PhotoSiftSnapshot(
     // Historical disclosure for Action.RequestId. Never used as live Review
     // authority, Selection input, a claim or an approval command source.
     public ReviewSnapshot ActionReview { get; init; } = ReviewSnapshot.Closed;
+    // True while the Scope is checking the folder again because the finished
+    // cleanup removed photos from it. Presentation only; cleared when the check ends.
+    public bool IsRecheckingScopeAfterCleanup { get; init; }
 }

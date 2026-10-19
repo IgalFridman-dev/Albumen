@@ -70,8 +70,13 @@ public static class CompositionRoot
             new WicPreviewDecoder(),
             new BoundedThumbnailCache(64L * 1024 * 1024),
             maximumEdge: 1024);
+        var thumbnails = new BoundedReviewPreviewSource(
+            reader,
+            new WicPreviewDecoder(),
+            new BoundedThumbnailCache(32L * 1024 * 1024),
+            maximumEdge: 320);
         return new ShellViewModel(
-            workflow, photoWorkflow, dialog, stores.ScanData, preview);
+            workflow, photoWorkflow, dialog, stores.ScanData, preview, thumbnails);
     }
 
     private sealed class OwnedPhotoSiftWorkflow(
@@ -120,6 +125,7 @@ public static class CompositionRoot
         public Task RevalidateUnknownAsync(Guid requestId, CancellationToken cancellationToken) =>
             workflow.RevalidateUnknownAsync(requestId, cancellationToken);
         public Task NavigateAsync(WorkflowPhase phase) => workflow.NavigateAsync(phase);
+        public Task ContinueReviewAsync() => workflow.ContinueReviewAsync();
 
         public ValueTask DisposeAsync()
         {

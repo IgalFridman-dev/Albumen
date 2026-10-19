@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using System.IO;
 using PhotoSift.Application.Review;
 using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Scan;
@@ -12,6 +13,19 @@ public enum ReviewCategoryKind
     Near,
     Uncertain,
     CouldNotAnalyze,
+}
+
+// The names people see for each kind. The enum keeps the internal Exact / Near / Uncertain terms.
+public static class ReviewCategoryNames
+{
+    public static string For(ReviewCategoryKind category) => category switch
+    {
+        ReviewCategoryKind.Exact => "Identical copies",
+        ReviewCategoryKind.Near => "Look-alike",
+        ReviewCategoryKind.Uncertain => "Maybe similar",
+        ReviewCategoryKind.CouldNotAnalyze => "Couldn't check",
+        _ => throw new InvalidOperationException($"Unknown Review category: {category}"),
+    };
 }
 
 public enum ReviewNavigationLevel
@@ -48,7 +62,19 @@ public sealed class ReviewCategoryViewModel
     public int GroupCount { get; }
     public int PositionInSet { get; }
     public int SizeOfSet { get; }
-    public string AutomationName => $"{Name}: {GroupCount.ToString(CultureInfo.InvariantCulture)} groups";
+    public string AutomationName => $"{Name}: {CountText}";
+    public string Description => Category switch
+    {
+        ReviewCategoryKind.Exact => "The same file saved more than once. Keeping one loses nothing.",
+        ReviewCategoryKind.Near => "The same photo resized, recompressed or lightly edited.",
+        ReviewCategoryKind.Uncertain => "Photos that look close. Check them yourself before removing any.",
+        _ => "Files PhotoSift couldn't read or doesn't support. Nothing here can be removed.",
+    };
+    public string CountText => GroupCount == 1
+        ? Category == ReviewCategoryKind.CouldNotAnalyze ? "1 file" : "1 set"
+        : Category == ReviewCategoryKind.CouldNotAnalyze
+            ? $"{GroupCount.ToString(CultureInfo.InvariantCulture)} files"
+            : $"{GroupCount.ToString(CultureInfo.InvariantCulture)} sets";
     public LazyReviewCollection<ReviewGroupViewModel> Groups { get; }
 
     internal ReviewGroupViewModel? FindGroup(Guid groupId) =>
@@ -76,9 +102,9 @@ public sealed class ReviewGroupViewModel
         Members = new(members.Length, index => new ScanOccurrenceViewModel(
             members[index], IsAlias(members, index), index + 1, members.Length));
         MemberCount = members.Length;
-        Summary = FormatSummary(category, MemberCount);
-        AutomationName = Summary;
-        ItemStatus = $"{category}; {MemberCount.ToString(CultureInfo.InvariantCulture)} comparison paths";
+        Summary = FormatSummary(positionInSet, MemberCount);
+        AutomationName = FormatAutomationName(category, positionInSet, sizeOfSet, MemberCount);
+        ItemStatus = $"{ReviewCategoryNames.For(category)}; {FormatPhotos(MemberCount)}";
         SelectAllCommand = DisabledCommand();
         ReplaceSelectionCommand = DisabledCommand(parameterized: true);
     }
@@ -89,7 +115,8 @@ public sealed class ReviewGroupViewModel
         int positionInSet,
         int sizeOfSet,
         bool reviewAllowsSelection,
-        Func<SelectionCommandKind, ImmutableArray<long>, Task> changeSelection)
+        Func<SelectionCommandKind, ImmutableArray<long>, Task> changeSelection,
+        Func<Guid, string>? describeSet = null)
     {
         GroupId = group.Candidate.GroupId;
         Category = category;
@@ -104,25 +131,34 @@ public sealed class ReviewGroupViewModel
             members[index], IsAlias(members, index), canChangeSelection,
             () => changeSelection(SelectionCommandKind.Toggle,
                 ImmutableArray.Create(members[index].Occurrence.Token.OccurrenceId)),
-            index + 1, members.Length));
+            index + 1, members.Length,
+            members[index].SelectedInGroup is { } holder ? describeSet?.Invoke(holder) : null));
         MemberCount = members.Length;
-        Summary = FormatSummary(category, MemberCount);
+        Summary = FormatSummary(positionInSet, MemberCount);
+        // A set is settled once marks held elsewhere leave at most one photo undecided:
+        // that photo is the set's survivor, so there is nothing left to choose here.
+        var markedElsewhere = members.Count(member => member.SelectedInGroup is not null);
+        var undecided = members.Count(member => member.Eligibility == ReviewEligibilityState.Eligible
+            && !member.Selected && member.SelectedInGroup is null);
+        IsSettledElsewhere = markedElsewhere > 0 && undecided <= 1;
+        SelectionStatus = FormatSelectionStatus(group.SelectedOccurrenceIds.Count, markedElsewhere, IsSettledElsewhere);
         var physicalFileCount = members.Select(member => member.Occurrence.PhysicalFileKey)
             .Where(key => key is not null).Distinct().Count();
         AutomationName = category == ReviewCategoryKind.Exact
-            ? $"Exact group {positionInSet.ToString(CultureInfo.InvariantCulture)} of {sizeOfSet.ToString(CultureInfo.InvariantCulture)}; {MemberCount.ToString(CultureInfo.InvariantCulture)} paths; {physicalFileCount.ToString(CultureInfo.InvariantCulture)} physical files"
-            : Summary;
+            ? $"{ReviewCategoryNames.For(category)} set {positionInSet.ToString(CultureInfo.InvariantCulture)} of {sizeOfSet.ToString(CultureInfo.InvariantCulture)}; {MemberCount.ToString(CultureInfo.InvariantCulture)} paths; {physicalFileCount.ToString(CultureInfo.InvariantCulture)} physical files"
+            : FormatAutomationName(category, positionInSet, sizeOfSet, MemberCount);
         ItemStatus = category == ReviewCategoryKind.Exact
             ? $"{group.SelectedOccurrenceIds.Count.ToString(CultureInfo.InvariantCulture)} selected; {ExactGroupViewModel.FormatSurvivor(group)}; {ExactGroupViewModel.FormatSelectionRecovery(group.Recovery)}"
-            : $"{category}; {MemberCount.ToString(CultureInfo.InvariantCulture)} comparison paths";
+            : $"{ReviewCategoryNames.For(category)}; {FormatPhotos(MemberCount)}";
         var selectable = members
-            .Where(member => member.Eligibility == ReviewEligibilityState.Eligible)
+            .Where(member => member.Eligibility == ReviewEligibilityState.Eligible && member.SelectedInGroup is null)
             .Select(member => member.Occurrence.Token.OccurrenceId)
             .Order()
             .ToImmutableArray();
+        var settled = IsSettledElsewhere;
         SelectAllCommand = new AsyncCommand(
             () => changeSelection(SelectionCommandKind.ReplaceFocusedGroup, selectable),
-            canExecute: () => canChangeSelection && !selectable.IsEmpty);
+            canExecute: () => canChangeSelection && !selectable.IsEmpty && !settled);
         ReplaceSelectionCommand = new AsyncCommand(
             parameter => changeSelection(SelectionCommandKind.ReplaceFocusedGroup, RequireIds(parameter)),
             canExecute: () => canChangeSelection);
@@ -138,9 +174,11 @@ public sealed class ReviewGroupViewModel
         Members = new(1, _ => new ScanOccurrenceViewModel(occurrence,
             positionInSet: 1, sizeOfSet: 1));
         MemberCount = 1;
-        Summary = $"Could Not Analyze: {occurrence.DiscoveredPath}";
-        AutomationName = Summary;
-        ItemStatus = "CouldNotAnalyze; 1 comparison path";
+        var fileName = Path.GetFileName(occurrence.DiscoveredPath.TrimEnd('\\', '/')) is { Length: > 0 } name
+            ? name : occurrence.DiscoveredPath;
+        Summary = $"{ReviewCategoryNames.For(ReviewCategoryKind.CouldNotAnalyze)}: {fileName}";
+        AutomationName = $"{Summary}; {occurrence.DiscoveredPath}";
+        ItemStatus = $"{ReviewCategoryNames.For(ReviewCategoryKind.CouldNotAnalyze)}; 1 file";
         SelectAllCommand = DisabledCommand();
         ReplaceSelectionCommand = DisabledCommand(parameterized: true);
     }
@@ -151,6 +189,8 @@ public sealed class ReviewGroupViewModel
     public int PositionInSet { get; }
     public int SizeOfSet { get; }
     public string Summary { get; }
+    public string SelectionStatus { get; } = string.Empty;
+    public bool IsSettledElsewhere { get; }
     public string AutomationName { get; private init; }
     public string ItemStatus { get; private init; }
     public LazyReviewCollection<ScanOccurrenceViewModel> Members { get; }
@@ -172,14 +212,31 @@ public sealed class ReviewGroupViewModel
         return key is not null && members.Take(index).Any(member => member.Occurrence.PhysicalFileKey == key);
     }
 
-    private static string FormatSummary(ReviewCategoryKind category, int count) =>
-        $"{category switch
+    private static string FormatSummary(int positionInSet, int count) =>
+        $"Set {positionInSet.ToString(CultureInfo.InvariantCulture)}: {FormatPhotos(count)}";
+
+    private static string FormatAutomationName(ReviewCategoryKind category, int positionInSet, int sizeOfSet, int count) =>
+        $"{ReviewCategoryNames.For(category)} set {positionInSet.ToString(CultureInfo.InvariantCulture)} of {sizeOfSet.ToString(CultureInfo.InvariantCulture)}; {FormatPhotos(count)}";
+
+    private static string FormatPhotos(int count) => count == 1
+        ? "1 photo"
+        : $"{count.ToString(CultureInfo.InvariantCulture)} photos";
+
+    private static string FormatSelectionStatus(int selected, int markedElsewhere, bool settled)
+    {
+        var here = selected switch
         {
-            ReviewCategoryKind.Exact => "Exact duplicate",
-            ReviewCategoryKind.Near => "Near duplicate",
-            ReviewCategoryKind.Uncertain => "Uncertain",
-            _ => "Could Not Analyze",
-        }} group: {count.ToString(CultureInfo.InvariantCulture)} paths";
+            0 => "Nothing marked yet",
+            1 => "1 photo marked for removal",
+            _ => $"{selected.ToString(CultureInfo.InvariantCulture)} photos marked for removal",
+        };
+        if (markedElsewhere == 0) return here;
+        var elsewhere = $"{markedElsewhere.ToString(CultureInfo.InvariantCulture)} marked elsewhere";
+        if (!settled) return $"{here}; {elsewhere}";
+        return selected == 0
+            ? $"Nothing left to decide: {elsewhere}"
+            : $"Nothing left to decide: {selected.ToString(CultureInfo.InvariantCulture)} marked here, {elsewhere}";
+    }
 
     private static AsyncCommand DisabledCommand(bool parameterized = false) => parameterized
         ? new AsyncCommand(_ => Task.CompletedTask, canExecute: () => false)

@@ -10,6 +10,7 @@ using PhotoSift.Application.Scope;
 using PhotoSift.Application.Tests.Scan;
 using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Scan;
+using PhotoSift.Domain.Scope;
 using PhotoSift.Domain.Workflow;
 using Xunit;
 
@@ -78,6 +79,223 @@ public sealed class PhotoSiftWorkflowTests
             await f.Pump(approving);
         }
     }
+
+    [Fact]
+    public async Task GoingToTheFolderPageAfterACleanupThatRemovedPhotosRechecksTheFolderOnce()
+    {
+        await using var f = new ReviewFixture();
+        var scope = new ScopeOwner(f.Request.Scope) { ChecksOnRetry = true };
+        var (workflow, action, request) = await SettleCleanupAsync(f, scope, ActionItemState.Recycled);
+        Assert.Equal(ActionStatus.Complete, ProjectedAction(workflow).Status);
+        Assert.Equal(request.RequestId, ProjectedActionReview(workflow).ApprovedRequest!.RequestId);
+        Assert.Empty(scope.Retries);
+
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+        await f.Pump(scope.RetryEntered.Task);
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+
+        Assert.Single(scope.Retries);
+        Assert.Equal(ScopeSessionState.Checking, workflow.Current.Scope.ScopeState);
+        Assert.Equal(2, workflow.Current.Scope.Revision);
+        Assert.True(workflow.Current.IsRecheckingScopeAfterCleanup);
+        Assert.Null(workflow.Current.Review.Pin);
+        Assert.Same(action.Current, workflow.Current.Action);
+
+        scope.Publish(Ready(2));
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+
+        Assert.Single(scope.Retries);
+        Assert.False(workflow.Current.IsRecheckingScopeAfterCleanup);
+        Assert.Equal(WorkflowPhase.ChooseScope, workflow.Current.CurrentPhase);
+    }
+
+    [Fact]
+    public async Task ARecheckStillBeingAcceptedByTheScopeIsNotSubmittedTwice()
+    {
+        await using var f = new ReviewFixture();
+        var release = ScanTestData.Signal<bool>();
+        var scope = new ScopeOwner(f.Request.Scope) { RetryRelease = release };
+        try
+        {
+            var (workflow, _, _) = await SettleCleanupAsync(f, scope, ActionItemState.Recycled);
+
+            await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+            await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+            Assert.Single(scope.Retries);
+            Assert.False(workflow.Current.IsRecheckingScopeAfterCleanup);
+
+            // The user picked another folder before the re-check was accepted:
+            // that check is theirs, and the pending re-check label is dropped.
+            scope.Publish(scope.Current with { ScopeState = ScopeSessionState.Checking, Preflight = null, Revision = 2,
+                Selection = new(@"C:\Elsewhere", ScopeRecursion.TopLevelOnly) });
+            await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+            Assert.Single(scope.Retries);
+            Assert.False(workflow.Current.IsRecheckingScopeAfterCleanup);
+            Assert.Equal(2, workflow.Current.Scope.Revision);
+        }
+        finally { release.TrySetResult(true); }
+    }
+
+    [Fact]
+    public async Task ACleanupThatRemovedNothingDoesNotRecheckTheFolder()
+    {
+        await using var f = new ReviewFixture();
+        var scope = new ScopeOwner(f.Request.Scope) { ChecksOnRetry = true };
+        var (workflow, _, _) = await SettleCleanupAsync(f, scope, ActionItemState.NotRemoved);
+        Assert.Equal(ActionStatus.Complete, ProjectedAction(workflow).Status);
+
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+
+        Assert.Empty(scope.Retries);
+        Assert.False(workflow.Current.IsRecheckingScopeAfterCleanup);
+        Assert.Equal(1, workflow.Current.Scope.Revision);
+    }
+
+    [Fact]
+    public async Task ACleanupThatSettlesWhileTheFolderPageIsOpenRechecksTheFolder()
+    {
+        await using var f = new ReviewFixture();
+        var scope = new ScopeOwner(f.Request.Scope) { ChecksOnRetry = true };
+        var (workflow, action, request) = await SettleCleanupAsync(f, scope, ActionItemState.Recycled, settle: false);
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+        Assert.Equal(WorkflowPhase.ChooseScope, workflow.Current.CurrentPhase);
+        Assert.Empty(scope.Retries);
+
+        action.Publish(Settled(request, ActionItemState.Recycled));
+        await f.Pump(scope.RetryEntered.Task);
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+
+        Assert.Single(scope.Retries);
+        Assert.True(workflow.Current.IsRecheckingScopeAfterCleanup);
+    }
+
+    // PM-013: a settled cleanup does not end the session. The user continues with
+    // the same scan, without the photos that reached the Recycle Bin.
+    [Fact]
+    public async Task ContinuingAfterACleanupReopensTheReviewWithoutTheRemovedPhotosAndApprovesANewCleanup()
+    {
+        await using var f = new ReviewFixture();
+        var (workflow, action, request) = await SettleCleanupAsync(f, new ScopeOwner(f.Request.Scope), ActionItemState.Recycled);
+        var sealedReview = f.Owner.Current;
+        f.Executor.Arrived = ScanTestData.Signal<ReviewTestRun>();
+
+        await f.Pump(workflow.ContinueReviewAsync());
+
+        var review = f.Owner.Current;
+        Assert.NotEqual(sealedReview.Pin, review.Pin);
+        Assert.Equal(sealedReview.Pin!.Scan, review.Pin!.Scan);
+        Assert.False(review.Sealed);
+        Assert.Equal([2L, 3L], Assert.Single(review.Groups).Members.Select(member => member.Occurrence.Token.OccurrenceId));
+        Assert.Equal(WorkflowPhase.Review, workflow.Current.CurrentPhase);
+        Assert.Same(review, workflow.Current.Review);
+        Assert.Same(action.Current, ProjectedAction(workflow));
+        Assert.Equal(request.RequestId, ProjectedActionReview(workflow).ApprovedRequest!.RequestId);
+        await f.Eligible(2, 3);
+        await f.Change(f.Command(SelectionCommandKind.Toggle, 2));
+        var command = new ApproveSelectionCommand(f.Owner.Current.Pin!, f.Owner.Current.SelectionRevision,
+            Guid.NewGuid(), DateTimeOffset.UnixEpoch);
+
+        await f.Pump(workflow.ApproveReviewAsync(command, TestContext.Current.CancellationToken));
+
+        Assert.Equal(2, action.Requests.Count);
+        var again = action.Requests[1];
+        Assert.NotEqual(request.RequestId, again.RequestId);
+        Assert.Equal(review.Pin.ReviewSessionId, again.ReviewSessionId);
+        Assert.Equal([2L], again.SelectedOccurrenceIds);
+        Assert.Equal(f.Request.Scan.Groups[0].Members[1].ResolvedPath, Assert.Single(again.Items).ResolvedPath);
+        action.Publish(new ActionSnapshot(again.RequestId, ActionStatus.Claiming,
+            [new(again.Items[0], null, ActionItemState.Waiting, ActionSafetyReason.None)], 0, 0, 0, 0, 0, ActionSafetyReason.None));
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ApproveCleanup));
+        Assert.Equal(again.RequestId, ProjectedAction(workflow).RequestId);
+        Assert.Equal(again.RequestId, ProjectedActionReview(workflow).ApprovedRequest!.RequestId);
+    }
+
+    [Fact]
+    public async Task ContinuingAfterAnUncertainOutcomeClosesThatSetUntilTheNextScan()
+    {
+        await using var f = new ReviewFixture();
+        var (workflow, action, request) = await SettleCleanupAsync(f, new ScopeOwner(f.Request.Scope),
+            ActionItemState.Recycled, settle: false);
+        action.Publish(new ActionSnapshot(request.RequestId, ActionStatus.Incomplete,
+            [new(request.Items[0], Guid.NewGuid(), ActionItemState.UnknownPendingRevalidation, ActionSafetyReason.None)],
+            1, 1, 0, 0, 1, ActionSafetyReason.None));
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ApproveCleanup));
+        f.Executor.Arrived = ScanTestData.Signal<ReviewTestRun>();
+
+        await f.Pump(workflow.ContinueReviewAsync());
+
+        var review = f.Owner.Current;
+        Assert.False(review.Sealed);
+        var group = Assert.Single(review.Groups);
+        Assert.True(group.Closed);
+        Assert.Equal([1L, 2L, 3L], group.Members.Select(member => member.Occurrence.Token.OccurrenceId));
+        Assert.Equal(ReviewStatus.Ready, review.Status);
+        Assert.Equal(WorkflowPhase.Review, workflow.Current.CurrentPhase);
+        Assert.Same(review, workflow.Current.Review);
+    }
+
+    [Theory]
+    [InlineData("faulted")]
+    [InlineData("running")]
+    public async Task ContinuingIsIgnoredWhileTheCleanupRunsOrAfterItStopped(string state)
+    {
+        await using var f = new ReviewFixture();
+        var (workflow, action, request) = await SettleCleanupAsync(f, new ScopeOwner(f.Request.Scope),
+            ActionItemState.Recycled, settle: false);
+        if (state == "faulted")
+        {
+            action.Publish(Settled(request, ActionItemState.NotRemoved) with
+            { Status = ActionStatus.Faulted, FaultReason = ActionSafetyReason.ProgrammingFault });
+            await f.Pump(workflow.NavigateAsync(WorkflowPhase.ApproveCleanup));
+        }
+        var before = f.Owner.Current;
+
+        await f.Pump(workflow.ContinueReviewAsync());
+
+        Assert.Same(before, f.Owner.Current);
+        Assert.True(f.Owner.Current.Sealed);
+        Assert.Equal(WorkflowPhase.ApproveCleanup, workflow.Current.CurrentPhase);
+        Assert.Single(f.Executor.Runs);
+    }
+
+    private static async Task<(PhotoSiftWorkflow Workflow, DeferredAction Action, ApprovedActionRequest Request)> SettleCleanupAsync(
+        ReviewFixture f, ScopeOwner scope, ActionItemState outcome, bool settle = true)
+    {
+        var scan = new ScanOwner();
+        var action = new DeferredAction();
+        var workflow = CreateActionWorkflow(scope, scan, f.Scheduler, f.Owner, action);
+        await f.Pump(workflow.ContinueAsync());
+        await f.Pump(workflow.ConfirmExactRulesAsync());
+        scan.Publish(f.Request.Scan);
+        await f.Pump(workflow.OpenReviewAsync());
+        await f.Eligible(1, 2, 3);
+        await f.Change(f.Command(SelectionCommandKind.Toggle, 1));
+        var command = new ApproveSelectionCommand(f.Owner.Current.Pin!, f.Owner.Current.SelectionRevision,
+            Guid.NewGuid(), DateTimeOffset.UnixEpoch);
+        var approving = workflow.ApproveReviewAsync(command, TestContext.Current.CancellationToken);
+        await f.Pump(action.Entered.Task);
+        var request = Assert.Single(action.Requests);
+        var admitted = new ActionSnapshot(request.RequestId, ActionStatus.Claiming,
+            [new(request.Items[0], null, ActionItemState.Waiting, ActionSafetyReason.None)], 0, 0, 0, 0, 0, ActionSafetyReason.None);
+        action.Publish(admitted);
+        action.Completion.TrySetResult(new(ActionCommandOutcome.Completed, admitted));
+        await f.Pump(approving);
+        await f.Pump(workflow.NavigateAsync(WorkflowPhase.ApproveCleanup));
+        Assert.Equal(WorkflowPhase.ApproveCleanup, workflow.Current.CurrentPhase);
+        if (settle)
+        {
+            action.Publish(Settled(request, outcome));
+            await f.Pump(workflow.NavigateAsync(WorkflowPhase.ApproveCleanup));
+        }
+        return (workflow, action, request);
+    }
+
+    private static ActionSnapshot Settled(ApprovedActionRequest request, ActionItemState outcome) =>
+        new(request.RequestId, ActionStatus.Complete,
+            [new(request.Items[0], Guid.NewGuid(), outcome, ActionSafetyReason.None)], 1, 0,
+            outcome == ActionItemState.Recycled ? 1 : 0, outcome == ActionItemState.NotRemoved ? 1 : 0, 0,
+            ActionSafetyReason.None);
 
     [Fact]
     public async Task NavigationScanRefreshAndReopenedReviewCannotCreateAction()
@@ -1002,6 +1220,38 @@ public sealed class PhotoSiftWorkflowTests
     }
 
     [Fact]
+    public async Task OptionsCanChangeOnTheFolderStepWithoutLeavingIt()
+    {
+        var scheduler = new ManualScheduler();
+        var scan = new ScanOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(Ready(1)), scan, scheduler);
+        var exactOnly = new ScanOptions(ExactDuplicateMode.Enabled, NearDuplicateMode.Disabled);
+
+        await scheduler.Finish(workflow.SetScanOptionsAsync(exactOnly));
+
+        Assert.Equal(WorkflowPhase.ChooseScope, workflow.Current.CurrentPhase);
+        Assert.Equal(exactOnly, workflow.Current.Options);
+        Assert.Null(workflow.Current.Rules);
+        await scheduler.Finish(workflow.ContinueAsync());
+        await scheduler.Finish(workflow.ConfirmExactRulesAsync());
+        await scheduler.Finish(workflow.StartScanAsync());
+        Assert.Equal(exactOnly, Assert.Single(scan.Starts).Options);
+    }
+
+    [Fact]
+    public async Task OptionsCannotChangeBeforeTheFolderIsReady()
+    {
+        var scheduler = new ManualScheduler();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(new(InitialWorkflow.Create(), "Choose")), new ScanOwner(), scheduler);
+        var before = workflow.Current.Options;
+
+        await scheduler.Finish(workflow.SetScanOptionsAsync(
+            new(ExactDuplicateMode.Enabled, NearDuplicateMode.Disabled)));
+
+        Assert.Equal(before, workflow.Current.Options);
+    }
+
+    [Fact]
     public async Task OptionChangeRevokesPriorGroupsAndPinsFreshRevisionToNextScan()
     {
         var scheduler = new ManualScheduler();
@@ -1025,6 +1275,29 @@ public sealed class PhotoSiftWorkflowTests
         var started = Assert.Single(scan.Starts);
         Assert.Equal(exactOnly, started.Options);
         Assert.True(started.RuleSetRevision > oldRules.RuleSetRevision);
+    }
+
+    [Fact]
+    public async Task OptionChangeOnTheFolderStepAfterAScanRevokesItsResults()
+    {
+        var scheduler = new ManualScheduler();
+        var scan = new ScanOwner();
+        var workflow = new PhotoSiftWorkflow(new ScopeOwner(Ready(1)), scan, scheduler);
+        await scheduler.Finish(workflow.ContinueAsync());
+        await scheduler.Finish(workflow.ConfirmExactRulesAsync());
+        var oldRules = workflow.Current.Rules!;
+        scan.Publish(EmptyScan(new(Guid.NewGuid(), 1, oldRules.RuleSetRevision, 1), ScanStatus.Complete));
+        scheduler.Drain();
+        await scheduler.Finish(workflow.NavigateAsync(WorkflowPhase.ChooseScope));
+
+        await scheduler.Finish(workflow.SetScanOptionsAsync(
+            new(ExactDuplicateMode.Enabled, NearDuplicateMode.Disabled)));
+
+        Assert.Equal(WorkflowPhase.ChooseScope, workflow.Current.CurrentPhase);
+        Assert.Null(workflow.Current.Rules);
+        Assert.Null(workflow.Current.Scan.Pin);
+        Assert.Equal(ReviewSnapshot.Closed, workflow.Current.Review);
+        Assert.Equal([(1L, (long?)null)], scan.Invalidations);
     }
 
     [Fact]
@@ -1451,10 +1724,23 @@ public sealed class PhotoSiftWorkflowTests
     {
         public ShellSnapshot Current { get; private set; } = current;
         public event EventHandler<ShellSnapshot>? SnapshotChanged;
+        public List<RetryScopePreflightCommand> Retries { get; } = [];
+        public TaskCompletionSource<bool> RetryEntered { get; } = ScanTestData.Signal<bool>();
+        // Like the real owner: a retry publishes Checking under the next revision.
+        public bool ChecksOnRetry { get; init; }
+        // Like the real owner: the retry call does not return until the check ends.
+        public TaskCompletionSource<bool>? RetryRelease { get; init; }
         public void Publish(ShellSnapshot snapshot) { Current = snapshot; SnapshotChanged?.Invoke(this, snapshot); }
         public Task HandleAsync(ChooseScopeCommand command, CancellationToken token) => Task.CompletedTask;
         public Task HandleAsync(ChangeScopeRecursionCommand command, CancellationToken token) => Task.CompletedTask;
-        public Task HandleAsync(RetryScopePreflightCommand command, CancellationToken token) => Task.CompletedTask;
+        public async Task HandleAsync(RetryScopePreflightCommand command, CancellationToken token)
+        {
+            Retries.Add(command);
+            if (ChecksOnRetry)
+                Publish(Current with { ScopeState = ScopeSessionState.Checking, Preflight = null, Revision = Current.Revision + 1 });
+            RetryEntered.TrySetResult(true);
+            if (RetryRelease is not null) await RetryRelease.Task;
+        }
     }
     private sealed class ScanOwner : IScanCoordinator
     {

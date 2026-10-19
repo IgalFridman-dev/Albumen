@@ -6,6 +6,7 @@ using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -89,10 +90,8 @@ public partial class MainWindow : Window
         object? sender,
         PropertyChangedEventArgs eventArgs)
     {
-        if ((eventArgs.PropertyName == nameof(ShellViewModel.CanConfirmExactRules)
-                && shellViewModel is { IsConfirmRulesPhase: true, CanConfirmExactRules: false, CanStartScan: true })
-            || (eventArgs.PropertyName == nameof(ShellViewModel.IsScanBusy)
-                && shellViewModel is { IsScanPhase: true, IsScanBusy: true }))
+        if (eventArgs.PropertyName == nameof(ShellViewModel.IsScanBusy)
+            && shellViewModel is { IsScanPhase: true, IsScanBusy: true })
         {
             QueuePhaseFocus();
         }
@@ -230,6 +229,10 @@ public partial class MainWindow : Window
 
         var source = eventArgs.OriginalSource as DependencyObject
             ?? Keyboard.FocusedElement as DependencyObject;
+        // A card's own buttons (such as Compare) act on Enter themselves.
+        if (FindAncestor<Button>(source) is { } button && IsWithin(button, list)
+            && !AutomationProperties.GetAutomationId(button).StartsWith("open-review-", StringComparison.Ordinal))
+            return;
         var item = list.SelectedItem
             ?? FindDataContext<ReviewCategoryViewModel>(source)
             ?? (object?)FindDataContext<ReviewGroupViewModel>(source)
@@ -260,8 +263,12 @@ public partial class MainWindow : Window
 
     private void OnOpenReviewMemberClick(object sender, RoutedEventArgs eventArgs)
     {
-        if (sender is Button { DataContext: ScanOccurrenceViewModel member })
-            shellViewModel?.OpenReviewMemberCommand.Execute(member);
+        if (sender is not Button { DataContext: ScanOccurrenceViewModel member }) return;
+        shellViewModel?.OpenReviewMemberCommand.Execute(member);
+        // Show the top of the viewer so the click visibly opens the photo, scrolling the
+        // page no further than that so the photo list stays in sight.
+        ReviewEvidencePanel.BringIntoView(new Rect(0, 0, ReviewEvidencePanel.ActualWidth,
+            Math.Min(ReviewEvidencePanel.ActualHeight, 160)));
     }
 
     private void OnReviewBackClick(object sender, RoutedEventArgs eventArgs) =>
@@ -271,18 +278,75 @@ public partial class MainWindow : Window
         UpdateReviewLayout();
 
     // The navigation lists keep a bounded height so they stay virtualized inside the
-    // scrolling Review page, leaving room for the evidence below them to come into view.
+    // scrolling Review page, leaving room for the viewer below them to come into view.
+    // The lists scroll a whole card at a time, so they stay taller than one photo card:
+    // a shorter list would cut off the bottom of a card for good.
     private void OnReviewPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
     {
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
         var viewport = eventArgs.NewSize.Height;
-        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.45, 180, 480));
-        // Scrolled to Evidence, the photo fills most of the page instead of a fixed thumbnail.
-        ReviewPreviewStatusControl.PreviewImage.MaxHeight = Math.Max(240, viewport * 0.8);
+        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.6, 300, 600));
+        // Scrolled to the viewer, the photo fills most of the page instead of a fixed thumbnail.
+        ReviewPreviewStatusControl.FitHeight = Math.Max(240, viewport * 0.8);
+    }
+
+    // The compared photo shares the viewer's size and zoom, and both photos pan together.
+    private void OnComparedPreviewLoaded(object sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is not PreviewStatusControl compared) return;
+        compared.SetBinding(PreviewStatusControl.ZoomProperty,
+            new Binding(nameof(Slider.Value)) { Source = ReviewZoomSlider });
+        compared.SetBinding(PreviewStatusControl.FitHeightProperty,
+            new Binding(nameof(PreviewStatusControl.FitHeight)) { Source = ReviewPreviewStatusControl });
+        compared.PreviewImage.SetValue(AutomationProperties.NameProperty, "Compared photo preview");
+        var main = ReviewPreviewStatusControl.PreviewImageScroller;
+        var other = compared.PreviewImageScroller;
+        // Photos of different widths pan by the same share of their own width.
+        var syncing = false;
+        void Follow(ScrollViewer leader, ScrollViewer follower)
+        {
+            if (syncing) return;
+            syncing = true;
+            try
+            {
+                var share = leader.ScrollableWidth > 0 ? leader.HorizontalOffset / leader.ScrollableWidth : 0;
+                follower.ScrollToHorizontalOffset(share * follower.ScrollableWidth);
+            }
+            finally
+            {
+                syncing = false;
+            }
+        }
+        ScrollChangedEventHandler fromMain = (_, change) =>
+        {
+            if (change.HorizontalChange != 0 || change.ExtentWidthChange != 0) Follow(main, other);
+        };
+        ScrollChangedEventHandler fromOther = (_, change) =>
+        {
+            if (change.HorizontalChange != 0) Follow(other, main);
+        };
+        main.ScrollChanged += fromMain;
+        other.ScrollChanged += fromOther;
+        compared.Unloaded += OnUnloaded;
+        Follow(main, other);
+
+        void OnUnloaded(object? unloadedSender, RoutedEventArgs unloadedArgs)
+        {
+            compared.Unloaded -= OnUnloaded;
+            main.ScrollChanged -= fromMain;
+            other.ScrollChanged -= fromOther;
+        }
+    }
+
+    // The selection bar stays under the page; its button brings the approval into view.
+    private void OnReviewCleanupClick(object sender, RoutedEventArgs eventArgs)
+    {
+        ApprovalPanel.BringIntoView();
+        ApprovalPanel.Focus();
     }
 
     // The Recycle Bin item list gets the same bounded height so the progress summary
-    // and Action Records below it stay reachable at small window sizes.
+    // and the earlier cleanups below it stay reachable at small window sizes.
     private void OnActionPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
     {
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
@@ -317,17 +381,34 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Loaded);
     }
 
+    // One notch of a mouse wheel reports a delta of 120 (WM_MOUSEWHEEL's WHEEL_DELTA). A precision
+    // touchpad reports many smaller deltas, which add up here until they make a notch.
+    private const int WheelDeltaPerNotch = 120;
+    private readonly Dictionary<DependencyObject, int> wheelResiduals = new();
+
     // A list at its scroll limit hands the wheel to its page, so the page can still be
     // scrolled while the pointer rests over a list.
     private void OnReviewListPreviewMouseWheel(object sender, MouseWheelEventArgs eventArgs)
     {
         if (sender is not DependencyObject list
-            || PageScrollerFor(list) is not { } page
             || Descendants<ScrollViewer>(list).FirstOrDefault() is not { } listScroller) return;
         var atLimit = eventArgs.Delta > 0
             ? listScroller.VerticalOffset <= 0
             : listScroller.VerticalOffset >= listScroller.ScrollableHeight;
-        if (!atLimit) return;
+        if (!atLimit)
+        {
+            // The lists scroll by item (a 10,000-photo set must not realize every card), and a
+            // wheel notch would move three items and skip the middle of a short list. One card
+            // per notch keeps every category and set reachable at the default window size.
+            eventArgs.Handled = true;
+            var residual = wheelResiduals.GetValueOrDefault(list) + eventArgs.Delta;
+            for (; residual >= WheelDeltaPerNotch; residual -= WheelDeltaPerNotch) listScroller.LineUp();
+            for (; residual <= -WheelDeltaPerNotch; residual += WheelDeltaPerNotch) listScroller.LineDown();
+            wheelResiduals[list] = residual;
+            return;
+        }
+        wheelResiduals.Remove(list);
+        if (PageScrollerFor(list) is not { } page) return;
         eventArgs.Handled = true;
         page.ScrollToVerticalOffset(page.VerticalOffset - eventArgs.Delta / 3.0);
     }
@@ -335,6 +416,9 @@ public partial class MainWindow : Window
     private void UpdateReviewLayout()
     {
         if (!IsInitialized) return;
+        // In a short window the page keeps the height; Approval stays reachable by scrolling.
+        var height = double.IsNaN(Height) ? ActualHeight : Height;
+        ReviewSelectionBar.Visibility = height >= 640 ? Visibility.Visible : Visibility.Collapsed;
         var width = double.IsNaN(Width) ? ActualWidth : Width;
         var level = shellViewModel?.ReviewNavigationLevel ?? ReviewNavigationLevel.Categories;
         if (width >= 920)
@@ -372,8 +456,11 @@ public partial class MainWindow : Window
             ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         ReviewGroupsColumn.Width = ReviewGroupsPanel.Visibility == Visibility.Visible
             ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        // An open set's photo cards get twice the room of the text lists beside them, so a
+        // card keeps a readable width and a height that fits the list.
+        var photosOpen = shellViewModel?.ReviewNavigationLevel == ReviewNavigationLevel.Comparisons;
         ReviewComparisonsColumn.Width = ReviewComparisonsPanel.Visibility == Visibility.Visible
-            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+            ? new GridLength(photosOpen ? 2 : 1, GridUnitType.Star) : new GridLength(0);
     }
 
     private void QueueReviewNavigationFocus()
@@ -397,6 +484,16 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Input);
     }
 
+    private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
+    {
+        while (current is not null)
+        {
+            if (current is T match) return match;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
     private static T? FindDataContext<T>(DependencyObject? current) where T : class
     {
         while (current is not null)
@@ -416,6 +513,15 @@ public partial class MainWindow : Window
                 Keyboard.Focus(BlockingNotice);
             },
             DispatcherPriority.Input);
+
+    // Leaving History cancels a pending clear, so coming back never lands keyboard focus
+    // on the destructive confirmation the user did not just ask for.
+    private void OnHistoryUnselected(object sender, RoutedEventArgs eventArgs)
+    {
+        if (!ReferenceEquals(eventArgs.OriginalSource, ActionRecordsTab)
+            || shellViewModel?.IsClearScanDataConfirmationPending is not true) return;
+        shellViewModel.CancelClearScanDataCommand.Execute(null);
+    }
 
     private void OnClearScanDataConfirmationVisibilityChanged(
         object sender,
@@ -494,8 +600,8 @@ public partial class MainWindow : Window
 
     private void QueueScopeStatusAnnouncement()
     {
-        var expectedViewModel = shellViewModel;
-        var expectedStatus = expectedViewModel?.ScopeStatus;
+        if (shellViewModel is not { } expectedViewModel) return;
+        var expectedStatus = expectedViewModel.ScopeStatus;
         if (expectedStatus is not "Checking location and access" and
             not "Ready" and
             not "Blocked")
@@ -503,6 +609,8 @@ public partial class MainWindow : Window
             return;
         }
 
+        // The strip shows and announces the one-sentence form of that status.
+        var expectedSentence = expectedViewModel.FolderStatusSentence;
         var expectedGeneration = dataContextGeneration;
         Dispatcher.InvokeAsync(
             () =>
@@ -510,9 +618,10 @@ public partial class MainWindow : Window
                 if (isClosed ||
                     expectedGeneration != dataContextGeneration ||
                     !ReferenceEquals(expectedViewModel, shellViewModel) ||
-                    ScopeStatusText.Text != expectedStatus ||
+                    expectedViewModel.ScopeStatus != expectedStatus ||
+                    ScopeStatusText.Text != expectedSentence ||
                     AutomationProperties.GetItemStatus(ScopeStatusText) !=
-                        expectedStatus)
+                        expectedSentence)
                 {
                     return;
                 }
@@ -537,7 +646,8 @@ public partial class MainWindow : Window
             UIElement? target = phase switch
             {
                 WorkflowPhase.ChooseScope => expected.IsBlocked ? BlockingNotice : ChooseAnotherScopeButton,
-                WorkflowPhase.ConfirmRules => expected.CanConfirmExactRules ? ConfirmExactRulesButton : StartScanButton,
+                // Folder and options share one screen; its Scan button is the next step.
+                WorkflowPhase.ConfirmRules => expected.CanScanFolder ? ScanFolderButton : ChooseAnotherScopeButton,
                 WorkflowPhase.Scan => expected.IsScanBusy ? CancelScanButton : null,
                 WorkflowPhase.Review => ReviewHeading,
                 WorkflowPhase.ApproveCleanup => ActionHeading,
@@ -1024,8 +1134,36 @@ internal sealed class ReviewAnnouncementDiagnosticBuffer(int ownerThreadId)
 
 public class ReviewSelectionCheckBox : CheckBox
 {
+    private bool pressedShownChoice;
+
     protected override AutomationPeer OnCreateAutomationPeer() =>
         new ReviewSelectionCheckBoxAutomationPeer(this);
+
+    // The Keep | Remove style looks like two choices, so a mouse click on the choice that
+    // is already shown leaves it as it is instead of flipping it. Keyboard and UI
+    // Automation still toggle.
+    protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
+    {
+        pressedShownChoice = GetTemplateChild(IsChecked == true ? "RemovePart" : "KeepPart")
+            is UIElement { IsMouseOver: true };
+        base.OnMouseLeftButtonDown(e);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        pressedShownChoice = false;
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnClick()
+    {
+        if (pressedShownChoice)
+        {
+            pressedShownChoice = false;
+            return;
+        }
+        base.OnClick();
+    }
 
     protected override void OnToggle()
     {

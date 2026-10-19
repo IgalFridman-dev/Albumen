@@ -12,7 +12,7 @@ the extracted files, right-click the ZIP before extracting, open Properties,
 tick "Unblock" and extract again.
 
 Using it
-Choose one local folder, confirm the rules, scan, and review the groups.
+Choose one local folder and its scan options, scan, and review the groups.
 Only the files you approve are moved to the Recycle Bin, one at a time, and
 at least one copy in every group is always kept. Restore anything from the
 Recycle Bin if you change your mind.
