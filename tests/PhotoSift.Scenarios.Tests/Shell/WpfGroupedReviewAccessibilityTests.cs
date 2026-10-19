@@ -443,21 +443,23 @@ public sealed class WpfGroupedReviewAccessibilityTests
     // PM-016: at the default window size the category list holds two or three cards, and a
     // wheel notch in item scrolling moved three items, so the two middle categories were never
     // shown at the top. Large text makes the cards tall enough to pin the overflow here. The
-    // wheel is raised on a card, where the pointer rests, so the event takes the real route:
-    // tunnelling through the list's handler and bubbling up to the list's ScrollViewer.
+    // wheel is raised on the card at the top of the list, where the pointer rests, so the event
+    // takes the real route: tunnelling through the list's handler and bubbling up to the list's
+    // ScrollViewer. A card that scrolled out of view leaves the visual tree, so it is looked up
+    // again before every notch.
     [Fact]
     public void OneWheelNotchMovesTheCategoryListByOneCardSoTheMiddleCardsAreReachable()
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
-            var window = OverflowingCategoriesWindow(out var scroller, out var firstCard);
+            var window = OverflowingCategoriesWindow(out var categories, out var scroller);
             try
             {
-                Wheel(firstCard, -120);
+                Wheel(TopCard(categories, scroller), -120);
                 Assert.Equal(1, scroller.VerticalOffset);
-                Wheel(firstCard, -120);
+                Wheel(TopCard(categories, scroller), -120);
                 Assert.Equal(2, scroller.VerticalOffset);
-                Wheel(firstCard, 120);
+                Wheel(TopCard(categories, scroller), 120);
                 Assert.Equal(1, scroller.VerticalOffset);
             }
             finally { window.Close(); }
@@ -470,14 +472,14 @@ public sealed class WpfGroupedReviewAccessibilityTests
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
-            var window = OverflowingCategoriesWindow(out var scroller, out var firstCard);
+            var window = OverflowingCategoriesWindow(out var categories, out var scroller);
             try
             {
-                Wheel(firstCard, -40);
+                Wheel(TopCard(categories, scroller), -40);
                 Assert.Equal(0, scroller.VerticalOffset);
-                Wheel(firstCard, -40);
+                Wheel(TopCard(categories, scroller), -40);
                 Assert.Equal(0, scroller.VerticalOffset);
-                Wheel(firstCard, -40);
+                Wheel(TopCard(categories, scroller), -40);
                 Assert.Equal(1, scroller.VerticalOffset);
             }
             finally { window.Close(); }
@@ -491,7 +493,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
-            var window = OverflowingCategoriesWindow(out var scroller, out _);
+            var window = OverflowingCategoriesWindow(out _, out var scroller);
             try
             {
                 var page = Assert.IsType<ScrollViewer>(window.FindName("ReviewPageScrollViewer"));
@@ -510,7 +512,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
         });
     }
 
-    private static MainWindow OverflowingCategoriesWindow(out ScrollViewer scroller, out Button firstCard)
+    private static MainWindow OverflowingCategoriesWindow(out ListBox categories, out ScrollViewer scroller)
     {
         var fixture = GroupedWpfFixture.Create();
         var window = new MainWindow
@@ -521,14 +523,22 @@ public sealed class WpfGroupedReviewAccessibilityTests
             FontSize = 24,
         };
         ShowAndDrain(window);
-        var categories = NamedList(window, "ReviewCategoriesList");
+        categories = NamedList(window, "ReviewCategoriesList");
         Assert.Equal(4, categories.Items.Count);
         scroller = Descendants<ScrollViewer>(categories).First();
         Assert.True(scroller.ScrollableHeight >= 2,
             $"The four cards must overflow the list by two items; ScrollableHeight is {scroller.ScrollableHeight}.");
         Assert.Equal(0, scroller.VerticalOffset);
-        firstCard = Descendants<Button>(categories).First();
         return window;
+    }
+
+    private static Button TopCard(ListBox list, ScrollViewer scroller)
+    {
+        var container = Assert.IsType<ListBoxItem>(
+            list.ItemContainerGenerator.ContainerFromIndex((int)scroller.VerticalOffset));
+        var card = Descendants<Button>(container).First();
+        Assert.True(card.IsVisible, "The card at the top of the list is not shown.");
+        return card;
     }
 
     // Input raises the tunnelling preview first and the bubbling event only when it was not handled.
