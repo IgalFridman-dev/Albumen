@@ -20,6 +20,11 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$SourceIdentity,
 
+    # Folder holding the SigLIP 2 files listed in src\Albumen.Infrastructure.Onnx\models\manifest.json.
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string]$ModelsRoot,
+
     [Parameter()]
     [switch]$CaptureOnly,
 
@@ -37,6 +42,8 @@ $resolvedRepositoryRoot = [System.IO.Path]::GetFullPath($RepositoryRoot)
 $resolvedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $resolvedSdkRoot = [System.IO.Path]::GetFullPath($SdkRoot)
 $resolvedPackagesRoot = [System.IO.Path]::GetFullPath($PackagesRoot)
+$resolvedModelsRoot = [System.IO.Path]::GetFullPath($ModelsRoot)
+$modelManifestPath = Join-Path $resolvedRepositoryRoot 'src\Albumen.Infrastructure.Onnx\models\manifest.json'
 $projectPath = Join-Path $resolvedRepositoryRoot 'src\Albumen.App\Albumen.App.csproj'
 $dotnetPath = Join-Path $resolvedSdkRoot 'dotnet.exe'
 $evidencePath = Join-Path $resolvedOutputRoot 'evidence'
@@ -255,6 +262,38 @@ function Copy-CleanReleaseSource {
                 [System.IO.Path]::GetDirectoryName($destination)) | Out-Null
             [System.IO.File]::Copy($entry.FullName, $destination)
         }
+    }
+}
+
+function Get-ReleaseModelFiles {
+    $manifest = Get-Content -Raw -LiteralPath $modelManifestPath | ConvertFrom-Json
+    $files = @($manifest.files.vision, $manifest.files.text, $manifest.files.tokenizer)
+    foreach ($file in $files) {
+        $source = Join-Path $resolvedModelsRoot ([string]$file.path)
+        if (-not [System.IO.File]::Exists($source)) {
+            throw "Model file named by models/manifest.json is missing from the models root: $source"
+        }
+        if ((Get-Item -LiteralPath $source).Length -ne [long]$file.length -or
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $source).Hash -cne [string]$file.sha256) {
+            throw "Model file differs from the length or SHA-256 in models/manifest.json: $($file.path)"
+        }
+    }
+    return $files
+}
+
+function Copy-ReleaseModelFiles {
+    param([object[]]$Files, [string]$PublishPath)
+
+    $publishedManifest = Join-Path $PublishPath 'models\manifest.json'
+    if (-not [System.IO.File]::Exists($publishedManifest) -or
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $publishedManifest).Hash -cne
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $modelManifestPath).Hash) {
+        throw "Published models/manifest.json is missing or differs from the source manifest: $PublishPath"
+    }
+    foreach ($file in $Files) {
+        [System.IO.File]::Copy(
+            (Join-Path $resolvedModelsRoot ([string]$file.path)),
+            (Join-Path $PublishPath ('models\' + [string]$file.path)))
     }
 }
 
@@ -478,7 +517,12 @@ function Assert-RuntimePackResolution {
         'SQLitePCLRaw.bundle_e_sqlite3/2.1.12',
         'SQLitePCLRaw.core/2.1.12',
         'SQLitePCLRaw.lib.e_sqlite3/2.1.12',
-        'SQLitePCLRaw.provider.e_sqlite3/2.1.12')
+        'SQLitePCLRaw.provider.e_sqlite3/2.1.12',
+        'Google.Protobuf/3.30.2',
+        'Microsoft.ML.OnnxRuntime/1.31.0',
+        'Microsoft.ML.OnnxRuntime.Managed/1.31.0',
+        'Microsoft.ML.Tokenizers/2.0.1',
+        'System.Numerics.Tensors/9.0.0')
     foreach ($requiredLibrary in $requiredPackageLibraries) {
         if ($libraries -cnotcontains $requiredLibrary) {
             throw "Locked restore did not resolve the exact approved package: $requiredLibrary"
@@ -655,7 +699,8 @@ foreach ($requiredFile in @(
         (Join-Path $resolvedRepositoryRoot 'eng\release\AlbumenRelease.psm1'),
         (Join-Path $resolvedRepositoryRoot 'eng\release\assets\README.txt'),
         (Join-Path $resolvedRepositoryRoot 'eng\release\assets\Start-Albumen.cmd'),
-        (Join-Path $resolvedRepositoryRoot 'eng\release\assets\Verify-AlbumenRelease.ps1'))) {
+        (Join-Path $resolvedRepositoryRoot 'eng\release\assets\Verify-AlbumenRelease.ps1'),
+        $modelManifestPath)) {
     if (-not [System.IO.File]::Exists($requiredFile)) {
         throw "Required release input does not exist: $requiredFile"
     }
@@ -687,6 +732,7 @@ if ([System.IO.Directory]::Exists($resolvedOutputRoot) -and
     throw "Release output root must be absent or empty: $resolvedOutputRoot"
 }
 [System.IO.Directory]::CreateDirectory($evidencePath) | Out-Null
+$modelFiles = @(Get-ReleaseModelFiles)
 $sdkSelection = Invoke-ReleaseExternal `
     -Name 'sdk-version' `
     -FilePath $dotnetPath `
@@ -764,7 +810,8 @@ try {
             [System.Array]::Sort($frameworkPaths, [System.StringComparer]::Ordinal)
             $nativePaths = [string[]]@(
                 @($frameworkPathSet.Values | Where-Object { $_.Type -ceq 'Native' } |
-                    ForEach-Object { $_.Path }) + @('e_sqlite3.dll'))
+                    ForEach-Object { $_.Path }) +
+                @('e_sqlite3.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll'))
             $nativePathSet = [System.Collections.Generic.Dictionary[string, bool]]::new(
                 [System.StringComparer]::OrdinalIgnoreCase)
             foreach ($nativePath in $nativePaths) {
@@ -811,6 +858,7 @@ try {
             -FilePath $dotnetPath `
             -Arguments $arguments `
             -WorkingDirectory $cleanSourcePath | Out-Null
+        Copy-ReleaseModelFiles -Files $modelFiles -PublishPath $rawPublishPaths[$index]
         foreach ($frameworkPath in $frameworkPaths) {
             $publishedFrameworkPath = Join-Path $rawPublishPaths[$index] $frameworkPath
             if (-not [System.IO.File]::Exists($publishedFrameworkPath)) {
@@ -879,7 +927,12 @@ $packageSpecifications = @(
     @{ Id = 'SQLitePCLRaw.bundle_e_sqlite3'; Version = '2.1.12' },
     @{ Id = 'SQLitePCLRaw.core'; Version = '2.1.12' },
     @{ Id = 'SQLitePCLRaw.lib.e_sqlite3'; Version = '2.1.12' },
-    @{ Id = 'SQLitePCLRaw.provider.e_sqlite3'; Version = '2.1.12' })
+    @{ Id = 'SQLitePCLRaw.provider.e_sqlite3'; Version = '2.1.12' },
+    @{ Id = 'Google.Protobuf'; Version = '3.30.2' },
+    @{ Id = 'Microsoft.ML.OnnxRuntime'; Version = '1.31.0' },
+    @{ Id = 'Microsoft.ML.OnnxRuntime.Managed'; Version = '1.31.0' },
+    @{ Id = 'Microsoft.ML.Tokenizers'; Version = '2.0.1' },
+    @{ Id = 'System.Numerics.Tensors'; Version = '9.0.0' })
 $packageCaptures = @($packageSpecifications | ForEach-Object {
         Get-ReleasePackageMetadata -PackageId $_.Id -Version $_.Version
     })
@@ -900,6 +953,12 @@ $components = @(
         packageId = 'Microsoft.NETCore.App.Runtime.win-x64'
     },
     [pscustomobject][ordered]@{
+        name = 'Google.Protobuf'
+        version = '3.30.2'
+        shippedPaths = @('Google.Protobuf.dll')
+        packageId = 'Google.Protobuf'
+    },
+    [pscustomobject][ordered]@{
         name = 'Microsoft.Data.Sqlite'
         version = '10.0.11'
         shippedPaths = @()
@@ -910,6 +969,24 @@ $components = @(
         version = '10.0.11'
         shippedPaths = @('Microsoft.Data.Sqlite.dll')
         packageId = 'Microsoft.Data.Sqlite.Core'
+    },
+    [pscustomobject][ordered]@{
+        name = 'Microsoft.ML.OnnxRuntime'
+        version = '1.31.0'
+        shippedPaths = @('onnxruntime.dll', 'onnxruntime_providers_shared.dll')
+        packageId = 'Microsoft.ML.OnnxRuntime'
+    },
+    [pscustomobject][ordered]@{
+        name = 'Microsoft.ML.OnnxRuntime.Managed'
+        version = '1.31.0'
+        shippedPaths = @('Microsoft.ML.OnnxRuntime.dll')
+        packageId = 'Microsoft.ML.OnnxRuntime.Managed'
+    },
+    [pscustomobject][ordered]@{
+        name = 'Microsoft.ML.Tokenizers'
+        version = '2.0.1'
+        shippedPaths = @('Microsoft.ML.Tokenizers.dll')
+        packageId = 'Microsoft.ML.Tokenizers'
     },
     [pscustomobject][ordered]@{
         name = 'Native SQLite'
@@ -945,6 +1022,18 @@ $components = @(
         version = '2.1.12'
         shippedPaths = @('SQLitePCLRaw.provider.e_sqlite3.dll')
         packageId = 'SQLitePCLRaw.provider.e_sqlite3'
+    },
+    [pscustomobject][ordered]@{
+        name = 'SigLIP 2 base patch16-224 (ONNX export)'
+        version = '1'
+        shippedPaths = @($modelFiles | ForEach-Object { 'models/' + [string]$_.path })
+        packageId = $null
+    },
+    [pscustomobject][ordered]@{
+        name = 'System.Numerics.Tensors'
+        version = '9.0.0'
+        shippedPaths = @('System.Numerics.Tensors.dll')
+        packageId = 'System.Numerics.Tensors'
     },
     [pscustomobject][ordered]@{
         name = 'Windows Desktop / WPF'

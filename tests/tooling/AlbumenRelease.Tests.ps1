@@ -29,6 +29,11 @@ $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
     'Albumen-Release-Tests-' + [System.Guid]::NewGuid().ToString('N'))
 [System.IO.Directory]::CreateDirectory($testRoot) | Out-Null
 $script:passed = 0
+$syntheticModels = Join-Path $testRoot 'synthetic-models'
+[System.IO.Directory]::CreateDirectory($syntheticModels) | Out-Null
+foreach ($modelName in @('vision.onnx', 'text.onnx', 'tokenizer.model')) {
+    [System.IO.File]::WriteAllText((Join-Path $syntheticModels $modelName), "synthetic $modelName")
+}
 
 function Assert-Equal {
     param($Expected, $Actual, [string]$Because)
@@ -290,6 +295,20 @@ function New-SyntheticReleaseRepository {
     Write-Utf8NoBom `
         -Path (Join-Path $root 'src\Albumen.App\packages.lock.json') `
         -Content '{"version":2,"dependencies":{}}'
+    $modelFiles = [ordered]@{}
+    foreach ($model in @(@('vision', 'vision.onnx'), @('text', 'text.onnx'), @('tokenizer', 'tokenizer.model'))) {
+        $modelPath = Join-Path $syntheticModels $model[1]
+        $modelFiles[$model[0]] = [ordered]@{
+            path = $model[1]
+            length = (Get-Item -LiteralPath $modelPath).Length
+            sha256 = Get-Sha256 -Path $modelPath
+        }
+    }
+    $modelManifestPath = Join-Path $root 'src\Albumen.Infrastructure.Onnx\models\manifest.json'
+    [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($modelManifestPath)) | Out-Null
+    Write-Utf8NoBom `
+        -Path $modelManifestPath `
+        -Content ([pscustomobject][ordered]@{ schemaVersion = 1; files = $modelFiles } | ConvertTo-Json -Depth 4)
     Write-Utf8NoBom `
         -Path (Join-Path $root 'THIRD-PARTY-NOTICES.md') `
         -Content '# Synthetic complete notices'
@@ -305,13 +324,19 @@ function New-SyntheticReleaseRepository {
     $componentSpecifications = @(
         @{ Name = '.NET Host'; Version = '10.0.11'; Paths = @('Albumen.App.exe'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = '.NET Runtime'; Version = '10.0.11'; Paths = @('coreclr.dll', 'System.Net.Http.dll', 'WindowsBase.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
+        @{ Name = 'Google.Protobuf'; Version = '3.30.2'; Paths = @('Google.Protobuf.dll'); License = 'BSD-3-Clause'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Microsoft.Data.Sqlite'; Version = '10.0.11'; Paths = @(); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Microsoft.Data.Sqlite.Core'; Version = '10.0.11'; Paths = @('Microsoft.Data.Sqlite.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
+        @{ Name = 'Microsoft.ML.OnnxRuntime'; Version = '1.31.0'; Paths = @('onnxruntime.dll', 'onnxruntime_providers_shared.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
+        @{ Name = 'Microsoft.ML.OnnxRuntime.Managed'; Version = '1.31.0'; Paths = @('Microsoft.ML.OnnxRuntime.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
+        @{ Name = 'Microsoft.ML.Tokenizers'; Version = '2.0.1'; Paths = @('Microsoft.ML.Tokenizers.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Native SQLite'; Version = '3.49.1'; Paths = @('e_sqlite3.dll'); License = 'blessing'; LicensePaths = @('licenses/SQLite-Blessing.txt') },
         @{ Name = 'SQLitePCLRaw.bundle_e_sqlite3'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.batteries_v2.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
         @{ Name = 'SQLitePCLRaw.core'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.core.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
         @{ Name = 'SQLitePCLRaw.lib.e_sqlite3'; Version = '2.1.12'; Paths = @('e_sqlite3.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
         @{ Name = 'SQLitePCLRaw.provider.e_sqlite3'; Version = '2.1.12'; Paths = @('SQLitePCLRaw.provider.e_sqlite3.dll'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
+        @{ Name = 'SigLIP 2 base patch16-224 (ONNX export)'; Version = '1'; Paths = @('models/text.onnx', 'models/tokenizer.model', 'models/vision.onnx'); License = 'Apache-2.0'; LicensePaths = @('licenses/Apache-2.0.txt') },
+        @{ Name = 'System.Numerics.Tensors'; Version = '9.0.0'; Paths = @('System.Numerics.Tensors.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Windows Desktop / WPF'; Version = '10.0.11'; Paths = @('D3DCompiler_47_cor3.dll', 'PresentationCore.dll', 'WindowsBase.dll', 'cs/PresentationCore.resources.dll', 'de/PresentationCore.resources.dll', 'wpfgfx_cor3.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') })
     $inventory = [pscustomobject][ordered]@{
         schemaVersion = 1
@@ -393,7 +418,12 @@ function New-SyntheticPackagesRoot {
             @{ Id = 'SQLitePCLRaw.bundle_e_sqlite3'; Version = '2.1.12'; License = 'Apache-2.0' },
             @{ Id = 'SQLitePCLRaw.core'; Version = '2.1.12'; License = 'Apache-2.0' },
             @{ Id = 'SQLitePCLRaw.lib.e_sqlite3'; Version = '2.1.12'; License = 'Apache-2.0' },
-            @{ Id = 'SQLitePCLRaw.provider.e_sqlite3'; Version = '2.1.12'; License = 'Apache-2.0' }
+            @{ Id = 'SQLitePCLRaw.provider.e_sqlite3'; Version = '2.1.12'; License = 'Apache-2.0' },
+            @{ Id = 'Google.Protobuf'; Version = '3.30.2'; License = 'BSD-3-Clause' },
+            @{ Id = 'Microsoft.ML.OnnxRuntime'; Version = '1.31.0'; License = 'MIT' },
+            @{ Id = 'Microsoft.ML.OnnxRuntime.Managed'; Version = '1.31.0'; License = 'MIT' },
+            @{ Id = 'Microsoft.ML.Tokenizers'; Version = '2.0.1'; License = 'MIT' },
+            @{ Id = 'System.Numerics.Tensors'; Version = '9.0.0'; License = 'MIT' }
         )) {
         $packagePath = Join-Path $root ($package.Id.ToLowerInvariant() + '\' + $package.Version)
         [System.IO.Directory]::CreateDirectory($packagePath) | Out-Null
@@ -430,7 +460,8 @@ function New-SyntheticPackagesRoot {
 function Write-SyntheticPublishOutput {
     param(
         [string]$OutputPath,
-        [bool]$Drift
+        [bool]$Drift,
+        [string]$SourcePath
     )
 
     [System.IO.Directory]::CreateDirectory($OutputPath) | Out-Null
@@ -466,7 +497,13 @@ function Write-SyntheticPublishOutput {
             'WindowsBase.dll',
             'cs/PresentationCore.resources.dll',
             'de/PresentationCore.resources.dll',
-            'wpfgfx_cor3.dll')) {
+            'wpfgfx_cor3.dll',
+            'Google.Protobuf.dll',
+            'Microsoft.ML.OnnxRuntime.dll',
+            'Microsoft.ML.Tokenizers.dll',
+            'System.Numerics.Tensors.dll',
+            'onnxruntime.dll',
+            'onnxruntime_providers_shared.dll')) {
         $content = "synthetic $file"
         if ($Drift -and $file -ceq 'Albumen.App.dll') {
             $content += ' drift'
@@ -475,6 +512,10 @@ function Write-SyntheticPublishOutput {
         [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($filePath)) | Out-Null
         Write-Utf8NoBom -Path $filePath -Content $content
     }
+    [System.IO.Directory]::CreateDirectory((Join-Path $OutputPath 'models')) | Out-Null
+    [System.IO.File]::Copy(
+        (Join-Path $SourcePath 'src\Albumen.Infrastructure.Onnx\models\manifest.json'),
+        (Join-Path $OutputPath 'models\manifest.json'))
 }
 
 function New-SyntheticReleaseOperations {
@@ -523,6 +564,11 @@ function New-SyntheticReleaseOperations {
                     'SQLitePCLRaw.core/2.1.12' = @{ type = 'package' }
                     'SQLitePCLRaw.lib.e_sqlite3/2.1.12' = @{ type = 'package' }
                     'SQLitePCLRaw.provider.e_sqlite3/2.1.12' = @{ type = 'package' }
+                    'Google.Protobuf/3.30.2' = @{ type = 'package' }
+                    'Microsoft.ML.OnnxRuntime/1.31.0' = @{ type = 'package' }
+                    'Microsoft.ML.OnnxRuntime.Managed/1.31.0' = @{ type = 'package' }
+                    'Microsoft.ML.Tokenizers/2.0.1' = @{ type = 'package' }
+                    'System.Numerics.Tensors/9.0.0' = @{ type = 'package' }
                 }
                 if (-not [string]::IsNullOrWhiteSpace($ExtraRestoredPackage)) {
                     $restoredLibraries[$ExtraRestoredPackage] = @{ type = 'package' }
@@ -547,6 +593,7 @@ function New-SyntheticReleaseOperations {
                 }
                 Write-SyntheticPublishOutput `
                     -OutputPath $Arguments[$outputIndex + 1] `
+                    -SourcePath $WorkingDirectory `
                     -Drift ($DriftSecondPublish -and $state.PublishCount -eq 2)
                 if ($null -ne $AfterPublish) {
                     & $AfterPublish $Arguments[$outputIndex + 1] $state.PublishCount
@@ -791,7 +838,7 @@ try {
     }
 
     $emptyModelDirectory = Copy-Package -SourcePath $cleanPackage -Name 'forbidden-empty-model-directory'
-    [System.IO.Directory]::CreateDirectory((Join-Path $emptyModelDirectory 'models')) | Out-Null
+    [System.IO.Directory]::CreateDirectory((Join-Path $emptyModelDirectory 'nested\models')) | Out-Null
     Assert-ThrowsLike `
         -Action { Test-AlbumenRelease -PackagePath $emptyModelDirectory | Out-Null } `
         -Pattern 'forbidden|model' `
@@ -900,7 +947,7 @@ try {
     $nestedCalls = [System.Collections.Generic.List[object]]::new()
     $nestedOperations = New-SyntheticReleaseOperations -Calls $nestedCalls -DriftSecondPublish $false
     Assert-ThrowsLike -Action {
-        & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot (Join-Path $syntheticRepository 'nested-output') -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $nestedOperations | Out-Null
+        & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot (Join-Path $syntheticRepository 'nested-output') -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -ModelsRoot $syntheticModels -SourceIdentity 'synthetic' -CaptureOnly -Operations $nestedOperations | Out-Null
     } -Pattern 'outside.*repository' -Because 'output must not recursively enter the source copy'
     Assert-Equal 0 $nestedCalls.Count 'nested output must be rejected before any external call'
 
@@ -917,7 +964,7 @@ try {
                 -OutputRoot $wrongSdkOutput `
                 -SdkRoot $syntheticSdk `
                 -PackagesRoot $syntheticPackages `
-                -SourceIdentity 'synthetic-source-identity' `
+                -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
                 -CaptureOnly `
                 -Operations $wrongSdkOperations | Out-Null
         } `
@@ -979,7 +1026,7 @@ try {
         $downloadOperations = New-SyntheticReleaseOperations -Calls $downloadCalls -DriftSecondPublish $false -AfterRestore $downloadCase.Mutate
         $downloadOutput = Join-Path $testRoot $downloadCase.Name
         Assert-ThrowsLike -Action {
-            & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot $downloadOutput -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $downloadOperations | Out-Null
+            & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot $downloadOutput -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -ModelsRoot $syntheticModels -SourceIdentity 'synthetic' -CaptureOnly -Operations $downloadOperations | Out-Null
         } -Pattern 'download|self-contained|exact' -Because 'self-contained restore must require exactly the pinned runtime downloads'
         Assert-True ([System.IO.File]::Exists((Join-Path $downloadOutput 'evidence/restore-1-project.assets.json'))) 'failed restore validation must retain the actual assets input'
         Assert-Equal 'sdk-version,restore-1' ($downloadCalls.Name -join ',') 'download metadata drift must stop before publish'
@@ -991,7 +1038,7 @@ try {
         -DriftSecondPublish $false `
         -ExtraRestoredPackage 'Microsoft.NETCore.App.Runtime.win-x64/10.0.11'
     Assert-ThrowsLike -Action {
-        & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot (Join-Path $testRoot 'runtime-pack-library') -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $runtimeLibraryOperations | Out-Null
+        & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot (Join-Path $testRoot 'runtime-pack-library') -SdkRoot $syntheticSdk -PackagesRoot $syntheticPackages -ModelsRoot $syntheticModels -SourceIdentity 'synthetic' -CaptureOnly -Operations $runtimeLibraryOperations | Out-Null
     } -Pattern 'package|dependency closure|runtime' -Because 'build-only PackageDownload metadata must never make a runtime pack an approved application library'
     Assert-Equal 'sdk-version,restore-1' ($runtimeLibraryCalls.Name -join ',') 'a restored runtime-pack library must stop before publish'
 
@@ -1008,7 +1055,7 @@ try {
         -OutputRoot $captureOutput `
         -SdkRoot $syntheticSdk `
         -PackagesRoot $syntheticPackages `
-        -SourceIdentity 'synthetic-source-identity' `
+        -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
         -CaptureOnly `
         -Operations $captureOperations
     Assert-Equal 'needs-license-inventory' $captureResult.status 'capture-only mode must stop before candidate packaging'
@@ -1037,7 +1084,7 @@ try {
         Join-Path $captureOutput 'evidence\dependency-capture.json') | ConvertFrom-Json
     Assert-Equal 1 $dependencyCapture.schemaVersion 'dependency capture schema must be versioned'
     Assert-Equal `
-        '.NET Host,.NET Runtime,Microsoft.Data.Sqlite,Microsoft.Data.Sqlite.Core,Native SQLite,SQLitePCLRaw.bundle_e_sqlite3,SQLitePCLRaw.core,SQLitePCLRaw.lib.e_sqlite3,SQLitePCLRaw.provider.e_sqlite3,Windows Desktop / WPF' `
+        '.NET Host,.NET Runtime,Google.Protobuf,Microsoft.Data.Sqlite,Microsoft.Data.Sqlite.Core,Microsoft.ML.OnnxRuntime,Microsoft.ML.OnnxRuntime.Managed,Microsoft.ML.Tokenizers,Native SQLite,SQLitePCLRaw.bundle_e_sqlite3,SQLitePCLRaw.core,SQLitePCLRaw.lib.e_sqlite3,SQLitePCLRaw.provider.e_sqlite3,SigLIP 2 base patch16-224 (ONNX export),System.Numerics.Tensors,Windows Desktop / WPF' `
         (($dependencyCapture.components | ForEach-Object { $_.name }) -join ',') `
         'capture-only mode must enumerate every required shipped/runtime component'
     foreach ($frameworkComponent in @('.NET Runtime', 'Windows Desktop / WPF')) {
@@ -1052,8 +1099,8 @@ try {
     Assert-Equal '3.49.1' $nativeSqliteCapture.version 'native SQLite version must come from the shipped binary evidence'
     Assert-Equal 'e_sqlite3.dll' ($nativeSqliteCapture.shippedPaths -join ',') 'native SQLite must map to its exact shipped path'
     Assert-True `
-        (@($dependencyCapture.packages).Count -eq 9) `
-        'capture-only mode must retain exact local metadata for both runtime packs, host pack, and all SQLite NuGet packages'
+        (@($dependencyCapture.packages).Count -eq 14) `
+        'capture-only mode must retain exact local metadata for both runtime packs, host pack, and all SQLite and ONNX NuGet packages'
     Assert-True `
         ([System.IO.File]::Exists((Join-Path $captureOutput 'evidence\license-sources\microsoft.netcore.app.runtime.win-x64\10.0.11\LICENSE.txt'))) `
         'capture-only mode must preserve local package license sources for review without downloading anything'
@@ -1083,7 +1130,7 @@ try {
                 -OutputRoot (Join-Path $testRoot ($overlapCase.Name + '-output')) `
                 -SdkRoot $syntheticSdk `
                 -PackagesRoot $overlapPackages `
-                -SourceIdentity 'synthetic-source-identity' `
+                -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
                 -CaptureOnly `
                 -Operations $overlapOperations | Out-Null
         } -Pattern $overlapCase.Pattern -Because 'only exact-case, same-Type overlap between the two pinned components is permitted'
@@ -1186,7 +1233,7 @@ try {
                     -OutputRoot $auditOutput `
                     -SdkRoot $syntheticSdk `
                     -PackagesRoot $syntheticPackages `
-                    -SourceIdentity 'synthetic-source-identity' `
+                    -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
                     -CaptureOnly `
                     -Operations $auditOperations | Out-Null
             } `
@@ -1214,7 +1261,7 @@ try {
         $sqliteOperations = New-SyntheticReleaseOperations -Calls $sqliteCalls -DriftSecondPublish $false -AfterPublish $sqliteMutation
         $sqliteOperations.Remove('GetFileVersion')
         Assert-ThrowsLike -Action {
-            & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot (Join-Path $testRoot $sqliteCase.Name) -SdkRoot $syntheticSdk -PackagesRoot $sqlitePackages -SourceIdentity 'synthetic' -CaptureOnly -Operations $sqliteOperations | Out-Null
+            & $builderPath -RepositoryRoot $syntheticRepository -OutputRoot (Join-Path $testRoot $sqliteCase.Name) -SdkRoot $syntheticSdk -PackagesRoot $sqlitePackages -ModelsRoot $syntheticModels -SourceIdentity 'synthetic' -CaptureOnly -Operations $sqliteOperations | Out-Null
         } -Pattern $sqliteCase.Pattern -Because 'static native SQLite version evidence must be unique, delimited and complete'
     }
 
@@ -1231,7 +1278,7 @@ try {
                 -OutputRoot $collisionOutput `
                 -SdkRoot $syntheticSdk `
                 -PackagesRoot $syntheticPackages `
-                -SourceIdentity 'synthetic-source-identity' `
+                -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
                 -CaptureOnly `
                 -Operations $collisionOperations | Out-Null
         } `
@@ -1260,7 +1307,7 @@ try {
                 -OutputRoot $reparseOutput `
                 -SdkRoot $syntheticSdk `
                 -PackagesRoot $syntheticPackages `
-                -SourceIdentity 'synthetic-source-identity' `
+                -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
                 -CaptureOnly `
                 -Operations $reparseOperations | Out-Null
         } `
@@ -1307,7 +1354,7 @@ try {
                     -OutputRoot (Join-Path $testRoot ($runtimeListMismatch.Name + '-output')) `
                     -SdkRoot $syntheticSdk `
                     -PackagesRoot $mismatchedPackages `
-                    -SourceIdentity 'synthetic-source-identity' `
+                    -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
                     -CaptureOnly `
                     -Operations $mismatchOperations | Out-Null
             } `
@@ -1329,7 +1376,7 @@ try {
                 -OutputRoot $unapprovedDependencyOutput `
                 -SdkRoot $syntheticSdk `
                 -PackagesRoot $syntheticPackages `
-                -SourceIdentity 'synthetic-source-identity' `
+                -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
                 -CaptureOnly `
                 -Operations $unapprovedDependencyOperations | Out-Null
         } `
@@ -1347,7 +1394,7 @@ try {
         -OutputRoot $builderOutput `
         -SdkRoot $syntheticSdk `
         -PackagesRoot $syntheticPackages `
-        -SourceIdentity 'synthetic-source-identity' `
+        -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
         -Operations $builderOperations
     Assert-Equal 5 $builderCalls.Count 'the builder must probe the SDK and perform one locked restore for each of two clean publishes'
     Assert-Equal 'publish-1,publish-2,restore-1,restore-2,sdk-version' `
@@ -1423,9 +1470,9 @@ try {
     $candidateNativePolicy = Get-Content -Raw -LiteralPath (
         Join-Path $candidatePath 'release-native-paths.json') | ConvertFrom-Json
     Assert-Equal `
-        'D3DCompiler_47_cor3.dll,coreclr.dll,e_sqlite3.dll,wpfgfx_cor3.dll' `
+        'D3DCompiler_47_cor3.dll,coreclr.dll,e_sqlite3.dll,onnxruntime.dll,onnxruntime_providers_shared.dll,wpfgfx_cor3.dll' `
         ($candidateNativePolicy.nativePaths -join ',') `
-        'the builder must derive the exact native closure from the pinned runtime packs plus SQLite'
+        'the builder must derive the exact native closure from the pinned runtime packs plus SQLite and ONNX Runtime'
     Assert-Equal $true $buildResult.inventoriesEqual 'the successful builder result must report exact tuple equality'
     Assert-Equal 'pending-owner-approval' $buildResult.status 'a provisional candidate must stop at the redistribution owner gate'
     Assert-Equal 'path,length,sha256' ($buildResult.comparedFields -join ',') 'determinism must be bounded to exact path, length, and SHA-256 tuples'
@@ -1444,7 +1491,7 @@ try {
         -OutputRoot $approvedOutput `
         -SdkRoot $syntheticSdk `
         -PackagesRoot $syntheticPackages `
-        -SourceIdentity 'owner-approved-source-identity' `
+        -ModelsRoot $syntheticModels -SourceIdentity 'owner-approved-source-identity' `
         -Operations $approvedOperations
     Assert-Equal `
         'owner-approved' `
@@ -1477,7 +1524,7 @@ try {
                 -OutputRoot $mismatchedOutput `
                 -SdkRoot $syntheticSdk `
                 -PackagesRoot $syntheticPackages `
-                -SourceIdentity 'synthetic-source-identity' `
+                -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
                 -Operations $mismatchedOperations | Out-Null
         } `
         -Pattern 'inventory|shipped path|component' `
@@ -1499,7 +1546,7 @@ try {
                 -OutputRoot $driftOutput `
                 -SdkRoot $syntheticSdk `
                 -PackagesRoot $syntheticPackages `
-                -SourceIdentity 'synthetic-source-identity' `
+                -ModelsRoot $syntheticModels -SourceIdentity 'synthetic-source-identity' `
                 -Operations $driftOperations | Out-Null
         } `
         -Pattern 'determin|differ|inventory' `
