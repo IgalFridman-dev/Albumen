@@ -19,10 +19,10 @@ public sealed class GroupedReviewNavigationTests
         var fixture = GroupedReviewFixture.Create();
 
         Assert.Collection(fixture.ViewModel.ReviewCategories,
-            row => AssertCategory(row, ReviewCategoryKind.Exact, "Exact", 1),
-            row => AssertCategory(row, ReviewCategoryKind.Near, "Near", 1),
-            row => AssertCategory(row, ReviewCategoryKind.Uncertain, "Uncertain", 1),
-            row => AssertCategory(row, ReviewCategoryKind.CouldNotAnalyze, "Could Not Analyze", 1));
+            row => AssertCategory(row, ReviewCategoryKind.Exact, "Identical copies", 1),
+            row => AssertCategory(row, ReviewCategoryKind.Near, "Look-alike", 1),
+            row => AssertCategory(row, ReviewCategoryKind.Uncertain, "Maybe similar", 1),
+            row => AssertCategory(row, ReviewCategoryKind.CouldNotAnalyze, "Couldn't check", 1));
     }
 
     [Fact]
@@ -42,7 +42,7 @@ public sealed class GroupedReviewNavigationTests
         Assert.Same(near, fixture.ViewModel.ActiveReviewCategory);
         Assert.Null(fixture.ViewModel.ActiveReviewGroup);
         Assert.Null(fixture.ViewModel.ActiveReviewMember);
-        Assert.Equal(["Review", "Near"], fixture.ViewModel.ReviewBreadcrumbs);
+        Assert.Equal(["Review", "Look-alike"], fixture.ViewModel.ReviewBreadcrumbs);
 
         var group = near.Groups[0];
         await fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(group);
@@ -50,7 +50,8 @@ public sealed class GroupedReviewNavigationTests
         Assert.Equal(ReviewNavigationLevel.Comparisons, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Same(group, fixture.ViewModel.ActiveReviewGroup);
         Assert.Null(fixture.ViewModel.ActiveReviewMember);
-        Assert.Equal(["Review", "Near", group.Summary], fixture.ViewModel.ReviewBreadcrumbs);
+        Assert.StartsWith("Set 1: ", group.Summary, StringComparison.Ordinal);
+        Assert.Equal(["Review", "Look-alike", group.Summary], fixture.ViewModel.ReviewBreadcrumbs);
 
         var member = group.Members[1];
         await fixture.ViewModel.OpenReviewMemberCommand.ExecuteAsync(member);
@@ -73,6 +74,51 @@ public sealed class GroupedReviewNavigationTests
         Assert.Same(sourceScan, fixture.Workflow.Current.Scan);
         Assert.Same(sourceReview, fixture.Workflow.Current.Review);
         Assert.Empty(fixture.Workflow.SelectionCommands);
+    }
+
+    [Fact]
+    public async Task AMarkHeldInAnotherSetShowsAsMarkedHereAndSettlesThePair()
+    {
+        var fixture = GroupedReviewFixture.CreateOverlapping();
+        var exact = fixture.ViewModel.ReviewCategories[0].Groups[0];
+        var near = fixture.ViewModel.ReviewCategories[1].Groups[0];
+        var uncertain = fixture.ViewModel.ReviewCategories[2].Groups[0];
+        var markedHere = exact.Members[0];
+        var markedElsewhere = near.Members[0];
+
+        Assert.Equal("Marked for removal", markedHere.EligibilityText);
+        Assert.True(markedHere.CanSelect);
+        Assert.False(markedHere.IsMarkedElsewhere);
+        Assert.Equal("1 photo marked for removal", exact.SelectionStatus);
+        Assert.False(exact.IsSettledElsewhere);
+
+        Assert.Equal("Marked for removal in Identical copies set 1", markedElsewhere.EligibilityText);
+        Assert.True(markedElsewhere.IsSelected);
+        Assert.True(markedElsewhere.IsMarkedElsewhere);
+        Assert.False(markedElsewhere.CanSelect);
+        Assert.False(markedElsewhere.ToggleSelectionCommand!.CanExecute(null));
+        Assert.StartsWith("Marked for removal: ", markedElsewhere.AutomationName, StringComparison.Ordinal);
+        Assert.StartsWith("Marked for removal in Identical copies set 1;", markedElsewhere.ItemStatus,
+            StringComparison.Ordinal);
+        Assert.Equal("Kept", near.Members[1].EligibilityText);
+        Assert.True(near.Members[1].CanSelect);
+        Assert.Equal("Nothing left to decide: 1 marked elsewhere", near.SelectionStatus);
+        Assert.True(near.IsSettledElsewhere);
+        Assert.False(near.SelectAllCommand.CanExecute(null));
+
+        Assert.Equal("Nothing marked yet; 1 marked elsewhere", uncertain.SelectionStatus);
+        Assert.False(uncertain.IsSettledElsewhere);
+        Assert.True(uncertain.SelectAllCommand.CanExecute(null));
+        await uncertain.SelectAllCommand.ExecuteAsync();
+        var selectAll = Assert.Single(fixture.Workflow.SelectionCommands);
+        Assert.Equal([21L, 22L], selectAll.OccurrenceIds);
+
+        await fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(fixture.ViewModel.ReviewCategories[1]);
+        await fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(near);
+        await fixture.ViewModel.OpenReviewMemberCommand.ExecuteAsync(markedElsewhere);
+
+        Assert.Same(markedElsewhere, fixture.ViewModel.ActiveReviewMember);
+        Assert.Single(fixture.Workflow.SelectionCommands);
     }
 
     [Fact]
@@ -192,6 +238,9 @@ internal sealed class GroupedReviewFixture
 
     public static GroupedReviewFixture CreateLarge(int groupCount) =>
         new(new GroupedReviewWorkflow(GroupedReviewData.LargeSnapshot(groupCount)));
+
+    public static GroupedReviewFixture CreateOverlapping() =>
+        new(new GroupedReviewWorkflow(GroupedReviewData.OverlappingSnapshot));
 }
 
 internal sealed class GroupedReviewWorkflow : IPhotoSiftWorkflow
@@ -219,6 +268,7 @@ internal sealed class GroupedReviewWorkflow : IPhotoSiftWorkflow
     public Task CancelScanAsync() => Task.CompletedTask;
     public Task OpenReviewAsync() => Task.CompletedTask;
     public Task NavigateAsync(WorkflowPhase phase) => Task.CompletedTask;
+    public Task ContinueReviewAsync() => Task.CompletedTask;
     public Task RevalidateUnknownAsync(Guid requestId, CancellationToken token) => Task.CompletedTask;
 
     public Task<ReviewCommandResult> ChangeReviewSelectionAsync(
@@ -301,6 +351,58 @@ internal static class GroupedReviewData
         return new PhotoSiftSnapshot(scope, new(scope.Revision, 3), scan, WorkflowPhase.Review,
             InitialWorkflow.Create()) { Review = review };
     };
+
+    // Photo 1 is in the Identical-copies set (marked there), in the Look-alike pair and in
+    // a Maybe-similar set of three. The one mark is projected into the other two sets.
+    internal static PhotoSiftSnapshot OverlappingSnapshot(ShellSnapshot scope)
+    {
+        var pin = new ScanPin(Guid.Parse("13000000-0000-0000-0000-000000000001"), scope.Revision, 3, 5);
+        var shared = Analyzed(pin, 1);
+        var exact = Group(pin, ExactGroupId, CandidateCategory.Exact, false,
+            [Member(shared, selected: true), Member(Analyzed(pin, 2))], selected: [1]);
+        var near = Group(pin, NearGroupId, CandidateCategory.NearDuplicate, false,
+            [Member(shared, selectedIn: ExactGroupId), Member(Analyzed(pin, 12))]);
+        var uncertain = Group(pin, UncertainGroupId, CandidateCategory.Uncertain, true,
+            [Member(shared, selectedIn: ExactGroupId), Member(Analyzed(pin, 21)), Member(Analyzed(pin, 22))]);
+        var groups = ImmutableArray.Create(exact.Candidate, near.Candidate, uncertain.Candidate);
+        var occurrences = groups.SelectMany(group => group.Members).DistinctBy(row => row.Token.OccurrenceId)
+            .ToImmutableArray();
+        var scan = new ScanSnapshot(pin, ScanStatus.Complete,
+            new(ScanStageState.Succeeded, ScanReason.None), occurrences, groups,
+            new(occurrences.Length, occurrences.Length, 0, 0, 0, 0));
+        var review = new ReviewSnapshot(
+            new(Guid.Parse("23000000-0000-0000-0000-000000000001"), pin),
+            ReviewStatus.Ready,
+            ScanStatus.Complete,
+            2,
+            [exact, near, uncertain],
+            new(0, 0, 0, 0, 0, 0, 0),
+            false,
+            null,
+            ReviewUnavailableReason.None);
+        return new PhotoSiftSnapshot(scope, new(scope.Revision, 3), scan, WorkflowPhase.Review,
+            InitialWorkflow.Create()) { Review = review };
+    }
+
+    private static ReviewMemberSnapshot Member(ScanFileOccurrence occurrence, bool selected = false,
+        Guid? selectedIn = null) =>
+        new(occurrence, ReviewEligibilityState.Eligible, ReviewUnavailableReason.None, selected, selectedIn);
+
+    private static ReviewGroupSnapshot Group(
+        ScanPin pin,
+        Guid groupId,
+        CandidateCategory category,
+        bool uncertain,
+        ImmutableArray<ReviewMemberSnapshot> members,
+        ImmutableArray<long> selected = default)
+    {
+        var candidate = new CandidateGroup(groupId, 4, pin, category,
+            members.Select(member => member.Occurrence).ToImmutableArray(), [], uncertain,
+            null, new(1024, RecoveryUnavailableReason.None));
+        return new ReviewGroupSnapshot(candidate, members,
+            selected.IsDefault ? ImmutableHashSet<long>.Empty : selected.ToImmutableHashSet(),
+            new(0, SelectionRecoveryUnavailableReason.None), false, null);
+    }
 
     internal static PhotoSiftSnapshot NearFeatureFailureSnapshot(ShellSnapshot scope)
     {

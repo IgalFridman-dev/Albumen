@@ -24,17 +24,34 @@ internal sealed class ReviewStore
         openRequest = request;
         context = new(session.Scan, request.Scope.Preflight!.Scope!);
         originals = request.Scan.Groups.ToImmutableDictionary(g => g.GroupId);
-        Current = new(session, ReviewStatus.Revalidating, request.Scan.Status, 1,
-            request.Scan.Groups.Select(g => new ReviewGroupSnapshot(g,
-                g.Members.Select(m => new ReviewMemberSnapshot(m, ReviewEligibilityState.PendingRevalidation,
-                    ReviewUnavailableReason.None, false)).ToImmutableArray(), [],
-                new(0, SelectionRecoveryUnavailableReason.None), false, null)).ToImmutableArray(),
+        var groups = request.Scan.Groups.Select(g => OpenGroup(g, request)).ToImmutableArray();
+        RunGroups = groups.Where(g => !g.Closed).Select(ForPolicy).ToImmutableArray();
+        Current = new(session, ReviewStatus.Revalidating, request.Scan.Status, 1, groups,
             new(request.Scan.Enumeration.State == ScanStageState.Succeeded ? 0 : 1,
                 request.Scan.Counts.Failed, request.Scan.Counts.Canceled, request.Scan.Counts.Outstanding, 0, 0, 0),
             false, null, ReviewUnavailableReason.None);
         Refresh(Current.Groups);
     }
     internal ReviewSnapshot Current { get; private set; }
+    // What the run revalidates: the open sets, each without the photos that left it.
+    internal ImmutableArray<CandidateGroup> RunGroups { get; }
+
+    // PM-013: a continuation leaves out the photos the cleanup moved to the Recycle
+    // Bin. A set closes when the request names it, when fewer than two photos are
+    // left, or when its identical copies no longer span two physical files. Closed
+    // members are not under review: nothing revalidates, marks or counts them.
+    private static ReviewGroupSnapshot OpenGroup(CandidateGroup group, ReviewOpenRequest request)
+    {
+        var members = group.Members
+            .Where(m => !request.ExcludedOccurrenceIds.Contains(m.Token.OccurrenceId)).ToImmutableArray();
+        var closed = request.ClosedGroupIds.Contains(group.GroupId) || members.Length < 2
+            || (group.Category == CandidateCategory.Exact
+                && members.Select(m => m.PhysicalFileKey).Distinct().Count() < 2);
+        return new ReviewGroupSnapshot(group, members.Select(m => closed
+                ? new ReviewMemberSnapshot(m, ReviewEligibilityState.Unavailable, ReviewUnavailableReason.Stale, false)
+                : new ReviewMemberSnapshot(m, ReviewEligibilityState.PendingRevalidation, ReviewUnavailableReason.None, false))
+            .ToImmutableArray(), [], new(0, SelectionRecoveryUnavailableReason.None), false, null) { Closed = closed };
+    }
 
     internal bool MatchesApprovedAction(ApprovedActionRequest request) =>
         Current.Sealed && Current.Status != ReviewStatus.Faulted
@@ -54,7 +71,7 @@ internal sealed class ReviewStore
     {
         var selected = Current.ApprovedRequest?.SelectedOccurrenceIds.ToImmutableHashSet()
             ?? GlobalSelection(Current.Groups);
-        return Current.Groups.Where(group => group.Members.Any(member =>
+        return Current.Groups.Where(group => !group.Closed && group.Members.Any(member =>
                 selected.Contains(member.Occurrence.Token.OccurrenceId)))
             .Select(ForPolicy).ToImmutableArray();
     }
@@ -147,6 +164,7 @@ internal sealed class ReviewStore
         var group = Current.Groups.FirstOrDefault(g => g.Candidate.GroupId == command.Pin.GroupId);
         if (group is null || group.Candidate.GroupRevision != command.Pin.GroupRevision
             || Current.SelectionRevision != command.Pin.SelectionRevision) return Result(ReviewCommandOutcome.Stale);
+        if (group.Closed) return Result(ReviewCommandOutcome.Invalid);
         if (!Enum.IsDefined(command.Kind) || command.CommandId == Guid.Empty || command.OccurrenceIds.IsDefault
             || command.OccurrenceIds.Distinct().Count() != command.OccurrenceIds.Length) return Result(ReviewCommandOutcome.Invalid);
         if (command.OccurrenceIds.Any(id => !group.Members.Any(m => m.Occurrence.Token.OccurrenceId == id)))
@@ -169,7 +187,8 @@ internal sealed class ReviewStore
         var decision = SurvivorPolicy.Evaluate(candidate, eligible, combined);
         if (!combined.SetEquals(proposed) && decision.Kind != SurvivorDecisionKind.Allowed)
             return Result(ReviewCommandOutcome.Invalid);
-        foreach (var other in Current.Groups.Where(candidateGroup => candidateGroup != group))
+        // A closed set holds no marks and takes no projection of the global selection.
+        foreach (var other in Current.Groups.Where(candidateGroup => candidateGroup != group && !candidateGroup.Closed))
         {
             var otherCombined = SelectionFor(other, globalSelection);
             if (otherCombined.SetEquals(other.SelectedOccurrenceIds)) continue;
@@ -436,10 +455,17 @@ internal sealed class ReviewStore
     private void Refresh(ImmutableArray<ReviewGroupSnapshot> groups)
     {
         var selected = GlobalSelection(groups);
+        var holders = SelectionHolders(groups);
         groups = groups.Select(g => g with
         {
+            Members = g.Members.Select(m => m with
+            {
+                SelectedInGroup = !m.Selected
+                    && holders.TryGetValue(m.Occurrence.Token.OccurrenceId, out var holder)
+                    && holder != g.Candidate.GroupId ? holder : null,
+            }).ToImmutableArray(),
             Recovery = SelectionAccounting.Calculate(ForPolicy(g), Eligible(g),
-                SelectionFor(g, selected)),
+                g.Closed ? ImmutableHashSet<long>.Empty : SelectionFor(g, selected)),
         }).ToImmutableArray();
         var counts = ReviewMemberCounts(groups, selected);
         Current = Current with
@@ -499,7 +525,7 @@ internal sealed class ReviewStore
         var globalSelection = GlobalSelection(Current.Groups);
         foreach (var selectedId in globalSelection)
         {
-            var copies = Current.Groups.SelectMany(group => group.Members)
+            var copies = Current.Groups.Where(group => !group.Closed).SelectMany(group => group.Members)
                 .Where(member => member.Occurrence.Token.OccurrenceId == selectedId)
                 .ToArray();
             if (copies.Length == 0 || copies.Any(member =>
@@ -520,6 +546,17 @@ internal sealed class ReviewStore
                     != group.SelectedOccurrenceIds.Contains(member.Occurrence.Token.OccurrenceId)))
             {
                 return Result(ReviewCommandOutcome.Stale);
+            }
+
+            if (group.Closed)
+            {
+                if (!group.SelectedOccurrenceIds.IsEmpty || group.OverrideEvidenceId is not null
+                    || attachedOverrideEvidence.ContainsKey(group.Candidate.GroupId))
+                {
+                    return Result(ReviewCommandOutcome.Invalid);
+                }
+
+                continue;
             }
 
             var eligible = Eligible(group);
@@ -663,7 +700,8 @@ internal sealed class ReviewStore
         ImmutableHashSet<long> selected)
     {
         var membersById = new Dictionary<long, ScanFileOccurrence>();
-        foreach (var member in groups.SelectMany(group => group.Members)
+        var open = groups.Where(group => !group.Closed).ToImmutableArray();
+        foreach (var member in open.SelectMany(group => group.Members)
                      .Select(member => member.Occurrence))
         {
             var id = member.Token.OccurrenceId;
@@ -673,7 +711,7 @@ internal sealed class ReviewStore
         }
         var members = membersById.Values.OrderBy(member => member.Token.OccurrenceId)
             .ToImmutableArray();
-        var eligible = groups.SelectMany(group => group.Members)
+        var eligible = open.SelectMany(group => group.Members)
             .Where(member => member.Eligibility == ReviewEligibilityState.Eligible)
             .Select(member => member.Occurrence.Token.OccurrenceId)
             .ToImmutableHashSet();
@@ -789,6 +827,15 @@ internal sealed class ReviewStore
     private static ImmutableHashSet<long> GlobalSelection(
         ImmutableArray<ReviewGroupSnapshot> groups) => groups
         .SelectMany(group => group.SelectedOccurrenceIds).ToImmutableHashSet();
+    private static ImmutableDictionary<long, Guid> SelectionHolders(
+        ImmutableArray<ReviewGroupSnapshot> groups)
+    {
+        var holders = ImmutableDictionary.CreateBuilder<long, Guid>();
+        foreach (var group in groups)
+        foreach (var id in group.SelectedOccurrenceIds)
+            holders.TryAdd(id, group.Candidate.GroupId);
+        return holders.ToImmutable();
+    }
     private static ImmutableHashSet<long> SelectionFor(
         ReviewGroupSnapshot group,
         ImmutableHashSet<long> selected) => group.Members
@@ -801,7 +848,7 @@ internal sealed class ReviewStore
         long pending = 0;
         long unavailable = 0;
         long unselected = 0;
-        foreach (var occurrence in groups.SelectMany(group => group.Members)
+        foreach (var occurrence in groups.Where(group => !group.Closed).SelectMany(group => group.Members)
                      .GroupBy(member => member.Occurrence.Token.OccurrenceId))
         {
             if (occurrence.Any(member => member.Eligibility == ReviewEligibilityState.PendingRevalidation))

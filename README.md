@@ -8,7 +8,7 @@
 
 **Find duplicate photos on Windows, review each group, and send only what you approve to the Recycle Bin.**
 
-![PhotoSift reviewing an exact duplicate group: categories, groups, the paths being compared and a preview of the photo](docs/images/hero-review-exact.png)
+![PhotoSift reviewing a set of identical copies: the kinds of duplicates found, the sets, and each photo with Keep or Remove, its path and size](docs/images/hero-review-exact.png)
 
 PhotoSift is a privacy-first desktop app for Windows 11 built with .NET 10, C# 14 and WPF. It scans one
 local folder for byte-identical and conservatively near-identical JPEG/PNG images, groups them for
@@ -17,8 +17,8 @@ never deletes permanently, and keeps a durable record of every action it takes.
 
 | 1. Choose a folder | 2. Approve exactly what goes | 3. See every outcome |
 |---|---|---|
-| ![Choose Scope with a ready preflight summary](docs/images/choose-scope.png) | ![Approval listing the selected path, recovery estimate and Recycle Bin destination](docs/images/approve-cleanup.png) | ![Recycle Bin progress showing one original path recycled](docs/images/recycle-bin-progress.png) |
-| Preflight checks the folder is local and readable before any scan. | The approval lists every path, the estimated space recovered and the destination. | Each file is sent on its own and its result is recorded. |
+| ![Folder screen with a demo folder ready to scan and the scan options](docs/images/choose-folder.png) | ![Approval asking to move one photo to the Recycle Bin, with its path and what the cleanup covers](docs/images/approve-cleanup.png) | ![Cleanup finished with one photo moved to the Recycle Bin](docs/images/cleanup-results.png) |
+| Preflight checks the folder is local and readable, and the scan options sit on the same screen. | Nothing moves until you approve. The approval lists every photo and where it goes. | Each photo is sent on its own, and its result is kept in History. |
 
 ## Why it is interesting
 
@@ -42,10 +42,10 @@ Deleting someone's photos is a one-way door, so PhotoSift is designed around one
 |---|---|
 | **Exact duplicates** | Streaming SHA-256 over file bytes; hard links are recognized as aliases of the same file, not as copies. |
 | **Near duplicates** | Managed dHash plus a color signature with conservative thresholds; borderline pairs are left ungrouped. |
-| **Guided workflow** | Five phases (Choose Scope → Confirm Rules → Scan → Review → Approve Cleanup), each unlocked only when the previous one is valid. |
+| **Guided workflow** | Four steps (Choose folder → Scan → Review → Clean up), each unlocked only when the previous one is valid. The folder and the scan options share one screen. |
 | **Safe scope** | Preflight rejects network shares, cloud-only placeholders and protected system folders before scanning. |
 | **Review** | Exact and Near categories, virtualized groups, bounded previews, keyboard navigation and a suggested survivor you can override. |
-| **Action Records** | Every outcome survives relaunch and can be revalidated read-only later. |
+| **History** | Every cleanup's per-photo outcome survives relaunch and can be checked again read-only later. |
 | **Crash-safe scans** | Scan state is checkpointed in SQLite with reconciled accounting; an interrupted scan is closed safely and restarted fresh. |
 
 ## Architecture
@@ -80,9 +80,9 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 
 ## Quality and verification
 
-- **About 21,500 lines of production C# and 37,000 lines of tests** across Domain, Application,
+- **About 23,500 lines of production C# and 40,000 lines of tests** across Domain, Application,
   Analysis, Infrastructure and real-window WPF scenario suites.
-- **Full suite: 1,757 / 1,757 passing** in the official gate on the release candidate.
+- **Full suite: 1,888 / 1,888 passing** in the official gate on the release candidate.
 - **Isolated verification VM.** Official gates run in a Hyper-V VM with no network adapter, restored
   from a known checkpoint for every run. This proves the offline guarantee and keeps runs reproducible.
 - **Reproducible release.** Two independent locked, self-contained publishes are compared file by

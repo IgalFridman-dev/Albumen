@@ -282,10 +282,9 @@ real app under light, dark and High Contrast, not only in tests that build
 ## PM-008 — Ship V1 as a self-contained release
 
 **Status:** In progress — design approved 2026-10-17; release built and clean-launch
-checked on 2026-10-17 at `8562f97`; inventory owner-approved 2026-10-17. Open: the
-demo-photos ZIP. The build used a fresh package cache restored on the owner's host,
-not the sealed offline Golden VM cache (the VM cache lacks the runtime packs); this
-was reported to the owner as sufficient for V1 but not separately signed off. Evidence: `docs/evidence/pm-008/`.
+checked on 2026-10-17 at `8562f97`; inventory owner-approved 2026-10-17; the published
+ZIP was rebuilt offline in the Golden VM from the sealed cache at `e1d6a9d` and passed the
+clean launch on 2026-10-17. Open: the demo-photos ZIP. Evidence: `docs/evidence/pm-008/`.
 
 **Priority:** Before the public V1 release
 
@@ -306,3 +305,185 @@ extracts the ZIP and runs `Start-PhotoSift.cmd`. Design:
   review, one Recycle Bin move and restore, and the tamper check still rejects a changed file.
 - A small demo-photos ZIP ships next to the app ZIP.
 
+
+## PM-009 — Make the UI understandable and attractive
+
+**Status:** In review — all code merged into develop (PRs #17, #19, #22, #24 and the
+follow-ups PM-010 to PM-016, last merge `e6b6a74` on 2026-10-19), CI green, Golden VM Full
+passed on `e6b6a74` (run `20261019-161036-full-8896cdac`, 1,888/1,888). Open: the owner's High
+Contrast click-through and the README screenshots. Evidence:
+`docs/evidence/pm-009/verification.md`.
+
+**Priority:** Post-V1 presentation
+
+**Origin:** Owner feedback from testing V1 with real photos, 2026-10-17
+
+V1 works but reads like an engineering tool: internal terms on screen, one photo at a time in
+Review, and no visual hierarchy. Restyle the app and rebuild Review around thumbnails and
+side-by-side comparison without changing the safety design. Design:
+`docs/superpowers/specs/2026-10-17-pm-009-ui-overhaul-design.md`; plan:
+`docs/superpowers/plans/2026-10-17-pm-009-ui-overhaul.md`.
+
+### Completion criteria
+
+- All three PRs merged with GitHub CI green.
+- Golden VM Full run passes on the final commit.
+- Owner click-through on Windows 11 with real photos, including High Contrast.
+- README screenshots updated.
+
+## PM-010 — Show look-alike photos as one set instead of many pairs
+
+**Status:** Done in PR #20 (merged 2026-10-17); Golden VM Full passed on `e6b6a74` with PM-009.
+The owner's real-burst check is not recorded on its own.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-17 to ship V1.0.0 with the new UI)
+
+**Origin:** Owner testing with real photos, 2026-10-17
+
+Several shots of one moment appear as many two-photo groups because every Uncertain relationship
+is published as its own pair. Design:
+`docs/superpowers/specs/2026-10-17-pm-010-look-alike-sets-design.md`.
+
+### Completion criteria
+
+- Application tests for sets, Near-only groups, loose chains and determinism pass on GitHub CI.
+- Owner checks a real burst folder and confirms one moment shows as one set (or a set plus pairs).
+- Golden VM Full run before release.
+
+## PM-011 — Treat truncated JPEGs as "couldn't be checked", not as look-alikes
+
+**Status:** Done in PR #23 (merged 2026-10-17); Golden VM Full passed on `e6b6a74` with PM-009.
+Found in the Hyper-V Review pass of PR #22.
+
+**Priority:** Before V1.0.0 (owner decision)
+
+**Origin:** VM fixture "Broken photo.jpg" (the first 2 KB of a 1200 × 900 JPEG)
+
+WIC decodes the truncated file without an error and fills the missing area with gray. The
+partial image gets a signature, is related (Uncertain) to unrelated photos, and joined a set of
+three resized copies of another photo, turning what would have been a clean Near set into an
+Uncertain set of four. Only a file with non-image bytes was reported as "couldn't be checked".
+
+### Completion criteria
+
+- Analysis detects a JPEG that ends before its image data is complete and reports it as
+  Could Not Analyze with a plain reason, so it never gets a signature or joins a set.
+- A test with a truncated JPEG fixture passes on GitHub CI; Golden VM Full run before release.
+
+### Fix
+
+The preview decoder walks a JPEG's segments and compressed data before decoding and reports
+"the photo file is incomplete" (Could Not Analyze) when the file ends before its end-of-image
+marker. Data after that marker, such as a motion-photo video, is accepted. Accepted
+limitation: a JPEG whose image data is complete but whose end marker was never written is also
+reported, because it cannot be told apart from a file cut right after its last scan.
+
+## PM-012 — Show a marked photo as marked in every set it belongs to
+
+**Status:** Done in PR #25 (merged 2026-10-18); Golden VM Full passed on `e6b6a74` with PM-009.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18
+
+A photo can sit in a Look-alike set and in a leftover Maybe similar pair. Marking it in one
+place already counts everywhere (the second mark is refused and every set keeps a survivor),
+but the other sets still show it as "Kept". The user sees no reason to open a pair whose other
+photo is the only one that can stay.
+
+### Completion criteria
+
+- A member marked in another set reads "Marked for removal in Set N" everywhere it appears,
+  can't be marked again there, and Compare still works.
+- A set whose remaining photos can't change (every other member is marked elsewhere) shows
+  that on its card and in the set list.
+- Scenario tests for both; no change to the survivor rule or the approval.
+
+## PM-013 — Keep reviewing after a cleanup without scanning again
+
+**Status:** Done in PR #26 (merged 2026-10-18); Golden VM Full passed on `e6b6a74` with PM-009.
+Marks on photos that were not removed are not carried over; a set touched by an uncertain
+outcome is closed until the next scan; after a faulted cleanup only "Scan again" is offered.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18
+
+Approving a cleanup seals the review, so removing more photos needs a new scan. The owner wants
+to go back to the sets after a cleanup, with the removed photos gone and any set that lost a
+photo dropped, and approve another cleanup. Design:
+`docs/superpowers/specs/2026-10-18-post-test-fixes-design.md`.
+
+### Completion criteria
+
+- After a cleanup ends, "Continue reviewing" reopens Review on the same scan. Removed photos
+  are checked on disk and shown as gone; a set with one photo left disappears from the lists.
+- Each further cleanup is a fresh sealed approval with a fresh check of every file, its own
+  journal rows, and at least one survivor per set, exactly like the first.
+- Application tests for the reopen, the dropped sets and a second approval; Golden VM Full run
+  before release.
+
+## PM-014 — Re-check the folder after a cleanup removed photos
+
+**Status:** Done in PR #25 (merged 2026-10-18); Golden VM Full passed on `e6b6a74` with PM-009.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18
+
+The folder page keeps the counts from the check that ran when the folder was chosen. After a
+cleanup removed photos, going back to the folder page still shows the old counts.
+
+### Completion criteria
+
+- Going to the folder page after a cleanup that removed at least one photo from the current
+  folder re-checks the folder by itself; the page says why while it checks.
+- Application test for the automatic re-check and for the case where nothing was removed.
+
+## PM-015 — The folder page gets the prototype's simplicity
+
+**Status:** Done in PR #27 (merged 2026-10-18; CI green, reviewer Ship, seen by the owner on
+the desktop: "Otherwise good work"). Golden VM Full passed on `e6b6a74` with PM-009.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18: "You showed me a
+prototype like this, but end product looks different." and "We can keep the side bar being a
+side bar, but I do like the simple design of the prototype." Design:
+`docs/superpowers/specs/2026-10-18-post-test-fixes-design.md`.
+
+### Completion criteria
+
+- The folder page has the prototype's layout: one hero (illustration drawn in XAML, headline,
+  one line), one card with the folder's name and path, one status strip that says one sentence
+  per state, the two switches with captions, the check summary under "Details", the Scan
+  button in the card's footer, and three trust lines under the card. The step rail stays.
+- Pinned automation names and the smoke marker `phases=5` are unchanged.
+- WPF scenario tests for the strip text per state, the captions, the trust lines and the
+  Scan button inside the card.
+
+## PM-016 — Category navigation on the Review page skips the middle categories at the default window size
+
+**Status:** Done in PR #28 (merged 2026-10-19); Golden VM Full passed on `e6b6a74` with PM-009.
+Cause: the Review lists scroll by item (kept so a
+10,000-photo set never realizes every card), and a wheel notch moved three items, so a list
+of four categories that shows two or three jumped from the first to the last. The wheel now
+moves one card per notch over every list that scrolls by item (the three Review lists and the
+Cleanup list); touchpad deltas smaller than a notch add up to one. At a list's end the wheel
+still goes to the page.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of the PM-015 build (commit 29d416e) on the desktop, 2026-10-18: on the
+Review page, at the normal (not maximized) window size, moving between the four categories
+(Identical copies, Look-alikes, Maybe similar, Couldn't check) jumps from the top one to the
+bottom one and skips the two in the middle; with the window enlarged it works fine.
+
+### Completion criteria
+
+- Every category is reachable in order by mouse wheel at the default window size (960×720).
+  Keyboard navigation is untouched by reasoning, not by a test: the handler is wheel-only and
+  the arrow keys go through a separate key handler.
+- WPF scenario tests at the default window size with large text (font size 24, so the four cards
+  overflow the list by two): one notch moves one card, three touchpad deltas of 40 move one
+  card, and a notch at the list's end moves the page.

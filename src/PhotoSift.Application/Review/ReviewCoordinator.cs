@@ -74,7 +74,8 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
             var pin = request.Scan.Pin!;
             if (IsOlder(pin) || revoked.Contains(pin) || (admissionRestricted && pin != requiredScan)
                 || request.Scan.Groups.Any(g => retiredGroups.Contains(g.GroupId)
-                    || (groupRevisions.TryGetValue(g.GroupId, out var revision) && g.GroupRevision < revision)))
+                    || (groupRevisions.TryGetValue(g.GroupId, out var revision) && g.GroupRevision < revision))
+                || (request.ContinuesRequestId is { } continues && !ContinuesSealedReview(continues, pin)))
                 return (Result: new ReviewCommandResult(ReviewCommandOutcome.Stale, current), Next: (Operation?)null, Old: (Operation?)null);
             var old = active;
             if (old is not null)
@@ -323,6 +324,18 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
         catch (Exception) { Fault(operation); return false; }
     }
 
+    // PM-013: a continuation replaces only the sealed review of the cleanup it
+    // names, and only once no claim or safety refresh still holds that review.
+    // Whether the cleanup itself finished (Complete/Incomplete, not Faulted or still running)
+    // is checked by the workflow before it asks to continue; here only the sealed review matters.
+    private bool ContinuesSealedReview(Guid requestId, ScanPin pin) =>
+        active is { Invalidated: false, ClaimAttempt: null } operation
+        && operation.Request.Scan.Pin == pin
+        && operation.Store.Current is { Sealed: true, ApprovedRequest: { } approved } snapshot
+        && snapshot.Status != ReviewStatus.Faulted
+        && approved.RequestId == requestId
+        && !actionEffects.Values.Any(effect => ReferenceEquals(effect.Operation, operation));
+
     private bool IsOlder(ScanPin pin) => watermark is { } latest
         && (pin.ScopeRevision < latest.ScopeRevision || pin.RuleSetRevision < latest.RuleSetRevision
             || (pin.ScanId == latest.ScanId && pin.AnalysisRevision < latest.AnalysisRevision));
@@ -337,11 +350,16 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
             || pin.ScopeRevision <= 0 || request.Rules.ScopeRevision != pin.ScopeRevision
             || request.Rules.RuleSetRevision != pin.RuleSetRevision || pin.RuleSetRevision <= 0
             || request.Rules.Options is not { IsValid: true }
-            || request.Scan.Groups.IsDefault || request.Scan.Occurrences.IsDefault) return false;
+            || request.Scan.Groups.IsDefault || request.Scan.Occurrences.IsDefault
+            || request.ExcludedOccurrenceIds is null || request.ClosedGroupIds is null
+            || request.ContinuesRequestId == Guid.Empty
+            || (request.ContinuesRequestId is null
+                && (request.ExcludedOccurrenceIds.Count > 0 || request.ClosedGroupIds.Count > 0))) return false;
         var occurrences = new Dictionary<long, ScanFileOccurrence>();
         foreach (var occurrence in request.Scan.Occurrences)
             if (!occurrences.TryAdd(occurrence.Token.OccurrenceId, occurrence)) return false;
         var groups = new HashSet<Guid>();
+        var memberIds = new HashSet<long>();
         foreach (var group in request.Scan.Groups)
         {
             if (group.Pin != pin || group.GroupId == Guid.Empty || !groups.Add(group.GroupId)
@@ -360,10 +378,11 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
                     || member.Content.PhysicalFileKey != member.PhysicalFileKey
                     || member.Enumerate.State != ScanStageState.Succeeded
                     || member.Exact.State != ScanStageState.Succeeded) return false;
+                memberIds.Add(member.Token.OccurrenceId);
             }
             if (!ValidCategoryEvidence(group, members)) return false;
         }
-        return true;
+        return request.ClosedGroupIds.IsSubsetOf(groups) && request.ExcludedOccurrenceIds.IsSubsetOf(memberIds);
     }
 
     private static bool ValidCategoryEvidence(
@@ -420,14 +439,16 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
                 || member.NearDuplicate.State != ScanStageState.Succeeded)) return false;
         var connected = members.Keys.ToDictionary(id => id, _ => new HashSet<long>());
         var edges = new HashSet<(long Left, long Right)>();
+        var hasExpectedKind = false;
         foreach (var edge in group.Similarity)
         {
             if (!members.TryGetValue(edge.Left.OccurrenceId, out var left)
                 || !members.TryGetValue(edge.Right.OccurrenceId, out var right)
                 || edge.Left != left.Token || edge.Right != right.Token
-                || edge.Left == edge.Right || edge.Kind != expectedKind
+                || edge.Left == edge.Right || !AllowedKind(edge.Kind, expectedKind)
                 || SameBytes(left.Content!, right.Content!)
-                || !ValidDistance(edge, expectedKind)) return false;
+                || !ValidDistance(edge, edge.Kind)) return false;
+            hasExpectedKind |= edge.Kind == expectedKind;
             var pair = edge.Left.OccurrenceId < edge.Right.OccurrenceId
                 ? (edge.Left.OccurrenceId, edge.Right.OccurrenceId)
                 : (edge.Right.OccurrenceId, edge.Left.OccurrenceId);
@@ -435,8 +456,15 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
             connected[pair.Item1].Add(pair.Item2);
             connected[pair.Item2].Add(pair.Item1);
         }
-        return Connected(group.Members[0].Token.OccurrenceId, connected) == members.Count;
+        return hasExpectedKind
+            && Connected(group.Members[0].Token.OccurrenceId, connected) == members.Count;
     }
+
+    // A look-alike set is Uncertain as a whole but keeps the Near evidence between its
+    // closest members; a Near group holds Near evidence only.
+    private static bool AllowedKind(NearRelationshipKind kind, NearRelationshipKind expectedKind) =>
+        kind == expectedKind
+        || expectedKind == NearRelationshipKind.Uncertain && kind == NearRelationshipKind.Near;
 
     private static bool ValidDistance(NearDuplicateEvidence edge, NearRelationshipKind kind)
     {
@@ -481,7 +509,7 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
                 // Executor Start may perform synchronous work; it never runs on
                 // a scheduler/owner callback or on the UI caller's continuation.
                 run = await Task.Run(() => revalidation.Start(operation.Session,
-                    new(operation.Session.Scan, operation.Request.Scope.Preflight!.Scope!), operation.Request.Scan.Groups, this),
+                    new(operation.Session.Scan, operation.Request.Scope.Preflight!.Scope!), operation.Store.RunGroups, this),
                     CancellationToken.None).ConfigureAwait(false);
                 operation.RunReady.TrySetResult(run);
                 await run.Completion.ConfigureAwait(false);

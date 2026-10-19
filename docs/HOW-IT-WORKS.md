@@ -5,16 +5,20 @@ data lives.
 
 ## What the user sees
 
-One window (`src/PhotoSift.App/MainWindow.xaml`) with a left-hand list of five workflow phases.
-Each phase unlocks only when the previous one is valid (`Domain/Workflow/WorkflowPhase.cs`).
+One window (`src/PhotoSift.App/MainWindow.xaml`) with a left-hand list of steps. The workflow has five
+phases (`Domain/Workflow/WorkflowPhase.cs`), each unlocked only when the previous one is valid; the
+first two share one screen, so the list shows four steps.
 
-| # | Phase | What happens on screen |
+| Step | Phase | What happens on screen |
 |---|---|---|
-| 1 | **Choose Scope** | Pick one local folder, "Include subfolders" toggle. A preflight summary shows the resolved path, readable files and blocking reasons (network, cloud-only, protected folders). |
-| 2 | **Confirm Rules** | Exact duplicates are always on; "Conservative Near duplicates" can be switched off. "Confirm Scan options". |
-| 3 | **Scan** | Progress and live counts; "Cancel Scan". Outcome categories show what was grouped, skipped or unsupported. |
-| 4 | **Review** | Categories (Exact / Near) → groups → side-by-side comparison with bounded previews. The user ticks files to remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). |
-| 5 | **Approve Cleanup** | A disclosure lists the exact original paths. "Approve Cleanup" moves them one by one to the Recycle Bin and shows progress. Below it, **Action Records** list every past outcome, survive relaunch, and can be revalidated read-only. |
+| 1 | **Choose folder** (phases ChooseScope + ConfirmRules) | Pick one local folder, "Include subfolders", and "Look-alikes" (identical copies are always found, as the caption says). A status strip says one sentence per state (ready with the photo count, checking, blocked, not checked); blocking reasons (network, cloud-only, protected folders) appear under it, and the folder check counts, restrictions and the scan options' status wait under "Details". One "Scan N photos" button continues, confirms the options for this folder and starts the scan, each step checked by the workflow owner as before. |
+| 2 | **Scan** | Progress and live counts; "Cancel Scan". Outcome categories show what was grouped, skipped or unsupported. |
+| 3 | **Review** | Kinds shown as Identical copies / Look-alike / Maybe similar / Couldn't check (internally Exact / Near / Uncertain / CouldNotAnalyze) → sets → photos with bounded previews and side-by-side compare. The user switches photos to Remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). |
+| 4 | **Clean up** (phase ApproveCleanup) | The Review page ends with "Move N photos to the Recycle Bin?": the first marked photos with thumbnails and paths, then the full accounting. "Move to Recycle Bin" sends them one at a time and shows a progress bar, a card per photo (moved, skipped and why, or unknown) and a summary when it ends. |
+
+A **History** view in the top bar lists every saved cleanup (one card each, with every photo's
+outcome); records survive relaunch and unknown outcomes can be checked again read-only. "Clear scan
+data" lives there too.
 
 ## Code layers
 
@@ -56,7 +60,7 @@ sequenceDiagram
   Act->>OS: revalidate file is unchanged
   Act->>DB: journal Requested → Executing
   Act->>OS: move ONE item to Recycle Bin
-  Act->>DB: record outcome (shown in Action Records)
+  Act->>DB: record outcome (shown in History)
 ```
 
 Key ideas:
@@ -70,7 +74,7 @@ Key ideas:
 ## Where data lives
 
 - `%LOCALAPPDATA%\PhotoSift\photosift.db` — SQLite (scan identity, checkpoints, override
-  evidence, action journal and records). "Clear local Scan data" removes scan data only.
+  evidence, action journal and records). "Clear scan data" (in History) removes scan data only.
 - Photos are only read, never modified; removal = Windows Recycle Bin (restorable).
 - No network access at all (verified by network audits in a VM with no network adapter).
 

@@ -4,6 +4,8 @@ using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -47,32 +49,54 @@ public sealed class WpfScopeAccessibilityTests
                     window.FindName("RuleSetStatusText"));
                 var blocking = Assert.IsType<Border>(
                     window.FindName("BlockingNotice"));
-                var recursion = Assert.IsType<CheckBox>(
+                var recursion = Assert.IsType<CommandSwitchCheckBox>(
                     window.FindName("IncludeSubfoldersCheckBox"));
                 var summary = Assert.IsType<ItemsControl>(
                     window.FindName("ScopeSummaryList"));
+                var folderName = Assert.IsType<TextBlock>(
+                    window.FindName("FolderNameText"));
+                var subfoldersCaption = Assert.IsType<TextBlock>(
+                    window.FindName("IncludeSubfoldersCaption"));
+                var lookAlikesCaption = Assert.IsType<TextBlock>(
+                    window.FindName("NearDuplicatesCaption"));
+                var card = Assert.IsType<Border>(window.FindName("FolderCard"));
+                var scanFolder = Assert.IsType<Button>(window.FindName("ScanFolderButton"));
+                var details = Assert.IsType<Expander>(window.FindName("FolderDetailsExpander"));
 
+                // The prototype's card: name in bold, the path as its caption, one status strip.
+                Assert.Equal("Photos", folderName.Text);
                 Assert.Equal(@"C:\Photos", selectedPath.Text);
-                Assert.Equal("Selected Scope", AutomationProperties.GetName(selectedPath));
+                Assert.Equal("Selected folder", AutomationProperties.GetName(selectedPath));
                 Assert.True(selectedPath.IsReadOnly);
                 Assert.Equal(TextWrapping.Wrap, selectedPath.TextWrapping);
                 Assert.Equal(@"\\?\C:\Photos", resolvedPath.Text);
-                Assert.Equal("Resolved Scope", AutomationProperties.GetName(resolvedPath));
+                Assert.Equal("Resolved folder path", AutomationProperties.GetName(resolvedPath));
                 Assert.True(resolvedPath.IsReadOnly);
                 Assert.Equal(TextWrapping.Wrap, resolvedPath.TextWrapping);
-                Assert.Equal("Ready", status.Text);
+                Assert.Equal("Ready to scan. 12 JPEG and PNG photos found.", status.Text);
+                Assert.Equal(status.Text, AutomationProperties.GetItemStatus(status));
                 Assert.Equal(
                     AutomationLiveSetting.Polite,
                     AutomationProperties.GetLiveSetting(status));
-                Assert.Equal("Rule Set: Not configured", ruleSet.Text);
+                Assert.Equal("Scan options: Not configured", ruleSet.Text);
                 Assert.Equal("Include subfolders", AutomationProperties.GetName(recursion));
                 Assert.True(recursion.IsChecked);
+                Assert.Equal("Also check folders inside Photos.", subfoldersCaption.Text);
+                Assert.Equal(
+                    "Bursts and near-identical shots. Identical copies are always found.",
+                    lookAlikesCaption.Text);
+                // The Scan button sits in the card's footer; the check summary waits under Details.
+                Assert.Contains(card, LogicalAncestors(scanFolder));
+                Assert.Contains(details, LogicalAncestors(summary));
+                Assert.False(details.IsExpanded);
+                Assert.Equal("Details", details.Header);
                 Assert.Equal(7, summary.Items.Count);
                 var volumeSummary = Assert.IsType<ScopeSummaryItemViewModel>(
                     summary.Items[0]);
                 Assert.Equal("Local drive type", volumeSummary.Label);
                 Assert.Equal(expectedVolumeValue, volumeSummary.Value);
                 Assert.Equal(Visibility.Collapsed, blocking.Visibility);
+                AssertTrustLines(window);
 
                 AssertSystemBrushesRemainDynamic(window);
                 AssertLaterPhaseButtonsStayUnavailable(window);
@@ -96,7 +120,7 @@ public sealed class WpfScopeAccessibilityTests
             {
                 ShowAndDrain(window);
 
-                var recursion = Assert.IsType<CheckBox>(
+                var recursion = Assert.IsType<CommandSwitchCheckBox>(
                     window.FindName("IncludeSubfoldersCheckBox"));
                 Assert.Equal(string.Empty, viewModel.SelectedPath);
                 Assert.False(recursion.IsChecked);
@@ -136,9 +160,9 @@ public sealed class WpfScopeAccessibilityTests
                 workflow.Publish(CheckingSnapshot(ScopeRecursion.TopLevelOnly));
                 DrainDispatcher();
 
-                Assert.Equal("Choose another folder", choose.Content);
+                Assert.Equal("Change folder", choose.Content);
                 Assert.Equal(
-                    "Choose another folder",
+                    "Change folder",
                     AutomationProperties.GetName(choose));
                 Assert.True(choose.IsEnabled);
             }
@@ -169,23 +193,25 @@ public sealed class WpfScopeAccessibilityTests
                 workflow.Publish(CheckingSnapshot(ScopeRecursion.TopLevelOnly));
                 AssertLiveRegionCount(liveEvents, expectedCount: 1);
 
-                Assert.Equal("Checking location and access", status.Text);
+                Assert.Equal("Checking location and access.", status.Text);
                 Assert.Collection(
                     liveEvents.ItemStatuses,
                     itemStatus => Assert.Equal(
-                        "Checking location and access",
+                        "Checking location and access.",
                         itemStatus));
 
                 workflow.Publish(ReadySnapshot());
                 AssertLiveRegionCount(liveEvents, expectedCount: 2);
 
-                Assert.Equal("Ready", status.Text);
+                Assert.Equal("Ready to scan. 12 JPEG and PNG photos found.", status.Text);
                 Assert.Collection(
                     liveEvents.ItemStatuses,
                     itemStatus => Assert.Equal(
-                        "Checking location and access",
+                        "Checking location and access.",
                         itemStatus),
-                    itemStatus => Assert.Equal("Ready", itemStatus));
+                    itemStatus => Assert.Equal(
+                        "Ready to scan. 12 JPEG and PNG photos found.",
+                        itemStatus));
             }
             finally
             {
@@ -210,7 +236,7 @@ public sealed class WpfScopeAccessibilityTests
                 var readyGeometry = Assert.IsAssignableFrom<Geometry>(icon.Data)
                     .ToString(CultureInfo.InvariantCulture);
                 Assert.Equal(Visibility.Visible, icon.Visibility);
-                Assert.Equal("Scope status: Ready", AutomationProperties.GetName(icon));
+                Assert.Equal("Folder status: Ready", AutomationProperties.GetName(icon));
                 Assert.Equal("Ready", AutomationProperties.GetItemStatus(icon));
 
                 var systemTextBrush = new SolidColorBrush(
@@ -225,7 +251,7 @@ public sealed class WpfScopeAccessibilityTests
                 var blockedGeometry = Assert.IsAssignableFrom<Geometry>(icon.Data)
                     .ToString(CultureInfo.InvariantCulture);
                 Assert.NotEqual(readyGeometry, blockedGeometry);
-                Assert.Equal("Scope status: Blocked", AutomationProperties.GetName(icon));
+                Assert.Equal("Folder status: Blocked", AutomationProperties.GetName(icon));
                 Assert.Equal("Blocked", AutomationProperties.GetItemStatus(icon));
                 Assert.Same(systemTextBrush, icon.Fill);
             }
@@ -260,7 +286,7 @@ public sealed class WpfScopeAccessibilityTests
                 var chooseAnother = Assert.IsType<Button>(
                     window.FindName("ChooseAnotherScopeButton"));
 
-                Assert.Equal("Blocked", status.Text);
+                Assert.Equal("This folder can't be scanned yet.", status.Text);
                 Assert.Equal(Visibility.Visible, blocking.Visibility);
                 Assert.Equal(
                     "Choose a folder on a local drive.",
@@ -269,14 +295,60 @@ public sealed class WpfScopeAccessibilityTests
                 Assert.True(retry.IsEnabled);
                 Assert.True(retry.Focusable);
                 Assert.True(retry.IsTabStop);
-                Assert.Equal("Retry Scope verification", AutomationProperties.GetName(retry));
+                Assert.Equal("Check the folder again", AutomationProperties.GetName(retry));
                 Assert.Same(viewModel.RetryScopeCommand, retry.Command);
                 Assert.True(chooseAnother.IsEnabled);
                 Assert.True(chooseAnother.Focusable);
                 Assert.True(chooseAnother.IsTabStop);
-                Assert.Equal("Choose another folder", AutomationProperties.GetName(chooseAnother));
+                Assert.Equal("Change folder", AutomationProperties.GetName(chooseAnother));
                 Assert.Same(viewModel.ChooseScopeCommand, chooseAnother.Command);
                 AssertLaterPhaseButtonsStayUnavailable(window);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void TheStripSaysOneSentenceBeforeAFolderIsChosenAndAfterACanceledCheck()
+    {
+        RunOnSta(() =>
+        {
+            var workflow = new PublishingChooseScopeWorkflow(ColdSnapshot());
+            var viewModel = new ShellViewModel(workflow);
+            var window = new MainWindow { DataContext = viewModel };
+            try
+            {
+                ShowAndDrain(window);
+
+                var status = Assert.IsType<TextBlock>(window.FindName("ScopeStatusText"));
+                var folderName = Assert.IsType<TextBlock>(window.FindName("FolderNameText"));
+                var subfoldersCaption = Assert.IsType<TextBlock>(
+                    window.FindName("IncludeSubfoldersCaption"));
+                var guidance = Assert.IsType<TextBlock>(window.FindName("ScanOptionsGuidanceText"));
+                var retry = Assert.IsType<Button>(window.FindName("RetryScopeButton"));
+
+                var headline = Assert.IsType<TextBlock>(window.FindName("FolderHeadline"));
+                Assert.Equal("Find duplicate and look-alike photos", headline.Text);
+                Assert.Equal("No folder chosen yet", folderName.Text);
+                // No automation name overrides the text, so a screen reader hears the folder's name.
+                Assert.Equal(string.Empty, AutomationProperties.GetName(folderName));
+                Assert.Equal("Choose a folder to start.", status.Text);
+                Assert.Equal("Also check folders inside the chosen folder.", subfoldersCaption.Text);
+                // Nothing to say about the options yet, so the live region stays out of the way.
+                Assert.Equal(Visibility.Collapsed, guidance.Visibility);
+                Assert.Equal(Visibility.Collapsed, retry.Visibility);
+
+                workflow.Publish(CanceledSnapshot());
+                DrainDispatcher();
+
+                Assert.Equal("Photos", folderName.Text);
+                Assert.Equal(
+                    "The folder wasn't checked. Check it again or choose another folder.",
+                    status.Text);
+                Assert.Equal(Visibility.Visible, retry.Visibility);
             }
             finally
             {
@@ -304,6 +376,50 @@ public sealed class WpfScopeAccessibilityTests
         Assert.False(ownerWasAccessed);
     }
 
+    [Fact]
+    public void AutomationToggleOnRecursionSwitchRequestsANewPreflight()
+    {
+        RunOnSta(() =>
+        {
+            var workflow = new PublishingChooseScopeWorkflow(
+                CheckingSnapshot(ScopeRecursion.TopLevelOnly));
+            var viewModel = new ShellViewModel(workflow);
+            var window = new MainWindow { DataContext = viewModel };
+            try
+            {
+                ShowAndDrain(window);
+                var recursion = Assert.IsType<CommandSwitchCheckBox>(
+                    window.FindName("IncludeSubfoldersCheckBox"));
+                var peer = UIElementAutomationPeer.CreatePeerForElement(recursion);
+                Assert.NotNull(peer);
+
+                Assert.IsAssignableFrom<IToggleProvider>(
+                    peer.GetPattern(PatternInterface.Toggle)).Toggle();
+                DrainDispatcher();
+
+                // Narrator and UI Automation must change the Scope, not only the switch.
+                Assert.True(Assert.Single(workflow.RecursionRequests));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    private static void AssertTrustLines(Window window)
+    {
+        var lines = Assert.IsType<StackPanel>(window.FindName("TrustLines"));
+        lines.UpdateLayout();
+        string[] expected =
+        [
+            "Stays on this PC. No account, no upload.",
+            "Recycle Bin only. Nothing is deleted for good.",
+            "You decide. At least one photo of every set is kept.",
+        ];
+        Assert.Equal(expected, VisualDescendants<TextBlock>(lines).Select(line => line.Text).ToArray());
+    }
+
     private static void AssertSystemBrushesRemainDynamic(Window window)
     {
         var windowBrush = new SolidColorBrush(Color.FromRgb(17, 34, 51));
@@ -325,7 +441,7 @@ public sealed class WpfScopeAccessibilityTests
             .Where(button => button.DataContext is PhaseItemViewModel)
             .ToArray();
 
-        Assert.Equal(5, phaseButtons.Length);
+        Assert.Equal(4, phaseButtons.Length);
         Assert.True(phaseButtons[0].IsEnabled);
         Assert.All(phaseButtons.Skip(1), button => Assert.False(button.IsEnabled));
     }
@@ -370,6 +486,15 @@ public sealed class WpfScopeAccessibilityTests
         }
 
         Assert.Equal(expectedCount, recorder.Count);
+    }
+
+    private static IEnumerable<DependencyObject> LogicalAncestors(DependencyObject element)
+    {
+        for (var parent = LogicalTreeHelper.GetParent(element); parent is not null;
+             parent = LogicalTreeHelper.GetParent(parent))
+        {
+            yield return parent;
+        }
     }
 
     private static IEnumerable<T> VisualDescendants<T>(DependencyObject root)
@@ -473,7 +598,7 @@ public sealed class WpfScopeAccessibilityTests
             BlockingReasons: ImmutableArray<ScopeBlockingReason>.Empty);
         return new ShellSnapshot(
             InitialWorkflow.Create(),
-            "Scope is ready.",
+            "The folder is ready to scan.",
             ScopeSessionState.Ready,
             selection,
             result,
@@ -498,13 +623,21 @@ public sealed class WpfScopeAccessibilityTests
             BlockingReasons: ImmutableArray.Create(ScopeBlockingReason.NonLocalRoot));
         return new ShellSnapshot(
             InitialWorkflow.Create(),
-            "Scope is blocked.",
+            "This folder can't be scanned yet.",
             ScopeSessionState.Blocked,
             selection,
             result,
             "Not configured",
             Revision: 2);
     }
+
+    private static ShellSnapshot CanceledSnapshot() =>
+        new(
+            InitialWorkflow.Create(),
+            "The folder wasn't checked. Check it again or choose another folder.",
+            ScopeSessionState.Canceled,
+            new ScopeSelection(@"C:\Photos", ScopeRecursion.IncludeSubfolders),
+            Revision: 2);
 
     private sealed class PublishingChooseScopeWorkflow(ShellSnapshot current)
         : IChooseScopeWorkflow
@@ -518,10 +651,15 @@ public sealed class WpfScopeAccessibilityTests
             CancellationToken cancellationToken) =>
             Task.CompletedTask;
 
+        public List<bool> RecursionRequests { get; } = [];
+
         public Task HandleAsync(
             ChangeScopeRecursionCommand command,
-            CancellationToken cancellationToken) =>
-            Task.CompletedTask;
+            CancellationToken cancellationToken)
+        {
+            RecursionRequests.Add(command.IncludeSubfolders);
+            return Task.CompletedTask;
+        }
 
         public Task HandleAsync(
             RetryScopePreflightCommand command,

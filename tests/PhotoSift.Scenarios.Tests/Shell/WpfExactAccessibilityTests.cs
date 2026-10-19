@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -33,31 +35,30 @@ public sealed class WpfExactAccessibilityTests
                 window.Show();
                 fixture.PublishPhase(WorkflowPhase.ConfirmRules);
                 Drain();
-                var confirm = Assert.IsType<Button>(window.FindName("ConfirmExactRulesButton"));
-                var start = Assert.IsType<Button>(window.FindName("StartScanButton"));
-                var exact = Assert.IsType<CheckBox>(window.FindName("ExactDuplicatesCheckBox"));
-                var near = Assert.IsType<CheckBox>(window.FindName("NearDuplicatesCheckBox"));
+                var scanFolder = Assert.IsType<Button>(window.FindName("ScanFolderButton"));
+                var near = Assert.IsType<CommandSwitchCheckBox>(window.FindName("NearDuplicatesCheckBox"));
+                var nearCaption = Assert.IsType<TextBlock>(window.FindName("NearDuplicatesCaption"));
                 var guidance = Assert.IsType<TextBlock>(window.FindName("ScanOptionsGuidanceText"));
-                Assert.True(exact.IsChecked);
-                Assert.False(exact.IsEnabled);
-                Assert.Equal("Exact duplicates are always enabled", AutomationProperties.GetName(exact));
+                var choose = Assert.IsType<Button>(window.FindName("ChooseAnotherScopeButton"));
+                // Folder and options are one screen: the folder controls stay in view with the options.
+                Assert.True(choose.IsVisible && near.IsVisible && nearCaption.IsVisible && scanFolder.IsVisible);
+                Assert.Null(window.FindName("ExactDuplicatesCheckBox"));
+                // The promise about identical copies lives in the caption, not in a switch nobody can move.
                 Assert.Equal(
-                    "Exact requires identical bytes and cannot be disabled.",
-                    AutomationProperties.GetHelpText(exact));
+                    "Bursts and near-identical shots. Identical copies are always found.",
+                    nearCaption.Text);
                 Assert.True(near.IsChecked);
                 Assert.True(near.IsTabStop && near.Focusable && near.IsEnabled);
-                Assert.Equal("Conservative Near duplicates", AutomationProperties.GetName(near));
-                Assert.Equal(
-                    "Uses the fixed precision-first Near profile. Ambiguous matches remain Uncertain.",
-                    AutomationProperties.GetHelpText(near));
-                Assert.Contains("Exact is always enabled", guidance.Text, StringComparison.Ordinal);
-                Assert.Contains("Near", guidance.Text, StringComparison.Ordinal);
-                Assert.Equal("Confirm Scan options", AutomationProperties.GetName(confirm));
-                Assert.Equal("Start Scan", AutomationProperties.GetName(start));
-                Assert.Same(fixture.ViewModel.ConfirmExactRulesCommand, confirm.Command);
-                Assert.Same(fixture.ViewModel.StartScanCommand, start.Command);
-                Assert.True(confirm.IsTabStop && confirm.Focusable && confirm.IsVisible);
-                Assert.True(confirm.IsKeyboardFocusWithin || start.IsKeyboardFocusWithin);
+                Assert.Equal("Look-alikes", AutomationProperties.GetName(near));
+                Assert.Contains("Maybe similar", AutomationProperties.GetHelpText(near), StringComparison.Ordinal);
+                // Valid options before any scan: the guidance has nothing to add, so it is hidden.
+                Assert.Equal(Visibility.Collapsed, guidance.Visibility);
+                Assert.Contains("Identical copies are always included", guidance.Text, StringComparison.Ordinal);
+                Assert.Equal("Scan 2 photos", scanFolder.Content);
+                Assert.Equal("Scan 2 photos", AutomationProperties.GetName(scanFolder));
+                Assert.Same(fixture.ViewModel.ScanFolderCommand, scanFolder.Command);
+                Assert.True(scanFolder.IsEnabled && scanFolder.IsTabStop && scanFolder.Focusable);
+                Assert.True(scanFolder.IsKeyboardFocusWithin);
                 fixture.PublishPhase(WorkflowPhase.Scan, ScanStatus.Running);
                 Drain();
                 var cancel = Assert.IsType<Button>(window.FindName("CancelScanButton"));
@@ -65,17 +66,45 @@ public sealed class WpfExactAccessibilityTests
                 Assert.Equal("Cancel Scan", AutomationProperties.GetName(cancel));
                 var status = Assert.IsType<TextBlock>(window.FindName("ScanStatusText"));
                 Assert.Equal(AutomationLiveSetting.Polite, AutomationProperties.GetLiveSetting(status));
-                Assert.Contains("Running", AutomationProperties.GetItemStatus(status));
+                Assert.StartsWith("Scanning:", AutomationProperties.GetItemStatus(status), StringComparison.Ordinal);
                 fixture.PublishPhase(WorkflowPhase.ChooseScope);
                 Drain();
-                Assert.True(Assert.IsType<Button>(window.FindName("ChooseAnotherScopeButton")).IsKeyboardFocusWithin);
+                Assert.True(choose.IsKeyboardFocusWithin);
+                Assert.True(near.IsVisible && scanFolder.IsVisible);
             }
             finally { window.Close(); }
         });
     }
 
     [Fact]
-    public void InvalidOptionsExposeLiveGuidanceAndBlockConfirmationAndStart()
+    public void AutomationToggleOnNearSwitchChangesTheScanOptions()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = new ExactShellFixture();
+            var window = new MainWindow { DataContext = fixture.ViewModel };
+            try
+            {
+                window.Show();
+                fixture.PublishPhase(WorkflowPhase.ChooseScope);
+                Drain();
+                var near = Assert.IsType<CommandSwitchCheckBox>(window.FindName("NearDuplicatesCheckBox"));
+                Assert.True(near.IsChecked);
+                Assert.True(near.IsEnabled);
+                var peer = UIElementAutomationPeer.CreatePeerForElement(near);
+                Assert.NotNull(peer);
+
+                Assert.IsAssignableFrom<IToggleProvider>(peer.GetPattern(PatternInterface.Toggle)).Toggle();
+                Drain();
+
+                Assert.Contains($"options:{NearDuplicateMode.Disabled}", fixture.Workflow.Actions);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
+    public void InvalidOptionsExposeLiveGuidanceAndBlockTheScan()
     {
         RunOnSta(() =>
         {
@@ -91,19 +120,20 @@ public sealed class WpfExactAccessibilityTests
                 Drain();
                 var guidance = Assert.IsType<TextBlock>(
                     window.FindName("ScanOptionsGuidanceText"));
-                var confirm = Assert.IsType<Button>(
-                    window.FindName("ConfirmExactRulesButton"));
-                var start = Assert.IsType<Button>(window.FindName("StartScanButton"));
+                var scanFolder = Assert.IsType<Button>(window.FindName("ScanFolderButton"));
 
                 Assert.Equal(invalid.ValidationGuidance, guidance.Text);
+                Assert.Equal(Visibility.Visible, guidance.Visibility);
                 Assert.Equal(
                     invalid.ValidationGuidance,
                     AutomationProperties.GetItemStatus(guidance));
                 Assert.Equal(
                     AutomationLiveSetting.Polite,
                     AutomationProperties.GetLiveSetting(guidance));
-                Assert.False(confirm.IsEnabled);
-                Assert.False(start.IsEnabled);
+                Assert.False(fixture.ViewModel.CanScanFolder);
+                Assert.False(scanFolder.IsEnabled);
+                fixture.ViewModel.ScanFolderCommand.ExecuteAsync().GetAwaiter().GetResult();
+                Assert.DoesNotContain("start", fixture.Workflow.Actions);
             }
             finally { window.Close(); }
         });
@@ -148,7 +178,7 @@ public sealed class WpfExactAccessibilityTests
                 Assert.All(selectionControls, control => Assert.True(control.IsTabStop));
                 Assert.DoesNotContain(Descendants<Button>(window), button => button.IsEnabled &&
                     (button.Content?.ToString()?.Contains("Remove", StringComparison.OrdinalIgnoreCase) == true ||
-                     button.Content?.ToString() == "Approve Cleanup"));
+                     button.Name == "ApproveCleanupButton"));
                 var textBrush = new SolidColorBrush(Colors.Coral);
                 window.Resources[SystemColors.WindowTextBrushKey] = textBrush;
                 Drain();
@@ -311,9 +341,9 @@ public sealed class WpfExactAccessibilityTests
                 try
                 {
                     dispatcher.BeginInvoke(publishRunning);
-                    Assert.StartsWith("Running;", NextAnnouncement(statuses, "Running", cancellationToken));
+                    Assert.StartsWith("Scanning:", NextAnnouncement(statuses, "Scanning", cancellationToken));
                     dispatcher.BeginInvoke(publishComplete);
-                    Assert.StartsWith("Complete;", NextAnnouncement(statuses, "Complete", cancellationToken));
+                    Assert.StartsWith("Finished:", NextAnnouncement(statuses, "Finished", cancellationToken));
                 }
                 finally
                 {
@@ -357,7 +387,7 @@ public sealed class WpfExactAccessibilityTests
             Assert.True(remaining > 0 && statuses.TryTake(out observed, remaining, cancellationToken),
                 $"No {requiredStatus} live-region announcement arrived within four seconds. Last status: {observed ?? "none"}.");
             var status = Assert.IsType<string>(observed);
-            if (status.StartsWith(requiredStatus + ";", StringComparison.Ordinal)) return status;
+            if (status.StartsWith(requiredStatus + ":", StringComparison.Ordinal)) return status;
         }
     }
 
