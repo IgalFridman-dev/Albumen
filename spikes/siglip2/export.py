@@ -96,8 +96,11 @@ def main():
         torch.onnx.export(module, (dummy,), str(fp32), input_names=[input_name], output_names=["embedding"],
                           dynamic_axes={input_name: {0: "batch"}, "embedding": {0: "batch"}},
                           opset_version=OPSET, dynamo=False)
+        # Weights only, per channel: quantizing activation x activation MatMuls (attention scores)
+        # and per-tensor weight scales cost too much accuracy on a ViT.
         quantize_dynamic(str(fp32), str(out / f"{name}.int8.onnx"), weight_type=QuantType.QInt8,
-                         op_types_to_quantize=["MatMul", "Gemm", "Gather"])
+                         op_types_to_quantize=["MatMul", "Gemm", "Gather"], per_channel=True,
+                         extra_options={"MatMulConstBOnly": True})
     shutil.copy(file_from(args.model, "tokenizer.model"), out / "tokenizer.model")
 
     photos = sorted(p for p in Path(args.photos).iterdir()
