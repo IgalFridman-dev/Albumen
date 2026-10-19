@@ -1,0 +1,6 @@
+<Project>
+  <!-- The spike is outside Albumen.slnx and the release package gate; it pins its own packages. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+</Project>
