@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "model": "google/siglip2-base-patch16-224",
+  "license": "Apache-2.0",
+  "imageSize": 224,
+  "maxTokens": 64,
+  "padId": 0,
+  "dimension": 768,
+  "files": {
+    "vision": { "path": "vision.onnx", "length": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000000" },
+    "text": { "path": "text.onnx", "length": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000000" },
+    "tokenizer": { "path": "tokenizer.model", "length": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000000" }
+  }
+}

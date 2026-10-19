@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Albumen.Application\Albumen.Application.csproj" />
+    <ProjectReference Include="..\Albumen.Domain\Albumen.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The model files themselves are never in git; the release builder places them next to this manifest. -->
+    <Content Include="models\manifest.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Albumen.Infrastructure.Tests" />
+  </ItemGroup>
+</Project>

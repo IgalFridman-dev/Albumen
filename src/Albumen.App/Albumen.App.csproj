@@ -10,6 +10,7 @@
     <ProjectReference Include="..\Albumen.Domain\Albumen.Domain.csproj" />
     <ProjectReference Include="..\Albumen.Application\Albumen.Application.csproj" />
     <ProjectReference Include="..\Albumen.Analysis\Albumen.Analysis.csproj" />
+    <ProjectReference Include="..\Albumen.Infrastructure.Onnx\Albumen.Infrastructure.Onnx.csproj" />
     <ProjectReference Include="..\Albumen.Infrastructure.Sqlite\Albumen.Infrastructure.Sqlite.csproj" />
     <ProjectReference Include="..\Albumen.Infrastructure.Windows\Albumen.Infrastructure.Windows.csproj" />
   </ItemGroup>
