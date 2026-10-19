@@ -43,9 +43,9 @@ jobs:
       - name: Build release candidate
         shell: pwsh
         run: |
-          $output = Join-Path $env:RUNNER_TEMP 'photosift-release'
-          $packages = Join-Path $env:RUNNER_TEMP 'photosift-packages'
-          $result = & ./eng/release/New-PhotoSiftRelease.ps1 `
+          $output = Join-Path $env:RUNNER_TEMP 'albumen-release'
+          $packages = Join-Path $env:RUNNER_TEMP 'albumen-packages'
+          $result = & ./eng/release/New-AlbumenRelease.ps1 `
             -RepositoryRoot $PWD `
             -OutputRoot $output `
             -SdkRoot $env:DOTNET_ROOT `
@@ -56,7 +56,7 @@ jobs:
 
       - name: Verify release candidate
         shell: pwsh
-        run: ./eng/release/Test-PhotoSiftRelease.ps1 -PackagePath $env:CANDIDATE
+        run: ./eng/release/Test-AlbumenRelease.ps1 -PackagePath $env:CANDIDATE
 
       - name: Summarize candidate
         if: always()
@@ -66,7 +66,7 @@ jobs:
           $files = @(Get-ChildItem -Recurse -File $env:CANDIDATE)
           $bytes = ($files | Measure-Object Length -Sum).Sum
           Write-Output "Files: $($files.Count); bytes: $bytes"
-          $zip = Join-Path $env:RUNNER_TEMP 'PhotoSift-candidate.zip'
+          $zip = Join-Path $env:RUNNER_TEMP 'Albumen-candidate.zip'
           Compress-Archive -Path (Join-Path $env:CANDIDATE '*') -DestinationPath $zip
           Write-Output "ZIP bytes: $((Get-Item $zip).Length)"
 
@@ -74,5 +74,5 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          $failure = Join-Path $env:RUNNER_TEMP 'photosift-release/evidence/failure.json'
+          $failure = Join-Path $env:RUNNER_TEMP 'albumen-release/evidence/failure.json'
           if (Test-Path $failure) { Get-Content -Raw $failure }

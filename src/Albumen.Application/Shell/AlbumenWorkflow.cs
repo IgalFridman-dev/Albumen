@@ -1,0 +1,743 @@
+using System.Collections.Concurrent;
+using System.Collections.Immutable;
+using Albumen.Application.Action;
+using Albumen.Application.Scan;
+using Albumen.Application.Review;
+using Albumen.Domain.Review;
+using Albumen.Domain.Scan;
+using Albumen.Domain.Workflow;
+
+namespace Albumen.Application.Shell;
+
+// Commands and immutable projections only. Scope, Scan, Review and Action retain
+// their sole owners; every presentation transition enters a non-inline inbox.
+public sealed class AlbumenWorkflow : IAlbumenWorkflow
+{
+    private readonly IChooseScopeWorkflow scope;
+    private readonly IScanCoordinator scan;
+    private readonly IReviewCoordinator? review;
+    private readonly IActionCoordinator? action;
+    private readonly IActionRecoveryCoordinator? recovery;
+    private readonly WorkflowInbox inbox;
+    private AlbumenSnapshot current;
+    private long nextRuleRevision;
+    private ScanSnapshot? pendingScan;
+    private int scanRefreshScheduled;
+    private ReviewSnapshot? pendingReview;
+    private int reviewRefreshScheduled;
+    private ActionSnapshot? pendingAction;
+    private int actionRefreshScheduled;
+    private int scopeRecheckPending;
+    private ActionRecoverySnapshot? pendingRecovery;
+    private int recoveryRefreshScheduled;
+    private ReviewSnapshot? approvedReviewProjection;
+    private readonly object adapterLifecycle = new();
+    private readonly List<Task> adapterTasks = [];
+    private readonly ConcurrentQueue<Task> adapterFailures = new();
+    private static readonly IEqualityComparer<EqualityEvidence> equalityComparison =
+        EqualityComparer<EqualityEvidence>.Create(SameEquality,
+            edge => HashCode.Combine(edge.Left, edge.LeftContent) ^ HashCode.Combine(edge.Right, edge.RightContent));
+    private static readonly IEqualityComparer<NearDuplicateEvidence> similarityComparison =
+        EqualityComparer<NearDuplicateEvidence>.Create(SameSimilarity,
+            edge => edge.Left.GetHashCode() ^ edge.Right.GetHashCode()
+                ^ HashCode.Combine(edge.HammingDistance, edge.ColorDistance, edge.Kind));
+    private static readonly IEqualityComparer<CandidateGroup> candidateComparison =
+        EqualityComparer<CandidateGroup>.Create(SameCandidate, group => group.GroupId.GetHashCode());
+
+    public AlbumenWorkflow(IChooseScopeWorkflow scope, IScanCoordinator scan, IWorkflowScheduler scheduler,
+        IReviewCoordinator? review = null, IActionCoordinator? action = null)
+        : this(scope, scan, scheduler, review, action, null)
+    {
+    }
+
+    public AlbumenWorkflow(IChooseScopeWorkflow scope, IScanCoordinator scan, IWorkflowScheduler scheduler,
+        IReviewCoordinator? review, IActionCoordinator? action, IActionRecoveryCoordinator? recovery)
+    {
+        this.scope = scope ?? throw new ArgumentNullException(nameof(scope));
+        this.scan = scan ?? throw new ArgumentNullException(nameof(scan));
+        this.review = review;
+        this.action = action;
+        this.recovery = recovery;
+        inbox = new(scheduler ?? throw new ArgumentNullException(nameof(scheduler)));
+        current = new(scope.Current, null, EmptyScan(), WorkflowPhase.ChooseScope, InitialWorkflow.Create());
+        scope.SnapshotChanged += OnScopeChanged;
+        scan.SnapshotChanged += OnScanChanged;
+        if (review is not null) review.SnapshotChanged += OnReviewChanged;
+        if (action is not null) action.SnapshotChanged += OnActionChanged;
+        if (recovery is not null)
+        {
+            recovery.SnapshotChanged += OnRecoveryChanged;
+            RetainAdapterTask(ObserveRecoveryAdapterAsync(() => recovery.LoadAsync(CancellationToken.None)));
+        }
+    }
+
+    public AlbumenSnapshot Current => Volatile.Read(ref current);
+    public event EventHandler<AlbumenSnapshot>? SnapshotChanged;
+
+    public Task OpenReviewAsync() => ObserveCommandAsync(() => OpenReviewCoreAsync(navigate: true));
+
+    private async Task OpenReviewCoreAsync(bool navigate, ScanPin? expectedScan = null)
+    {
+        while (true)
+        {
+            var request = await inbox.InvokeAsync(() =>
+            {
+                RefreshScope();
+                var acceptedScan = scan.Current;
+                if (review is null || acceptedScan.Status is not (ScanStatus.Complete or ScanStatus.Incomplete)
+                    || (expectedScan is not null && expectedScan != acceptedScan.Pin)) return null;
+                var request = CaptureReviewRequest(acceptedScan);
+                if (request is null) return null;
+                var acceptedReview = review.Current;
+                if (!ReviewMatchesScan(acceptedReview, acceptedScan)) return request;
+                if (navigate)
+                    Publish(current with { Scan = acceptedScan, Review = acceptedReview,
+                        CurrentPhase = WorkflowPhase.Review });
+                return null;
+            }).ConfigureAwait(false);
+            if (request is null) return;
+            var result = await review!.OpenAsync(request, CancellationToken.None).ConfigureAwait(false);
+            var retry = await inbox.InvokeAsync(() =>
+            {
+                RefreshScope();
+                var acceptedScan = scan.Current;
+                if (current.Scope != request.Scope || current.Rules != request.Rules
+                    || acceptedScan.Pin != request.Scan.Pin
+                    || acceptedScan.Status is not (ScanStatus.Complete or ScanStatus.Incomplete)) return false;
+                // ScanPin alone does not identify its candidate projection. A
+                // same-pin update during admission is reconciled by the owner.
+                if (!SameScan(acceptedScan, request.Scan)) return true;
+                var acceptedReview = review.Current;
+                if (result.Outcome != ReviewCommandOutcome.Committed || acceptedReview.Pin != result.Snapshot.Pin
+                    || !ReviewMatchesScan(acceptedReview, acceptedScan)) return false;
+                Publish(current with { Scan = acceptedScan, Review = acceptedReview,
+                    CurrentPhase = navigate ? WorkflowPhase.Review : current.CurrentPhase });
+                return false;
+            }).ConfigureAwait(false);
+            if (!retry) return;
+            expectedScan = request.Scan.Pin;
+        }
+    }
+
+    // PM-013: a settled cleanup does not end the session. The review of the same
+    // scan reopens without the photos that reached the Recycle Bin, with no marks
+    // carried over; a set with an uncertain outcome closes until the next scan. The
+    // Review owner refuses the continuation unless its live review is the sealed
+    // one for that cleanup, so this never replaces a review the user moved on to.
+    public Task ContinueReviewAsync() => ObserveCommandAsync(async () =>
+    {
+        var request = await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            return CaptureContinuationRequest();
+        }).ConfigureAwait(false);
+        if (request is null) return;
+        var result = await review!.OpenAsync(request, CancellationToken.None).ConfigureAwait(false);
+        await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            var acceptedScan = scan.Current;
+            var acceptedReview = review.Current;
+            if (result.Outcome != ReviewCommandOutcome.Committed || current.Scope != request.Scope
+                || current.Rules != request.Rules || acceptedScan.Pin != request.Scan.Pin
+                || !SameScan(acceptedScan, request.Scan) || acceptedReview.Pin != result.Snapshot.Pin
+                || !ReviewMatchesScan(acceptedReview, acceptedScan)) return;
+            Publish(current with { Scan = acceptedScan, Review = acceptedReview, CurrentPhase = WorkflowPhase.Review });
+        }).ConfigureAwait(false);
+    });
+
+    // Called only in a workflow data turn. Removed photos and closed sets from
+    // earlier continuations of this scan are carried over from the live review.
+    private ReviewOpenRequest? CaptureContinuationRequest()
+    {
+        if (review is null || action is null) return null;
+        var settled = current.Action;
+        if (settled.RequestId is not { } requestId
+            || settled.Status is not (ActionStatus.Complete or ActionStatus.Incomplete)) return null;
+        var live = review.Current;
+        if (!live.Sealed || live.Status == ReviewStatus.Faulted || live.Pin is not { } pin
+            || live.ApprovedRequest?.RequestId != requestId) return null;
+        var acceptedScan = scan.Current;
+        if (acceptedScan.Pin != pin.Scan || !ReviewMatchesScan(live, acceptedScan)) return null;
+        if (CaptureReviewRequest(acceptedScan) is not { } request) return null;
+        var excluded = ImmutableHashSet.CreateBuilder<long>();
+        var closed = ImmutableHashSet.CreateBuilder<Guid>();
+        foreach (var group in live.Groups)
+        {
+            if (group.Closed) closed.Add(group.Candidate.GroupId);
+            var reviewed = group.Members.Select(member => member.Occurrence.Token.OccurrenceId).ToHashSet();
+            foreach (var member in group.Candidate.Members)
+                if (!reviewed.Contains(member.Token.OccurrenceId)) excluded.Add(member.Token.OccurrenceId);
+        }
+        foreach (var item in settled.Items)
+        {
+            switch (item.State)
+            {
+                case ActionItemState.Recycled:
+                    excluded.Add(item.Item.Occurrence.OccurrenceId);
+                    break;
+                case ActionItemState.NotRemoved or ActionItemState.NotRequested:
+                    break;
+                default:
+                    // Executing, interrupted or unknown: the Action treats the set's
+                    // other photos as dependent on this one, and so does the review.
+                    closed.Add(item.Item.GroupId);
+                    break;
+            }
+        }
+        return request with
+        {
+            ExcludedOccurrenceIds = excluded.ToImmutable(),
+            ClosedGroupIds = closed.ToImmutable(),
+            ContinuesRequestId = requestId,
+        };
+    }
+
+    public Task ContinueAsync() => ObserveCommandAsync(() => inbox.InvokeAsync(() =>
+    {
+        RefreshScope();
+        if (current.Scope.ScopeState == ScopeSessionState.Ready)
+            Publish(current with { CurrentPhase = WorkflowPhase.ConfirmRules });
+    }));
+
+    public Task SetScanOptionsAsync(ScanOptions options) => ObserveCommandAsync(async () =>
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var invalidateScopeRevision = await inbox.InvokeAsync<long?>(() =>
+        {
+            RefreshScope();
+            // The folder step shows the options too, so they can change there or on Confirm Rules.
+            if (current.CurrentPhase is not (WorkflowPhase.ChooseScope or WorkflowPhase.ConfirmRules)
+                || current.Scope.ScopeState != ScopeSessionState.Ready
+                || current.Scan.Status is ScanStatus.Checking or ScanStatus.Running
+                || current.Options == options)
+            {
+                return null;
+            }
+            var hadCurrentScan = current.Scan.Pin is not null;
+            Publish(current with
+            {
+                Options = options,
+                Rules = null,
+                Scan = EmptyScan(),
+                Review = ReviewSnapshot.Closed,
+            });
+            return hadCurrentScan ? current.Scope.Revision : null;
+        }).ConfigureAwait(false);
+        if (invalidateScopeRevision is not { } scopeRevision) return;
+        await scan.InvalidateAsync(scopeRevision, null).ConfigureAwait(false);
+        if (review is not null) await review.InvalidateAsync(null).ConfigureAwait(false);
+    });
+
+    public Task ConfirmExactRulesAsync() => ObserveCommandAsync(() => inbox.InvokeAsync(() =>
+    {
+        RefreshScope();
+        if (current.CurrentPhase != WorkflowPhase.ConfirmRules
+            || current.Scope.ScopeState != ScopeSessionState.Ready
+            || !current.Options.IsValid)
+            return;
+        if (current.Rules is null)
+            Publish(current with
+            {
+                Rules = new(
+                    current.Scope.Revision,
+                    checked(++nextRuleRevision),
+                    current.Options),
+            });
+    }));
+
+    public Task StartScanAsync() => ObserveCommandAsync(StartScanCoreAsync);
+
+    private async Task StartScanCoreAsync()
+    {
+        var request = await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            if (!ShellPhasePolicy.CanStart(current.Scope, current.Rules)
+                || current.Scan.Status is ScanStatus.Checking or ScanStatus.Running) return null;
+            Publish(current with { CurrentPhase = WorkflowPhase.Scan });
+            return current;
+        }).ConfigureAwait(false);
+        // Command submission and fresh preflight belong to Scan; no work is
+        // awaited while holding a shell turn.
+        if (request is not null)
+            await scan.StartAsync(request.Scope, request.Rules!, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    public Task CancelScanAsync() => ObserveCommandAsync(CancelScanCoreAsync);
+
+    public Task<ReviewCommandResult> ChangeReviewSelectionAsync(
+        SelectionCommand command, CancellationToken cancellationToken) =>
+        ObserveReviewCommandAsync(coordinator => coordinator.ChangeSelectionAsync(command, cancellationToken));
+
+    public Task<ReviewCommandResult> AffirmReviewOverrideAsync(
+        OverrideAffirmationCommand command, CancellationToken cancellationToken) =>
+        ObserveReviewCommandAsync(coordinator => coordinator.AffirmOverrideAsync(command, cancellationToken));
+
+    public Task<ReviewCommandResult> ApproveReviewAsync(
+        ApproveSelectionCommand command, CancellationToken cancellationToken) =>
+        ObserveReviewCommandAsync(async coordinator =>
+        {
+            var result = await coordinator.ApproveAsync(command, cancellationToken).ConfigureAwait(false);
+            if (result.Outcome == ReviewCommandOutcome.Approved
+                && result.ApprovedRequest is { } request && action is not null)
+            {
+                await inbox.InvokeAsync(() =>
+                {
+                    // Capture disclosure only; approval is not admission or
+                    // durable intent. Forward the owner's exact returned object.
+                    if (result.Snapshot.Sealed && ReferenceEquals(result.Snapshot.ApprovedRequest, request))
+                        approvedReviewProjection = result.Snapshot;
+                }).ConfigureAwait(false);
+                await action.ApproveAsync(request, cancellationToken).ConfigureAwait(false);
+                // Completion can race the coalesced presentation notification.
+                // Read the sole owner's current snapshot through the same inbox.
+                if (await inbox.InvokeAsync(RefreshAction).ConfigureAwait(false)) RecheckScopeAfterCleanup();
+            }
+            return result;
+        });
+
+    public Task RevalidateUnknownAsync(Guid requestId, CancellationToken cancellationToken) =>
+        ObserveCommandAsync(() => recovery?.RevalidateUnknownAsync(requestId, cancellationToken)
+            ?? Task.CompletedTask);
+
+    private async Task CancelScanCoreAsync()
+    {
+        await inbox.InvokeAsync(RefreshScope).ConfigureAwait(false);
+        await scan.CancelAsync().ConfigureAwait(false);
+    }
+
+    public Task NavigateAsync(WorkflowPhase phase) => ObserveCommandAsync(() =>
+        phase == WorkflowPhase.Review && review is not null
+            ? OpenReviewCoreAsync(navigate: true)
+            : NavigateCoreAsync(phase));
+
+    private async Task NavigateCoreAsync(WorkflowPhase phase)
+    {
+        var recheck = await inbox.InvokeAsync(() =>
+        {
+            RefreshScope();
+            if (CanNavigate(current, phase)) Publish(current with { CurrentPhase = phase });
+            return ShouldRecheckScopeAfterCleanup();
+        }).ConfigureAwait(false);
+        if (recheck) RecheckScopeAfterCleanup();
+    }
+
+    // The folder page still shows the counts from before a cleanup that removed
+    // photos. Re-check the folder once: scopeRecheckPending holds the submit until
+    // the Scope publishes the check under its next revision (RefreshScope consumes
+    // it there), and that revision no longer matches the approved request. The
+    // retry runs outside the inbox turn and is observed like any adapter call.
+    private bool ShouldRecheckScopeAfterCleanup() =>
+        current.CurrentPhase == WorkflowPhase.ChooseScope
+        && current.Action.Status is ActionStatus.Complete or ActionStatus.Incomplete or ActionStatus.Faulted
+        && current.Action.RecycledCount > 0
+        && current.ActionReview.ApprovedRequest is { } approved
+        && approved.Scan.ScopeRevision == current.Scope.Revision
+        && current.Scope.ScopeState != ScopeSessionState.Checking
+        && Volatile.Read(ref scopeRecheckPending) == 0;
+
+    private void RecheckScopeAfterCleanup()
+    {
+        if (Interlocked.CompareExchange(ref scopeRecheckPending, 1, 0) != 0) return;
+        var revision = scope.Current.Revision;
+        ObserveAdapter(async () =>
+        {
+            try
+            {
+                await scope.HandleAsync(new RetryScopePreflightCommand(), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                Volatile.Write(ref scopeRecheckPending, 0);
+                throw;
+            }
+            // The Scope declined to check (a folder picker is open): nothing was
+            // published under a new revision, so release the hold here.
+            if (scope.Current.Revision == revision) Volatile.Write(ref scopeRecheckPending, 0);
+        }, origin: null);
+    }
+
+    private void OnScopeChanged(object? sender, ShellSnapshot snapshot)
+    {
+        // Submit invalidation at publication, before yielding the Scope owner.
+        // This API only queues a Scan command; its work/cancellation is outside
+        // both owner turns. Same-revision observations are neutral.
+        if (!ReferenceEquals(snapshot, scope.Current)) return;
+        var origin = review?.Current.Pin;
+        if (snapshot.Revision != Current.Scope.Revision)
+        {
+            ObserveAdapter(() => scan.InvalidateAsync(snapshot.Revision, null), origin);
+            if (review is not null) ObserveAdapter(() => review.InvalidateAsync(null), origin);
+        }
+        ObserveAdapter(() => inbox.InvokeAsync(RefreshScope), origin);
+    }
+
+    private void RefreshScope()
+    {
+        var accepted = scope.Current;
+        if (accepted.Revision != current.Scope.Revision)
+        {
+            // The re-check keeps the selection; a different folder or recursion is
+            // the user's own check, whatever is pending.
+            var rechecking = Interlocked.Exchange(ref scopeRecheckPending, 0) == 1
+                && accepted.ScopeState == ScopeSessionState.Checking
+                && accepted.Selection == current.Scope.Selection;
+            Publish(current with { Scope = accepted, Rules = null, Scan = EmptyScan(), Review = ReviewSnapshot.Closed,
+                CurrentPhase = WorkflowPhase.ChooseScope, IsRecheckingScopeAfterCleanup = rechecking });
+        }
+        else if (!ReferenceEquals(accepted, current.Scope))
+        {
+            Publish(current with { Scope = accepted, IsRecheckingScopeAfterCleanup =
+                current.IsRecheckingScopeAfterCleanup && accepted.ScopeState == ScopeSessionState.Checking });
+        }
+    }
+
+    private void OnScanChanged(object? sender, ScanSnapshot snapshot)
+    {
+        if (!ReferenceEquals(snapshot, scan.Current)) return;
+        var liveReview = review?.Current;
+        var replaceReview = liveReview is { Pin: { } reviewPin } && reviewPin.Scan == snapshot.Pin
+            && snapshot.Status is ScanStatus.Complete or ScanStatus.Incomplete
+            && !ReviewMatchesScan(liveReview, snapshot);
+        // Submission occurs synchronously at the Scan publication boundary.
+        // InvalidateAsync queues data acceptance before its first await.
+        if (review is not null && snapshot.Pin != Current.Scan.Pin)
+            ObserveAdapter(() => review.InvalidateAsync(snapshot.Pin), liveReview?.Pin);
+        // Coalesce presentation notifications, not accepted results: the latest
+        // immutable snapshot retains all terminal rows and evidence.
+        Interlocked.Exchange(ref pendingScan, snapshot);
+        ScheduleScanRefresh();
+        if (replaceReview) ObserveAdapter(() => OpenReviewCoreAsync(navigate: false, snapshot.Pin), liveReview?.Pin);
+    }
+
+    // Called only in a workflow data turn; the returned values are immutable.
+    private ReviewOpenRequest? CaptureReviewRequest(ScanSnapshot snapshot)
+    {
+        if (current.Rules is not { } rules || snapshot.Pin is not { } pin
+            || pin.ScopeRevision != current.Scope.Revision || pin.RuleSetRevision != rules.RuleSetRevision) return null;
+        return new ReviewOpenRequest(current.Scope, rules, snapshot);
+    }
+
+    private void OnReviewChanged(object? sender, ReviewSnapshot snapshot)
+    {
+        if (!ReferenceEquals(snapshot, review?.Current)) return;
+        Interlocked.Exchange(ref pendingReview, snapshot);
+        ScheduleReviewRefresh();
+    }
+
+    private void OnActionChanged(object? sender, ActionSnapshot snapshot)
+    {
+        if (!ReferenceEquals(snapshot, action?.Current)) return;
+        Interlocked.Exchange(ref pendingAction, snapshot);
+        ScheduleActionRefresh();
+    }
+
+    private void OnRecoveryChanged(object? sender, ActionRecoverySnapshot snapshot)
+    {
+        if (!ReferenceEquals(snapshot, recovery?.Current)) return;
+        Interlocked.Exchange(ref pendingRecovery, snapshot);
+        if (Interlocked.CompareExchange(ref recoveryRefreshScheduled, 1, 0) == 0)
+            RetainAdapterTask(ObserveRecoveryAdapterAsync(ApplyRecoveryAsync));
+    }
+
+    private async Task ApplyRecoveryAsync()
+    {
+        await inbox.InvokeAsync(() =>
+        {
+            try
+            {
+                Interlocked.Exchange(ref pendingRecovery, null);
+                var snapshot = recovery?.Current;
+                if (snapshot is not null && !ReferenceEquals(snapshot, current.ActionRecovery))
+                    Publish(current with { ActionRecovery = snapshot });
+            }
+            finally
+            {
+                Volatile.Write(ref recoveryRefreshScheduled, 0);
+                if (Volatile.Read(ref pendingRecovery) is not null
+                    && Interlocked.CompareExchange(ref recoveryRefreshScheduled, 1, 0) == 0)
+                    RetainAdapterTask(ObserveRecoveryAdapterAsync(ApplyRecoveryAsync));
+            }
+        }).ConfigureAwait(false);
+    }
+
+    private void ScheduleActionRefresh()
+    {
+        if (Interlocked.CompareExchange(ref actionRefreshScheduled, 1, 0) == 0)
+            ObserveActionAdapter(ApplyActionAsync, action?.Current.RequestId);
+    }
+
+    private async Task ApplyActionAsync()
+    {
+        var recheck = await inbox.InvokeAsync(() =>
+        {
+            try
+            {
+                Interlocked.Exchange(ref pendingAction, null);
+                return RefreshAction();
+            }
+            finally
+            {
+                Volatile.Write(ref actionRefreshScheduled, 0);
+                if (Volatile.Read(ref pendingAction) is not null) ScheduleActionRefresh();
+            }
+        }).ConfigureAwait(false);
+        if (recheck) RecheckScopeAfterCleanup();
+    }
+
+    private bool RefreshAction()
+    {
+        var snapshot = action?.Current;
+        if (snapshot is null || ReferenceEquals(snapshot, current.Action)) return false;
+        var disclosure = current.ActionReview;
+        if (disclosure.ApprovedRequest?.RequestId != snapshot.RequestId)
+        {
+            disclosure = approvedReviewProjection is { Sealed: true, ApprovedRequest: { } approved }
+                && approved.RequestId == snapshot.RequestId ? approvedReviewProjection
+                : review?.Current is { Sealed: true, ApprovedRequest: { } liveApproved } live
+                    && liveApproved.RequestId == snapshot.RequestId ? live : ReviewSnapshot.Closed;
+        }
+        var newlyAdmitted = snapshot.RequestId is not null && snapshot.RequestId != current.Action.RequestId;
+        Publish(current with { Action = snapshot, ActionReview = disclosure,
+            CurrentPhase = newlyAdmitted ? WorkflowPhase.ApproveCleanup : current.CurrentPhase }, snapshot.RequestId);
+        return ShouldRecheckScopeAfterCleanup();
+    }
+
+    private void ScheduleReviewRefresh()
+    {
+        if (Interlocked.CompareExchange(ref reviewRefreshScheduled, 1, 0) == 0)
+            ObserveAdapter(ApplyReviewAsync, review?.Current.Pin);
+    }
+
+    private async Task ApplyReviewAsync()
+    {
+        await inbox.InvokeAsync(() =>
+        {
+            try
+            {
+                Interlocked.Exchange(ref pendingReview, null);
+                var snapshot = review?.Current;
+                RefreshScope();
+                if (snapshot is null) return;
+                if (snapshot.Pin is { } pin && (!ReviewMatchesScan(snapshot, scan.Current) || current.Rules is null
+                    || pin.Scan.ScopeRevision != current.Scope.Revision || pin.Scan.RuleSetRevision != current.Rules.RuleSetRevision)) return;
+                Publish(current with { Review = snapshot });
+            }
+            finally
+            {
+                Volatile.Write(ref reviewRefreshScheduled, 0);
+                if (Volatile.Read(ref pendingReview) is not null) ScheduleReviewRefresh();
+            }
+        }).ConfigureAwait(false);
+    }
+
+    private void ScheduleScanRefresh()
+    {
+        if (Interlocked.CompareExchange(ref scanRefreshScheduled, 1, 0) == 0)
+            ObserveAdapter(ApplyScanAsync, review?.Current.Pin);
+    }
+
+    private async Task ApplyScanAsync()
+    {
+        await inbox.InvokeAsync(() =>
+        {
+            try
+            {
+                Interlocked.Exchange(ref pendingScan, null);
+                var snapshot = scan.Current;
+                RefreshScope();
+                if (snapshot?.Pin is not { } pin || current.Rules is not { } rules
+                    || pin.ScopeRevision != scope.Current.Revision
+                    || pin.ScopeRevision != rules.ScopeRevision
+                    || pin.RuleSetRevision != rules.RuleSetRevision) return;
+                Publish(current with { Scan = snapshot });
+            }
+            finally
+            {
+                Volatile.Write(ref scanRefreshScheduled, 0);
+                if (Volatile.Read(ref pendingScan) is not null) ScheduleScanRefresh();
+            }
+        }).ConfigureAwait(false);
+    }
+
+    private static bool ReviewMatchesScan(ReviewSnapshot reviewSnapshot, ScanSnapshot scanSnapshot) =>
+        reviewSnapshot.Pin?.Scan == scanSnapshot.Pin && reviewSnapshot.Coverage == scanSnapshot.Status
+        && !scanSnapshot.Groups.IsDefault
+        && SameValues(reviewSnapshot.Groups.Select(group => group.Candidate), scanSnapshot.Groups, candidateComparison);
+
+    private static bool SameScan(ScanSnapshot left, ScanSnapshot right) =>
+        // Record equality still compares every scalar fact. Only collection
+        // identity is replaced by value comparison below.
+        left with { Occurrences = right.Occurrences, Groups = right.Groups } == right
+        && SameArray(left.Occurrences, right.Occurrences)
+        && SameArray(left.Groups, right.Groups, candidateComparison);
+
+    private static bool SameCandidate(CandidateGroup? left, CandidateGroup? right) =>
+        left is not null && right is not null
+        && left with
+        {
+            Members = right.Members,
+            Equality = right.Equality,
+            Similarity = right.Similarity,
+        } == right
+        && SameArray(left.Members, right.Members)
+        && SameArray(left.Equality, right.Equality, equalityComparison)
+        && SameArray(left.Similarity, right.Similarity, similarityComparison);
+
+    private static bool SameEquality(EqualityEvidence? left, EqualityEvidence? right) =>
+        left == right || (left is not null && right is not null
+            && left.Left == right.Right && left.Right == right.Left
+            && left.LeftContent == right.RightContent && left.RightContent == right.LeftContent);
+
+    private static bool SameSimilarity(NearDuplicateEvidence? left, NearDuplicateEvidence? right) =>
+        left == right || (left is not null && right is not null
+            && left.Left == right.Right && left.Right == right.Left
+            && left.HammingDistance == right.HammingDistance
+            && left.ColorDistance == right.ColorDistance && left.Kind == right.Kind);
+
+    private static bool SameArray<T>(ImmutableArray<T> left, ImmutableArray<T> right,
+        IEqualityComparer<T>? comparison = null) where T : notnull =>
+        left.IsDefault || right.IsDefault ? left.IsDefault && right.IsDefault : SameValues(left, right, comparison);
+
+    private static bool SameValues<T>(IEnumerable<T> left, IEnumerable<T> right,
+        IEqualityComparer<T>? comparison = null) where T : notnull
+    {
+        // Group membership and equality edges are unordered, but multiplicity
+        // is significant: a malformed duplicate cannot disappear in a set.
+        var counts = new Dictionary<T, int>(comparison);
+        foreach (var value in left) counts[value] = counts.GetValueOrDefault(value) + 1;
+        foreach (var value in right)
+        {
+            if (!counts.TryGetValue(value, out var count)) return false;
+            if (count == 1) counts.Remove(value);
+            else counts[value] = count - 1;
+        }
+        return counts.Count == 0;
+    }
+
+    private async Task ObserveCommandAsync(Func<Task> command)
+    {
+        // Diagnostics never gate the command (especially cancellation). A
+        // command exception wins and leaves queued diagnostics for later calls.
+        await command().ConfigureAwait(false);
+        await ConsumeNextAdapterFailureAsync().ConfigureAwait(false);
+    }
+
+    private Task ConsumeNextAdapterFailureAsync() => adapterFailures.TryDequeue(out var failure) ? failure : Task.CompletedTask;
+
+    private async Task<ReviewCommandResult> ObserveReviewCommandAsync(
+        Func<IReviewCoordinator, Task<ReviewCommandResult>> command)
+    {
+        if (review is null) return new(ReviewCommandOutcome.Invalid, Current.Review);
+        var result = await command(review).ConfigureAwait(false);
+        await ConsumeNextAdapterFailureAsync().ConfigureAwait(false);
+        return result;
+    }
+
+    private void ObserveAdapter(Func<Task> work, ReviewSessionPin? origin)
+    {
+        var observation = ObserveAdapterAsync(work, origin);
+        RetainAdapterTask(observation);
+    }
+
+    private void ObserveActionAdapter(Func<Task> work, Guid? origin)
+    {
+        RetainAdapterTask(ObserveActionAdapterAsync(work, origin));
+    }
+
+    private void RetainAdapterTask(Task observation)
+    {
+        // This lock retains asynchronous supervision only. It never owns or
+        // gates Review data, and commands do not wait for pending adapter work.
+        lock (adapterLifecycle)
+        {
+            adapterTasks.RemoveAll(task => task.IsCompleted);
+            adapterTasks.Add(observation);
+        }
+    }
+
+    private async Task ObserveActionAdapterAsync(Func<Task> work, Guid? origin)
+    {
+        try { await work().ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            RetainAdapterFailure(exception);
+            if (origin is not null && action is not null)
+            {
+                try { await action.ReportObserverFaultAsync(origin.Value).ConfigureAwait(false); }
+                catch (Exception reportingFailure) { RetainAdapterFailure(reportingFailure); }
+            }
+        }
+    }
+
+    private async Task ObserveRecoveryAdapterAsync(Func<Task> work)
+    {
+        try { await work().ConfigureAwait(false); }
+        catch (Exception exception) { RetainAdapterFailure(exception); }
+    }
+
+    private async Task ObserveAdapterAsync(Func<Task> work, ReviewSessionPin? origin)
+    {
+        try { await work().ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            RetainAdapterFailure(exception);
+            if (origin is not null && review is not null)
+            {
+                try { await review.ReportObserverFaultAsync(origin).ConfigureAwait(false); }
+                catch (Exception reportingFailure) { RetainAdapterFailure(reportingFailure); }
+            }
+        }
+    }
+
+    private void RetainAdapterFailure(Exception exception)
+    {
+        var failure = Task.FromException(exception);
+        // Observe now, retain for the existing Task-returning command surface.
+        // Failures without a live session cannot be attached to a newer Review.
+        _ = failure.Exception;
+        // FIFO arrival, exactly one delivery per successful command completion.
+        // Concurrent commands claim distinct diagnostics atomically.
+        adapterFailures.Enqueue(failure);
+    }
+
+    private static bool CanNavigate(AlbumenSnapshot snapshot, WorkflowPhase phase) => phase switch
+    {
+        WorkflowPhase.ChooseScope => true,
+        WorkflowPhase.ConfirmRules => snapshot.Scope.ScopeState == ScopeSessionState.Ready
+            && (snapshot.CurrentPhase != WorkflowPhase.ChooseScope || snapshot.Rules is not null),
+        WorkflowPhase.Scan => ShellPhasePolicy.CanStart(snapshot.Scope, snapshot.Rules),
+        WorkflowPhase.Review => snapshot.Scan.Pin is { } pin && snapshot.Rules is { } rules
+            && pin.ScopeRevision == snapshot.Scope.Revision && pin.RuleSetRevision == rules.RuleSetRevision,
+        WorkflowPhase.ApproveCleanup => snapshot.Action.RequestId is not null,
+        _ => false,
+    };
+
+    private void Publish(AlbumenSnapshot snapshot, Guid? actionOrigin = null)
+    {
+        var phases = InitialWorkflow.Create().Select(phase => phase with
+        {
+            Availability = phase.Phase == snapshot.CurrentPhase ? PhaseAvailability.Current
+                : CanNavigate(snapshot, phase.Phase) ? PhaseAvailability.Available : PhaseAvailability.Unavailable,
+        }).ToImmutableArray();
+        var published = snapshot with { Phases = phases };
+        Volatile.Write(ref current, published);
+        foreach (var observer in SnapshotChanged?.GetInvocationList() ?? [])
+        {
+            try { ((EventHandler<AlbumenSnapshot>)observer)(this, published); }
+            catch (Exception exception)
+            {
+                // The exact published session is the failure's origin, even if
+                // a subscriber synchronously queues a replacement before throwing.
+                if (actionOrigin is { } requestId)
+                    ObserveActionAdapter(() => Task.FromException(exception), requestId);
+                else
+                    ObserveAdapter(() => Task.FromException(exception), published.Review.Pin);
+            }
+        }
+    }
+
+    private static ScanSnapshot EmptyScan() => new(null, ScanStatus.Idle,
+        new(ScanStageState.Pending, ScanReason.None), [], [], new(0, 0, 0, 0, 0, 0));
+}

@@ -1,4 +1,4 @@
-# PhotoSift Post-MVP Engineering Backlog
+# Albumen Post-MVP Engineering Backlog
 
 ## PM-001 — Harden E1-S6 real-process crash-boundary automation
 
@@ -16,8 +16,8 @@ The failure repeated in Architecture runs `20260914-121019-architecture-b47aabb3
 
 Read-only follow-up identified the direct fail-closed boundary: `SqliteDatabaseOwner.RefuseRetainedSidecars()` rejects any retained SQLite `-wal`, `-shm`, or `-journal` file before opening the database. A hard process kill may legitimately leave WAL/SHM state, so elapsed time alone does not make this state admissible. The current behavior protects evidence and source photos by refusing startup mutation, but it can prevent Action Records from loading after this exact hard-crash edge case.
 
-Owner observation, 2026-10-16: on a fresh Windows install the restored `%LOCALAPPDATA%\PhotoSift` folder held a
-0-byte `photosift.db-wal` and a `photosift.db-shm` dated 2026-10-06. Every launch showed "Local data could not be
+Owner observation, 2026-10-16: on a fresh Windows install the restored `%LOCALAPPDATA%\Albumen` folder held a
+0-byte `albumen.db-wal` and a `albumen.db-shm` dated 2026-10-06. Every launch showed "Local data could not be
 safely loaded" and the app offered no in-app way out. The Hyper-V VM reproduced it on clean develop `9a78e3b`: one launch
 and a normal close (exit code 0) left an empty `-wal` and a `-shm`. Shutdown tracing showed every dispose step
 completing, no open statements, and the writer closing last, yet the close did not remove the sidecars. An explicit
@@ -68,7 +68,7 @@ The product owner explicitly waived hands-on visual verification so E2-S2 could 
 ### Deferred verification
 
 - Run the current integrated executable in a stable Windows UI environment.
-- For corrupt bytes, foreign version-0 contents, read-only migration, and retained SQLite sidecars, confirm startup remains in `ChooseScope` and displays exactly: `Local data could not be safely loaded. PhotoSift will not modify files until the database is available.`
+- For corrupt bytes, foreign version-0 contents, read-only migration, and retained SQLite sidecars, confirm startup remains in `ChooseScope` and displays exactly: `Local data could not be safely loaded. Albumen will not modify files until the database is available.`
 - Confirm the message is exposed once through the accessible live-status surface, including Narrator, without duplicate Review/Action announcements.
 - Confirm Review approval, Action entry, and the Recycle Bin executor remain unreachable for every unsafe startup fixture.
 - Execute the corrected composed fixture teardown and prove it drains without a dispatcher deadlock.
@@ -251,7 +251,7 @@ cannot reach explicit Approval even after resizing
 **Origin:** Owner observation during `b0c4c13` packaged manual verification,
 2026-09-30
 
-At the default PhotoSift window size, some Review content was clipped and
+At the default Albumen window size, some Review content was clipped and
 could not be reached by scrolling. Maximizing the window and scrolling inside
 the lower Approval pane exposed the control; both Near and Exact packaged
 actions completed safely. Make Comparison, selection controls, survivor
@@ -293,7 +293,7 @@ clean launch on 2026-10-17. Open: the demo-photos ZIP. Evidence: `docs/evidence/
 The V1 candidate requires the .NET 10 Desktop Runtime to be installed first, which is a
 barrier for someone trying the app from a GitHub release. Bundle the pinned 10.0.11 runtime
 and the WPF part of the Windows Desktop runtime in the release folder so the user only
-extracts the ZIP and runs `Start-PhotoSift.cmd`. Design:
+extracts the ZIP and runs `Start-Albumen.cmd`. Design:
 `docs/superpowers/specs/2026-10-17-pm-008-self-contained-release-design.md`.
 
 ### Completion criteria

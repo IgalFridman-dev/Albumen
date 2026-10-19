@@ -1,4 +1,4 @@
-# PhotoSift V1 third-party notices
+# Albumen V1 third-party notices
 
 This self-contained win-x64 package contains the components below, including
 the .NET runtime and the WPF part of the Windows Desktop runtime, so no
@@ -8,7 +8,7 @@ the bundled runtime was owner-approved on 2026-10-17.
 
 | Component | Version | Shipped file(s) | Terms and packaged notices |
 | --- | --- | --- | --- |
-| .NET Host | 10.0.11 | `PhotoSift.App.exe` | [LicenseRef-Microsoft-NET-Library](https://www.microsoft.com/net/dotnet_library_license.htm); `licenses/dotnet/LICENSE.txt`, `licenses/dotnet/ThirdPartyNotices.txt` |
+| .NET Host | 10.0.11 | `Albumen.App.exe` | [LicenseRef-Microsoft-NET-Library](https://www.microsoft.com/net/dotnet_library_license.htm); `licenses/dotnet/LICENSE.txt`, `licenses/dotnet/ThirdPartyNotices.txt` |
 | .NET Runtime | 10.0.11 | 187 files from `Microsoft.NETCore.App.Runtime.win-x64` (for example `coreclr.dll`, `System.Private.CoreLib.dll`) | [MIT](https://licenses.nuget.org/MIT); `licenses/dotnet-runtime/LICENSE.txt`, `licenses/dotnet-runtime/THIRD-PARTY-NOTICES.txt` |
 | Microsoft.Data.Sqlite | 10.0.11 | Dependency metapackage; no separate file | [MIT](https://github.com/dotnet/dotnet/blob/v10.0.11/LICENSE.TXT); `licenses/MIT.txt` |
 | Microsoft.Data.Sqlite.Core | 10.0.11 | `Microsoft.Data.Sqlite.dll` | [MIT](https://github.com/dotnet/dotnet/blob/v10.0.11/LICENSE.TXT); `licenses/MIT.txt` |
@@ -45,5 +45,5 @@ profile of the Windows Desktop runtime is included, not Windows Forms.
 SDK tools and build-only packs are not shipped.
 
 The exact file list for every component is in the versioned machine-readable
-inventory `eng/release/release-dependencies.json` in the PhotoSift source
+inventory `eng/release/release-dependencies.json` in the Albumen source
 repository. All entries have disposition `owner-approved`.

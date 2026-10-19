@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 $Operations = $null
-$builderPath = Join-Path $PSScriptRoot '../../eng/release/New-PhotoSiftRelease.ps1'
+$builderPath = Join-Path $PSScriptRoot '../../eng/release/New-AlbumenRelease.ps1'
 # Load the exact production functions without running the builder's SDK setup.
 # No command operation is mocked: each test launches Windows cmd.exe itself.
 $tokens = $null
@@ -22,7 +22,7 @@ foreach ($name in @('Write-ReleaseUtf8NoBom', 'Invoke-ReleaseExternal')) {
     . ([scriptblock]::Create($functions[0].Extent.Text))
 }
 
-$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('PhotoSift-NativeCommand-' + [guid]::NewGuid().ToString('N'))
+$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('Albumen-NativeCommand-' + [guid]::NewGuid().ToString('N'))
 $evidencePath = Join-Path $testRoot 'evidence'
 $workingPath = Join-Path $testRoot 'working directory with spaces'
 [System.IO.Directory]::CreateDirectory($evidencePath) | Out-Null
@@ -82,7 +82,7 @@ try {
 }
 finally {
     $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)
-    $tempPrefix = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\PhotoSift-NativeCommand-'
+    $tempPrefix = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\Albumen-NativeCommand-'
     if (-not $resolvedTestRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe native test cleanup path.' }
     Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force
 }

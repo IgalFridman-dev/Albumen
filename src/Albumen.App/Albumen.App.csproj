@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Albumen.Domain\Albumen.Domain.csproj" />
+    <ProjectReference Include="..\Albumen.Application\Albumen.Application.csproj" />
+    <ProjectReference Include="..\Albumen.Analysis\Albumen.Analysis.csproj" />
+    <ProjectReference Include="..\Albumen.Infrastructure.Sqlite\Albumen.Infrastructure.Sqlite.csproj" />
+    <ProjectReference Include="..\Albumen.Infrastructure.Windows\Albumen.Infrastructure.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Albumen.Infrastructure.Tests" />
+    <InternalsVisibleTo Include="Albumen.Scenarios.Tests" />
+  </ItemGroup>
+</Project>
