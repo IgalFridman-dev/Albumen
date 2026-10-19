@@ -1,6 +1,6 @@
 # Albumen
 
-[![CI](https://github.com/IgalFridman-dev/PhotoSift/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/IgalFridman-dev/PhotoSift/actions/workflows/ci.yml)
+[![CI](https://github.com/IgalFridman-dev/Albumen/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/IgalFridman-dev/Albumen/actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/platform-Windows%2011%20x64-0078D4)
 ![.NET](https://img.shields.io/badge/.NET-10-512BD4)
 ![C#](https://img.shields.io/badge/C%23-14-239120)
