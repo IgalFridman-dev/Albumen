@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using PhotoSift.Application.Action;
 using PhotoSift.Domain.Action;
 
@@ -14,6 +15,7 @@ public sealed class ActionItemViewModel
         OriginalPath = snapshot.Item.DiscoveredPath;
         State = snapshot.State;
         Reason = snapshot.Reason;
+        FileName = Path.GetFileName(OriginalPath.TrimEnd('\\', '/')) is { Length: > 0 } name ? name : OriginalPath;
         AutomationName = $"Item {position.ToString(CultureInfo.InvariantCulture)} of {total.ToString(CultureInfo.InvariantCulture)}; Windows Recycle Bin; {OriginalPath}";
     }
 
@@ -34,7 +36,46 @@ public sealed class ActionItemViewModel
         ActionItemState.UnknownPendingRevalidation => "Unknown pending revalidation",
         _ => "Unknown state",
     };
+    public string FileName { get; }
     public string ReasonText => DescribeReason(Reason);
+
+    // Plain words for the card; StateText and CertaintyText stay the recorded detail.
+    public string ResultLabel => State switch
+    {
+        ActionItemState.Waiting => "Waiting",
+        ActionItemState.Requested => "Getting ready",
+        ActionItemState.Executing => "Moving…",
+        ActionItemState.Recycled => "In the Recycle Bin",
+        ActionItemState.NotRemoved => "Skipped",
+        ActionItemState.NotRequested => "Not moved",
+        ActionItemState.InterruptedBeforeExecution => "Stopped before moving",
+        _ => "Outcome unknown",
+    };
+    public ActionResultTone Tone => State switch
+    {
+        ActionItemState.Recycled => ActionResultTone.Done,
+        ActionItemState.NotRemoved or ActionItemState.NotRequested => ActionResultTone.Skipped,
+        ActionItemState.Waiting => ActionResultTone.Waiting,
+        ActionItemState.Requested or ActionItemState.Executing => ActionResultTone.Busy,
+        _ => ActionResultTone.Warning,
+    };
+    public string DetailText
+    {
+        get
+        {
+            var reason = Reason == ActionSafetyReason.None ? string.Empty : ReasonText + " ";
+            return State switch
+            {
+                ActionItemState.NotRemoved or ActionItemState.NotRequested => $"{reason}The photo was left where it is.",
+                ActionItemState.InterruptedBeforeExecution =>
+                    $"{reason}The cleanup stopped before this photo was sent to the Recycle Bin.",
+                ActionItemState.UnknownPendingRevalidation =>
+                    $"{reason}PhotoSift can't tell yet whether this photo moved. It needs a later check.",
+                _ => reason.TrimEnd(),
+            };
+        }
+    }
+    public bool HasDetail => DetailText.Length != 0;
     public string CertaintyText => State switch
     {
         ActionItemState.Waiting => "Not requested; no Recycle Bin operation has been started for this item.",
@@ -78,3 +119,5 @@ public sealed class ActionItemViewModel
         _ => "An unrecognized reason requires a later safe review.",
     };
 }
+
+public enum ActionResultTone { Waiting, Busy, Done, Skipped, Warning }

@@ -33,7 +33,7 @@ public sealed class ExactScanFlowTests
         Assert.Contains("UnknownAllocation", group.PotentialRecovery);
         Assert.Equal(@"C:\Photos\denied.jpg", Assert.Single(vm.CouldNotAnalyze).DiscoveredPath);
         Assert.Contains("AccessDenied", vm.CouldNotAnalyze[0].Outcome);
-        Assert.Contains("Analyzed revisions", vm.ReviewDisclaimer);
+        Assert.Contains("as they were when scanned", vm.ReviewDisclaimer);
         Assert.False(vm.Phases.Single(p => p.Phase == WorkflowPhase.ApproveCleanup).IsAvailable);
         fixture.PublishReview(ScanStatus.Complete);
         Assert.Contains("complete", vm.CoverageStatus, StringComparison.OrdinalIgnoreCase);
@@ -77,7 +77,7 @@ public sealed class ExactScanFlowTests
         fixture.PublishPhase(WorkflowPhase.ConfirmRules);
 
         Assert.True(fixture.ViewModel.NearDuplicatesEnabled);
-        Assert.Contains("Exact is always enabled", fixture.ViewModel.ScanOptionsGuidance, StringComparison.Ordinal);
+        Assert.Contains("Identical copies are always included", fixture.ViewModel.ScanOptionsGuidance, StringComparison.Ordinal);
         Assert.All(fixture.Workflow.Current.Review.Groups,
             group => Assert.Empty(group.SelectedOccurrenceIds));
         await fixture.ViewModel.ChangeNearDuplicateModeCommand.ExecuteAsync(false)
@@ -318,6 +318,7 @@ internal sealed class ExactShellFixture
             Task.FromResult(new ReviewCommandResult(ReviewCommandOutcome.Neutral, Current.Review));
         public Task RevalidateUnknownAsync(Guid requestId, CancellationToken token) => Task.CompletedTask;
         public Task NavigateAsync(WorkflowPhase phase) => Act(phase.ToString());
+        public Task ContinueReviewAsync() => Act("continue-review");
         public async ValueTask DisposeAsync()
         {
             DisposeCalls++;

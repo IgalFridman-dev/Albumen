@@ -8,6 +8,7 @@ using System.Windows.Media;
 using PhotoSift.App;
 using PhotoSift.App.Shell;
 using PhotoSift.Application.Review;
+using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Review;
 using Xunit;
 
@@ -54,7 +55,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
 
                 var openCategory = Descendants<Button>(categories).First(button =>
                     AutomationProperties.GetAutomationId(button) == "open-review-category");
-                Assert.Contains("Exact", AutomationProperties.GetName(openCategory),
+                Assert.Contains("Identical copies", AutomationProperties.GetName(openCategory),
                     StringComparison.Ordinal);
                 Assert.Equal(1, AutomationProperties.GetPositionInSet(openCategory));
                 Assert.Equal(4, AutomationProperties.GetSizeOfSet(openCategory));
@@ -86,13 +87,13 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 var breadcrumb = Assert.IsType<TextBlock>(
                     window.FindName("ReviewBreadcrumbText"));
                 Assert.Contains("Review", breadcrumb.Text, StringComparison.Ordinal);
-                Assert.Contains("Exact", breadcrumb.Text, StringComparison.Ordinal);
+                Assert.Contains("Identical copies", breadcrumb.Text, StringComparison.Ordinal);
 
                 var evidence = Assert.IsAssignableFrom<FrameworkElement>(
                     window.FindName("ReviewEvidencePanel"));
-                Assert.Contains("Exact", AutomationProperties.GetName(evidence),
+                Assert.Contains("Identical copies", AutomationProperties.GetName(evidence),
                     StringComparison.Ordinal);
-                Assert.Contains("No recommendation", AutomationProperties.GetItemStatus(evidence),
+                Assert.Contains("You choose what to remove", AutomationProperties.GetItemStatus(evidence),
                     StringComparison.Ordinal);
                 Assert.Contains("Uncertainty: Unavailable",
                     AutomationProperties.GetItemStatus(evidence), StringComparison.Ordinal);
@@ -158,9 +159,9 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 Assert.Empty(fixture.Workflow.SelectionCommands);
 
                 var selection = Assert.Single(Descendants<ReviewSelectionCheckBox>(row));
-                Assert.Contains("Not selected", AutomationProperties.GetName(selection),
+                Assert.StartsWith("Kept:", AutomationProperties.GetName(selection),
                     StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("Eligible", AutomationProperties.GetItemStatus(selection),
+                Assert.StartsWith("Kept;", AutomationProperties.GetItemStatus(selection),
                     StringComparison.Ordinal);
                 selection.Focus();
                 Keyboard.Focus(selection);
@@ -178,6 +179,59 @@ public sealed class WpfGroupedReviewAccessibilityTests
                     control => control.IsKeyboardFocusWithin
                         && control.DataContext is ScanOccurrenceViewModel member
                         && member.OccurrenceId == 1);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void AMarkHeldInAnotherSetIsShownCheckedAndDisabledAndItsSettledSetIsDimmed()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = GroupedWpfFixture.Create(
+                review: scope => GroupedReviewData.OverlappingSnapshot(scope).Review);
+            var near = fixture.ViewModel.ReviewCategories[1];
+            fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(near).GetAwaiter().GetResult();
+            var window = new MainWindow { DataContext = fixture.ViewModel, Width = 1280, Height = 800 };
+            try
+            {
+                ShowAndDrain(window);
+                var groups = NamedList(window, "ReviewGroupsList");
+                var groupRow = Realize(groups, groups.Items[0]);
+                var caption = Descendants<TextBlock>(groupRow).Single(text =>
+                    text.Text == "Nothing left to decide: 1 marked elsewhere");
+                Assert.True(caption.IsVisible);
+                var card = Descendants<Grid>(groupRow).First(grid => Descendants<TextBlock>(grid).Contains(caption));
+                Assert.Equal(SystemParameters.HighContrast ? 1.0 : 0.55, card.Opacity, 2);
+
+                fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(near.Groups[0]).GetAwaiter().GetResult();
+                WpfReviewSelectionTests.Drain();
+                window.UpdateLayout();
+                var comparisons = NamedList(window, "ReviewComparisonsList");
+                var row = Realize(comparisons, comparisons.Items[0]);
+                var selection = Assert.Single(Descendants<ReviewSelectionCheckBox>(row));
+                Assert.False(selection.IsEnabled);
+                Assert.True(selection.IsChecked);
+                Assert.Equal("Marked for removal in Identical copies set 1", selection.Content);
+                Assert.StartsWith("Marked for removal:", AutomationProperties.GetName(selection),
+                    StringComparison.Ordinal);
+                Assert.StartsWith("Marked for removal in Identical copies set 1;",
+                    AutomationProperties.GetItemStatus(selection), StringComparison.Ordinal);
+                var kept = Assert.Single(Descendants<ReviewSelectionCheckBox>(
+                    Realize(comparisons, comparisons.Items[1])));
+                Assert.True(kept.IsEnabled);
+                Assert.Equal("Kept", kept.Content);
+
+                var openMember = Descendants<Button>(row).First(button =>
+                    AutomationProperties.GetAutomationId(button) == "open-review-member");
+                Click(openMember);
+                Assert.NotNull(fixture.ViewModel.ActiveReviewMember);
+                Assert.Equal(1, fixture.ViewModel.ActiveReviewMember!.OccurrenceId);
+                Assert.Empty(fixture.Workflow.SelectionCommands);
             }
             finally
             {
@@ -386,6 +440,128 @@ public sealed class WpfGroupedReviewAccessibilityTests
         });
     }
 
+    // PM-016: at the default window size the category list holds two or three cards, and a
+    // wheel notch in item scrolling moved three items, so the two middle categories were never
+    // shown at the top. Large text makes the cards tall enough to pin the overflow here. The
+    // wheel is raised on the card at the top of the list, where the pointer rests, so the event
+    // takes the real route: tunnelling through the list's handler and bubbling up to the list's
+    // ScrollViewer. A card that scrolled out of view leaves the visual tree, so it is looked up
+    // again before every notch.
+    [Fact]
+    public void OneWheelNotchMovesTheCategoryListByOneCardSoTheMiddleCardsAreReachable()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var window = OverflowingCategoriesWindow(out var categories, out var scroller);
+            try
+            {
+                Wheel(TopCard(categories, scroller), -120);
+                Assert.Equal(1, scroller.VerticalOffset);
+                Wheel(TopCard(categories, scroller), -120);
+                Assert.Equal(2, scroller.VerticalOffset);
+                Wheel(TopCard(categories, scroller), 120);
+                Assert.Equal(1, scroller.VerticalOffset);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    // A precision touchpad reports a notch as several small deltas; they add up to one card.
+    [Fact]
+    public void SmallTouchpadDeltasAddUpToOneCardPerNotch()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var window = OverflowingCategoriesWindow(out var categories, out var scroller);
+            try
+            {
+                Wheel(TopCard(categories, scroller), -40);
+                Assert.Equal(0, scroller.VerticalOffset);
+                Wheel(TopCard(categories, scroller), -40);
+                Assert.Equal(0, scroller.VerticalOffset);
+                Wheel(TopCard(categories, scroller), -40);
+                Assert.Equal(1, scroller.VerticalOffset);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    // At the end of the list a further notch scrolls the page instead, so Approval stays
+    // reachable while the pointer rests over the list.
+    [Fact]
+    public void AWheelNotchAtTheEndOfTheCategoryListScrollsThePage()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var window = OverflowingCategoriesWindow(out _, out var scroller);
+            try
+            {
+                var page = Assert.IsType<ScrollViewer>(window.FindName("ReviewPageScrollViewer"));
+                scroller.ScrollToEnd();
+                WpfReviewSelectionTests.Drain();
+                window.UpdateLayout();
+                var end = scroller.VerticalOffset;
+                Assert.True(end > 0, "The list did not scroll to its end.");
+                Assert.Equal(0, page.VerticalOffset);
+
+                Wheel(scroller, -120);
+                Assert.Equal(end, scroller.VerticalOffset);
+                Assert.Equal(Math.Min(40, page.ScrollableHeight), page.VerticalOffset);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    private static MainWindow OverflowingCategoriesWindow(out ListBox categories, out ScrollViewer scroller)
+    {
+        var fixture = GroupedWpfFixture.Create();
+        var window = new MainWindow
+        {
+            DataContext = fixture.ViewModel,
+            Width = 960,
+            Height = 720,
+            FontSize = 24,
+        };
+        ShowAndDrain(window);
+        categories = NamedList(window, "ReviewCategoriesList");
+        Assert.Equal(4, categories.Items.Count);
+        scroller = Descendants<ScrollViewer>(categories).First();
+        Assert.True(scroller.ScrollableHeight >= 2,
+            $"The four cards must overflow the list by two items; ScrollableHeight is {scroller.ScrollableHeight}.");
+        Assert.Equal(0, scroller.VerticalOffset);
+        return window;
+    }
+
+    private static Button TopCard(ListBox list, ScrollViewer scroller)
+    {
+        var container = Assert.IsType<ListBoxItem>(
+            list.ItemContainerGenerator.ContainerFromIndex((int)scroller.VerticalOffset));
+        var card = Descendants<Button>(container).First();
+        Assert.True(card.IsVisible, "The card at the top of the list is not shown.");
+        return card;
+    }
+
+    // Input raises the tunnelling preview first and the bubbling event only when it was not handled.
+    private static void Wheel(UIElement element, int delta)
+    {
+        var preview = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
+        {
+            RoutedEvent = Mouse.PreviewMouseWheelEvent,
+            Source = element,
+        };
+        element.RaiseEvent(preview);
+        if (!preview.Handled)
+        {
+            element.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
+            {
+                RoutedEvent = Mouse.MouseWheelEvent,
+                Source = element,
+            });
+        }
+        WpfReviewSelectionTests.Drain();
+        element.UpdateLayout();
+    }
+
     private static void OpenFirstComparison(ShellViewModel viewModel)
     {
         var category = viewModel.ReviewCategories[0];
@@ -484,11 +660,12 @@ internal sealed class GroupedWpfFixture
     public ControllableReviewPreviewSource Preview { get; }
     public ShellViewModel ViewModel { get; }
 
-    public static GroupedWpfFixture Create(IReviewDialogService? dialog = null)
+    public static GroupedWpfFixture Create(IReviewDialogService? dialog = null,
+        Func<ShellSnapshot, ReviewSnapshot>? review = null)
     {
         var scope = new ReviewStaticScope();
         var workflow = new RecordingReviewWorkflow(
-            scope.Current, ReviewData.CreateSnapshot(twoGroups: true));
+            scope.Current, review?.Invoke(scope.Current) ?? ReviewData.CreateSnapshot(twoGroups: true));
         return new(scope, workflow,
             new ControllableReviewPreviewSource(autoComplete: true),
             dialog ?? new RecordingReviewDialogService());

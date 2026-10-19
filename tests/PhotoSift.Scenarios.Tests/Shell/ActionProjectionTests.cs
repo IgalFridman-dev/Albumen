@@ -7,6 +7,7 @@ using PhotoSift.Application.Shell;
 using PhotoSift.Domain.Action;
 using PhotoSift.Domain.Review;
 using PhotoSift.Domain.Scan;
+using PhotoSift.Domain.Scope;
 using PhotoSift.Domain.Workflow;
 using Xunit;
 
@@ -132,14 +133,27 @@ internal sealed class ActionShellFixture : IPhotoSiftWorkflow
     public event EventHandler<PhotoSiftSnapshot>? SnapshotChanged;
     internal List<ApproveSelectionCommand> Approvals { get; } = [];
     internal List<Guid> Revalidations { get; } = [];
+    internal int Continuations { get; private set; }
     internal static Guid RequestId { get; } = Guid.Parse("95000000-0000-0000-0000-000000000005");
-    internal void Publish(ActionSnapshot action, WorkflowPhase phase = WorkflowPhase.ApproveCleanup, bool freshScope = false)
+    // approved: the live review is the sealed one for this cleanup, as after a real approval.
+    internal void Publish(ActionSnapshot action, WorkflowPhase phase = WorkflowPhase.ApproveCleanup, bool freshScope = false,
+        bool approved = false)
     {
         var property = typeof(PhotoSiftSnapshot).GetProperty("Action");
         Assert.NotNull(property);
-        Current = Current with { CurrentPhase = phase, Review = Current.Review with { Sealed = true },
+        Current = Current with { CurrentPhase = phase,
+            Review = Current.Review with { Sealed = true, ApprovedRequest = approved ? Approved(Current.Review) : null },
             Scope = freshScope ? Current.Scope with { Revision = 8 } : Current.Scope };
         property.SetValue(Current, action);
+        SnapshotChanged?.Invoke(this, Current);
+    }
+    internal void PublishScope(ShellSnapshot scope, bool rechecking)
+    {
+        Current = Current with
+        {
+            Scope = scope, CurrentPhase = WorkflowPhase.ChooseScope, Rules = null,
+            Review = ReviewSnapshot.Closed, IsRecheckingScopeAfterCleanup = rechecking,
+        };
         SnapshotChanged?.Invoke(this, Current);
     }
     internal void PublishRecovery(ActionRecoverySnapshot recovery,
@@ -162,6 +176,11 @@ internal sealed class ActionShellFixture : IPhotoSiftWorkflow
         return new(group.Candidate.GroupId, group.Candidate.GroupRevision, member.Token with { OccurrenceId = id },
             path, @"\\?\" + path, member.PhysicalFileKey!.Value, member.Content!, member.Allocation, null);
     }
+    private static ApprovedActionRequest Approved(ReviewSnapshot review) => new(RequestId, DateTimeOffset.UnixEpoch,
+        review.Pin!.ReviewSessionId, review.SelectionRevision, review.Pin.Scan,
+        new ResolvedScope(new(@"C:\Photos", ScopeRecursion.IncludeSubfolders), @"\\?\C:\Photos", new DirectoryIdentity(7, 0, 70)),
+        [Item(1)], [1], new(1, 1, review.Coverage, review.Unresolved, new(512, SelectionRecoveryUnavailableReason.None),
+            "Windows Recycle Bin", "Revalidated again before any file operation."));
     internal static ActionSnapshot Snapshot(params ActionItemSnapshot[] rows) =>
         new(RequestId, ActionStatus.Running, [.. rows], 0, 0, 0, 0, 0, ActionSafetyReason.None);
     public Task ContinueAsync() => Task.CompletedTask;
@@ -173,6 +192,7 @@ internal sealed class ActionShellFixture : IPhotoSiftWorkflow
     public Task RevalidateUnknownAsync(Guid requestId, CancellationToken token)
     { Revalidations.Add(requestId); return Task.CompletedTask; }
     public Task NavigateAsync(WorkflowPhase phase) => Task.CompletedTask;
+    public Task ContinueReviewAsync() { Continuations++; return Task.CompletedTask; }
     public Task<ReviewCommandResult> ChangeReviewSelectionAsync(SelectionCommand command, CancellationToken token) => throw new NotSupportedException();
     public Task<ReviewCommandResult> AffirmReviewOverrideAsync(OverrideAffirmationCommand command, CancellationToken token) => throw new NotSupportedException();
     public Task<ReviewCommandResult> ApproveReviewAsync(ApproveSelectionCommand command, CancellationToken token)
