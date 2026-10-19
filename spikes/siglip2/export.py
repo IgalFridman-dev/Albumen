@@ -1,4 +1,4 @@
-"""Export a SigLIP 2 checkpoint to ONNX (fp32 + int8) and write reference embeddings.
+"""Export a SigLIP 2 checkpoint to ONNX (fp32, plus a text tower with an 8-bit vocabulary) and write reference embeddings.
 
 Runs once on the dev PC. Nothing here ships or runs in the app.
 
@@ -14,12 +14,10 @@ from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
-import onnx
 import onnxruntime as ort
 import torch
 from huggingface_hub import hf_hub_download
 from onnxruntime.quantization import QuantType, quantize_dynamic
-from onnxruntime.quantization.matmul_nbits_quantizer import DefaultWeightOnlyQuantConfig, MatMulNBitsQuantizer
 from PIL import Image, ImageOps
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 
@@ -51,17 +49,6 @@ class Text(torch.nn.Module):
 
     def forward(self, input_ids):
         return self.model(input_ids=input_ids).pooler_output
-
-
-def quantize_int8(source, target):
-    """8-bit weights with fp32 activations. Dynamic int8 also quantizes activations, and ViT
-    activation outliers dropped real checkpoints to 0.72 cosine. The token-embedding Gather
-    (most of the text tower) is not a MatMul, so it gets plain 8-bit weights on top."""
-    quantizer = MatMulNBitsQuantizer(onnx.load(str(source)), algo_config=DefaultWeightOnlyQuantConfig(
-        block_size=32, is_symmetric=True, bits=8))
-    quantizer.process()
-    onnx.save(quantizer.model.model, str(target))
-    quantize_dynamic(str(target), str(target), weight_type=QuantType.QUInt8, op_types_to_quantize=["Gather"])
 
 
 def preprocess(path, size):
@@ -109,7 +96,10 @@ def main():
         torch.onnx.export(module, (dummy,), str(fp32), input_names=[input_name], output_names=["embedding"],
                           dynamic_axes={input_name: {0: "batch"}, "embedding": {0: "batch"}},
                           opset_version=OPSET, dynamo=False)
-        quantize_int8(fp32, out / f"{name}.int8.onnx")
+    # int8 matrix weights (dynamic and MatMulNBits) cost accuracy and CPU time on real photos; see FINDINGS.md.
+    # The 256k-token vocabulary table is most of the text tower and is only looked up, so 8 bits there is cheap.
+    quantize_dynamic(str(out / "text.onnx"), str(out / "text.emb8.onnx"), weight_type=QuantType.QUInt8,
+                     op_types_to_quantize=["Gather"])
     shutil.copy(file_from(args.model, "tokenizer.model"), out / "tokenizer.model")
 
     photos = sorted(p for p in Path(args.photos).iterdir()
@@ -129,7 +119,7 @@ def main():
     onnx_check = {
         name: onnx_cosines(name, {"pixel_values": pixels.numpy()} if name.startswith("vision")
                            else {"input_ids": ids}, image_embeddings if name.startswith("vision") else text_embeddings)
-        for name in ["vision.onnx", "vision.int8.onnx", "text.onnx", "text.int8.onnx"]
+        for name in ["vision.onnx", "text.onnx", "text.emb8.onnx"]
     }
 
     special = tokenizer("x")["input_ids"]

@@ -6,16 +6,17 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using Microsoft.ML.Tokenizers;
 using Siglip2Spike;
 
-if (args.Length is < 3 or > 4 || args[2] is not ("fp32" or "int8") || args.Length == 4 && args[3] != "full")
+// <decode edge>: the WIC decode's longest edge, 256 (the Near stage's decode, the default) or larger, or "full".
+if (args.Length is < 3 or > 4 || args[2] is not ("fp32" or "emb8")
+    || args.Length == 4 && args[3] != "full" && !int.TryParse(args[3], System.Globalization.CultureInfo.InvariantCulture, out _))
 {
-    Console.Error.WriteLine("usage: Siglip2Spike <export dir> <photos dir> <fp32|int8> [full]");
+    Console.Error.WriteLine("usage: Siglip2Spike <export dir> <photos dir> <fp32|emb8> [decode edge|full]");
     return 2;
 }
 var (modelDir, photosDir, precision) = (args[0], args[1], args[2]);
-// "full" decodes at full resolution instead of reusing the Near stage's 256-edge decode,
-// to separate the cost of that shortcut from any preprocessing error.
-var decodeEdge = args.Length == 4 ? int.MaxValue : WicDecode.MaximumEdge;
-var suffix = precision == "int8" ? ".int8.onnx" : ".onnx";
+var decodeEdge = args.Length < 4 ? WicDecode.MaximumEdge : args[3] == "full" ? int.MaxValue : int.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture);
+var edgeLabel = decodeEdge == int.MaxValue ? "full" : decodeEdge.ToString(System.Globalization.CultureInfo.InvariantCulture);
+var textFile = precision == "emb8" ? "text.emb8.onnx" : "text.onnx";
 var reference = JsonNode.Parse(File.ReadAllText(Path.Combine(modelDir, "reference.json")))!;
 var size = (int)reference["image_size"]!;
 var maxLength = (int)reference["max_length"]!;
@@ -25,7 +26,7 @@ var clock = Stopwatch.StartNew();
 SentencePieceTokenizer tokenizer;
 using (var stream = File.OpenRead(Path.Combine(modelDir, "tokenizer.model")))
     tokenizer = SentencePieceTokenizer.Create(stream, (bool)reference["adds_bos"]!, (bool)reference["adds_eos"]!);
-using var text = new InferenceSession(Path.Combine(modelDir, "text" + suffix));
+using var text = new InferenceSession(Path.Combine(modelDir, textFile));
 var textLoadMs = clock.Elapsed.TotalMilliseconds;
 long[] Tokens(string prompt) => SiglipInputs.TokenIds(
     tokenizer, prompt, maxLength, (int)reference["pad_id"]!, (bool)reference["pads_left"]!);
@@ -50,10 +51,10 @@ foreach (var prompt in prompts)
 
 // Vision tower: the app's 256-edge WIC decode, then resize + normalize, then inference.
 clock.Restart();
-using var vision = new InferenceSession(Path.Combine(modelDir, "vision" + suffix));
+using var vision = new InferenceSession(Path.Combine(modelDir, "vision.onnx"));
 var visionLoadMs = clock.Elapsed.TotalMilliseconds;
 using var singleThread = new SessionOptions { IntraOpNumThreads = 1 };
-using var visionOneThread = new InferenceSession(Path.Combine(modelDir, "vision" + suffix), singleThread);
+using var visionOneThread = new InferenceSession(Path.Combine(modelDir, "vision.onnx"), singleThread);
 
 var photos = reference["photos"]!.AsArray();
 var photoPaths = Directory.GetFiles(photosDir).ToDictionary(f => NameHash(Path.GetFileName(f)));
@@ -85,10 +86,10 @@ var report = new
 {
     model = (string)reference["model"]!,
     precision,
-    decode_edge = decodeEdge == int.MaxValue ? "full" : decodeEdge.ToString(System.Globalization.CultureInfo.InvariantCulture),
+    decode_edge = edgeLabel,
     machine = new { Environment.MachineName, Environment.ProcessorCount, os = Environment.OSVersion.ToString() },
-    sizes_mb = Directory.GetFiles(modelDir, "*" + suffix).Where(f => precision == "int8" || !f.Contains(".int8."))
-        .ToDictionary(f => Path.GetFileName(f), f => Math.Round(new FileInfo(f).Length / 1048576.0, 1)),
+    sizes_mb = new[] { "vision.onnx", textFile }
+        .ToDictionary(f => f, f => Math.Round(new FileInfo(Path.Combine(modelDir, f)).Length / 1048576.0, 1)),
     load_ms = new { text = Math.Round(textLoadMs), vision = Math.Round(visionLoadMs) },
     peak_working_set_mb = Process.GetCurrentProcess().PeakWorkingSet64 / 1048576,
     parity = new
@@ -103,7 +104,7 @@ var report = new
     ms_per_prompt = Stats(promptMs),
     ms_per_photo = new
     {
-        decode_256 = Stats(decodeMs),
+        decode = Stats(decodeMs),
         preprocess = Stats(preprocessMs),
         inference_all_threads = Stats(inferMs),
         inference_one_thread = Stats(inferOneThreadMs),
@@ -111,7 +112,7 @@ var report = new
     photos = photos.Count,
 };
 var json = JsonSerializer.Serialize(report, Indented.Options);
-File.WriteAllText(Path.Combine(modelDir, $"spike-{precision}{(decodeEdge == int.MaxValue ? "-full" : "")}.json"), json);
+File.WriteAllText(Path.Combine(modelDir, $"spike-{precision}-{edgeLabel}.json"), json);
 Console.WriteLine(json);
 return 0;
 

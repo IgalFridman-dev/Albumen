@@ -7,4 +7,3 @@ pillow
 sentencepiece
 protobuf
 numpy
-onnx-ir
