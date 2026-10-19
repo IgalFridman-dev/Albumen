@@ -77,6 +77,21 @@ foreach (var (photo, index) in photos.Select((p, i) => (p!, i)))
     inferOneThreadMs.Add(clock.Elapsed.TotalMilliseconds);
 }
 
+// Throughput: whole photos (decode + resize + inference) in parallel, one inference thread each.
+var throughput = new Dictionary<string, double>();
+var work = Enumerable.Repeat(photos.Select(p => photoPaths[(string)p!["file_hash"]!]), 3).SelectMany(p => p).ToList();
+foreach (var workers in new[] { Environment.ProcessorCount / 4, Environment.ProcessorCount / 2, Environment.ProcessorCount }.Distinct())
+{
+    clock.Restart();
+    Parallel.ForEach(work, new ParallelOptions { MaxDegreeOfParallelism = workers }, path =>
+    {
+        var (bgra, width, height) = WicDecode.Decode(path, decodeEdge);
+        Run(visionOneThread, "pixel_values",
+            new DenseTensor<float>(SiglipInputs.Pixels(bgra, width, height, size), [1, 3, size, size]));
+    });
+    throughput[$"{workers}_workers"] = Math.Round(clock.Elapsed.TotalMilliseconds / work.Count, 1);
+}
+
 // Text search sanity: does each prompt pick the same best photo as the reference?
 var referencePhotos = photos.Select(p => Floats(p!["embedding"]!)).ToList();
 var sameTopPhoto = prompts.Select((p, i) =>
@@ -108,6 +123,7 @@ var report = new
         preprocess = Stats(preprocessMs),
         inference_all_threads = Stats(inferMs),
         inference_one_thread = Stats(inferOneThreadMs),
+        end_to_end_in_parallel = throughput,
     },
     photos = photos.Count,
 };
