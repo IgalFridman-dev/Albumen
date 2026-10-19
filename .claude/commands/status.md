@@ -1,5 +1,5 @@
 ---
-description: Summarize PhotoSift progress from sprint-status.yaml and the backlog
+description: Summarize Albumen progress from sprint-status.yaml and the backlog
 ---
 Read `_bmad-output/implementation-artifacts/sprint-status.yaml` and `docs/backlog/post-mvp.md`.
 Reply in under 15 lines: stories done / remaining per lane (V1, V1.1, V1.2), the next eligible

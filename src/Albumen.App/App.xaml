@@ -1,0 +1,11 @@
+<Application x:Class="Albumen.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ThemeMode="Light"
+             ShutdownMode="OnExplicitShutdown">
+    <!-- The windows paint their surfaces and text with SystemColors brushes, which
+         stay light outside High Contrast. ThemeMode="System" switched the Fluent
+         controls to dark under Windows dark mode and left white text on white
+         panels. Dark mode is tracked as PM-007. -->
+    <Application.Resources />
+</Application>
