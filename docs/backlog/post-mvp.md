@@ -308,8 +308,10 @@ extracts the ZIP and runs `Start-PhotoSift.cmd`. Design:
 
 ## PM-009 — Make the UI understandable and attractive
 
-**Status:** In progress — design approved 2026-10-17; PR 1 of 3 (theme, folder, options and
-scan screens) open.
+**Status:** In review — all code merged into develop (PRs #17, #19, #22, #24 and the
+follow-ups PM-010 to PM-016, last merge `e6b6a74` on 2026-10-19), CI green. Open: the Golden VM
+Full run on `e6b6a74`, the owner's High Contrast click-through and the README screenshots.
+Evidence: `docs/evidence/pm-009/verification.md`.
 
 **Priority:** Post-V1 presentation
 
@@ -330,7 +332,8 @@ side-by-side comparison without changing the safety design. Design:
 
 ## PM-010 — Show look-alike photos as one set instead of many pairs
 
-**Status:** In progress — design approved by the owner 2026-10-17.
+**Status:** Done in PR #20 (merged 2026-10-17); Golden VM Full run still owed with PM-009.
+The owner's real-burst check is not recorded on its own.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-17 to ship V1.0.0 with the new UI)
 
@@ -348,7 +351,7 @@ is published as its own pair. Design:
 
 ## PM-011 — Treat truncated JPEGs as "couldn't be checked", not as look-alikes
 
-**Status:** In review — fix in the PR after #22; owner chose "before V1.0.0" on 2026-10-17.
+**Status:** Done in PR #23 (merged 2026-10-17); Golden VM Full run still owed with PM-009.
 Found in the Hyper-V Review pass of PR #22.
 
 **Priority:** Before V1.0.0 (owner decision)
@@ -460,7 +463,8 @@ side bar, but I do like the simple design of the prototype." Design:
 
 ## PM-016 — Category navigation on the Review page skips the middle categories at the default window size
 
-**Status:** In review — PR #28. Cause: the Review lists scroll by item (kept so a
+**Status:** Done in PR #28 (merged 2026-10-19); Golden VM Full run still owed with PM-009.
+Cause: the Review lists scroll by item (kept so a
 10,000-photo set never realizes every card), and a wheel notch moved three items, so a list
 of four categories that shows two or three jumped from the first to the last. The wheel now
 moves one card per notch over every list that scrolls by item (the three Review lists and the
