@@ -5,6 +5,7 @@ Runs once on the dev PC. Nothing here ships or runs in the app.
     python export.py --model google/siglip2-base-patch16-224 --photos <folder> --out <dir>
 """
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -133,12 +134,17 @@ def main():
                         **{p: version(p) for p in ["torch", "transformers", "onnx", "onnxruntime", "pillow"]}},
         "min_cosine_torch_vs_onnx": onnx_check,
         "prompts": [{**p, "embedding": e.tolist()} for p, e in zip(prompts, text_embeddings)],
-        "photos": [{"file": p.name, "embedding": e.tolist()} for p, e in zip(photos, image_embeddings)],
+        "photos": [{"file_hash": name_hash(p.name), "embedding": e.tolist()} for p, e in zip(photos, image_embeddings)],
     }
     (out / "reference.json").write_text(json.dumps(reference, ensure_ascii=False))
     sizes = {f.name: round(f.stat().st_size / 2**20, 1) for f in sorted(out.glob("*.onnx"))}
     print(json.dumps({"sizes_mb": sizes, "min_cosine_torch_vs_onnx": onnx_check,
                       **{k: reference[k] for k in ["adds_bos", "adds_eos", "pads_left"]}}, indent=2))
+
+
+def name_hash(name):
+    """Photo names stay out of the reference file; C# finds each photo by the same hash."""
+    return hashlib.sha256(name.encode()).hexdigest()[:16]
 
 
 def cosine(a, b):

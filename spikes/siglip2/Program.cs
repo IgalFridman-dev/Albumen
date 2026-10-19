@@ -53,12 +53,13 @@ using var singleThread = new SessionOptions { IntraOpNumThreads = 1 };
 using var visionOneThread = new InferenceSession(Path.Combine(modelDir, "vision" + suffix), singleThread);
 
 var photos = reference["photos"]!.AsArray();
+var photoPaths = Directory.GetFiles(photosDir).ToDictionary(f => NameHash(Path.GetFileName(f)));
 var photoEmbeddings = new List<float[]>();
 List<double> decodeMs = [], preprocessMs = [], inferMs = [], inferOneThreadMs = [];
 foreach (var (photo, index) in photos.Select((p, i) => (p!, i)))
 {
     clock.Restart();
-    var (bgra, width, height) = WicDecode.Decode(Path.Combine(photosDir, (string)photo["file"]!));
+    var (bgra, width, height) = WicDecode.Decode(photoPaths[(string)photo["file_hash"]!]);
     decodeMs.Add(clock.Elapsed.TotalMilliseconds);
     clock.Restart();
     var pixels = new DenseTensor<float>(SiglipInputs.Pixels(bgra, width, height, size), [1, 3, size, size]);
@@ -115,6 +116,9 @@ static float[] Run<T>(InferenceSession session, string input, DenseTensor<T> ten
     using var results = session.Run([NamedOnnxValue.CreateFromTensor(input, tensor)]);
     return [.. results[0].AsEnumerable<float>()];
 }
+
+static string NameHash(string name) =>
+    Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name)))[..16];
 
 static float[] Floats(JsonNode node) => [.. node.AsArray().Select(v => (float)v!)];
 
