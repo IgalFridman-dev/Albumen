@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Albumen.Domain/Albumen.Domain.csproj" />
+    <Project Path="src/Albumen.Application/Albumen.Application.csproj" />
+    <Project Path="src/Albumen.Analysis/Albumen.Analysis.csproj" />
+    <Project Path="src/Albumen.Infrastructure.Sqlite/Albumen.Infrastructure.Sqlite.csproj" />
+    <Project Path="src/Albumen.Infrastructure.Windows/Albumen.Infrastructure.Windows.csproj" />
+    <Project Path="src/Albumen.App/Albumen.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Albumen.Domain.Tests/Albumen.Domain.Tests.csproj" />
+    <Project Path="tests/Albumen.Application.Tests/Albumen.Application.Tests.csproj" />
+    <Project Path="tests/Albumen.Analysis.Tests/Albumen.Analysis.Tests.csproj" />
+    <Project Path="tests/Albumen.Infrastructure.Tests/Albumen.Infrastructure.Tests.csproj" />
+    <Project Path="tests/Albumen.Scenarios.Tests/Albumen.Scenarios.Tests.csproj" />
+  </Folder>
+</Solution>

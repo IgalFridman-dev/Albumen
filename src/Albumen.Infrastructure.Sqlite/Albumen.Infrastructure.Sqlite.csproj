@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Albumen.Application\Albumen.Application.csproj" />
+    <ProjectReference Include="..\Albumen.Domain\Albumen.Domain.csproj" />
+  </ItemGroup>
+</Project>

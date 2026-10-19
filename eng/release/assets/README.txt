@@ -1,8 +1,8 @@
-PhotoSift V1 - Windows 11 x64
+Albumen V1 - Windows 11 x64
 
-Starting PhotoSift
+Starting Albumen
 Extract the complete ZIP to a local folder, keep its files together, and run
-Start-PhotoSift.cmd. It checks the packaged files, then starts the app.
+Start-Albumen.cmd. It checks the packaged files, then starts the app.
 Nothing needs to be installed: the .NET runtime is included in this folder.
 
 Windows SmartScreen
@@ -17,7 +17,7 @@ Only the files you approve are moved to the Recycle Bin, one at a time, and
 at least one copy in every group is always kept. Restore anything from the
 Recycle Bin if you change your mind.
 
-PhotoSift processes your photos locally and never uses the network. No
+Albumen processes your photos locally and never uses the network. No
 account, install, or download is required.
 
 Do not edit or replace packaged files: verification rejects changes. See
