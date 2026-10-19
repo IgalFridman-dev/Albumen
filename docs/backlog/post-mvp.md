@@ -284,7 +284,8 @@ real app under light, dark and High Contrast, not only in tests that build
 **Status:** In progress — design approved 2026-10-17; release built and clean-launch
 checked on 2026-10-17 at `8562f97`; inventory owner-approved 2026-10-17; the published
 ZIP was rebuilt offline in the Golden VM from the sealed cache at `e1d6a9d` and passed the
-clean launch on 2026-10-17. Open: the demo-photos ZIP. Evidence: `docs/evidence/pm-008/`.
+clean launch on 2026-10-17; after the new UI and the Albumen rename it was rebuilt the same way
+from main `a5bd8e2` and passed the clean launch on 2026-10-19. Open: the demo-photos ZIP. Evidence: `docs/evidence/pm-008/`.
 
 **Priority:** Before the public V1 release
 
