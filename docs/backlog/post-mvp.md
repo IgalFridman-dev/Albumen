@@ -523,29 +523,22 @@ E4-S4 text search → E4-S5 acceptance and release. E3-S3 blur runs in parallel.
 
 ## PM-018 — Make the scan close-ordering test deterministic
 
-**Status:** Backlog
+**Status:** Fixed in [#39](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/39) (`cb04915`,
+test-only) before the 1.0.0 release; the app is unchanged.
 
-**Priority:** Albumen 1.1 test robustness (before the 1.1 Golden VM Full run)
+**Priority:** Before the 1.0.0 release
 
-**Origin:** GitHub CI on two docs-only PRs, 2026-10-19
+**Origin:** GitHub CI, 2026-10-19
 
 `ScanCheckpointCoordinatorTests.CallbackArrivingDuringTerminalPersistenceCannotOverwriteTerminalTruth`
-(`endEnumeration: False` case, `tests/Albumen.Application.Tests/Scan/ScanCheckpointCoordinatorTests.cs`)
-timed out after 10 s in `PumpNext` on the first `Build and test (windows-latest)` run of
-[#31](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/31) (`550924a`) and of
-[#35](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/35); both changed only docs and both
-passed on one re-run. The test passed on the `e6b6a74` develop push and in the Golden VM Full run.
+(`endEnumeration: False` case) timed out after 10 s in `PumpNext` on the first `Build and test
+(windows-latest)` run of [#31](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/31) and
+[#35](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/35), both docs-only, and failed a third
+time on #39.
 
-The test branches on whether a late registration has already completed when the terminal write is
-released (`admissionClosedBeforeCommit = late.IsCompleted`). The timeout happens in the branch that
-waits for the late registration's checkpoint write, so on a slow runner the late callback likely
-reaches neither path in time. Not established whether the race is in the test's synchronisation or
-in scan finalisation itself.
+### Cause and fix
 
-### Completion criteria
-
-- Root cause stated: test synchronisation or product ordering.
-- The test decides its branch from an explicit signal, not from timing, and still proves that a
-  callback arriving during terminal persistence cannot overwrite the terminal state.
-- If the cause is in finalisation, the fix keeps the terminal-truth invariant and gets its own test.
-- No retry, longer timeout or skip as the fix.
+The test read `late.IsCompleted` once, right after pumping the owner, but the rejection of the late
+registration can complete just after the owner goes idle. On a slow runner the test then waited for a
+checkpoint write that correctly never comes. It now waits for whichever comes first, the rejection or
+the late write, so it still catches a real admission bug. Scan finalisation itself was not at fault.
