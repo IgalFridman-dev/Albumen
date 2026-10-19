@@ -28,7 +28,7 @@ flowchart LR
   App --> Analysis
   App --> Sqlite
   App --> Windows
-  Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature"] --> Application
+  Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature<br/>sharpness"] --> Application
   Sqlite["Infrastructure.Sqlite<br/>schema v5, journals, records"] --> Application
   Windows["Infrastructure.Windows<br/>Win32 scope/traversal, WIC decode,<br/>IFileOperation Recycle Bin"] --> Application
   Application["Albumen.Application<br/>workflows, coordinators, ports"] --> Domain["Albumen.Domain<br/>pure rules & policies"]
@@ -84,7 +84,7 @@ Key ideas:
 |---|---|
 | `Albumen.Domain.Tests` | pure policies (survivor, scope, transitions) |
 | `Albumen.Application.Tests` | coordinators, workflows, fakes for ports |
-| `Albumen.Analysis.Tests` | hashing and perceptual signatures |
+| `Albumen.Analysis.Tests` | hashing, perceptual signatures and sharpness |
 | `Albumen.Infrastructure.Tests` | Win32/WIC/SQLite adapters + architecture rules |
 | `Albumen.Scenarios.Tests` | real WPF window, keyboard and automation flows |
 | `tests/tooling/*.Tests.ps1` | PowerShell tests for VM and release scripts |
