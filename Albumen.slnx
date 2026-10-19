@@ -3,6 +3,7 @@
     <Project Path="src/Albumen.Domain/Albumen.Domain.csproj" />
     <Project Path="src/Albumen.Application/Albumen.Application.csproj" />
     <Project Path="src/Albumen.Analysis/Albumen.Analysis.csproj" />
+    <Project Path="src/Albumen.Infrastructure.Onnx/Albumen.Infrastructure.Onnx.csproj" />
     <Project Path="src/Albumen.Infrastructure.Sqlite/Albumen.Infrastructure.Sqlite.csproj" />
     <Project Path="src/Albumen.Infrastructure.Windows/Albumen.Infrastructure.Windows.csproj" />
     <Project Path="src/Albumen.App/Albumen.App.csproj" />

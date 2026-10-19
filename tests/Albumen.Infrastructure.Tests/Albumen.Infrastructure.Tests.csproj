@@ -12,11 +12,15 @@
     <PackageReference Include="xunit.v3" />
     <ProjectReference Include="..\..\src\Albumen.Analysis\Albumen.Analysis.csproj" />
     <ProjectReference Include="..\..\src\Albumen.App\Albumen.App.csproj" />
+    <ProjectReference Include="..\..\src\Albumen.Infrastructure.Onnx\Albumen.Infrastructure.Onnx.csproj" />
     <ProjectReference Include="..\..\src\Albumen.Infrastructure.Sqlite\Albumen.Infrastructure.Sqlite.csproj" />
     <ProjectReference Include="..\..\src\Albumen.Infrastructure.Windows\Albumen.Infrastructure.Windows.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="Exact\ExactCorpusManifest.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Onnx\Fixtures\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Onnx\Fixtures\*.py" CopyToOutputDirectory="Never" />
+    <None Update="Onnx\siglip2-reference.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="System.IO" />
