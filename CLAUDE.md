@@ -19,7 +19,7 @@ Read [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) first for the map of the code 
 | Sprint state — source of truth for "what's next" | `_bmad-output/implementation-artifacts/sprint-status.yaml` |
 | Per-story design + implementation plans | `docs/superpowers/specs/`, `docs/superpowers/plans/` |
 | Verification evidence per story | `docs/evidence/eX-sY/` |
-| Backlog (PM-001…PM-017) | `docs/backlog/post-mvp.md` |
+| Backlog (PM-001…PM-018) | `docs/backlog/post-mvp.md` |
 | Release plan for 1.1 (SigLIP 2, text search, blur) | `docs/superpowers/specs/2026-10-19-albumen-1.1-siglip2-release-plan.md` |
 | Docs index / authority rules | `docs/README.md` |
 

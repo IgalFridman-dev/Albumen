@@ -520,3 +520,32 @@ E4-S4 text search → E4-S5 acceptance and release. E3-S3 blur runs in parallel.
   and completes an Exact, a Look-alike and a text-search review.
 - README states measured model size, per-photo CPU time and corpus precision/recall with limitations;
   PM-005 remains recorded as open.
+
+## PM-018 — Make the scan close-ordering test deterministic
+
+**Status:** Backlog
+
+**Priority:** Albumen 1.1 test robustness (before the 1.1 Golden VM Full run)
+
+**Origin:** GitHub CI on two docs-only PRs, 2026-10-19
+
+`ScanCheckpointCoordinatorTests.CallbackArrivingDuringTerminalPersistenceCannotOverwriteTerminalTruth`
+(`endEnumeration: False` case, `tests/Albumen.Application.Tests/Scan/ScanCheckpointCoordinatorTests.cs`)
+timed out after 10 s in `PumpNext` on the first `Build and test (windows-latest)` run of
+[#31](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/31) (`550924a`) and of
+[#35](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/35); both changed only docs and both
+passed on one re-run. The test passed on the `e6b6a74` develop push and in the Golden VM Full run.
+
+The test branches on whether a late registration has already completed when the terminal write is
+released (`admissionClosedBeforeCommit = late.IsCompleted`). The timeout happens in the branch that
+waits for the late registration's checkpoint write, so on a slow runner the late callback likely
+reaches neither path in time. Not established whether the race is in the test's synchronisation or
+in scan finalisation itself.
+
+### Completion criteria
+
+- Root cause stated: test synchronisation or product ordering.
+- The test decides its branch from an explicit signal, not from timing, and still proves that a
+  callback arriving during terminal persistence cannot overwrite the terminal state.
+- If the cause is in finalisation, the fix keeps the terminal-truth invariant and gets its own test.
+- No retry, longer timeout or skip as the fix.
