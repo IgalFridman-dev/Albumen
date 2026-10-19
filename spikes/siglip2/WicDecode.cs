@@ -3,12 +3,12 @@ using System.Windows.Media.Imaging;
 
 namespace Siglip2Spike;
 
-/// <summary>The app's Near-stage decode (WicPreviewDecoder): WIC scaled to a 256 edge, BGRA, EXIF-oriented.</summary>
+/// <summary>The app's Near-stage decode (WicPreviewDecoder): WIC scaled to a maximum edge, BGRA, EXIF-oriented.</summary>
 public static class WicDecode
 {
     public const int MaximumEdge = 256;
 
-    public static (byte[] Bgra, int Width, int Height) Decode(string path)
+    public static (byte[] Bgra, int Width, int Height) Decode(string path, int maximumEdge)
     {
         using var stream = File.OpenRead(path);
         var header = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.None).Frames[0];
@@ -21,8 +21,8 @@ public static class WicDecode
         bitmap.CacheOption = BitmapCacheOption.OnLoad;
         bitmap.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
         bitmap.StreamSource = stream;
-        if (sourceWidth >= sourceHeight && sourceWidth > MaximumEdge) bitmap.DecodePixelWidth = MaximumEdge;
-        else if (sourceHeight > MaximumEdge) bitmap.DecodePixelHeight = MaximumEdge;
+        if (sourceWidth >= sourceHeight && sourceWidth > maximumEdge) bitmap.DecodePixelWidth = maximumEdge;
+        else if (sourceHeight > maximumEdge) bitmap.DecodePixelHeight = maximumEdge;
         bitmap.EndInit();
         var bgra = new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0);
 

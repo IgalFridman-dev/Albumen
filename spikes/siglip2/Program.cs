@@ -6,12 +6,15 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using Microsoft.ML.Tokenizers;
 using Siglip2Spike;
 
-if (args.Length != 3 || args[2] is not ("fp32" or "int8"))
+if (args.Length is < 3 or > 4 || args[2] is not ("fp32" or "int8") || args.Length == 4 && args[3] != "full")
 {
-    Console.Error.WriteLine("usage: Siglip2Spike <export dir> <photos dir> <fp32|int8>");
+    Console.Error.WriteLine("usage: Siglip2Spike <export dir> <photos dir> <fp32|int8> [full]");
     return 2;
 }
 var (modelDir, photosDir, precision) = (args[0], args[1], args[2]);
+// "full" decodes at full resolution instead of reusing the Near stage's 256-edge decode,
+// to separate the cost of that shortcut from any preprocessing error.
+var decodeEdge = args.Length == 4 ? int.MaxValue : WicDecode.MaximumEdge;
 var suffix = precision == "int8" ? ".int8.onnx" : ".onnx";
 var reference = JsonNode.Parse(File.ReadAllText(Path.Combine(modelDir, "reference.json")))!;
 var size = (int)reference["image_size"]!;
@@ -59,7 +62,7 @@ List<double> decodeMs = [], preprocessMs = [], inferMs = [], inferOneThreadMs = 
 foreach (var (photo, index) in photos.Select((p, i) => (p!, i)))
 {
     clock.Restart();
-    var (bgra, width, height) = WicDecode.Decode(photoPaths[(string)photo["file_hash"]!]);
+    var (bgra, width, height) = WicDecode.Decode(photoPaths[(string)photo["file_hash"]!], decodeEdge);
     decodeMs.Add(clock.Elapsed.TotalMilliseconds);
     clock.Restart();
     var pixels = new DenseTensor<float>(SiglipInputs.Pixels(bgra, width, height, size), [1, 3, size, size]);
@@ -82,6 +85,7 @@ var report = new
 {
     model = (string)reference["model"]!,
     precision,
+    decode_edge = decodeEdge == int.MaxValue ? "full" : decodeEdge.ToString(System.Globalization.CultureInfo.InvariantCulture),
     machine = new { Environment.MachineName, Environment.ProcessorCount, os = Environment.OSVersion.ToString() },
     sizes_mb = Directory.GetFiles(modelDir, "*" + suffix).Where(f => precision == "int8" || !f.Contains(".int8."))
         .ToDictionary(f => Path.GetFileName(f), f => Math.Round(new FileInfo(f).Length / 1048576.0, 1)),
@@ -107,7 +111,7 @@ var report = new
     photos = photos.Count,
 };
 var json = JsonSerializer.Serialize(report, Indented.Options);
-File.WriteAllText(Path.Combine(modelDir, $"spike-{precision}.json"), json);
+File.WriteAllText(Path.Combine(modelDir, $"spike-{precision}{(decodeEdge == int.MaxValue ? "-full" : "")}.json"), json);
 Console.WriteLine(json);
 return 0;
 

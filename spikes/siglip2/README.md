@@ -19,6 +19,7 @@ py -m venv .venv; .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python export.py --model google/siglip2-base-patch16-224 --photos <photos> --out out\p16
 dotnet run -c Release -- out\p16 <photos> fp32
 dotnet run -c Release -- out\p16 <photos> int8
+dotnet run -c Release -- out\p16 <photos> fp32 full   # decode at full size instead of the 256 edge
 ```
 
 Each run writes `spike-<precision>.json` next to the model. Model files stay out of git.
