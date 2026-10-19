@@ -1,6 +1,6 @@
-# PhotoSift — guide for Claude Code
+# Albumen — guide for Claude Code
 
-PhotoSift is a Windows 11 WPF app (.NET 10 / C# 14, `win-x64`) that finds Exact and
+Albumen is a Windows 11 WPF app (.NET 10 / C# 14, `win-x64`) that finds Exact and
 conservative Near duplicate JPEG/PNG photos in one local folder, lets the user review
 groups, and moves only approved files to the Recycle Bin. Offline, no telemetry, no
 permanent deletion. V1 is a technically accepted recruiter-demo candidate (commit `b0c4c13`).
@@ -29,8 +29,8 @@ BMAD + Superpowers (Codex) workflow because hundreds of evidence links point int
 
 - **Architecture boundaries** (Architecture Spine): Domain has no dependencies; Application
   depends only on Domain and defines ports; Infrastructure implements ports; only
-  `PhotoSift.App/Composition/CompositionRoot.cs` wires concrete types. Architecture tests
-  in `tests/PhotoSift.Infrastructure.Tests` enforce this — don't weaken them.
+  `Albumen.App/Composition/CompositionRoot.cs` wires concrete types. Architecture tests
+  in `tests/Albumen.Infrastructure.Tests` enforce this — don't weaken them.
 - **Safety invariants**: never delete permanently; every Recycle Bin call goes through the
   single Action owner after a sealed approval, fresh revalidation and durable
   Requested/Executing journal rows; uncertain work is never auto-replayed; at least one
@@ -50,9 +50,9 @@ BMAD + Superpowers (Codex) workflow because hundreds of evidence links point int
 Needs Windows with .NET SDK 10.0.400. From the repo root:
 
 ```powershell
-dotnet restore PhotoSift.slnx --locked-mode
-dotnet build PhotoSift.slnx -c Release --no-restore
-dotnet test  PhotoSift.slnx -c Release --no-build
+dotnet restore Albumen.slnx --locked-mode
+dotnet build Albumen.slnx -c Release --no-restore
+dotnet test  Albumen.slnx -c Release --no-build
 ```
 
 The official gates (Architecture / Core / Full, last Full = 1,888/1,888 on `e6b6a74`) run inside a NIC-free

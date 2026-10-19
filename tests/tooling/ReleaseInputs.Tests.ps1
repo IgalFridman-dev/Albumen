@@ -8,7 +8,7 @@ param(
 
 # Host-safe input integration test: reads PE/ZIP bytes, never loads or executes them.
 # Only first-party application bytes and external build command results are simulated.
-. (Join-Path $PSScriptRoot 'PhotoSiftRelease.Tests.ps1') -LoadHelpersOnly
+. (Join-Path $PSScriptRoot 'AlbumenRelease.Tests.ps1') -LoadHelpersOnly
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $actualSdkRoot = [System.IO.Path]::GetFullPath($SdkRoot)
 $actualPackagesRoot = [System.IO.Path]::GetFullPath($PackagesRoot)
@@ -66,7 +66,7 @@ try {
     foreach ($native in $expectedNative) { Assert-Equal 'Native' $destinationSources[$native].Type 'all actual native names must retain exact classification' }
     Assert-Equal 20 @($destinationSources.Values | Where-Object { $_.Type -ceq 'Native' }).Count 'exact native manifest closure'
 
-    $lock = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'src/PhotoSift.App/packages.lock.json') | ConvertFrom-Json
+    $lock = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'src/Albumen.App/packages.lock.json') | ConvertFrom-Json
     foreach ($id in @('Microsoft.Data.Sqlite', 'Microsoft.Data.Sqlite.Core', 'SQLitePCLRaw.bundle_e_sqlite3', 'SQLitePCLRaw.core', 'SQLitePCLRaw.lib.e_sqlite3', 'SQLitePCLRaw.provider.e_sqlite3')) {
         $locked = $lock.dependencies.'net10.0-windows7.0'.$id
         $stem = $id.ToLowerInvariant() + '.' + $locked.resolved + '.nupkg'
@@ -99,7 +99,7 @@ try {
         foreach ($destination in $sqlitePayloads.Keys) {
             [System.IO.File]::Copy((Join-Path $actualPackagesRoot $sqlitePayloads[$destination]), (Join-Path $OutputPath $destination), $true)
         }
-        [System.IO.File]::Copy((Join-Path $actualSdkRoot 'packs/Microsoft.NETCore.App.Host.win-x64/10.0.11/runtimes/win-x64/native/apphost.exe'), (Join-Path $OutputPath 'PhotoSift.App.exe'), $true)
+        [System.IO.File]::Copy((Join-Path $actualSdkRoot 'packs/Microsoft.NETCore.App.Host.win-x64/10.0.11/runtimes/win-x64/native/apphost.exe'), (Join-Path $OutputPath 'Albumen.App.exe'), $true)
     }.GetNewClosure()
     $actualCalls = [System.Collections.Generic.List[object]]::new()
     $actualOperations = New-SyntheticReleaseOperations -Calls $actualCalls -DriftSecondPublish $false -AfterPublish $afterPublish
