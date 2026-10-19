@@ -7,6 +7,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:AlbumenApprovedNativePaths = [string[]]@('coreclr.dll')
+# The SigLIP 2 folder and the files models/manifest.json lists; any other model-shaped path is forbidden.
+$script:AlbumenModelPaths = [string[]]@(
+    'models', 'models/manifest.json', 'models/text.onnx', 'models/tokenizer.model', 'models/vision.onnx')
 
 function Get-AlbumenReleaseSha256 {
     param(
@@ -16,7 +19,9 @@ function Get-AlbumenReleaseSha256 {
 
     $stream = [System.IO.File]::OpenRead($LiteralPath)
     try {
-        $algorithm = [System.Security.Cryptography.SHA256]::Create()
+        # CNG uses the CPU's SHA extensions; Windows PowerShell's default SHA256 is managed and
+        # several times slower, which every launch would pay on the model files.
+        $algorithm = New-Object System.Security.Cryptography.SHA256Cng
         try {
             return ([System.BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '')
         }
@@ -152,6 +157,10 @@ function Test-AlbumenForbiddenReleasePath {
         [string]$Path
     )
 
+    if ($script:AlbumenModelPaths -ccontains $Path) {
+        return $null
+    }
+
     $normalized = '/' + $Path.Replace('\', '/').ToLowerInvariant() + '/'
     $leaf = [System.IO.Path]::GetFileName($Path).ToLowerInvariant()
     $extension = [System.IO.Path]::GetExtension($leaf).ToLowerInvariant()
@@ -206,6 +215,9 @@ function Get-AlbumenReleasePayloadKind {
     }
     if ($Path -ieq 'Start-Albumen.cmd' -or $Path -ieq 'Verify-AlbumenRelease.ps1') {
         return 'launcher'
+    }
+    if ($script:AlbumenModelPaths -ccontains $Path) {
+        return 'model'
     }
     if ($Path -ieq 'THIRD-PARTY-NOTICES.md' -or
         $Path.StartsWith('licenses/', [System.StringComparison]::OrdinalIgnoreCase) -or
@@ -471,7 +483,7 @@ function Test-AlbumenPackageIntegrity {
                 throw "Release payload SHA-256 must be 64 uppercase hex characters: $($_.path)"
             }
             if ($_.kind -isnot [string] -or $_.kind -notin @(
-                    'application', 'managed-runtime', 'native-runtime', 'notice', 'launcher')) {
+                    'application', 'managed-runtime', 'native-runtime', 'notice', 'launcher', 'model')) {
                 throw "Release payload kind is invalid: $($_.path)"
             }
             $expectedKind = Get-AlbumenReleasePayloadKind -Path $_.path

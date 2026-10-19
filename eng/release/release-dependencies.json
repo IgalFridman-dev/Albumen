@@ -14,7 +14,7 @@
       ],
       "officialSourceUrl": "https://github.com/dotnet/runtime/tree/v10.0.11",
       "redistributionTermUrl": "https://www.microsoft.com/net/dotnet_library_license.htm",
-      "redistributionApproval": "owner-approved"
+      "redistributionApproval": "pending-owner-approval"
     },
     {
       "name": ".NET Runtime",
@@ -215,7 +215,21 @@
       ],
       "officialSourceUrl": "https://github.com/dotnet/dotnet/tree/v10.0.11",
       "redistributionTermUrl": "https://licenses.nuget.org/MIT",
-      "redistributionApproval": "owner-approved"
+      "redistributionApproval": "pending-owner-approval"
+    },
+    {
+      "name": "Google.Protobuf",
+      "version": "3.30.2",
+      "shippedPaths": [
+        "Google.Protobuf.dll"
+      ],
+      "licenseIdentifier": "BSD-3-Clause",
+      "packagedLicensePaths": [
+        "licenses/protobuf/LICENSE.txt"
+      ],
+      "officialSourceUrl": "https://github.com/protocolbuffers/protobuf/tree/v30.2",
+      "redistributionTermUrl": "https://licenses.nuget.org/BSD-3-Clause",
+      "redistributionApproval": "pending-owner-approval"
     },
     {
       "name": "Microsoft.Data.Sqlite",
@@ -227,7 +241,7 @@
       ],
       "officialSourceUrl": "https://github.com/dotnet/dotnet/tree/v10.0.11",
       "redistributionTermUrl": "https://github.com/dotnet/dotnet/blob/v10.0.11/LICENSE.TXT",
-      "redistributionApproval": "owner-approved"
+      "redistributionApproval": "pending-owner-approval"
     },
     {
       "name": "Microsoft.Data.Sqlite.Core",
@@ -241,7 +255,53 @@
       ],
       "officialSourceUrl": "https://github.com/dotnet/dotnet/tree/v10.0.11",
       "redistributionTermUrl": "https://github.com/dotnet/dotnet/blob/v10.0.11/LICENSE.TXT",
-      "redistributionApproval": "owner-approved"
+      "redistributionApproval": "pending-owner-approval"
+    },
+    {
+      "name": "Microsoft.ML.OnnxRuntime",
+      "version": "1.31.0",
+      "shippedPaths": [
+        "onnxruntime.dll",
+        "onnxruntime_providers_shared.dll"
+      ],
+      "licenseIdentifier": "MIT",
+      "packagedLicensePaths": [
+        "licenses/onnxruntime/LICENSE.txt",
+        "licenses/onnxruntime/ThirdPartyNotices.txt"
+      ],
+      "officialSourceUrl": "https://github.com/microsoft/onnxruntime/tree/v1.31.0",
+      "redistributionTermUrl": "https://licenses.nuget.org/MIT",
+      "redistributionApproval": "pending-owner-approval"
+    },
+    {
+      "name": "Microsoft.ML.OnnxRuntime.Managed",
+      "version": "1.31.0",
+      "shippedPaths": [
+        "Microsoft.ML.OnnxRuntime.dll"
+      ],
+      "licenseIdentifier": "MIT",
+      "packagedLicensePaths": [
+        "licenses/onnxruntime/LICENSE.txt",
+        "licenses/onnxruntime/ThirdPartyNotices.txt"
+      ],
+      "officialSourceUrl": "https://github.com/microsoft/onnxruntime/tree/v1.31.0",
+      "redistributionTermUrl": "https://licenses.nuget.org/MIT",
+      "redistributionApproval": "pending-owner-approval"
+    },
+    {
+      "name": "Microsoft.ML.Tokenizers",
+      "version": "2.0.1",
+      "shippedPaths": [
+        "Microsoft.ML.Tokenizers.dll"
+      ],
+      "licenseIdentifier": "MIT",
+      "packagedLicensePaths": [
+        "licenses/ml-tokenizers/LICENSE.txt",
+        "licenses/ml-tokenizers/THIRD-PARTY-NOTICES.txt"
+      ],
+      "officialSourceUrl": "https://github.com/dotnet/machinelearning/tree/a4f730ec0c9106c2c9ef9e1fa34011374115fb98",
+      "redistributionTermUrl": "https://licenses.nuget.org/MIT",
+      "redistributionApproval": "pending-owner-approval"
     },
     {
       "name": "Native SQLite",
@@ -255,7 +315,7 @@
       ],
       "officialSourceUrl": "https://sqlite.org/",
       "redistributionTermUrl": "https://sqlite.org/copyright.html",
-      "redistributionApproval": "owner-approved"
+      "redistributionApproval": "pending-owner-approval"
     },
     {
       "name": "SQLitePCLRaw.bundle_e_sqlite3",
@@ -270,7 +330,7 @@
       ],
       "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
       "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
-      "redistributionApproval": "owner-approved"
+      "redistributionApproval": "pending-owner-approval"
     },
     {
       "name": "SQLitePCLRaw.core",
@@ -285,7 +345,7 @@
       ],
       "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
       "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
-      "redistributionApproval": "owner-approved"
+      "redistributionApproval": "pending-owner-approval"
     },
     {
       "name": "SQLitePCLRaw.lib.e_sqlite3",
@@ -300,7 +360,7 @@
       ],
       "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
       "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
-      "redistributionApproval": "owner-approved"
+      "redistributionApproval": "pending-owner-approval"
     },
     {
       "name": "SQLitePCLRaw.provider.e_sqlite3",
@@ -315,7 +375,37 @@
       ],
       "officialSourceUrl": "https://github.com/ericsink/SQLitePCL.raw/tree/v2.1.12",
       "redistributionTermUrl": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
-      "redistributionApproval": "owner-approved"
+      "redistributionApproval": "pending-owner-approval"
+    },
+    {
+      "name": "SigLIP 2 base patch16-224 (ONNX export)",
+      "version": "1",
+      "shippedPaths": [
+        "models/text.onnx",
+        "models/tokenizer.model",
+        "models/vision.onnx"
+      ],
+      "licenseIdentifier": "Apache-2.0",
+      "packagedLicensePaths": [
+        "licenses/siglip2/LICENSE.txt"
+      ],
+      "officialSourceUrl": "https://huggingface.co/google/siglip2-base-patch16-224",
+      "redistributionTermUrl": "https://www.apache.org/licenses/LICENSE-2.0",
+      "redistributionApproval": "pending-owner-approval"
+    },
+    {
+      "name": "System.Numerics.Tensors",
+      "version": "9.0.0",
+      "shippedPaths": [
+        "System.Numerics.Tensors.dll"
+      ],
+      "licenseIdentifier": "MIT",
+      "packagedLicensePaths": [
+        "licenses/system-numerics-tensors/LICENSE.txt"
+      ],
+      "officialSourceUrl": "https://github.com/dotnet/runtime/tree/v9.0.0",
+      "redistributionTermUrl": "https://licenses.nuget.org/MIT",
+      "redistributionApproval": "pending-owner-approval"
     },
     {
       "name": "Windows Desktop / WPF",
@@ -537,7 +627,7 @@
       ],
       "officialSourceUrl": "https://github.com/dotnet/dotnet/tree/v10.0.11",
       "redistributionTermUrl": "https://licenses.nuget.org/MIT",
-      "redistributionApproval": "owner-approved"
+      "redistributionApproval": "pending-owner-approval"
     }
   ]
 }

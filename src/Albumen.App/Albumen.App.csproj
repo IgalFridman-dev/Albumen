@@ -14,6 +14,12 @@
     <ProjectReference Include="..\Albumen.Infrastructure.Sqlite\Albumen.Infrastructure.Sqlite.csproj" />
     <ProjectReference Include="..\Albumen.Infrastructure.Windows\Albumen.Infrastructure.Windows.csproj" />
   </ItemGroup>
+  <!-- ONNX Runtime's package also carries its .lib import libraries; only its DLLs are needed at run time. -->
+  <Target Name="DropOnnxRuntimeImportLibraries" AfterTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)" Condition="'%(Extension)' == '.lib'" />
+    </ItemGroup>
+  </Target>
   <ItemGroup>
     <InternalsVisibleTo Include="Albumen.Infrastructure.Tests" />
     <InternalsVisibleTo Include="Albumen.Scenarios.Tests" />
