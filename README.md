@@ -8,7 +8,7 @@
 
 **Find duplicate photos on Windows, review each group, and send only what you approve to the Recycle Bin.**
 
-![PhotoSift reviewing an exact duplicate group: categories, groups, the paths being compared and a preview of the photo](docs/images/hero-review-exact.png)
+![PhotoSift reviewing a set of identical copies: the kinds of duplicates found, the sets, and each photo with Keep or Remove, its path and size](docs/images/hero-review-exact.png)
 
 PhotoSift is a privacy-first desktop app for Windows 11 built with .NET 10, C# 14 and WPF. It scans one
 local folder for byte-identical and conservatively near-identical JPEG/PNG images, groups them for
@@ -17,8 +17,8 @@ never deletes permanently, and keeps a durable record of every action it takes.
 
 | 1. Choose a folder | 2. Approve exactly what goes | 3. See every outcome |
 |---|---|---|
-| ![Choose Scope screen before the PM-009 redesign, with a ready preflight summary](docs/images/choose-scope.png) | ![Approval listing the selected path, recovery estimate and Recycle Bin destination](docs/images/approve-cleanup.png) | ![Recycle Bin progress showing one original path recycled](docs/images/recycle-bin-progress.png) |
-| Preflight checks the folder is local and readable before any scan. | The approval lists every path, the estimated space recovered and the destination. | Each file is sent on its own and its result is recorded. |
+| ![Folder screen with a demo folder ready to scan and the scan options](docs/images/choose-folder.png) | ![Approval asking to move one photo to the Recycle Bin, with its path and what the cleanup covers](docs/images/approve-cleanup.png) | ![Cleanup finished with one photo moved to the Recycle Bin](docs/images/cleanup-results.png) |
+| Preflight checks the folder is local and readable, and the scan options sit on the same screen. | Nothing moves until you approve. The approval lists every photo and where it goes. | Each photo is sent on its own, and its result is kept in History. |
 
 ## Why it is interesting
 
