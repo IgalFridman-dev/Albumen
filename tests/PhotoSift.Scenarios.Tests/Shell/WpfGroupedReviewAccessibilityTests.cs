@@ -440,6 +440,128 @@ public sealed class WpfGroupedReviewAccessibilityTests
         });
     }
 
+    // PM-016: at the default window size the category list holds two or three cards, and a
+    // wheel notch in item scrolling moved three items, so the two middle categories were never
+    // shown at the top. Large text makes the cards tall enough to pin the overflow here. The
+    // wheel is raised on the card at the top of the list, where the pointer rests, so the event
+    // takes the real route: tunnelling through the list's handler and bubbling up to the list's
+    // ScrollViewer. A card that scrolled out of view leaves the visual tree, so it is looked up
+    // again before every notch.
+    [Fact]
+    public void OneWheelNotchMovesTheCategoryListByOneCardSoTheMiddleCardsAreReachable()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var window = OverflowingCategoriesWindow(out var categories, out var scroller);
+            try
+            {
+                Wheel(TopCard(categories, scroller), -120);
+                Assert.Equal(1, scroller.VerticalOffset);
+                Wheel(TopCard(categories, scroller), -120);
+                Assert.Equal(2, scroller.VerticalOffset);
+                Wheel(TopCard(categories, scroller), 120);
+                Assert.Equal(1, scroller.VerticalOffset);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    // A precision touchpad reports a notch as several small deltas; they add up to one card.
+    [Fact]
+    public void SmallTouchpadDeltasAddUpToOneCardPerNotch()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var window = OverflowingCategoriesWindow(out var categories, out var scroller);
+            try
+            {
+                Wheel(TopCard(categories, scroller), -40);
+                Assert.Equal(0, scroller.VerticalOffset);
+                Wheel(TopCard(categories, scroller), -40);
+                Assert.Equal(0, scroller.VerticalOffset);
+                Wheel(TopCard(categories, scroller), -40);
+                Assert.Equal(1, scroller.VerticalOffset);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    // At the end of the list a further notch scrolls the page instead, so Approval stays
+    // reachable while the pointer rests over the list.
+    [Fact]
+    public void AWheelNotchAtTheEndOfTheCategoryListScrollsThePage()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var window = OverflowingCategoriesWindow(out _, out var scroller);
+            try
+            {
+                var page = Assert.IsType<ScrollViewer>(window.FindName("ReviewPageScrollViewer"));
+                scroller.ScrollToEnd();
+                WpfReviewSelectionTests.Drain();
+                window.UpdateLayout();
+                var end = scroller.VerticalOffset;
+                Assert.True(end > 0, "The list did not scroll to its end.");
+                Assert.Equal(0, page.VerticalOffset);
+
+                Wheel(scroller, -120);
+                Assert.Equal(end, scroller.VerticalOffset);
+                Assert.Equal(Math.Min(40, page.ScrollableHeight), page.VerticalOffset);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    private static MainWindow OverflowingCategoriesWindow(out ListBox categories, out ScrollViewer scroller)
+    {
+        var fixture = GroupedWpfFixture.Create();
+        var window = new MainWindow
+        {
+            DataContext = fixture.ViewModel,
+            Width = 960,
+            Height = 720,
+            FontSize = 24,
+        };
+        ShowAndDrain(window);
+        categories = NamedList(window, "ReviewCategoriesList");
+        Assert.Equal(4, categories.Items.Count);
+        scroller = Descendants<ScrollViewer>(categories).First();
+        Assert.True(scroller.ScrollableHeight >= 2,
+            $"The four cards must overflow the list by two items; ScrollableHeight is {scroller.ScrollableHeight}.");
+        Assert.Equal(0, scroller.VerticalOffset);
+        return window;
+    }
+
+    private static Button TopCard(ListBox list, ScrollViewer scroller)
+    {
+        var container = Assert.IsType<ListBoxItem>(
+            list.ItemContainerGenerator.ContainerFromIndex((int)scroller.VerticalOffset));
+        var card = Descendants<Button>(container).First();
+        Assert.True(card.IsVisible, "The card at the top of the list is not shown.");
+        return card;
+    }
+
+    // Input raises the tunnelling preview first and the bubbling event only when it was not handled.
+    private static void Wheel(UIElement element, int delta)
+    {
+        var preview = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
+        {
+            RoutedEvent = Mouse.PreviewMouseWheelEvent,
+            Source = element,
+        };
+        element.RaiseEvent(preview);
+        if (!preview.Handled)
+        {
+            element.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
+            {
+                RoutedEvent = Mouse.MouseWheelEvent,
+                Source = element,
+            });
+        }
+        WpfReviewSelectionTests.Drain();
+        element.UpdateLayout();
+    }
+
     private static void OpenFirstComparison(ShellViewModel viewModel)
     {
         var category = viewModel.ReviewCategories[0];

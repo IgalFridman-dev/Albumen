@@ -376,7 +376,7 @@ reported, because it cannot be told apart from a file cut right after its last s
 
 ## PM-012 — Show a marked photo as marked in every set it belongs to
 
-**Status:** Backlog — owner asked for it before V1.0.0 on 2026-10-18.
+**Status:** Done in PR #25 (merged 2026-10-18); Golden VM Full run still owed with PM-009.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -397,7 +397,9 @@ photo is the only one that can stay.
 
 ## PM-013 — Keep reviewing after a cleanup without scanning again
 
-**Status:** Backlog — owner asked for it before V1.0.0 on 2026-10-18.
+**Status:** Done in PR #26 (merged 2026-10-18); Golden VM Full run still owed with PM-009.
+Marks on photos that were not removed are not carried over; a set touched by an uncertain
+outcome is closed until the next scan; after a faulted cleanup only "Scan again" is offered.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -419,7 +421,7 @@ photo dropped, and approve another cleanup. Design:
 
 ## PM-014 — Re-check the folder after a cleanup removed photos
 
-**Status:** Backlog — owner asked for it before V1.0.0 on 2026-10-18.
+**Status:** Done in PR #25 (merged 2026-10-18); Golden VM Full run still owed with PM-009.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -434,16 +436,49 @@ cleanup removed photos, going back to the folder page still shows the old counts
   folder re-checks the folder by itself; the page says why while it checks.
 - Application test for the automatic re-check and for the case where nothing was removed.
 
-## PM-015 — A home page that shows the photos as cards
+## PM-015 — The folder page gets the prototype's simplicity
 
-**Status:** Backlog — scope to be confirmed with the owner.
+**Status:** Done in PR #27 (merged 2026-10-18; CI green, reviewer Ship, seen by the owner on
+the desktop: "Otherwise good work"). Golden VM Full run still owed with PM-009.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
-**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18: "I don't see any
-main page that looks beautiful with the windows photos cards when in the app."
+**Origin:** Owner test of PR #24 on the desktop with real photos, 2026-10-18: "You showed me a
+prototype like this, but end product looks different." and "We can keep the side bar being a
+side bar, but I do like the simple design of the prototype." Design:
+`docs/superpowers/specs/2026-10-18-post-test-fixes-design.md`.
 
 ### Completion criteria
 
-- To be written once the owner confirms which page: a card grid of the chosen folder's photos
-  on the folder page, or a start page before a folder is chosen.
+- The folder page has the prototype's layout: one hero (illustration drawn in XAML, headline,
+  one line), one card with the folder's name and path, one status strip that says one sentence
+  per state, the two switches with captions, the check summary under "Details", the Scan
+  button in the card's footer, and three trust lines under the card. The step rail stays.
+- Pinned automation names and the smoke marker `phases=5` are unchanged.
+- WPF scenario tests for the strip text per state, the captions, the trust lines and the
+  Scan button inside the card.
+
+## PM-016 — Category navigation on the Review page skips the middle categories at the default window size
+
+**Status:** In review — PR #28. Cause: the Review lists scroll by item (kept so a
+10,000-photo set never realizes every card), and a wheel notch moved three items, so a list
+of four categories that shows two or three jumped from the first to the last. The wheel now
+moves one card per notch over every list that scrolls by item (the three Review lists and the
+Cleanup list); touchpad deltas smaller than a notch add up to one. At a list's end the wheel
+still goes to the page.
+
+**Priority:** Before V1.0.0 (owner decision 2026-10-18)
+
+**Origin:** Owner test of the PM-015 build (commit 29d416e) on the desktop, 2026-10-18: on the
+Review page, at the normal (not maximized) window size, moving between the four categories
+(Identical copies, Look-alikes, Maybe similar, Couldn't check) jumps from the top one to the
+bottom one and skips the two in the middle; with the window enlarged it works fine.
+
+### Completion criteria
+
+- Every category is reachable in order by mouse wheel at the default window size (960×720).
+  Keyboard navigation is untouched by reasoning, not by a test: the handler is wheel-only and
+  the arrow keys go through a separate key handler.
+- WPF scenario tests at the default window size with large text (font size 24, so the four cards
+  overflow the list by two): one notch moves one card, three touchpad deltas of 40 move one
+  card, and a notch at the list's end moves the page.

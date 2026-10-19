@@ -381,17 +381,34 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Loaded);
     }
 
+    // One notch of a mouse wheel reports a delta of 120 (WM_MOUSEWHEEL's WHEEL_DELTA). A precision
+    // touchpad reports many smaller deltas, which add up here until they make a notch.
+    private const int WheelDeltaPerNotch = 120;
+    private readonly Dictionary<DependencyObject, int> wheelResiduals = new();
+
     // A list at its scroll limit hands the wheel to its page, so the page can still be
     // scrolled while the pointer rests over a list.
     private void OnReviewListPreviewMouseWheel(object sender, MouseWheelEventArgs eventArgs)
     {
         if (sender is not DependencyObject list
-            || PageScrollerFor(list) is not { } page
             || Descendants<ScrollViewer>(list).FirstOrDefault() is not { } listScroller) return;
         var atLimit = eventArgs.Delta > 0
             ? listScroller.VerticalOffset <= 0
             : listScroller.VerticalOffset >= listScroller.ScrollableHeight;
-        if (!atLimit) return;
+        if (!atLimit)
+        {
+            // The lists scroll by item (a 10,000-photo set must not realize every card), and a
+            // wheel notch would move three items and skip the middle of a short list. One card
+            // per notch keeps every category and set reachable at the default window size.
+            eventArgs.Handled = true;
+            var residual = wheelResiduals.GetValueOrDefault(list) + eventArgs.Delta;
+            for (; residual >= WheelDeltaPerNotch; residual -= WheelDeltaPerNotch) listScroller.LineUp();
+            for (; residual <= -WheelDeltaPerNotch; residual += WheelDeltaPerNotch) listScroller.LineDown();
+            wheelResiduals[list] = residual;
+            return;
+        }
+        wheelResiduals.Remove(list);
+        if (PageScrollerFor(list) is not { } page) return;
         eventArgs.Handled = true;
         page.ScrollToVerticalOffset(page.VerticalOffset - eventArgs.Delta / 3.0);
     }
