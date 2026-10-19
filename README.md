@@ -1,4 +1,4 @@
-# PhotoSift
+# Albumen
 
 [![CI](https://github.com/IgalFridman-dev/PhotoSift/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/IgalFridman-dev/PhotoSift/actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/platform-Windows%2011%20x64-0078D4)
@@ -8,9 +8,11 @@
 
 **Find duplicate photos on Windows, review each group, and send only what you approve to the Recycle Bin.**
 
-![PhotoSift reviewing a set of identical copies: the kinds of duplicates found, the sets, and each photo with Keep or Remove, its path and size](docs/images/hero-review-exact.png)
+*Albumen was called PhotoSift until October 2026. It was renamed because another Windows duplicate-photo app already uses that name.*
 
-PhotoSift is a privacy-first desktop app for Windows 11 built with .NET 10, C# 14 and WPF. It scans one
+![Albumen reviewing a set of identical copies: the kinds of duplicates found, the sets, and each photo with Keep or Remove, its path and size](docs/images/hero-review-exact.png)
+
+Albumen is a privacy-first desktop app for Windows 11 built with .NET 10, C# 14 and WPF. It scans one
 local folder for byte-identical and conservatively near-identical JPEG/PNG images, groups them for
 review, and moves only the files you explicitly approve to the Recycle Bin. It works fully offline,
 never deletes permanently, and keeps a durable record of every action it takes.
@@ -22,7 +24,7 @@ never deletes permanently, and keeps a durable record of every action it takes.
 
 ## Why it is interesting
 
-Deleting someone's photos is a one-way door, so PhotoSift is designed around one question:
+Deleting someone's photos is a one-way door, so Albumen is designed around one question:
 *what has to be true before the app is allowed to touch a file?*
 
 - **At least one survivor per group.** The review model refuses any selection that would remove every copy.
@@ -56,14 +58,14 @@ wires them together. These boundaries are enforced by architecture tests, not ju
 
 ```mermaid
 flowchart LR
-  App["PhotoSift.App<br/>WPF views + ViewModels<br/>CompositionRoot"] --> Application
+  App["Albumen.App<br/>WPF views + ViewModels<br/>CompositionRoot"] --> Application
   App --> Analysis
   App --> Sqlite
   App --> Windows
-  Analysis["PhotoSift.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature"] --> Application
+  Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature"] --> Application
   Sqlite["Infrastructure.Sqlite<br/>schema v5, journals, records"] --> Application
   Windows["Infrastructure.Windows<br/>Win32 scope and traversal, WIC decode,<br/>IFileOperation Recycle Bin"] --> Application
-  Application["PhotoSift.Application<br/>workflows, coordinators, ports"] --> Domain["PhotoSift.Domain<br/>pure rules and policies"]
+  Application["Albumen.Application<br/>workflows, coordinators, ports"] --> Domain["Albumen.Domain<br/>pure rules and policies"]
 ```
 
 A walkthrough of one run from folder selection to Recycle Bin, with the classes involved, is in
@@ -98,17 +100,17 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 install is required.
 
 1. Download the ZIP from the latest release and extract it to a local folder.
-2. Run `Start-PhotoSift.cmd`. It checks every packaged file against its manifest, then starts the app.
+2. Run `Start-Albumen.cmd`. It checks every packaged file against its manifest, then starts the app.
 3. The build is not code-signed, so Windows SmartScreen may warn on first run: choose
    **More info → Run anyway**.
 
 **To build it** you need the .NET SDK `10.0.400`:
 
 ```powershell
-dotnet restore PhotoSift.slnx --locked-mode
-dotnet build   PhotoSift.slnx -c Release --no-restore
-dotnet run     --project src/PhotoSift.App -c Release
-dotnet test    PhotoSift.slnx -c Release --no-build
+dotnet restore Albumen.slnx --locked-mode
+dotnet build   Albumen.slnx -c Release --no-restore
+dotnet run     --project src/Albumen.App -c Release
+dotnet test    Albumen.slnx -c Release --no-build
 ```
 
 Some Infrastructure and WPF scenario tests exercise real Windows APIs and expect an isolated machine;
@@ -118,7 +120,7 @@ the official gate scripts live in [`eng/verification/`](eng/verification/) and a
 ## Known limitations (V1)
 
 - Accessibility work is not complete. The local-data warning now raises a screen-reader
-  announcement, but that has not yet been checked with Narrator (PM-002, PM-005). PhotoSift makes
+  announcement, but that has not yet been checked with Narrator (PM-002, PM-005). Albumen makes
   no accessibility-compliance claim.
 - HEIF support depends on the installed Windows codec and is best effort; JPEG and PNG are supported.
 - Near-duplicate quality was validated on a small labeled corpus. Human review is always required.
@@ -133,7 +135,7 @@ Deferred work is tracked in [`docs/backlog/post-mvp.md`](docs/backlog/post-mvp.m
 
 ## How it was built
 
-PhotoSift is developed with AI coding agents under a written, reviewable process rather than
+Albumen is developed with AI coding agents under a written, reviewable process rather than
 ad-hoc prompting. The workflow is checked into the repo, so anyone can see exactly how changes are made:
 
 | Piece | What it does |
@@ -158,7 +160,7 @@ tests/          5 xUnit v3 projects + PowerShell tooling tests
 eng/            Hyper-V verification gates and release packaging scripts
 docs/           HOW-IT-WORKS and the deferred-work backlog
 .github/        CI workflow
-.claude/        skills, agents and commands used to develop PhotoSift
+.claude/        skills, agents and commands used to develop Albumen
 CLAUDE.md       guide for working on the code with Claude Code
 ```
 

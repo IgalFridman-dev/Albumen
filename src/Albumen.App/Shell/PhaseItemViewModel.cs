@@ -1,0 +1,23 @@
+using Albumen.Domain.Workflow;
+
+namespace Albumen.App.Shell;
+
+public sealed record PhaseItemViewModel(
+    WorkflowPhase Phase,
+    string DisplayName,
+    PhaseAvailability Availability,
+    int StepNumber)
+{
+    public bool IsAvailable => Availability is PhaseAvailability.Current or PhaseAvailability.Available;
+
+    public bool IsCurrent => Availability is PhaseAvailability.Current;
+
+    public string AvailabilityLabel => Availability switch
+    {
+        PhaseAvailability.Current => "Current step",
+        PhaseAvailability.Available => "Available",
+        PhaseAvailability.Unavailable => "Unavailable",
+        _ => throw new InvalidOperationException($"Unknown availability: {Availability}"),
+    };
+}
+
