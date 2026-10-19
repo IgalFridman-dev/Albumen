@@ -1,9 +1,9 @@
 ---
 name: story-workflow
-description: Implement a PhotoSift story (E#-S#), a backlog item (PM-###) or a post-V1 bug fix end to end - SPEC, plan, test-first build, review, verify, evidence, status. Use when starting or continuing any such work.
+description: Implement a Albumen story (E#-S#), a backlog item (PM-###) or a post-V1 bug fix end to end - SPEC, plan, test-first build, review, verify, evidence, status. Use when starting or continuing any such work.
 ---
 
-# PhotoSift story workflow
+# Albumen story workflow
 
 Converted from the BMAD (planning) + Superpowers (implementation) flow used to build E1-S1…E5-S5.
 Branch off `develop` (`main` is stable releases only). Commit and PR wording: `commit-and-pr` skill.

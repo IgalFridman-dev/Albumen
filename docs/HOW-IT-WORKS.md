@@ -1,11 +1,11 @@
-# How PhotoSift works
+# How Albumen works
 
 A one-page map of the app: what the user sees, how a click flows through the code, and where
 data lives.
 
 ## What the user sees
 
-One window (`src/PhotoSift.App/MainWindow.xaml`) with a left-hand list of steps. The workflow has five
+One window (`src/Albumen.App/MainWindow.xaml`) with a left-hand list of steps. The workflow has five
 phases (`Domain/Workflow/WorkflowPhase.cs`), each unlocked only when the previous one is valid; the
 first two share one screen, so the list shows four steps.
 
@@ -24,26 +24,26 @@ data" lives there too.
 
 ```mermaid
 flowchart LR
-  App["PhotoSift.App<br/>WPF views + ViewModels<br/>CompositionRoot"] --> Application
+  App["Albumen.App<br/>WPF views + ViewModels<br/>CompositionRoot"] --> Application
   App --> Analysis
   App --> Sqlite
   App --> Windows
-  Analysis["PhotoSift.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature"] --> Application
+  Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature"] --> Application
   Sqlite["Infrastructure.Sqlite<br/>schema v5, journals, records"] --> Application
   Windows["Infrastructure.Windows<br/>Win32 scope/traversal, WIC decode,<br/>IFileOperation Recycle Bin"] --> Application
-  Application["PhotoSift.Application<br/>workflows, coordinators, ports"] --> Domain["PhotoSift.Domain<br/>pure rules & policies"]
+  Application["Albumen.Application<br/>workflows, coordinators, ports"] --> Domain["Albumen.Domain<br/>pure rules & policies"]
 ```
 
 Domain and Application never reference WPF, SQLite or Win32; Infrastructure implements the
 ports Application declares; `Composition/CompositionRoot.cs` is the only place they meet.
-Architecture tests in `tests/PhotoSift.Infrastructure.Tests/Architecture/` enforce this.
+Architecture tests in `tests/Albumen.Infrastructure.Tests/Architecture/` enforce this.
 
 ## One run, end to end
 
 ```mermaid
 sequenceDiagram
   participant UI as ShellViewModel (WPF)
-  participant WF as PhotoSiftWorkflow
+  participant WF as AlbumenWorkflow
   participant Scan as ScanCoordinator
   participant Rev as ReviewCoordinator
   participant Act as ActionCoordinator
@@ -73,7 +73,7 @@ Key ideas:
 
 ## Where data lives
 
-- `%LOCALAPPDATA%\PhotoSift\photosift.db` — SQLite (scan identity, checkpoints, override
+- `%LOCALAPPDATA%\Albumen\albumen.db` — SQLite (scan identity, checkpoints, override
   evidence, action journal and records). "Clear scan data" (in History) removes scan data only.
 - Photos are only read, never modified; removal = Windows Recycle Bin (restorable).
 - No network access at all (verified by network audits in a VM with no network adapter).
@@ -82,9 +82,9 @@ Key ideas:
 
 | Project | Covers |
 |---|---|
-| `PhotoSift.Domain.Tests` | pure policies (survivor, scope, transitions) |
-| `PhotoSift.Application.Tests` | coordinators, workflows, fakes for ports |
-| `PhotoSift.Analysis.Tests` | hashing and perceptual signatures |
-| `PhotoSift.Infrastructure.Tests` | Win32/WIC/SQLite adapters + architecture rules |
-| `PhotoSift.Scenarios.Tests` | real WPF window, keyboard and automation flows |
+| `Albumen.Domain.Tests` | pure policies (survivor, scope, transitions) |
+| `Albumen.Application.Tests` | coordinators, workflows, fakes for ports |
+| `Albumen.Analysis.Tests` | hashing and perceptual signatures |
+| `Albumen.Infrastructure.Tests` | Win32/WIC/SQLite adapters + architecture rules |
+| `Albumen.Scenarios.Tests` | real WPF window, keyboard and automation flows |
 | `tests/tooling/*.Tests.ps1` | PowerShell tests for VM and release scripts |

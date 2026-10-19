@@ -1,6 +1,6 @@
 ---
 name: commit-and-pr
-description: Write PhotoSift commit messages and PR titles/descriptions. Use before every git commit, PR creation, or PR body edit in this repo.
+description: Write Albumen commit messages and PR titles/descriptions. Use before every git commit, PR creation, or PR body edit in this repo.
 ---
 
 # Commit and PR messages
