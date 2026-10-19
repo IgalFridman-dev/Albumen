@@ -12,15 +12,25 @@ SigLIP 2 passes. C# reproduces the reference: SentencePiece token ids are identi
 run) and fp32 embeddings match PyTorch to cosine 1.0 on the same pixels. No fallback to SigLIP 1 or CLIP
 is needed; CLIP was not evaluated.
 
-## Recommendations
+## Decisions (Igal, 2026-10-19)
 
-| Decision | Recommendation | Why |
+| Decision | Outcome | Basis |
 |---|---|---|
-| D1 variant | `siglip2-base-patch32-256` | Half the vision CPU of patch16-224 (13 vs 28 ms, 85 vs 257 ms on one thread) with equal or better parity. Retrieval quality versus patch16 is not measured here; story 5's corpus checks it, and switching back is a re-export with no code change. |
+| D1 variant | `siglip2-base-patch16-224` | Quality first: Google's published results put it ahead of patch32-256 (not measured here), and finer patches suit look-alike photos. Parity is the same as patch32; it costs about twice the CPU. Story 5's corpus checks the choice; switching is a re-export. |
 | D1 precision | fp32 | Both int8 schemes lost accuracy and ran slower on this CPU (table below). |
-| Decode for the encoder | WIC decode at a 512 edge, then the Pillow-style resize | Reusing the Near stage's 256 decode drops the mean image cosine to 0.97 to 0.98 and moves the best photo for half the prompts. A 512 decode costs the same as 256 here and gives 0.995. |
-| D2 signature reuse | Add the reduced E2-S4 (embeddings only, keyed by SHA-256 + profile) | About 46 ms per photo end to end for patch32 (decode 27 + resize 6 + inference 13), above the plan's 40 ms line: a 10,000-photo rescan is about 8 minutes here and about 20 on one core. |
-| Text tower size (story 3) | Open | fp32 text is 1,077 MB of the 1.44 GB total. An 8-bit vocabulary table halves it but drops text cosine to 0.990 and moves the best photo for 2 to 3 more prompts. Try fp16 weight storage first; otherwise ship the text tower as an optional download (`Unavailable` without it). |
+| Decode for the encoder | WIC decode at a 512 edge, then the Pillow-style resize | Reusing the Near stage's 256 decode drops the mean image cosine to 0.97 and moves the best photo for half the prompts. A 512 decode costs the same as 256 here and gives 0.995. |
+| D2 signature reuse | Deferred to 1.2 | Every 1.1 scan re-embeds every photo. Run in parallel, patch16 costs 25.6 ms per photo on this PC: about 4.3 minutes per 10,000 photos. |
+| Indexing pipeline (story 4) | Whole photos in parallel, one inference thread each, one shared session | 2.5x the throughput of one photo across all threads (25.6 vs about 63 ms per photo for patch16) for about 0.27 GB more peak RAM. |
+| Text tower size (story 3) | Open | fp32 text is 1,077 MB of the 1.43 GB total. An 8-bit vocabulary table halves it but drops text cosine to 0.990 and moves the best photo for 2 to 3 more prompts. Try fp16 weight storage first; otherwise ship the text tower as an optional download (`Unavailable` without it). |
+
+## Throughput (fp32, 512 decode, 111 photos, decode + resize + one-thread inference per worker)
+
+| Variant | 6 workers | 12 workers | 24 workers | one photo at a time, all threads | peak RAM |
+|---|---|---|---|---|---|
+| patch16-224 | 56.1 ms | 35.2 ms | 25.6 ms | about 63 ms | 2.31 GB |
+| patch32-256 | 24.8 ms | 17.0 ms | 12.3 ms | about 54 ms | 2.28 GB |
+
+Going from 12 to 24 workers gains only 1.4x, probably because half the cores are efficiency cores.
 
 ## Numbers (medians; p95 in the raw file)
 

@@ -689,6 +689,118 @@
    "photos": 37,
    "commit": "8471579",
    "run": "p32-emb8-512"
+  },
+  {
+   "model": "google/siglip2-base-patch32-256",
+   "precision": "fp32",
+   "decode_edge": "512",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "vision.onnx": 360.9,
+    "text.onnx": 1077.1
+   },
+   "load_ms": {
+    "text": 1397,
+    "vision": 538
+   },
+   "peak_working_set_mb": 2280,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 1,
+    "min_image_cosine": 0.9701,
+    "mean_image_cosine": 0.99517,
+    "same_top_photo_per_prompt": "11/15"
+   },
+   "ms_per_prompt": {
+    "median": 10.9,
+    "p95": 13.5
+   },
+   "ms_per_photo": {
+    "decode": {
+     "median": 28.5,
+     "p95": 97.8
+    },
+    "preprocess": {
+     "median": 11.2,
+     "p95": 26.2
+    },
+    "inference_all_threads": {
+     "median": 14.1,
+     "p95": 23
+    },
+    "inference_one_thread": {
+     "median": 85.6,
+     "p95": 126.5
+    },
+    "end_to_end_in_parallel": {
+     "6_workers": 24.8,
+     "12_workers": 17,
+     "24_workers": 12.3
+    }
+   },
+   "photos": 37,
+   "commit": "0298595",
+   "run": "p32-fp32-512-parallel"
+  },
+  {
+   "model": "google/siglip2-base-patch16-224",
+   "precision": "fp32",
+   "decode_edge": "512",
+   "machine": {
+    "ProcessorCount": 24,
+    "os": "Microsoft Windows NT 10.0.26300.0"
+   },
+   "sizes_mb": {
+    "vision.onnx": 354.5,
+    "text.onnx": 1077.1
+   },
+   "load_ms": {
+    "text": 1447,
+    "vision": 465
+   },
+   "peak_working_set_mb": 2310,
+   "parity": {
+    "token_ids_exact": "15/15",
+    "token_mismatches": [],
+    "min_text_cosine": 1,
+    "min_image_cosine": 0.9459,
+    "mean_image_cosine": 0.99459,
+    "same_top_photo_per_prompt": "13/15"
+   },
+   "ms_per_prompt": {
+    "median": 12.8,
+    "p95": 20.1
+   },
+   "ms_per_photo": {
+    "decode": {
+     "median": 29.2,
+     "p95": 97.5
+    },
+    "preprocess": {
+     "median": 5.6,
+     "p95": 20
+    },
+    "inference_all_threads": {
+     "median": 28.3,
+     "p95": 77.2
+    },
+    "inference_one_thread": {
+     "median": 252.1,
+     "p95": 270.9
+    },
+    "end_to_end_in_parallel": {
+     "6_workers": 56.1,
+     "12_workers": 35.2,
+     "24_workers": 25.6
+    }
+   },
+   "photos": 37,
+   "commit": "0298595",
+   "run": "p16-fp32-512-parallel"
   }
  ]
 }
