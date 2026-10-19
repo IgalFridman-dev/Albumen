@@ -81,7 +81,7 @@ def main():
     model = AutoModel.from_pretrained(args.model, dtype=torch.float32).eval()
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     size = AutoConfig.from_pretrained(args.model).vision_config.image_size
-    preprocessor = json.loads(Path(file_from(args.model, "preprocessor_config.json")).read_text())
+    preprocessor = json.loads(Path(file_from(args.model, "preprocessor_config.json")).read_text(encoding="utf-8"))
     # The C# preprocessing hard-codes these; stop if a checkpoint differs.
     assert preprocessor.get("resample") == 2, preprocessor
     assert preprocessor.get("image_mean") == [0.5] * 3 and preprocessor.get("image_std") == [0.5] * 3, preprocessor
@@ -136,7 +136,7 @@ def main():
         "prompts": [{**p, "embedding": e.tolist()} for p, e in zip(prompts, text_embeddings)],
         "photos": [{"file_hash": name_hash(p.name), "embedding": e.tolist()} for p, e in zip(photos, image_embeddings)],
     }
-    (out / "reference.json").write_text(json.dumps(reference, ensure_ascii=False))
+    (out / "reference.json").write_text(json.dumps(reference, ensure_ascii=False), encoding="utf-8")
     sizes = {f.name: round(f.stat().st_size / 2**20, 1) for f in sorted(out.glob("*.onnx"))}
     print(json.dumps({"sizes_mb": sizes, "min_cosine_torch_vs_onnx": onnx_check,
                       **{k: reference[k] for k in ["adds_bos", "adds_eos", "pads_left"]}}, indent=2))
