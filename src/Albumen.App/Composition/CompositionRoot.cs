@@ -2,6 +2,7 @@ using System.IO;
 using Albumen.App.Shell;
 using Albumen.Analysis.Exact;
 using Albumen.Analysis.NearDuplicate;
+using Albumen.Analysis.Sharpness;
 using Albumen.Application.Scan;
 using Albumen.Application.Review;
 using Albumen.Application.Action;
@@ -47,7 +48,7 @@ public static class CompositionRoot
         var stores = new SqliteAlbumenStores(databasePath);
         var nearDuplicates = new BoundedNearDuplicatePipeline(
             new WicNearFeatureSource(reader, analyzer, new WicPreviewDecoder(),
-                new ManagedPerceptualSignature()));
+                new ManagedPerceptualSignature(), new ManagedSharpness()));
         var scan = new ScanCoordinator(
             scheduler, preflight, executor, stores.ScanIdentities, stores.ScanCheckpoints, nearDuplicates);
         var review = new ReviewCoordinator(scheduler,

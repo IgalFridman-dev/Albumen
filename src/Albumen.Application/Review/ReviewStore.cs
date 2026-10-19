@@ -110,7 +110,7 @@ internal sealed class ReviewStore
             && evidence.Opened.Allocation.AllocatedBytes == evidence.Final.Allocation.AllocatedBytes
             && evidence.Opened.Allocation.LinkCount == evidence.Final.Allocation.LinkCount);
         var refreshed = new ScanFileOccurrence(member.Token, member.DiscoveredPath, member.ResolvedPath, member.PhysicalFileKey,
-            member.Enumerate, member.Exact, member.Content, allocation);
+            member.Enumerate, member.Exact, member.Content, allocation) { Sharpness = member.Sharpness };
         Refresh(Current.Groups.Select(g => g.Candidate.GroupId != evidence.Request.GroupId ? g : g with
         {
             Members = g.Members.Select(m => m.Occurrence.Token == member.Token
