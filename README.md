@@ -82,7 +82,7 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 
 - **About 23,500 lines of production C# and 40,000 lines of tests** across Domain, Application,
   Analysis, Infrastructure and real-window WPF scenario suites.
-- **Full suite: 1,757 / 1,757 passing** in the official gate on the release candidate.
+- **Full suite: 1,888 / 1,888 passing** in the official gate on the release candidate.
 - **Isolated verification VM.** Official gates run in a Hyper-V VM with no network adapter, restored
   from a known checkpoint for every run. This proves the offline guarantee and keeps runs reproducible.
 - **Reproducible release.** Two independent locked, self-contained publishes are compared file by
