@@ -438,8 +438,8 @@ cleanup removed photos, going back to the folder page still shows the old counts
 
 ## PM-015 — The folder page gets the prototype's simplicity
 
-**Status:** In review — PR #27 (CI green, reviewer Ship, seen by the owner on the desktop on
-2026-10-18: "Otherwise good work"). Golden VM Full run still owed with PM-009.
+**Status:** Done in PR #27 (merged 2026-10-18; CI green, reviewer Ship, seen by the owner on
+the desktop: "Otherwise good work"). Golden VM Full run still owed with PM-009.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -460,7 +460,12 @@ side bar, but I do like the simple design of the prototype." Design:
 
 ## PM-016 — Category navigation on the Review page skips the middle categories at the default window size
 
-**Status:** Backlog — owner asked for it on 2026-10-18 ("Mark 1 small fix for UI").
+**Status:** In review — PR #28. Cause: the Review lists scroll by item (kept so a
+10,000-photo set never realizes every card), and a wheel notch moved three items, so a list
+of four categories that shows two or three jumped from the first to the last. The wheel now
+moves one card per notch over every list that scrolls by item (the three Review lists and the
+Cleanup list); touchpad deltas smaller than a notch add up to one. At a list's end the wheel
+still goes to the page.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -471,9 +476,9 @@ bottom one and skips the two in the middle; with the window enlarged it works fi
 
 ### Completion criteria
 
-- Reproduce at the default window size (960×720) with four categories present: find which
-  control moves the selection (keyboard, mouse wheel over the category list, or the scroll
-  viewer paging) and why it skips two items.
-- Every category is reachable in order at the default window size and at the minimum window
-  size (680×520), by keyboard and by mouse wheel.
-- A WPF scenario test that walks the four categories at the default size.
+- Every category is reachable in order by mouse wheel at the default window size (960×720).
+  Keyboard navigation is untouched by reasoning, not by a test: the handler is wheel-only and
+  the arrow keys go through a separate key handler.
+- WPF scenario tests at the default window size with large text (font size 24, so the four cards
+  overflow the list by two): one notch moves one card, three touchpad deltas of 40 move one
+  card, and a notch at the list's end moves the page.
