@@ -55,7 +55,7 @@ dotnet build PhotoSift.slnx -c Release --no-restore
 dotnet test  PhotoSift.slnx -c Release --no-build
 ```
 
-The official gates (Architecture / Core / Full, last Full = 1,888/1,888) run inside a NIC-free
+The official gates (Architecture / Core / Full, last Full = 1,888/1,888 on `e6b6a74`) run inside a NIC-free
 Hyper-V "Golden VM" because the dev host blocks unsigned binaries: see the `verify-gates`
 skill. A Linux container can read and edit code but cannot build or run WPF.
 
