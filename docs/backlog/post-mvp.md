@@ -308,8 +308,11 @@ extracts the ZIP and runs `Start-PhotoSift.cmd`. Design:
 
 ## PM-009 — Make the UI understandable and attractive
 
-**Status:** In progress — design approved 2026-10-17; PR 1 of 3 (theme, folder, options and
-scan screens) open.
+**Status:** In review — all code merged into develop (PRs #17, #19, #22, #24 and the
+follow-ups PM-010 to PM-016, last merge `e6b6a74` on 2026-10-19), CI green, Golden VM Full
+passed on `e6b6a74` (run `20261019-161036-full-8896cdac`, 1,888/1,888). Open: the owner's High
+Contrast click-through and the README screenshots. Evidence:
+`docs/evidence/pm-009/verification.md`.
 
 **Priority:** Post-V1 presentation
 
@@ -330,7 +333,8 @@ side-by-side comparison without changing the safety design. Design:
 
 ## PM-010 — Show look-alike photos as one set instead of many pairs
 
-**Status:** In progress — design approved by the owner 2026-10-17.
+**Status:** Done in PR #20 (merged 2026-10-17); Golden VM Full passed on `e6b6a74` with PM-009.
+The owner's real-burst check is not recorded on its own.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-17 to ship V1.0.0 with the new UI)
 
@@ -348,7 +352,7 @@ is published as its own pair. Design:
 
 ## PM-011 — Treat truncated JPEGs as "couldn't be checked", not as look-alikes
 
-**Status:** In review — fix in the PR after #22; owner chose "before V1.0.0" on 2026-10-17.
+**Status:** Done in PR #23 (merged 2026-10-17); Golden VM Full passed on `e6b6a74` with PM-009.
 Found in the Hyper-V Review pass of PR #22.
 
 **Priority:** Before V1.0.0 (owner decision)
@@ -376,7 +380,7 @@ reported, because it cannot be told apart from a file cut right after its last s
 
 ## PM-012 — Show a marked photo as marked in every set it belongs to
 
-**Status:** Done in PR #25 (merged 2026-10-18); Golden VM Full run still owed with PM-009.
+**Status:** Done in PR #25 (merged 2026-10-18); Golden VM Full passed on `e6b6a74` with PM-009.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -397,7 +401,7 @@ photo is the only one that can stay.
 
 ## PM-013 — Keep reviewing after a cleanup without scanning again
 
-**Status:** Done in PR #26 (merged 2026-10-18); Golden VM Full run still owed with PM-009.
+**Status:** Done in PR #26 (merged 2026-10-18); Golden VM Full passed on `e6b6a74` with PM-009.
 Marks on photos that were not removed are not carried over; a set touched by an uncertain
 outcome is closed until the next scan; after a faulted cleanup only "Scan again" is offered.
 
@@ -421,7 +425,7 @@ photo dropped, and approve another cleanup. Design:
 
 ## PM-014 — Re-check the folder after a cleanup removed photos
 
-**Status:** Done in PR #25 (merged 2026-10-18); Golden VM Full run still owed with PM-009.
+**Status:** Done in PR #25 (merged 2026-10-18); Golden VM Full passed on `e6b6a74` with PM-009.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -439,7 +443,7 @@ cleanup removed photos, going back to the folder page still shows the old counts
 ## PM-015 — The folder page gets the prototype's simplicity
 
 **Status:** Done in PR #27 (merged 2026-10-18; CI green, reviewer Ship, seen by the owner on
-the desktop: "Otherwise good work"). Golden VM Full run still owed with PM-009.
+the desktop: "Otherwise good work"). Golden VM Full passed on `e6b6a74` with PM-009.
 
 **Priority:** Before V1.0.0 (owner decision 2026-10-18)
 
@@ -460,7 +464,8 @@ side bar, but I do like the simple design of the prototype." Design:
 
 ## PM-016 — Category navigation on the Review page skips the middle categories at the default window size
 
-**Status:** In review — PR #28. Cause: the Review lists scroll by item (kept so a
+**Status:** Done in PR #28 (merged 2026-10-19); Golden VM Full passed on `e6b6a74` with PM-009.
+Cause: the Review lists scroll by item (kept so a
 10,000-photo set never realizes every card), and a wheel notch moved three items, so a list
 of four categories that shows two or three jumped from the first to the last. The wheel now
 moves one card per notch over every list that scrolls by item (the three Review lists and the
