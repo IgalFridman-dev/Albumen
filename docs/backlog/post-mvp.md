@@ -308,10 +308,10 @@ extracts the ZIP and runs `Start-PhotoSift.cmd`. Design:
 
 ## PM-009 — Make the UI understandable and attractive
 
-**Status:** In review — all code merged into develop (PRs #17, #19, #22, #24 and the
-follow-ups PM-010 to PM-016, last merge `e6b6a74` on 2026-10-19), CI green, Golden VM Full
-passed on `e6b6a74` (run `20261019-161036-full-8896cdac`, 1,888/1,888). Open: the owner's High
-Contrast click-through and the README screenshots. Evidence:
+**Status:** Done 2026-10-19 — all code merged into develop (PRs #17, #19, #22, #24 and the
+follow-ups PM-010 to PM-016, last code merge `e6b6a74`), CI green, Golden VM Full passed on
+`e6b6a74` (run `20261019-161036-full-8896cdac`, 1,888/1,888), owner's High Contrast
+click-through passed. The README screenshots moved to the v1.0.0 release work. Evidence:
 `docs/evidence/pm-009/verification.md`.
 
 **Priority:** Post-V1 presentation
