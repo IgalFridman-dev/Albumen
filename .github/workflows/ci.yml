@@ -1,9 +1,14 @@
 name: CI
 
+# Windows minutes count double against the private repo's quota, so CI runs
+# only for releases (PRs into main and the push to main, which keeps the README
+# badge current) and on demand. Day-to-day PRs into develop are verified in the
+# Golden VM (see the verify-gates skill).
 on:
   pull_request:
+    branches: [main]
   push:
-    branches: [develop, main]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
