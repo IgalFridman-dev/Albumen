@@ -158,7 +158,8 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
                 return (null, new(null, Unavailable($"The model file {file.Path} is not installed.")));
             }
 
-            if (new FileInfo(path).Length != file.Length)
+            using var stream = File.OpenRead(path);
+            if (stream.Length != file.Length)
             {
                 return (null, new(null, Failed($"The model file {file.Path} has the wrong size.")));
             }
