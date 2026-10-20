@@ -424,6 +424,10 @@
                                 </TextBlock>
                             </Border>
                             <Border Style="{StaticResource Albumen.Badge}"
+                                    Visibility="{Binding LooksBlurrier, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="{x:Static shell:ScanOccurrenceViewModel.BlurrierText}" TextWrapping="Wrap" />
+                            </Border>
+                            <Border Style="{StaticResource Albumen.Badge}"
                                     Visibility="{Binding IsAliasPath, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <TextBlock Text="Another path to the same file" TextWrapping="Wrap" />
                             </Border>

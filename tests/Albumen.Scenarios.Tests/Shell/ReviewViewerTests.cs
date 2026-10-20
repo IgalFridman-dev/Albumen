@@ -221,6 +221,55 @@ public sealed class SuggestedBestPhotoTests
         Assert.Equal(new SuggestedBest(2, "largest file at the highest pixel size"), pick);
     }
 
+    [Fact]
+    public void AClearlySharpestPhotoLeadsEvenOverMorePixels()
+    {
+        var pick = SuggestedBestPhoto.Pick([
+            new(1, 4000, 3000, 3_000_000, Sharpness: 120),
+            new(2, 2000, 1500, 2_000_000, Sharpness: 900),
+        ]);
+
+        Assert.Equal(new SuggestedBest(2, "sharpest"), pick);
+    }
+
+    [Fact]
+    public void TheReasonListsEverythingTheSharpestPhotoAlsoLeads()
+    {
+        var pick = SuggestedBestPhoto.Pick([
+            new(1, 4000, 3000, 3_000_000, Sharpness: 900),
+            new(2, 4000, 3000, 2_000_000, Sharpness: 300),
+            new(3, 2000, 1500, 1_000_000, Sharpness: 200),
+        ]);
+        var all = SuggestedBestPhoto.Pick([
+            new(1, 4000, 3000, 3_000_000, Sharpness: 900),
+            new(2, 2000, 1500, 2_000_000, Sharpness: 300),
+        ]);
+
+        Assert.Equal(new SuggestedBest(1, "sharpest and largest file"), pick);
+        Assert.Equal(new SuggestedBest(1, "sharpest, most pixels and largest file"), all);
+    }
+
+    [Fact]
+    public void SimilarSharpnessFallsBackToPixelsAndFileSize()
+    {
+        var pick = SuggestedBestPhoto.Pick([
+            new(1, 4000, 3000, 2_000_000, Sharpness: 800),
+            new(2, 2000, 1500, 3_000_000, Sharpness: 900),
+        ]);
+
+        Assert.Equal(new SuggestedBest(1, "most pixels"), pick);
+    }
+
+    [Fact]
+    public void APhotoTheSetCallsBlurrierIsNeverSuggested()
+    {
+        Assert.Null(SuggestedBestPhoto.Pick([
+            new(1, 4000, 3000, 3_000_000, Sharpness: 150),
+            new(2, 2000, 1500, 2_000_000, Sharpness: 900),
+            new(3, 2000, 1500, 1_000_000, Sharpness: 800),
+        ]));
+    }
+
     [Theory]
     [InlineData(2_000_000L, 2_000_000L)]
     [InlineData(2_000_000L, null)]

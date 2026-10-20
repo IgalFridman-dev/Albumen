@@ -15,6 +15,11 @@ public interface IPerceptualSignatureAnalyzer
     PerceptualSignature Extract(int width, int height, ReadOnlySpan<byte> bgra);
 }
 
+public interface ISharpnessAnalyzer
+{
+    double Analyze(int width, int height, ReadOnlySpan<byte> bgra);
+}
+
 public interface INearDuplicatePipeline
 {
     Task<NearDuplicateBatch> AnalyzeAsync(ScanRunContext context,
