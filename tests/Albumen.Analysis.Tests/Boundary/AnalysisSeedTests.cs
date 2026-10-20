@@ -1,6 +1,7 @@
 using Albumen.Analysis;
 using Albumen.Analysis.Exact;
 using Albumen.Analysis.NearDuplicate;
+using Albumen.Analysis.Sharpness;
 using Albumen.Application.Scan;
 using Xunit;
 
@@ -14,7 +15,8 @@ public sealed class AnalysisSeedTests
         var exportedTypes = typeof(AssemblyMarker).Assembly.GetExportedTypes().OrderBy(type => type.FullName).ToArray();
 
         Assert.Equal(
-            [typeof(AssemblyMarker), typeof(StreamingExactContentAnalyzer), typeof(ManagedPerceptualSignature)],
+            [typeof(AssemblyMarker), typeof(StreamingExactContentAnalyzer), typeof(ManagedPerceptualSignature),
+                typeof(ManagedSharpness)],
             exportedTypes);
         Assert.Contains(typeof(IExactContentAnalyzer), typeof(StreamingExactContentAnalyzer).GetInterfaces());
     }

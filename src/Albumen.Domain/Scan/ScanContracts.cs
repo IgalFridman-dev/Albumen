@@ -165,6 +165,10 @@ public sealed record ScanFileOccurrence
 
     public StageOutcome NearDuplicate { get; init; } =
         new(ScanStageState.Pending, ScanReason.None);
+
+    // Fine-detail score from the visual-features pass; null when that pass did not succeed.
+    // It only compares photos within one set (SharpnessComparison).
+    public double? Sharpness { get; init; }
 }
 
 public enum CandidateCategory
