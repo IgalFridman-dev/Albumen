@@ -6,7 +6,7 @@ separate .NET install is needed, and the SigLIP 2 model with ONNX Runtime for
 look-alike grouping and text search. The original inventory (host and SQLite
 components) was owner-approved on 2026-09-23 and the inventory with the bundled
 runtime on 2026-10-17. The 1.1 additions (ONNX Runtime, the tokenizer and its
-dependencies, the SigLIP 2 model) await owner approval.
+dependencies, the SigLIP 2 model) were owner-approved on 2026-10-20.
 
 | Component | Version | Shipped file(s) | Terms and packaged notices |
 | --- | --- | --- | --- |
@@ -66,5 +66,4 @@ Google.Protobuf ships no license file; its BSD-3-Clause text is copied from
 
 The exact file list for every component is in the versioned machine-readable
 inventory `eng/release/release-dependencies.json` in the Albumen source
-repository. All entries have disposition `pending-owner-approval` until the
-1.1 additions are approved.
+repository. All entries have disposition `owner-approved`.
