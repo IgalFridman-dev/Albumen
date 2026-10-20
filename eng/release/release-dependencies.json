@@ -232,6 +232,23 @@
       "redistributionApproval": "owner-approved"
     },
     {
+      "name": "Microsoft Visual C++ Runtime",
+      "version": "14.44.35211.0",
+      "shippedPaths": [
+        "msvcp140.dll",
+        "msvcp140_1.dll",
+        "vcruntime140.dll",
+        "vcruntime140_1.dll"
+      ],
+      "licenseIdentifier": "LicenseRef-Microsoft-Visual-CPP-Redistributable",
+      "packagedLicensePaths": [
+        "licenses/vcruntime/LICENSE.txt"
+      ],
+      "officialSourceUrl": "https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist",
+      "redistributionTermUrl": "https://learn.microsoft.com/visualstudio/releases/2022/redistribution",
+      "redistributionApproval": "owner-approved"
+    },
+    {
       "name": "Microsoft.Data.Sqlite",
       "version": "10.0.11",
       "shippedPaths": [],

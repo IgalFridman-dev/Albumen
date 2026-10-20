@@ -96,8 +96,9 @@ $approvedPackageLibraries = @($approvedPackages.GetEnumerator() | ForEach-Object
 $sqliteDependencyPattern = '^(?:Microsoft\.Data\.Sqlite|SQLitePCL)'
 # The SigLIP 2 files listed in models/manifest.json; any other model-shaped file is still forbidden.
 $approvedModelPaths = @('models/text.onnx', 'models/tokenizer.model', 'models/vision.onnx')
-# An approved package file whose name looks like framework content but is not in the runtime packs.
-$approvedPackageRuntimePaths = @('System.Numerics.Tensors.dll')
+# Approved files whose names look like framework content but are not in the runtime packs:
+# a package assembly, and the app-local Visual C++ runtime that onnxruntime.dll imports.
+$approvedPackageRuntimePaths = @('System.Numerics.Tensors.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
 # Microsoft.ML.Tokenizers 2.0.1 contains an HttpClient helper reachable only through URL-loading
 # APIs Albumen never calls; Albumen loads its SentencePiece model from a local file. Pinned by hash.
 $approvedNetworkMarkerBinaries = @{

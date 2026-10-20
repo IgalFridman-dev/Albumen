@@ -325,6 +325,7 @@ function New-SyntheticReleaseRepository {
         @{ Name = '.NET Host'; Version = '10.0.11'; Paths = @('Albumen.App.exe'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = '.NET Runtime'; Version = '10.0.11'; Paths = @('coreclr.dll', 'System.Net.Http.dll', 'WindowsBase.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Google.Protobuf'; Version = '3.30.2'; Paths = @('Google.Protobuf.dll'); License = 'BSD-3-Clause'; LicensePaths = @('licenses/MIT.txt') },
+        @{ Name = 'Microsoft Visual C++ Runtime'; Version = '14.44.35211.0'; Paths = @('msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'); License = 'LicenseRef-Microsoft-Visual-CPP-Redistributable'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Microsoft.Data.Sqlite'; Version = '10.0.11'; Paths = @(); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Microsoft.Data.Sqlite.Core'; Version = '10.0.11'; Paths = @('Microsoft.Data.Sqlite.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
         @{ Name = 'Microsoft.ML.OnnxRuntime'; Version = '1.31.0'; Paths = @('onnxruntime.dll', 'onnxruntime_providers_shared.dll'); License = 'MIT'; LicensePaths = @('licenses/MIT.txt') },
@@ -503,7 +504,11 @@ function Write-SyntheticPublishOutput {
             'Microsoft.ML.Tokenizers.dll',
             'System.Numerics.Tensors.dll',
             'onnxruntime.dll',
-            'onnxruntime_providers_shared.dll')) {
+            'onnxruntime_providers_shared.dll',
+            'msvcp140.dll',
+            'msvcp140_1.dll',
+            'vcruntime140.dll',
+            'vcruntime140_1.dll')) {
         $content = "synthetic $file"
         if ($Drift -and $file -ceq 'Albumen.App.dll') {
             $content += ' drift'
@@ -1084,7 +1089,7 @@ try {
         Join-Path $captureOutput 'evidence\dependency-capture.json') | ConvertFrom-Json
     Assert-Equal 1 $dependencyCapture.schemaVersion 'dependency capture schema must be versioned'
     Assert-Equal `
-        '.NET Host,.NET Runtime,Google.Protobuf,Microsoft.Data.Sqlite,Microsoft.Data.Sqlite.Core,Microsoft.ML.OnnxRuntime,Microsoft.ML.OnnxRuntime.Managed,Microsoft.ML.Tokenizers,Native SQLite,SQLitePCLRaw.bundle_e_sqlite3,SQLitePCLRaw.core,SQLitePCLRaw.lib.e_sqlite3,SQLitePCLRaw.provider.e_sqlite3,SigLIP 2 base patch16-224 (ONNX export),System.Numerics.Tensors,Windows Desktop / WPF' `
+        '.NET Host,.NET Runtime,Google.Protobuf,Microsoft Visual C++ Runtime,Microsoft.Data.Sqlite,Microsoft.Data.Sqlite.Core,Microsoft.ML.OnnxRuntime,Microsoft.ML.OnnxRuntime.Managed,Microsoft.ML.Tokenizers,Native SQLite,SQLitePCLRaw.bundle_e_sqlite3,SQLitePCLRaw.core,SQLitePCLRaw.lib.e_sqlite3,SQLitePCLRaw.provider.e_sqlite3,SigLIP 2 base patch16-224 (ONNX export),System.Numerics.Tensors,Windows Desktop / WPF' `
         (($dependencyCapture.components | ForEach-Object { $_.name }) -join ',') `
         'capture-only mode must enumerate every required shipped/runtime component'
     foreach ($frameworkComponent in @('.NET Runtime', 'Windows Desktop / WPF')) {
@@ -1470,7 +1475,7 @@ try {
     $candidateNativePolicy = Get-Content -Raw -LiteralPath (
         Join-Path $candidatePath 'release-native-paths.json') | ConvertFrom-Json
     Assert-Equal `
-        'D3DCompiler_47_cor3.dll,coreclr.dll,e_sqlite3.dll,onnxruntime.dll,onnxruntime_providers_shared.dll,wpfgfx_cor3.dll' `
+        'D3DCompiler_47_cor3.dll,coreclr.dll,e_sqlite3.dll,msvcp140.dll,msvcp140_1.dll,onnxruntime.dll,onnxruntime_providers_shared.dll,vcruntime140.dll,vcruntime140_1.dll,wpfgfx_cor3.dll' `
         ($candidateNativePolicy.nativePaths -join ',') `
         'the builder must derive the exact native closure from the pinned runtime packs plus SQLite and ONNX Runtime'
     Assert-Equal $true $buildResult.inventoriesEqual 'the successful builder result must report exact tuple equality'

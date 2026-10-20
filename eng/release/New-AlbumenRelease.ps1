@@ -811,7 +811,8 @@ try {
             $nativePaths = [string[]]@(
                 @($frameworkPathSet.Values | Where-Object { $_.Type -ceq 'Native' } |
                     ForEach-Object { $_.Path }) +
-                @('e_sqlite3.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll'))
+                @('e_sqlite3.dll', 'msvcp140.dll', 'msvcp140_1.dll', 'onnxruntime.dll',
+                    'onnxruntime_providers_shared.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'))
             $nativePathSet = [System.Collections.Generic.Dictionary[string, bool]]::new(
                 [System.StringComparer]::OrdinalIgnoreCase)
             foreach ($nativePath in $nativePaths) {
@@ -957,6 +958,12 @@ $components = @(
         version = '3.30.2'
         shippedPaths = @('Google.Protobuf.dll')
         packageId = 'Google.Protobuf'
+    },
+    [pscustomobject][ordered]@{
+        name = 'Microsoft Visual C++ Runtime'
+        version = '14.44.35211.0'
+        shippedPaths = @('msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+        packageId = $null
     },
     [pscustomobject][ordered]@{
         name = 'Microsoft.Data.Sqlite'

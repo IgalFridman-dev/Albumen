@@ -6,13 +6,15 @@ separate .NET install is needed, and the SigLIP 2 model with ONNX Runtime for
 look-alike grouping and text search. The original inventory (host and SQLite
 components) was owner-approved on 2026-09-23 and the inventory with the bundled
 runtime on 2026-10-17. The 1.1 additions (ONNX Runtime, the tokenizer and its
-dependencies, the SigLIP 2 model) were owner-approved on 2026-10-20.
+dependencies, the SigLIP 2 model, the Visual C++ runtime) were owner-approved
+on 2026-10-20.
 
 | Component | Version | Shipped file(s) | Terms and packaged notices |
 | --- | --- | --- | --- |
 | .NET Host | 10.0.11 | `Albumen.App.exe` | [LicenseRef-Microsoft-NET-Library](https://www.microsoft.com/net/dotnet_library_license.htm); `licenses/dotnet/LICENSE.txt`, `licenses/dotnet/ThirdPartyNotices.txt` |
 | .NET Runtime | 10.0.11 | 187 files from `Microsoft.NETCore.App.Runtime.win-x64` (for example `coreclr.dll`, `System.Private.CoreLib.dll`) | [MIT](https://licenses.nuget.org/MIT); `licenses/dotnet-runtime/LICENSE.txt`, `licenses/dotnet-runtime/THIRD-PARTY-NOTICES.txt` |
 | Google.Protobuf | 3.30.2 | `Google.Protobuf.dll` | [BSD-3-Clause](https://licenses.nuget.org/BSD-3-Clause); `licenses/protobuf/LICENSE.txt` |
+| Microsoft Visual C++ Runtime | 14.44.35211.0 | `msvcp140.dll`, `msvcp140_1.dll`, `vcruntime140.dll`, `vcruntime140_1.dll` | [Visual Studio Distributable Code](https://learn.microsoft.com/visualstudio/releases/2022/redistribution); `licenses/vcruntime/LICENSE.txt` |
 | Microsoft.Data.Sqlite | 10.0.11 | Dependency metapackage; no separate file | [MIT](https://github.com/dotnet/dotnet/blob/v10.0.11/LICENSE.TXT); `licenses/MIT.txt` |
 | Microsoft.Data.Sqlite.Core | 10.0.11 | `Microsoft.Data.Sqlite.dll` | [MIT](https://github.com/dotnet/dotnet/blob/v10.0.11/LICENSE.TXT); `licenses/MIT.txt` |
 | Microsoft.ML.OnnxRuntime | 1.31.0 | `onnxruntime.dll`, `onnxruntime_providers_shared.dll` | [MIT](https://licenses.nuget.org/MIT); `licenses/onnxruntime/LICENSE.txt`, `licenses/onnxruntime/ThirdPartyNotices.txt` |
@@ -63,6 +65,12 @@ SentencePiece `tokenizer.model`. Their SHA-256 values are in
 license and third-party notice files are retained verbatim from the packages.
 Google.Protobuf ships no license file; its BSD-3-Clause text is copied from
 [protobuf v30.2](https://github.com/protocolbuffers/protobuf/blob/v30.2/LICENSE).
+`onnxruntime.dll` needs the Visual C++ 2015-2022 runtime, which a clean
+Windows does not include, so its four x64 DLLs ship app-local. They are
+unchanged, Microsoft-signed files from the official `VC_redist.x64.exe`
+14.44.35211.0, redistributed under the Visual Studio Distributable Code terms;
+`licenses/vcruntime/LICENSE.txt` is the runtime's own license text from that
+installer.
 
 The exact file list for every component is in the versioned machine-readable
 inventory `eng/release/release-dependencies.json` in the Albumen source
