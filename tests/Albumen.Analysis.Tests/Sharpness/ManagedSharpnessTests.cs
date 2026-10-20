@@ -8,11 +8,11 @@ public sealed class ManagedSharpnessTests
     [Fact]
     public void ScoreIsDeterministicAndIgnoresQuarterTurns()
     {
-        var pixels = Texture(40, 30);
+        var pixels = Texture(48, 32);
 
-        var first = ManagedSharpness.Measure(40, 30, pixels);
-        var second = ManagedSharpness.Measure(40, 30, pixels);
-        var rotated = ManagedSharpness.Measure(30, 40, RotateClockwise(pixels, 40, 30));
+        var first = ManagedSharpness.Measure(48, 32, pixels);
+        var second = ManagedSharpness.Measure(48, 32, pixels);
+        var rotated = ManagedSharpness.Measure(32, 48, RotateClockwise(pixels, 48, 32));
 
         Assert.True(first > 0);
         Assert.Equal(first, second);
@@ -33,6 +33,21 @@ public sealed class ManagedSharpnessTests
         Assert.True(softScore < sharpScore);
         Assert.True(blurryScore * 4 < sharpScore);
         Assert.True(blurryScore < softScore);
+    }
+
+    [Fact]
+    public void ASharpSubjectCoveringAFifthOfABlurredPhotoStillScoresAsSharp()
+    {
+        var sharp = Texture(64, 64);
+        var blurry = BoxBlur(sharp, 64, 64, radius: 3);
+        var portrait = WithSharpSquare(blurry, sharp, from: 16, size: 32);
+        var speck = WithSharpSquare(blurry, sharp, from: 28, size: 8);
+
+        var sharpScore = ManagedSharpness.Measure(64, 64, sharp);
+
+        Assert.True(ManagedSharpness.Measure(64, 64, portrait) * 2 > sharpScore);
+        Assert.True(ManagedSharpness.Measure(64, 64, speck) * 4 < sharpScore);
+        Assert.True(ManagedSharpness.Measure(64, 64, blurry) * 4 < sharpScore);
     }
 
     [Fact]
@@ -88,6 +103,15 @@ public sealed class ManagedSharpnessTests
             }
             output[(y * width + x) * 4 + channel] = (byte)((total + count / 2) / count);
         }
+        return output;
+    }
+
+    // A 64-pixel-wide copy of background with a sharp size×size square starting at (from, from).
+    private static byte[] WithSharpSquare(byte[] background, byte[] sharp, int from, int size)
+    {
+        var output = (byte[])background.Clone();
+        for (var y = from; y < from + size; y++)
+            sharp.AsSpan((y * 64 + from) * 4, size * 4).CopyTo(output.AsSpan((y * 64 + from) * 4));
         return output;
     }
 
