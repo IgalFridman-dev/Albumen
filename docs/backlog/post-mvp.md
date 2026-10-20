@@ -176,7 +176,9 @@ Any later feature begins with a fresh product/design review based on shipped V1 
 
 ## PM-005 — Complete accessibility hardening after the recruiter-demo V1
 
-**Status:** Backlog — accepted recruiter-demo V1 limitation
+**Status:** Backlog — accepted recruiter-demo V1 limitation. Scheduled for Albumen 1.2 (the first
+public release) by the [1.1 release plan](../superpowers/specs/2026-10-19-albumen-1.1-siglip2-release-plan.md);
+E4-S5 covers only the new semantic states.
 
 **Priority:** Post-MVP accessibility hardening
 
@@ -262,7 +264,8 @@ sizes, not only through layout unit tests.
 
 ## PM-007 — Support Windows dark mode
 
-**Status:** Backlog
+**Status:** Backlog — scheduled for Albumen 1.2 by the
+[1.1 release plan](../superpowers/specs/2026-10-19-albumen-1.1-siglip2-release-plan.md).
 
 **Priority:** Post-V1 presentation
 
@@ -284,7 +287,8 @@ real app under light, dark and High Contrast, not only in tests that build
 **Status:** In progress — design approved 2026-10-17; release built and clean-launch
 checked on 2026-10-17 at `8562f97`; inventory owner-approved 2026-10-17; the published
 ZIP was rebuilt offline in the Golden VM from the sealed cache at `e1d6a9d` and passed the
-clean launch on 2026-10-17. Open: the demo-photos ZIP. Evidence: `docs/evidence/pm-008/`.
+clean launch on 2026-10-17; after the new UI and the Albumen rename it was rebuilt the same way
+from main `a5bd8e2` and passed the clean launch on 2026-10-19. Open: the demo-photos ZIP. Evidence: `docs/evidence/pm-008/`.
 
 **Priority:** Before the public V1 release
 
@@ -487,3 +491,55 @@ bottom one and skips the two in the middle; with the window enlarged it works fi
 - WPF scenario tests at the default window size with large text (font size 24, so the four cards
   overflow the list by two): one notch moves one card, three touchpad deltas of 40 move one
   card, and a notch at the list's end moves the page.
+
+## PM-017 — Albumen 1.1: SigLIP 2 look-alikes, text search and blur
+
+**Status:** Approved 2026-10-19; stories ready for dev after the rename (PR #33). Plan:
+`docs/superpowers/specs/2026-10-19-albumen-1.1-siglip2-release-plan.md`.
+
+**Priority:** The next release after 1.0.0
+
+**Origin:** Owner decision in the project thread "V1.0.1 scope and blur detection", 2026-10-19
+
+1.0.0 is the recruiter and beta build. The owner wants the app to be genuinely usable before it goes
+public, which means look-alike grouping that survives a moving subject, text search over the scan,
+and blur detection. One on-device SigLIP 2 model serves grouping and search; blur stays a classical
+pixel measure. Accessibility (PM-005, PM-002) and dark mode (PM-007) follow in 1.2, the first public
+release. Standing owner instruction for 1.1: YAGNI, clear and concise code, only what this release
+needs.
+
+### Stories and order
+
+E4-S1 spike → E3-S6 corpus → E4-S2 profile and packaging → E4-S3 index → E4-S6 look-alike sets and
+E4-S4 text search → E4-S5 acceptance and release. E3-S3 blur runs in parallel. E2-S4 is deferred to
+1.2 unless decision D2 (measured embedding cost) pulls an embeddings-only version in.
+
+### Completion criteria
+
+- Each story closed through the story workflow with Golden VM evidence.
+- The 1.1.0 ZIP rebuilt offline from the sealed cache launches on the runtime-free VM with no network
+  and completes an Exact, a Look-alike and a text-search review.
+- README states measured model size, per-photo CPU time and corpus precision/recall with limitations;
+  PM-005 remains recorded as open.
+
+## PM-018 — Make the scan close-ordering test deterministic
+
+**Status:** Fixed in [#39](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/39) (`cb04915`,
+test-only) before the 1.0.0 release; the app is unchanged.
+
+**Priority:** Before the 1.0.0 release
+
+**Origin:** GitHub CI, 2026-10-19
+
+`ScanCheckpointCoordinatorTests.CallbackArrivingDuringTerminalPersistenceCannotOverwriteTerminalTruth`
+(`endEnumeration: False` case) timed out after 10 s in `PumpNext` on the first `Build and test
+(windows-latest)` run of [#31](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/31) and
+[#35](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/35), both docs-only, and failed a third
+time on #39.
+
+### Cause and fix
+
+The test read `late.IsCompleted` once, right after pumping the owner, but the rejection of the late
+registration can complete just after the owner goes idle. On a slow runner the test then waited for a
+checkpoint write that correctly never comes. It now waits for whichever comes first, the rejection or
+the late write, so it still catches a real admission bug. Scan finalisation itself was not at fault.
