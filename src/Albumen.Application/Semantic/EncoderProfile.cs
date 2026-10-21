@@ -12,6 +12,11 @@ namespace Albumen.Application.Semantic;
 /// The adapter's fixed choices: resize and pixel scaling, channel order, prompt lower-casing,
 /// truncation and padding, ONNX input and output names, and L2 normalization.
 /// </param>
+/// <param name="LogitScale">
+/// With <paramref name="LogitBias"/>, the model's learned calibration: the probability that a
+/// prompt fits a photo is sigmoid(LogitScale * cosine + LogitBias). Not part of the fingerprint,
+/// because it changes no vector; only how a cosine is read.
+/// </param>
 public sealed record EncoderProfile(
     string Model,
     string VisionSha256,
@@ -22,7 +27,9 @@ public sealed record EncoderProfile(
     int MaxTokens,
     int PadId,
     int Dimension,
-    int PipelineRevision)
+    int PipelineRevision,
+    double LogitScale,
+    double LogitBias)
 {
     public const int SchemaVersion = 1;
 

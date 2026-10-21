@@ -104,6 +104,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly ObservableCollection<ActionRecordViewModel> actionRecoveryRecords = [];
     private readonly object lifetime = new();
     private Task? disposalTask;
+    // Where Review was when the first likely match was opened; Show all returns there.
+    private (ReviewLevel Level, ReviewCategoryKind? Category, Guid? Group, long? Member)? likelyMatchesReturn;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
@@ -154,6 +156,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         OpenReviewGroupCommand = new AsyncCommand(OpenReviewGroupAsync);
         OpenReviewMemberCommand = new AsyncCommand(
             OpenReviewMemberAsync, allowConcurrentExecutions: true);
+        OpenLikelyMatchCommand = new AsyncCommand(
+            OpenLikelyMatchAsync, allowConcurrentExecutions: true);
+        LikelyMatches = new(null);
         ReviewBackCommand = new AsyncCommand(ReviewBackAsync,
             canExecute: () => ReviewNavigationLevel != ReviewLevel.Categories);
         ShowPreviousReviewMemberCommand = new AsyncCommand(() => ShowAdjacentReviewMemberAsync(-1),
@@ -178,9 +183,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         IReviewDialogService? reviewDialog = null,
         ILocalScanDataControl? localScanDataControl = null,
         IReviewPreviewSource? reviewPreviewSource = null,
-        IReviewPreviewSource? reviewThumbnailSource = null) : this(scope)
+        IReviewPreviewSource? reviewThumbnailSource = null,
+        LikelyMatchesQuery? likelyMatches = null) : this(scope)
     {
         photoWorkflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
+        LikelyMatches = new(likelyMatches);
+        LikelyMatches.Cleared += ReturnFromLikelyMatches;
         this.reviewDialog = reviewDialog;
         this.localScanDataControl = localScanDataControl;
         this.reviewPreviewSource = reviewPreviewSource;
@@ -207,6 +215,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand OpenReviewCategoryCommand { get; }
     public AsyncCommand OpenReviewGroupCommand { get; }
     public AsyncCommand OpenReviewMemberCommand { get; }
+    public AsyncCommand OpenLikelyMatchCommand { get; }
+    public LikelyMatchesViewModel LikelyMatches { get; }
     public AsyncCommand ReviewBackCommand { get; }
     public AsyncCommand ShowPreviousReviewMemberCommand { get; }
     public AsyncCommand ShowNextReviewMemberCommand { get; }
@@ -829,6 +839,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var previousRecovery = photoSnapshot?.ActionRecovery;
         var previousActionReview = photoSnapshot?.ActionReview;
         var previousReview = photoSnapshot?.Review;
+        var previousScan = photoSnapshot?.Scan;
         var previousReviewStatusText = ReviewStatusText;
         var preserveReviewProjection = ReviewProjectionUnchanged(photoSnapshot?.Review, snapshot.Review)
             && (snapshot.Review.Pin is not null || ScanProjectionUnchanged(photoSnapshot?.Scan, snapshot.Scan));
@@ -868,6 +879,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             RestoreReviewNavigation(previousNavigationLevel, previousCategory,
                 previousGroupId, previousMemberId);
         }
+        if (previousScan?.Pin != snapshot.Scan.Pin) likelyMatchesReturn = null;
+        LikelyMatches.Update(snapshot);
         legacyCouldNotAnalyze = null;
         ScanOutcomeSummaries = ProjectOutcomeSummaries(snapshot.Scan);
         ProjectReview(snapshot.Review);
@@ -1083,7 +1096,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         return null;
     }
 
-    private static bool InCategory(CandidateGroup group, ReviewCategoryKind category) => category switch
+    internal static bool InCategory(CandidateGroup group, ReviewCategoryKind category) => category switch
     {
         ReviewCategoryKind.Exact => group.Category == CandidateCategory.Exact && !group.Uncertain,
         ReviewCategoryKind.Near => group.Category == CandidateCategory.NearDuplicate && !group.Uncertain,
@@ -1119,6 +1132,26 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         SetReviewNavigation(ReviewLevel.Comparisons, ActiveReviewCategory, ActiveReviewGroup, member);
         await LoadActiveReviewPreviewAsync(member);
+    }
+
+    private async Task OpenLikelyMatchAsync(object? parameter)
+    {
+        if (parameter is not LikelyMatchItemViewModel { Set: { } set } match) return;
+        var category = ReviewCategories.FirstOrDefault(row => row.Category == set.Category);
+        if (category?.FindGroup(set.GroupId) is not { } group
+            || group.FindMember(match.Photo.OccurrenceId) is not { } member)
+            return;
+        likelyMatchesReturn ??= (ReviewNavigationLevel, ActiveReviewCategory?.Category,
+            ActiveReviewGroup?.GroupId, ActiveReviewMember?.OccurrenceId);
+        SetReviewNavigation(ReviewLevel.Comparisons, category, group, member);
+        await LoadActiveReviewPreviewAsync(member);
+    }
+
+    private void ReturnFromLikelyMatches()
+    {
+        if (likelyMatchesReturn is not { } back) return;
+        likelyMatchesReturn = null;
+        RestoreReviewNavigation(back.Level, back.Category, back.Group, back.Member);
     }
 
     private Task ReviewBackAsync()

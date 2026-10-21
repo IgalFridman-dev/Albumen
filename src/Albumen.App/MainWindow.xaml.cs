@@ -236,13 +236,16 @@ public partial class MainWindow : Window
         var item = list.SelectedItem
             ?? FindDataContext<ReviewCategoryViewModel>(source)
             ?? (object?)FindDataContext<ReviewGroupViewModel>(source)
-            ?? FindDataContext<ScanOccurrenceViewModel>(source);
+            ?? (object?)FindDataContext<ScanOccurrenceViewModel>(source)
+            ?? FindDataContext<LikelyMatchItemViewModel>(source);
         if (ReferenceEquals(list, ReviewCategoriesList) && item is ReviewCategoryViewModel category)
             shellViewModel.OpenReviewCategoryCommand.Execute(category);
         else if (ReferenceEquals(list, ReviewGroupsList) && item is ReviewGroupViewModel group)
             shellViewModel.OpenReviewGroupCommand.Execute(group);
         else if (ReferenceEquals(list, ReviewComparisonsList) && item is ScanOccurrenceViewModel member)
             shellViewModel.OpenReviewMemberCommand.Execute(member);
+        else if (ReferenceEquals(list, LikelyMatchesList) && item is LikelyMatchItemViewModel match)
+            shellViewModel.OpenLikelyMatchCommand.Execute(match);
         else
             return;
 
@@ -270,6 +273,18 @@ public partial class MainWindow : Window
         ReviewEvidencePanel.BringIntoView(new Rect(0, 0, ReviewEvidencePanel.ActualWidth,
             Math.Min(ReviewEvidencePanel.ActualHeight, 160)));
     }
+
+    private void OnOpenLikelyMatchClick(object sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is not Button { DataContext: LikelyMatchItemViewModel match }) return;
+        shellViewModel?.OpenLikelyMatchCommand.Execute(match);
+        ReviewEvidencePanel.BringIntoView(new Rect(0, 0, ReviewEvidencePanel.ActualWidth,
+            Math.Min(ReviewEvidencePanel.ActualHeight, 160)));
+    }
+
+    // Show all clears the search; the prompt keeps focus so the next search starts there.
+    private void OnLikelyMatchesShowAllClick(object sender, RoutedEventArgs eventArgs) =>
+        Dispatcher.BeginInvoke(() => LikelyMatchesPromptBox.Focus(), DispatcherPriority.Input);
 
     private void OnReviewBackClick(object sender, RoutedEventArgs eventArgs) =>
         shellViewModel?.ReviewBackCommand.Execute(null);

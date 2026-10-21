@@ -6,6 +6,8 @@
   "maxTokens": 64,
   "padId": 0,
   "dimension": 768,
+  "logitScale": 112.66889953613281,
+  "logitBias": -16.771724700927734,
   "files": {
     "vision": { "path": "vision.onnx", "length": 371748468, "sha256": "D787E0827FBCA899B5E962AD44400CDE8E51F9D9B09271CCD1A16B375642C087" },
     "text": { "path": "text.onnx", "length": 736185139, "sha256": "9E5660E6EA728C0F6AAF41943DFA30EAE76A06DF9A9EEF6AE89077D69BEF09AD" },
