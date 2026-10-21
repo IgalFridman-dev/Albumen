@@ -83,8 +83,19 @@ Key ideas:
 
 - `%LOCALAPPDATA%\Albumen\albumen.db` — SQLite (scan identity, checkpoints, override
   evidence, action journal and records, and the last Scan's photo vectors). "Clear scan data" (in History) removes scan data only.
+- `models\` next to `Albumen.App.exe` — the SigLIP 2 files (`vision.onnx`, `text.onnx`,
+  `tokenizer.model`, 1,112 MB) and `manifest.json` with each file's length and SHA-256. A missing or
+  changed file makes only the semantic features unavailable; Exact, Look-alike, Review and cleanup
+  work without them.
 - Photos are only read, never modified; removal = Windows Recycle Bin (restorable).
 - No network access at all (verified by network audits in a VM with no network adapter).
+
+## What the model costs
+
+Measured in the verification VM (2 CPU, 4 GiB, no network); raw numbers, not targets:
+indexing 73.5 ms per photo with 4 workers and a 566 MB peak working set; one text search over
+10,000 stored vectors 70 ms. The release ZIP is about 1.1 GB, almost all of it model.
+Sources: `docs/evidence/e4-s3`, `e4-s4` and `e4-s5`.
 
 ## Tests at a glance
 
