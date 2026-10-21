@@ -564,6 +564,9 @@ hash, sharpness and vector from that decode, with the stages still reporting sep
 ### Completion criteria
 
 - The cost of the extra reads and decodes is measured on the owner's PC and the Golden VM before any
-  change (E4-S3 records the vector stage on its own; the Near stage has no timing yet).
+  change. Measured so far: the whole vector stage (hash, 512 px decode, encode) takes 73.5 ms per photo
+  on the Golden VM with 4 workers (200 photos at 1600x1200, peak working set 566 MB;
+  [E4-S3 evidence](../evidence/e4-s3/verification.md)). The share of that spent on the read and
+  decode, and any Near stage timing, are not measured yet.
 - If it is worth it: one pass per photo with the same per-stage outcomes and isolation, the same
   Exact/Near/blur results on the labelled corpus, and a measured speed-up.
