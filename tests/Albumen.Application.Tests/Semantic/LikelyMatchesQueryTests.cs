@@ -18,34 +18,49 @@ public sealed class LikelyMatchesQueryTests
     public async Task PhotosAreRankedByDescendingScoreWithTiesByOccurrenceId()
     {
         var fixture = new Fixture();
-        fixture.Store.Add(4, Unit(0.11f));
+        fixture.Store.Add(4, Unit(0.12f));
         fixture.Store.Add(1, Unit(0.15f));
-        fixture.Store.Add(3, Unit(0.11f));
-        fixture.Store.Add(2, Unit(0.13f));
+        fixture.Store.Add(3, Unit(0.12f));
+        fixture.Store.Add(2, Unit(0.14f));
 
         var result = await fixture.RankAsync("at sea");
 
         Assert.Equal(LikelyMatchesOutcome.Matches, result.Outcome);
         Assert.Equal([1L, 2L, 3L, 4L], result.Matches.Select(match => match.OccurrenceId));
-        // The score is the model's probability: sigmoid(100 * 0.11 - 10).
-        Assert.Equal(0.73106f, result.Matches[2].Score, 5);
+        // The score is the model's probability: sigmoid(100 * 0.12 - 10).
+        Assert.Equal(0.88080f, result.Matches[2].Score, 5);
         Assert.Equal(result.Matches[2].Score, result.Matches[3].Score);
     }
 
     [Fact]
-    public async Task PhotosBelowTheMinimumScoreAreLeftOutAndNoneLeftIsNoMatches()
+    public async Task PhotosFarLessLikelyThanTheBestOneAreLeftOut()
     {
         var fixture = new Fixture();
-        // With scale 100 and bias -10 the probability reaches MinimumScore (0.5) at cosine 0.1.
-        fixture.Store.Add(1, Unit(0.1f));
-        fixture.Store.Add(2, Unit(0.099f));
-        fixture.Store.Add(3, Unit(-0.4f));
+        // The odds are exp(100 * cosine - 10). The best photo's odds are e^5, and a photo is listed
+        // down to a fiftieth of that: ln 50 = 3.91 lower, cosine 0.1109. Photo 3 is at 73% on its
+        // own and still left out, because the line follows the best photo.
+        fixture.Store.Add(1, Unit(0.15f));
+        fixture.Store.Add(2, Unit(0.112f));
+        fixture.Store.Add(3, Unit(0.11f));
 
-        var some = await fixture.RankAsync("at sea");
-        Assert.Equal([1L], some.Matches.Select(match => match.OccurrenceId));
+        var result = await fixture.RankAsync("at sea");
+
+        Assert.Equal([1L, 2L], result.Matches.Select(match => match.OccurrenceId));
+    }
+
+    [Fact]
+    public async Task PhotosUnderTheMinimumScoreAreNeverListedAndNoneLeftIsNoMatches()
+    {
+        // With scale 100 and bias -10 the probability reaches MinimumScore (0.01%) at cosine 0.0079.
+        var some = new Fixture();
+        some.Store.Add(1, Unit(0.01f));
+        some.Store.Add(2, Unit(0.005f));
+        var listed = await some.RankAsync("at sea");
+        Assert.Equal([1L], listed.Matches.Select(match => match.OccurrenceId));
+        Assert.Equal(0.00012f, listed.Matches[0].Score, 5);
 
         var none = new Fixture();
-        none.Store.Add(1, Unit(0.01f));
+        none.Store.Add(1, Unit(0.005f));
         var result = await none.RankAsync("at sea");
         Assert.Equal((LikelyMatchesOutcome.NoMatches, "at sea"), (result.Outcome, result.Prompt));
         Assert.Empty(result.Matches);
@@ -155,8 +170,8 @@ public sealed class LikelyMatchesQueryTests
     {
         var fixture = new Fixture();
         fixture.Store.Add(1, Unit(0.9f));
-        fixture.Store.Add(2, Unit(0.8f), sha256: IndexerFixture.Sha(99));
-        fixture.Store.Add(700, Unit(0.7f));
+        fixture.Store.Add(2, Unit(0.9f), sha256: IndexerFixture.Sha(99));
+        fixture.Store.Add(700, Unit(0.9f));
 
         var result = await fixture.RankAsync("at sea");
 
@@ -200,8 +215,8 @@ public sealed class LikelyMatchesQueryTests
     public void NormalizingCollapsesWhitespace() =>
         Assert.Equal("kids at sea", LikelyMatchesQuery.Normalize("\tkids \n at    sea  "));
 
-    // The prompt encodes as (1, 0), so a photo's score is the first component of its vector.
-    private static float[] Unit(float score) => [score, MathF.Sqrt(1 - score * score)];
+    // The prompt encodes as (1, 0), so a photo's cosine is the first component of its vector.
+    private static float[] Unit(float cosine) => [cosine, MathF.Sqrt(1 - cosine * cosine)];
 
     // A Scan of photos 1 to 500 whose content is IndexerFixture.Sha(id).
     private sealed class Fixture

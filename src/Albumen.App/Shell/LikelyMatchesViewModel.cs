@@ -129,7 +129,7 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
                 { Outcome: LikelyMatchesOutcome.Matches } when shown.Length == 1 =>
                     $"1 likely match in this Scan for “{result.Prompt}”",
                 { Outcome: LikelyMatchesOutcome.Matches } when shown.Length > 1 =>
-                    $"{Count(shown.Length)} likely matches in this Scan for “{result.Prompt}”",
+                    $"{Count(shown.Length)} likely matches in this Scan for “{result.Prompt}”, most likely first",
                 { Outcome: LikelyMatchesOutcome.Matches or LikelyMatchesOutcome.NoMatches } =>
                     $"No likely matches in this Scan for “{result.Prompt}”. Try other words.",
                 { Outcome: LikelyMatchesOutcome.TooLong } =>

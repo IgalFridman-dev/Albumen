@@ -11,7 +11,7 @@ public enum LikelyMatchesOutcome
     /// <summary>The prompt is longer than <see cref="LikelyMatchesQuery.MaximumPromptLength"/>; nothing was encoded.</summary>
     TooLong,
     Matches,
-    /// <summary>No current photo scored at or above <see cref="LikelyMatchesQuery.MinimumScore"/>.</summary>
+    /// <summary>No current photo reached <see cref="LikelyMatchesQuery.MinimumScore"/>.</summary>
     NoMatches,
     /// <summary>The Scan has no searchable index (see <see cref="ScanSnapshot.Semantic"/>).</summary>
     NotReady,
@@ -45,10 +45,20 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
     public const int MaximumPromptLength = 60;
 
     /// <summary>
-    /// Lowest probability shown as a likely match: the model finds the prompt more likely to fit
-    /// the photo than not. To be measured on the E3-S6 labelled corpus.
+    /// Lowest probability ever listed. The model's probability is small even for a photo that fits
+    /// when the words are generic (owner's photos, 2026-10-21: 0.03% to 0.3% for "food", 5% to 54%
+    /// for "jetski"), so this drops only photos the model finds unrelated to the words.
     /// </summary>
-    public const float MinimumScore = 0.5f;
+    public const float MinimumScore = 0.0001f;
+
+    /// <summary>
+    /// A photo is listed only while the model's odds that the words fit it are at least this
+    /// fraction of the odds for the best photo in the Scan. The list stops where photos become far
+    /// less likely than the best one: "jetski" lists the jetski photos, not every sea photo that
+    /// scores a little. Measured on the owner's photos, the line fell about 0.008 in cosine from the
+    /// nearest photo on either side for "jetski" and "food".
+    /// </summary>
+    public const double LeastOddsRelativeToBest = 1.0 / 50;
 
     /// <summary>
     /// SigLIP was trained on captions, so a bare word such as "jetski" is encoded as the caption
@@ -56,9 +66,9 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
     /// </summary>
     public const string PromptTemplate = "a photo of ";
 
-    // Scores equal to this many decimals are a tie, broken by occurrence id, so CPU rounding
+    // Cosines equal to this many decimals are a tie, broken by occurrence id, so CPU rounding
     // differences between machines cannot reorder near-equal photos.
-    private const int ScoreDecimals = 5;
+    private const int CosineDecimals = 5;
 
     private readonly IVisionLanguageEncoder encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
     private readonly IEmbeddingStore store = store ?? throw new ArgumentNullException(nameof(store));
@@ -73,8 +83,9 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
     }
 
     /// <summary>
-    /// Ranks the photos of <paramref name="scan"/> by descending score, ties by occurrence id.
-    /// Model and store failures are returned, never thrown.
+    /// Ranks the photos of <paramref name="scan"/> by descending cosine, ties by occurrence id, and
+    /// keeps those within <see cref="LeastOddsRelativeToBest"/> of the best photo and at or above
+    /// <see cref="MinimumScore"/>. Model and store failures are returned, never thrown.
     /// </summary>
     public async Task<LikelyMatchesResult> RankAsync(ScanSnapshot scan, string prompt,
         CancellationToken cancellationToken)
@@ -103,17 +114,15 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
         var content = scan.Occurrences
             .Where(row => row.Content is not null)
             .ToDictionary(row => row.Token.OccurrenceId, row => row.Content!.Sha256);
-        var scores = new List<LikelyMatch>();
+        var cosines = new List<(long OccurrenceId, float Cosine)>();
         try
         {
-            // Visits one stored vector at a time and keeps only its score.
+            // Visits one stored vector at a time and keeps only its cosine.
             await store.ReadAsync(pin.ScanId, profile, stored =>
             {
-                if (!content.TryGetValue(stored.OccurrenceId, out var sha256)
-                    || !string.Equals(sha256, stored.Sha256, StringComparison.Ordinal))
-                    return;
-                var score = MathF.Round(Probability(profile, Dot(text.Vector.Span, stored.Vector)), ScoreDecimals);
-                if (score >= MinimumScore) scores.Add(new(stored.OccurrenceId, score));
+                if (content.TryGetValue(stored.OccurrenceId, out var sha256)
+                    && string.Equals(sha256, stored.Sha256, StringComparison.Ordinal))
+                    cosines.Add((stored.OccurrenceId, Dot(text.Vector.Span, stored.Vector)));
             }, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -122,9 +131,15 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
                 "The photo search data could not be read.");
         }
 
-        var ranked = scores
-            .OrderByDescending(match => match.Score)
-            .ThenBy(match => match.OccurrenceId)
+        // The odds are exp(scale * cosine + bias), so a fraction of the best odds is a fixed step
+        // down in cosine from the best photo.
+        var floor = Math.Max(CosineAt(profile, MinimumScore),
+            cosines.Count == 0 ? 0 : cosines.Max(row => row.Cosine) + Math.Log(LeastOddsRelativeToBest) / profile.LogitScale);
+        var ranked = cosines
+            .Where(row => row.Cosine >= floor)
+            .OrderByDescending(row => MathF.Round(row.Cosine, CosineDecimals))
+            .ThenBy(row => row.OccurrenceId)
+            .Select(row => new LikelyMatch(row.OccurrenceId, Probability(profile, row.Cosine)))
             .ToImmutableArray();
         return new(ranked.IsEmpty ? LikelyMatchesOutcome.NoMatches : LikelyMatchesOutcome.Matches, normalized, ranked);
     }
@@ -136,6 +151,10 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
     // The model's own reading of a cosine: sigmoid(scale * cosine + bias), as it was trained.
     private static float Probability(EncoderProfile profile, float cosine) =>
         (float)(1 / (1 + Math.Exp(-(profile.LogitScale * cosine + profile.LogitBias))));
+
+    // The cosine at which the model's probability is exactly this.
+    private static double CosineAt(EncoderProfile profile, double probability) =>
+        (Math.Log(probability / (1 - probability)) - profile.LogitBias) / profile.LogitScale;
 
     // Both vectors are L2-normalized, so their dot product is the cosine.
     private static float Dot(ReadOnlySpan<float> left, ReadOnlySpan<float> right)
