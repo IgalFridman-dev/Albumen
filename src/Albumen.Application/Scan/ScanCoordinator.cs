@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Threading.Channels;
 using Albumen.Application.Scope;
 using Albumen.Application.Semantic;
@@ -24,6 +25,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
     private readonly IScanCheckpointStore checkpoints;
     private readonly INearDuplicatePipeline? nearDuplicates;
     private readonly ISemanticIndexer? semanticIndex;
+    private readonly IEmbeddingMatcher? embeddingMatches;
     private readonly HashSet<Operation> operations = [];
     private Operation? active;
     private ScanSnapshot current = ScanSnapshotProjector.Create(null, ScanStatus.Idle, Pending, [], []);
@@ -39,7 +41,8 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         IScanIdentityStore identities,
         IScanCheckpointStore checkpoints,
         INearDuplicatePipeline? nearDuplicates = null,
-        ISemanticIndexer? semanticIndex = null)
+        ISemanticIndexer? semanticIndex = null,
+        IEmbeddingMatcher? embeddingMatches = null)
     {
         inbox = new ScanOwnerInbox(scheduler);
         this.preflight = preflight ?? throw new ArgumentNullException(nameof(preflight));
@@ -48,6 +51,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         this.checkpoints = checkpoints ?? throw new ArgumentNullException(nameof(checkpoints));
         this.nearDuplicates = nearDuplicates;
         this.semanticIndex = semanticIndex;
+        this.embeddingMatches = embeddingMatches;
     }
 
     public ScanSnapshot Current => Volatile.Read(ref current);
@@ -442,6 +446,8 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                 && !operation.Token.IsCancellationRequested)
             {
                 await IndexAsync(operation, semanticIndex).ConfigureAwait(false);
+                if (embeddingMatches is not null)
+                    await MatchEmbeddingsAsync(operation, embeddingMatches).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (operation.Token.IsCancellationRequested) { }
@@ -510,6 +516,48 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                 return result is null || ApplySemantic(operation, result);
             }).ConfigureAwait(false);
             indexing.Dispose();
+        }
+    }
+
+    // E4-S6: the stored vectors add Maybe-similar sets. Like the index, a failure or Cancel here
+    // leaves the hash sets as they are and the Scan completes.
+    private async Task MatchEmbeddingsAsync(Operation operation, IEmbeddingMatcher matcher)
+    {
+        var start = await inbox.CommandAsync(() =>
+        {
+            if (!ReferenceEquals(active, operation) || operation.Canceled || operation.Faulted
+                || operation.Semantic is not { State: SemanticState.Ready, Profile: { } profile }) return null;
+            operation.Indexing = CancellationTokenSource.CreateLinkedTokenSource(operation.Token);
+            // Only photos with a hash signature can be in a set.
+            var contents = operation.Store.Snapshot(ScanStatus.Running, operation.Enumeration).Occurrences
+                .Where(row => row.NearDuplicate.State == ScanStageState.Succeeded && row.Content is not null)
+                .ToDictionary(row => row.Token.OccurrenceId, row => row.Content!.Sha256);
+            return new { Profile = profile, Contents = contents, Matching = operation.Indexing };
+        }).ConfigureAwait(false);
+        if (start is null) return;
+        var matches = ImmutableArray<EmbeddingMatch>.Empty;
+        try
+        {
+            matches = await matcher.MatchAsync(operation.Context.Pin.ScanId, start.Profile, start.Contents,
+                start.Matching.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException
+            || !operation.Token.IsCancellationRequested)
+        {
+            // Canceled or failed: Review shows the hash sets only.
+        }
+        finally
+        {
+            await inbox.CommandAsync(() =>
+            {
+                operation.Indexing = null;
+                if (matches.IsDefaultOrEmpty || !ReferenceEquals(active, operation)
+                    || operation.Canceled || operation.Finished || operation.Faulted) return false;
+                operation.Store.Apply(operation.Store.PrepareEmbeddingMatches(matches));
+                PublishResults(operation);
+                return true;
+            }).ConfigureAwait(false);
+            start.Matching.Dispose();
         }
     }
 
