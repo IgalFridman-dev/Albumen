@@ -7,9 +7,11 @@ namespace Albumen.Infrastructure.Tests.Onnx;
 
 /// <summary>
 /// The shipped model files against the PyTorch reference written by eng/models/export_siglip2.py.
-/// The files are not in CI: set ALBUMEN_MODELS_DIR to a folder laid out like the release's models
-/// folder (the dev PC, the Golden VM) or this test is skipped.
+/// The files are not in git, so this is a Golden VM test: it reads them from ALBUMEN_MODELS_DIR, or
+/// from C:\PhotoSift\models where the VM stages them for the release build, and the folder must also
+/// hold the shipped models/manifest.json.
 /// </summary>
+[Trait("Category", "GoldenVm")]
 public sealed class OnnxEncoderParityTests
 {
     // Same pixels and fp32 weights: only kernel rounding differs. The text vocabulary is stored in 16 bits.
@@ -19,15 +21,17 @@ public sealed class OnnxEncoderParityTests
     [Fact]
     public void ShippedModelMatchesThePyTorchReference()
     {
-        var models = Environment.GetEnvironmentVariable("ALBUMEN_MODELS_DIR");
-        Assert.SkipWhen(string.IsNullOrEmpty(models), "ALBUMEN_MODELS_DIR is not set.");
+        var models = Environment.GetEnvironmentVariable("ALBUMEN_MODELS_DIR") is { Length: > 0 } configured
+            ? configured
+            : @"C:\PhotoSift\models";
+        Assert.True(Directory.Exists(models), $"The model files are not staged at {models}.");
         Assert.Equal(
             File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "models", "manifest.json")),
-            File.ReadAllText(Path.Combine(models!, "manifest.json")));
+            File.ReadAllText(Path.Combine(models, "manifest.json")));
         var reference = JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Onnx", "siglip2-reference.json")))!;
-        using var encoder = new OnnxVisionLanguageEncoder(models!);
+        using var encoder = new OnnxVisionLanguageEncoder(models);
         var profile = encoder.LoadProfile().Profile!;
-        using var stream = File.OpenRead(Path.Combine(models!, "tokenizer.model"));
+        using var stream = File.OpenRead(Path.Combine(models, "tokenizer.model"));
         var tokenizer = SentencePieceTokenizer.Create(stream, addBeginningOfSentence: false, addEndOfSentence: false);
 
         foreach (var (image, index) in reference["images"]!.AsArray().Select((image, index) => (image!, index)))
