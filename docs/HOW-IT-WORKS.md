@@ -12,7 +12,7 @@ first two share one screen, so the list shows four steps.
 | Step | Phase | What happens on screen |
 |---|---|---|
 | 1 | **Choose folder** (phases ChooseScope + ConfirmRules) | Pick one local folder, "Include subfolders", and "Look-alikes" (identical copies are always found, as the caption says). A status strip says one sentence per state (ready with the photo count, checking, blocked, not checked); blocking reasons (network, cloud-only, protected folders) appear under it, and the folder check counts, restrictions and the scan options' status wait under "Details". One "Scan N photos" button continues, confirms the options for this folder and starts the scan, each step checked by the workflow owner as before. |
-| 2 | **Scan** | Progress and live counts; "Cancel Scan". Outcome categories show what was grouped, skipped or unsupported. |
+| 2 | **Scan** | Progress and live counts; "Cancel Scan". With Look-alikes on, a last stage indexes the photos for search (Cancel there skips only that stage). Outcome categories show what was grouped, skipped or unsupported. |
 | 3 | **Review** | Kinds shown as Identical copies / Look-alike / Maybe similar / Couldn't check (internally Exact / Near / Uncertain / CouldNotAnalyze) → sets → photos with bounded previews and side-by-side compare. The user switches photos to Remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). |
 | 4 | **Clean up** (phase ApproveCleanup) | The Review page ends with "Move N photos to the Recycle Bin?": the first marked photos with thumbnails and paths, then the full accounting. "Move to Recycle Bin" sends them one at a time and shows a progress bar, a card per photo (moved, skipped and why, or unknown) and a summary when it ends. |
 
@@ -30,9 +30,9 @@ flowchart LR
   App --> Windows
   App --> Onnx
   Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature<br/>sharpness"] --> Application
-  Sqlite["Infrastructure.Sqlite<br/>schema v5, journals, records"] --> Application
+  Sqlite["Infrastructure.Sqlite<br/>schema v6, journals, records, photo vectors"] --> Application
   Windows["Infrastructure.Windows<br/>Win32 scope/traversal, WIC decode,<br/>IFileOperation Recycle Bin"] --> Application
-  Onnx["Infrastructure.Onnx<br/>SigLIP 2 encoder on ONNX Runtime<br/>(1.1; not wired until E4-S3)"] --> Application
+  Onnx["Infrastructure.Onnx<br/>SigLIP 2 encoder on ONNX Runtime"] --> Application
   Application["Albumen.Application<br/>workflows, coordinators, ports"] --> Domain["Albumen.Domain<br/>pure rules & policies"]
 ```
 
@@ -56,6 +56,7 @@ sequenceDiagram
   UI->>Scan: Start Scan (options)
   Scan->>OS: enumerate files, read bytes under a lease
   Scan->>Scan: Exact groups (SHA-256) + Near groups (dHash ≤4, color ≤12)
+  Scan->>Scan: photo vectors (SigLIP 2, parallel; Look-alikes on)
   Scan->>DB: checkpoints + accounting
   UI->>Rev: select files, keep ≥1 survivor
   Rev->>Act: sealed ApprovedActionRequest
@@ -76,7 +77,7 @@ Key ideas:
 ## Where data lives
 
 - `%LOCALAPPDATA%\Albumen\albumen.db` — SQLite (scan identity, checkpoints, override
-  evidence, action journal and records). "Clear scan data" (in History) removes scan data only.
+  evidence, action journal and records, and the last Scan's photo vectors). "Clear scan data" (in History) removes scan data only.
 - Photos are only read, never modified; removal = Windows Recycle Bin (restorable).
 - No network access at all (verified by network audits in a VM with no network adapter).
 

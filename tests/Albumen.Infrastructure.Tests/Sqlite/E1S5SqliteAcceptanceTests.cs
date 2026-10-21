@@ -50,7 +50,7 @@ public sealed class E1S5SqliteAcceptanceTests
         string executingPayload;
         await using (var read = await fixture.OpenRawAsync())
         {
-            Assert.Equal(5L, await ScalarAsync(read, "PRAGMA user_version;"));
+            Assert.Equal(6L, await ScalarAsync(read, "PRAGMA user_version;"));
             Assert.Equal(1L, await ScalarAsync(read, "SELECT COUNT(*) FROM action_items;"));
             Assert.Equal(1L, await ScalarAsync(read, "SELECT COUNT(*) FROM action_transitions;"));
             Assert.Equal("executing", await ScalarAsync(read, "SELECT transition_kind FROM action_transitions;"));

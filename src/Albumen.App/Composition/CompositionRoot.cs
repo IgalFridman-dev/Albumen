@@ -3,10 +3,13 @@ using Albumen.App.Shell;
 using Albumen.Analysis.Exact;
 using Albumen.Analysis.NearDuplicate;
 using Albumen.Analysis.Sharpness;
+using Albumen.Application.LocalData;
 using Albumen.Application.Scan;
+using Albumen.Application.Semantic;
 using Albumen.Application.Review;
 using Albumen.Application.Action;
 using Albumen.Infrastructure.Windows.Action;
+using Albumen.Infrastructure.Onnx;
 using Albumen.Infrastructure.Sqlite;
 using Albumen.Infrastructure.Windows.Scan;
 using Albumen.Application.Scope;
@@ -49,8 +52,12 @@ public static class CompositionRoot
         var nearDuplicates = new BoundedNearDuplicatePipeline(
             new WicNearFeatureSource(reader, analyzer, new WicPreviewDecoder(),
                 new ManagedPerceptualSignature(), new ManagedSharpness()));
-        var scan = new ScanCoordinator(
-            scheduler, preflight, executor, stores.ScanIdentities, stores.ScanCheckpoints, nearDuplicates);
+        var encoder = new OnnxVisionLanguageEncoder(Path.Combine(AppContext.BaseDirectory, "models"));
+        var semanticIndex = new BoundedSemanticIndexer(encoder,
+            new WicEncoderImageSource(reader, analyzer, new WicPreviewDecoder()),
+            stores.Embeddings, Environment.ProcessorCount);
+        var scan = new ScanCoordinator(scheduler, preflight, executor, stores.ScanIdentities,
+            stores.ScanCheckpoints, nearDuplicates, semanticIndex);
         var review = new ReviewCoordinator(scheduler,
             new BoundedReviewRevalidator(reader, analyzer), stores.OverrideEvidence,
             actionSafety: new ProtectedActionSafetyValidator(reader, analyzer));
@@ -64,7 +71,8 @@ public static class CompositionRoot
             scan,
             action,
             review,
-            stores);
+            stores,
+            encoder);
         var dialog = new WpfReviewDialogService(() => System.Windows.Application.Current?.MainWindow);
         // The viewer decodes large enough to stay sharp on high-DPI screens and when
         // zoomed; the cache keeps the two compared photos.
@@ -79,7 +87,22 @@ public static class CompositionRoot
             new BoundedThumbnailCache(32L * 1024 * 1024),
             maximumEdge: 320);
         return new ShellViewModel(
-            workflow, photoWorkflow, dialog, stores.ScanData, preview, thumbnails);
+            workflow, photoWorkflow, dialog, new SemanticClearingScanData(stores.ScanData, scan),
+            preview, thumbnails);
+    }
+
+    // Clearing the local Scan data removes the stored vectors too, so the shown Scan's
+    // semantic state returns to not prepared. Nothing else about the Scan changes.
+    private sealed class SemanticClearingScanData(ILocalScanDataControl inner, ScanCoordinator scan)
+        : ILocalScanDataControl
+    {
+        public async ValueTask<ScanDataClearResult> ClearAsync(CancellationToken cancellationToken)
+        {
+            var result = await inner.ClearAsync(cancellationToken).ConfigureAwait(false);
+            if (result.Outcome == ScanDataClearOutcome.Cleared)
+                await scan.ForgetSemanticIndexAsync().ConfigureAwait(false);
+            return result;
+        }
     }
 
     private sealed class OwnedAlbumenWorkflow(
@@ -88,7 +111,8 @@ public static class CompositionRoot
         IAsyncDisposable scan,
         IAsyncDisposable action,
         IAsyncDisposable review,
-        IAsyncDisposable evidenceStore) : IAlbumenWorkflow, IAsyncDisposable
+        IAsyncDisposable evidenceStore,
+        IDisposable? encoder = null) : IAlbumenWorkflow, IAsyncDisposable
     {
         private OwnedAlbumenWorkflow(IAlbumenWorkflow workflow, IAsyncDisposable scan,
             IAsyncDisposable action, IAsyncDisposable review, IAsyncDisposable evidenceStore)
@@ -168,6 +192,16 @@ public static class CompositionRoot
             try
             {
                 await scan.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
+
+            try
+            {
+                // After the Scan: no indexing worker is still inside a model session.
+                encoder?.Dispose();
             }
             catch (Exception exception)
             {
