@@ -122,6 +122,17 @@ dotnet run     --project src/Albumen.App -c Release
 dotnet test    Albumen.slnx -c Release --no-build
 ```
 
+A fresh local build is unsigned, and Windows application control (Smart App Control, or a company
+policy) can block it, often as a notification that a DLL "can't be verified". Run it in the
+verification VM instead (elevated, VM restored from a checkpoint that has the model files):
+
+```powershell
+eng/verification/Invoke-AlbumenUiSmoke.ps1 -CheckpointName <Seeded checkpoint> -GuestModelsRoot C:\PhotoSift\models -KeepRunning
+```
+
+It publishes the app, starts it on the VM desktop and leaves it open; connect to the VM in Hyper-V
+Manager to use it.
+
 Some Infrastructure and WPF scenario tests exercise real Windows APIs and expect an isolated machine;
 the official gate scripts live in [`eng/verification/`](eng/verification/) and are described in
 [`.claude/skills/verify-gates/SKILL.md`](.claude/skills/verify-gates/SKILL.md).
