@@ -236,13 +236,16 @@ public partial class MainWindow : Window
         var item = list.SelectedItem
             ?? FindDataContext<ReviewCategoryViewModel>(source)
             ?? (object?)FindDataContext<ReviewGroupViewModel>(source)
-            ?? FindDataContext<ScanOccurrenceViewModel>(source);
+            ?? (object?)FindDataContext<ScanOccurrenceViewModel>(source)
+            ?? FindDataContext<LikelyMatchItemViewModel>(source);
         if (ReferenceEquals(list, ReviewCategoriesList) && item is ReviewCategoryViewModel category)
             shellViewModel.OpenReviewCategoryCommand.Execute(category);
         else if (ReferenceEquals(list, ReviewGroupsList) && item is ReviewGroupViewModel group)
             shellViewModel.OpenReviewGroupCommand.Execute(group);
         else if (ReferenceEquals(list, ReviewComparisonsList) && item is ScanOccurrenceViewModel member)
             shellViewModel.OpenReviewMemberCommand.Execute(member);
+        else if (ReferenceEquals(list, LikelyMatchesList) && item is LikelyMatchItemViewModel match)
+            shellViewModel.OpenLikelyMatchCommand.Execute(match);
         else
             return;
 
