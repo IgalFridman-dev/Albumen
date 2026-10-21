@@ -1165,6 +1165,9 @@
                                              AutomationProperties.Name="Scan activity"
                                              AutomationProperties.ItemStatus="{Binding ScanStatus}" />
                                 <TextBlock Margin="0,12,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding ScanCountsText}" />
+                                <TextBlock Margin="0,6,0,0" Style="{StaticResource Albumen.MutedText}" TextWrapping="Wrap"
+                                           Text="{Binding SemanticProgressText}"
+                                           Visibility="{Binding HasSemanticProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                                 <Border Height="1" Margin="0,16" Background="{StaticResource Albumen.BorderBrush}" />
 
