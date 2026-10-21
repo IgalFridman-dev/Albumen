@@ -635,3 +635,31 @@ The cut-off cannot fix this; the signal is not there at that size.
 - A change of model is an `EncoderProfile` change: vectors are recomputed on the next Scan, the
   manifest and parity fixtures are regenerated, and the release inventory gate in `eng/release/`
   approves the new files.
+
+## PM-022 — A likely match that cannot be opened looks clickable
+
+**Status:** Proposed 2026-10-21; not started. For the 1.2 UI pass (with PM-009 and PM-005).
+
+**Priority:** 1.2, with the other Review page changes
+
+**Origin:** Owner's check of E4-S4 (Likely matches) on his own photos, 2026-10-21: clicking some
+photos in the results list does nothing, neither compare nor a full-size view.
+
+### Likely cause, from the code
+
+The results list shows every photo the model ranks, but a card only opens a photo that is in an open
+Review set; that is where Keep / Remove lives. A photo "Not in any set" (no identical copy or
+look-alike, so nothing to decide) has its card disabled (`IsEnabled="{Binding CanOpen}"`), and the
+only cue is the small line "Not in any set: nothing to decide" under the thumbnail. The same happens
+when the photo's set was closed by a cleanup since the search. Disabled WPF buttons with a thumbnail
+inside do not look disabled, so the card reads as a broken click. The list also never shows a photo
+full size on its own: the view model's `OpenLikelyMatchAsync` only navigates to a set member.
+
+### Fix to consider
+
+- Open any listed photo in the preview, with the set's Keep / Remove only when it has a set, so a
+  click always does something.
+- Until then, make the disabled state visible (greyed thumbnail, the "nothing to decide" line as the
+  card's main text) and expose it to UI Automation.
+- Check the "weird quirks with some photos" the owner saw elsewhere in Review against the same cause
+  (a member whose set closed) before treating them as a separate bug.
