@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using System.Globalization;
+using Albumen.Application.Semantic;
 using Albumen.Domain.Scan;
 
 namespace Albumen.Application.Scan;
@@ -7,10 +9,17 @@ namespace Albumen.Application.Scan;
 internal sealed class NearDuplicateGroupIndex
 {
     private readonly Dictionary<string, PublishedGroup> published = [];
+    // The analyzed photos and their hash relationships, kept so model matches reuse them.
+    private ImmutableArray<NearFeatureResult> successful = [];
+    private ImmutableArray<NearDuplicateEvidence> relationships = [];
+    private ImmutableArray<EmbeddingMatch> matches = [];
     private ImmutableArray<CandidateGroupProjection> projections = [];
 
     private NearDuplicateGroupIndex(NearDuplicateGroupIndex source)
     {
+        successful = source.successful;
+        relationships = source.relationships;
+        matches = source.matches;
         projections = source.projections;
         foreach (var pair in source.published) published.Add(pair.Key, pair.Value);
     }
@@ -21,11 +30,11 @@ internal sealed class NearDuplicateGroupIndex
 
     public void Replace(ImmutableArray<NearFeatureResult> results, ImmutableArray<ScanFileOccurrence> rows)
     {
-        var successful = results
+        successful = results
             .Where(result => result.Outcome.State == ScanStageState.Succeeded && result.Signature is not null)
             .OrderBy(result => result.Token.OccurrenceId)
-            .ToArray();
-        var relationships = new List<NearDuplicateEvidence>();
+            .ToImmutableArray();
+        var related = ImmutableArray.CreateBuilder<NearDuplicateEvidence>();
         for (var leftIndex = 0; leftIndex < successful.Length; leftIndex++)
         for (var rightIndex = leftIndex + 1; rightIndex < successful.Length; rightIndex++)
         {
@@ -34,10 +43,61 @@ internal sealed class NearDuplicateGroupIndex
             if (SameBytes(left.Content!, right.Content!)) continue;
             var evidence = NearDuplicateThresholds.Classify(
                 left.Signature!, right.Signature!, left.Token, right.Token);
-            if (evidence.Kind != NearRelationshipKind.NotRelated) relationships.Add(evidence);
+            if (evidence.Kind != NearRelationshipKind.NotRelated) related.Add(evidence);
         }
+        relationships = related.ToImmutable();
+        matches = [];
+        Build(rows);
+    }
 
-        var next = ImmutableArray.CreateBuilder<CandidateGroupProjection>();
+    /// <summary>Adds the photo model's Maybe-similar matches to the hash relationships (E4-S6).</summary>
+    public void ReplaceMatches(ImmutableArray<EmbeddingMatch> matches, ImmutableArray<ScanFileOccurrence> rows)
+    {
+        this.matches = matches;
+        Build(rows);
+    }
+
+    private void Build(ImmutableArray<ScanFileOccurrence> rows)
+    {
+        // Look-alike sets come from the hash alone, so they are the same with or without the model.
+        // The model's matches only add Maybe-similar sets and pairs. Its links merge after every hash
+        // link, so each hash merge happens exactly as without it; a Look-alike set that then takes in
+        // a model match appears again inside that Maybe-similar set, and stays Look-alike on its own.
+        var hash = Projections(relationships, rows);
+        var model = ModelRelationships();
+        var all = model.Count == 0 ? hash : Projections([.. relationships, .. model], rows);
+        projections = hash.Where(value => value.Category == CandidateCategory.NearDuplicate)
+            .Concat(all.Where(value => value.Category != CandidateCategory.NearDuplicate))
+            .OrderBy(value => value.Category)
+            .ThenBy(value => value.Members[0].Token.OccurrenceId)
+            .ToImmutableArray();
+    }
+
+    // A model match relates a pair only where the hash does not: a pair the hash calls Near or
+    // Uncertain keeps the hash's evidence.
+    private List<NearDuplicateEvidence> ModelRelationships()
+    {
+        var model = new List<NearDuplicateEvidence>();
+        if (matches.IsDefaultOrEmpty) return model;
+        var byId = successful.ToDictionary(result => result.Token.OccurrenceId);
+        foreach (var match in matches.DistinctBy(match => (match.Left, match.Right))
+            .OrderBy(match => match.Left).ThenBy(match => match.Right))
+        {
+            if (match.Left >= match.Right || !MaybeSimilarThresholds.IsMatch(match.Cosine)
+                || !byId.TryGetValue(match.Left, out var left) || !byId.TryGetValue(match.Right, out var right)
+                || SameBytes(left.Content!, right.Content!)) continue;
+            var evidence = NearDuplicateThresholds.Classify(
+                left.Signature!, right.Signature!, left.Token, right.Token);
+            if (evidence.Kind == NearRelationshipKind.NotRelated)
+                model.Add(evidence with { Kind = NearRelationshipKind.Uncertain, Cosine = match.Cosine });
+        }
+        return model;
+    }
+
+    private static List<CandidateGroupProjection> Projections(IReadOnlyList<NearDuplicateEvidence> relationships,
+        ImmutableArray<ScanFileOccurrence> rows)
+    {
+        var next = new List<CandidateGroupProjection>();
         var sets = LookAlikeSets(relationships);
         var setOf = new Dictionary<long, int>();
         for (var index = 0; index < sets.Count; index++)
@@ -55,10 +115,14 @@ internal sealed class NearDuplicateGroupIndex
                 if (!sets[left].IsSingleNearComponent || edge.Kind == NearRelationshipKind.Near)
                     setEvidence[left].Add(edge);
             }
-            else if (edge.Kind == NearRelationshipKind.Uncertain)
+            else if (edge.Kind == NearRelationshipKind.Uncertain
+                && (edge.Cosine is null || !setOf.ContainsKey(edge.Left.OccurrenceId)
+                    || !setOf.ContainsKey(edge.Right.OccurrenceId)))
             {
                 // A photo related to only part of a set is not forced into it; that
-                // relationship still surfaces as an Uncertain pair.
+                // relationship still surfaces as an Uncertain pair. A model match between two
+                // photos already in sets is not shown again: in a large burst that would be
+                // hundreds of pairs.
                 leftover.Add(edge);
             }
         }
@@ -68,10 +132,7 @@ internal sealed class NearDuplicateGroupIndex
         foreach (var edge in leftover)
             next.Add(Project([edge.Left.OccurrenceId, edge.Right.OccurrenceId], [edge],
                 CandidateCategory.Uncertain, rows));
-        projections = next
-            .OrderBy(value => value.Category)
-            .ThenBy(value => value.Members[0].Token.OccurrenceId)
-            .ToImmutableArray();
+        return next;
     }
 
     public ImmutableArray<CandidateGroup> Groups(ScanPin pin)
@@ -121,7 +182,9 @@ internal sealed class NearDuplicateGroupIndex
     // Hamming distance, then largest color distance, then lowest photo ids), so loosely
     // chained photos are not pulled together and no new threshold is introduced. Linkage
     // after a merge is the larger of the two parts' linkages (Lance-Williams), so each merge
-    // only revisits the merged set's neighbors.
+    // only revisits the merged set's neighbors. A link with a model match comes after every
+    // hash-only link, closest weakest cosine first, and never builds a set larger than
+    // MaybeSimilarThresholds.MaximumSetSize.
     private static List<LookAlikeSet> LookAlikeSets(IReadOnlyList<NearDuplicateEvidence> relationships)
     {
         var clusters = new List<Cluster>();
@@ -145,20 +208,23 @@ internal sealed class NearDuplicateGroupIndex
             var a = owner[edge.Left.OccurrenceId];
             var b = owner[edge.Right.OccurrenceId];
             if (a == b) continue;
-            var link = clusters[a].Links.TryGetValue(b, out var existing) ? existing : new Link(0, 0, 0);
-            link = new(link.Count + 1, Math.Max(link.Hamming, edge.HammingDistance),
-                Math.Max(link.Color, edge.ColorDistance));
+            var link = clusters[a].Links.TryGetValue(b, out var existing) ? existing : Link.None;
+            link = link.Merge(new(1, edge.HammingDistance, edge.ColorDistance, edge.Cosine is not null,
+                edge.Cosine ?? 1f));
             clusters[a].Links[b] = link;
             clusters[b].Links[a] = link;
         }
 
-        var queue = new PriorityQueue<(int Left, int Right), (int Hamming, int Color, long First, long Second)>();
+        var queue = new PriorityQueue<(int Left, int Right),
+            (bool Model, float Distance, int Hamming, int Color, long First, long Second)>();
         void Offer(int a, int b, Link link)
         {
             if (link.Count != (long)clusters[a].Members.Count * clusters[b].Members.Count) return;
+            if (link.Model && clusters[a].Members.Count + clusters[b].Members.Count > MaybeSimilarThresholds.MaximumSetSize)
+                return;
             var first = Math.Min(clusters[a].Lowest, clusters[b].Lowest);
             var second = Math.Max(clusters[a].Lowest, clusters[b].Lowest);
-            queue.Enqueue((a, b), (link.Hamming, link.Color, first, second));
+            queue.Enqueue((a, b), (link.Model, 1f - link.Cosine, link.Hamming, link.Color, first, second));
         }
 
         for (var a = 0; a < clusters.Count; a++)
@@ -179,12 +245,9 @@ internal sealed class NearDuplicateGroupIndex
             foreach (var neighbor in left.Links.Keys.Union(right.Links.Keys).Order())
             {
                 if (neighbor == pair.Left || neighbor == pair.Right || !clusters[neighbor].Alive) continue;
-                left.Links.TryGetValue(neighbor, out var fromLeft);
-                right.Links.TryGetValue(neighbor, out var fromRight);
-                var link = new Link(
-                    (fromLeft?.Count ?? 0) + (fromRight?.Count ?? 0),
-                    Math.Max(fromLeft?.Hamming ?? 0, fromRight?.Hamming ?? 0),
-                    Math.Max(fromLeft?.Color ?? 0, fromRight?.Color ?? 0));
+                var fromLeft = left.Links.GetValueOrDefault(neighbor, Link.None);
+                var fromRight = right.Links.GetValueOrDefault(neighbor, Link.None);
+                var link = fromLeft.Merge(fromRight);
                 clusters[neighbor].Links.Remove(pair.Left);
                 clusters[neighbor].Links.Remove(pair.Right);
                 clusters[neighbor].Links[merged] = link;
@@ -236,11 +299,18 @@ internal sealed class NearDuplicateGroupIndex
         $"{projection.Category}:{string.Join(",", projection.Members.Select(row => row.Token.OccurrenceId))}";
 
     private static string Fingerprint(CandidateGroupProjection projection) =>
-        $"{Key(projection)}:{string.Join(";", projection.Similarity.Select(edge => $"{edge.Left.OccurrenceRevision}:{edge.Right.OccurrenceRevision}:{edge.HammingDistance}:{edge.ColorDistance}:{edge.Kind}"))}";
+        $"{Key(projection)}:{string.Join(";", projection.Similarity.Select(edge => $"{edge.Left.OccurrenceRevision}:{edge.Right.OccurrenceRevision}:{edge.HammingDistance}:{edge.ColorDistance}:{edge.Kind}{(edge.Cosine is { } cosine ? ":" + cosine.ToString("R", CultureInfo.InvariantCulture) : "")}"))}";
 
     private sealed record LookAlikeSet(HashSet<long> Members, bool IsSingleNearComponent);
 
-    private sealed record Link(long Count, int Hamming, int Color);
+    // Cosine is the weakest model match in the link, 1 when it has none.
+    private sealed record Link(long Count, int Hamming, int Color, bool Model, float Cosine)
+    {
+        public static Link None { get; } = new(0, 0, 0, false, 1f);
+
+        public Link Merge(Link other) => new(Count + other.Count, Math.Max(Hamming, other.Hamming),
+            Math.Max(Color, other.Color), Model || other.Model, Math.Min(Cosine, other.Cosine));
+    }
 
     private sealed class Cluster(HashSet<long> members, bool isNearComponent)
     {

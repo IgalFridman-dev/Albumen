@@ -248,7 +248,8 @@ internal sealed class CoordinatorFixture : IAsyncDisposable
         CoordinatorIdentityStore? identities = null,
         CoordinatorCheckpointStore? checkpoints = null,
         INearDuplicatePipeline? nearDuplicates = null,
-        ISemanticIndexer? semanticIndex = null)
+        ISemanticIndexer? semanticIndex = null,
+        IEmbeddingMatcher? embeddingMatches = null)
     {
         Identities = identities ?? new CoordinatorIdentityStore();
         Checkpoints = checkpoints ?? new CoordinatorCheckpointStore();
@@ -260,7 +261,8 @@ internal sealed class CoordinatorFixture : IAsyncDisposable
             Identities,
             Checkpoints,
             nearDuplicates,
-            semanticIndex);
+            semanticIndex,
+            embeddingMatches);
     }
     public Task Pump(Task task) => ScanTestData.Bound(Scheduler.PumpUntilAsync(task));
     public Task Start(long scope = 1, long rules = 1) => Pump(Owner.StartAsync(Ready(scope), new ExactRuleConfirmation(scope, rules), CancellationToken.None));

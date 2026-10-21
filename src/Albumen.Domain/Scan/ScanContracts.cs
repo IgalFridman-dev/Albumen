@@ -216,7 +216,14 @@ public sealed record NearDuplicateEvidence(
     OccurrenceToken Right,
     int HammingDistance,
     int ColorDistance,
-    NearRelationshipKind Kind);
+    NearRelationshipKind Kind)
+{
+    /// <summary>
+    /// Set only when the photo model related a pair the hash does not: such a pair is Maybe similar
+    /// (<see cref="NearRelationshipKind.Uncertain"/>) and never Near.
+    /// </summary>
+    public float? Cosine { get; init; }
+}
 
 public sealed record CandidateGroup(
     Guid GroupId,

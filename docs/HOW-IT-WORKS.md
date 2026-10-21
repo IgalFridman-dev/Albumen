@@ -57,6 +57,7 @@ sequenceDiagram
   Scan->>OS: enumerate files, read bytes under a lease
   Scan->>Scan: Exact groups (SHA-256) + Near groups (dHash ≤4, color ≤12)
   Scan->>Scan: photo vectors (SigLIP 2, parallel; Look-alikes on)
+  Scan->>Scan: Maybe-similar sets from vector cosine (Near stays hash-only)
   Scan->>DB: checkpoints + accounting
   UI->>Rev: select files, keep ≥1 survivor
   Rev->>Act: sealed ApprovedActionRequest
@@ -73,6 +74,10 @@ Key ideas:
   blocks the action and is shown as such; interrupted actions are reconciled on restart, never replayed.
 - **Near duplicates are conservative**: thresholds live in `Application/Scan/NearDuplicateThresholds.cs`;
   borderline pairs are not grouped.
+- **The photo model only adds Maybe similar**: two photos the hash does not relate are Maybe similar
+  when their vectors' cosine reaches `Application/Scan/MaybeSimilarThresholds.cs` (provisional until
+  the labelled corpus sets it). Look-alike sets are built from the hash alone, so they are the same
+  with or without the model; nothing the model finds is pre-marked.
 
 ## Where data lives
 
