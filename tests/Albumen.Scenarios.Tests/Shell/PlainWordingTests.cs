@@ -1,5 +1,6 @@
 using Albumen.App.Shell;
 using Albumen.Application.Scan;
+using Albumen.Application.Semantic;
 using Albumen.Domain.Scan;
 using Xunit;
 
@@ -98,5 +99,37 @@ public sealed class PlainWordingTests
         });
 
         Assert.Equal(expected, fixture.ViewModel.ScanStatus);
+    }
+
+    [Fact]
+    public void PreparingPhotosForSearchSaysWhatItDoesAndThatCancelKeepsTheResults()
+    {
+        var fixture = new ExactShellFixture();
+        fixture.Workflow.Publish(fixture.Workflow.Current with
+        {
+            Scan = fixture.Workflow.Current.Scan with
+            {
+                Status = ScanStatus.Running,
+                Enumeration = new(ScanStageState.Succeeded, ScanReason.None),
+                Semantic = new(SemanticState.Indexing, 10000, 1300, 1234, new string('a', 64), ""),
+            },
+        });
+
+        Assert.Equal("Scanning: getting photos ready for search and look-alikes", fixture.ViewModel.ScanStatus);
+        Assert.Equal("1,234 of 10,000 photos ready. Cancel skips the rest; identical copies and look-alikes found so far are kept.",
+            fixture.ViewModel.SemanticProgressText);
+        Assert.True(fixture.ViewModel.HasSemanticProgress);
+        Assert.DoesNotContain("vector", fixture.ViewModel.SemanticProgressText, StringComparison.OrdinalIgnoreCase);
+
+        fixture.Workflow.Publish(fixture.Workflow.Current with
+        {
+            Scan = fixture.Workflow.Current.Scan with
+            {
+                Status = ScanStatus.Complete,
+                Semantic = new(SemanticState.Ready, 10000, 10000, 9990, new string('a', 64), ""),
+            },
+        });
+
+        Assert.False(fixture.ViewModel.HasSemanticProgress);
     }
 }
