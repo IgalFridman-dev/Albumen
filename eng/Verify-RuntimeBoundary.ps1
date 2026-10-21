@@ -661,6 +661,20 @@ $nativeSqliteSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeSqlite
 if ($nativeSqliteSha256 -cne 'B7385D722C83FB52142A00477A726723745916D22A555711EE89834C1111FB2E') {
     throw "SQLite native runtime hash differs from the approved win-x64 closure: $nativeSqliteSha256"
 }
+# The app-local Visual C++ runtime from the official VC_redist.x64.exe 14.44.35211.0 (owner-approved).
+$approvedVcRuntime = [ordered]@{
+    'msvcp140.dll' = '0F885B509A685D2BBFA652FED26B5FB31D88FBDAB0A978C641D1C7B8AA460AA9'
+    'msvcp140_1.dll' = 'BFAD5AEF4C63A669E3C140655CDFDF395B6C979B400A447BD5DCB65ED8826C3D'
+    'vcruntime140.dll' = 'D5E4D9A3E835FA679450145D6A7D94E36573A509317111904D9B3712C30D9066'
+    'vcruntime140_1.dll' = '1F2D41C4AA5DB0BC33EBF7B66D72943A817D7CE6CBE880502A9403823633093F'
+}
+foreach ($entry in $approvedVcRuntime.GetEnumerator()) {
+    $vcRuntimePath = Join-Path $outputDirectory $entry.Key
+    if (-not [System.IO.File]::Exists($vcRuntimePath) -or
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $vcRuntimePath).Hash -cne $entry.Value) {
+        throw "Visual C++ runtime differs from the approved app-local files: $($entry.Key)"
+    }
+}
 
 Write-Output 'ALBUMEN_RUNTIME_BOUNDARY_OK'
 Write-Output "TargetFramework=net10.0-windows"
@@ -671,6 +685,7 @@ Write-Output "RuntimeLibraries=$($runtimeLibraries -join ',')"
 Write-Output "SourceFilesScanned=$sourceFileCount"
 Write-Output "ProductionPackages=$($distinctPackageLibraries -join ',')"
 Write-Output "SQLiteNativeSha256=$nativeSqliteSha256"
+Write-Output "VcRuntimeFiles=$($approvedVcRuntime.Keys -join ',')"
 Write-Output "OutputFiles=$($outputFiles -join ',')"
 Write-Output "RuntimeBinariesScanned=$($artifactInspection.BinaryCount)"
 Write-Output "RuntimeConfigsScanned=$($artifactInspection.ConfigCount)"
