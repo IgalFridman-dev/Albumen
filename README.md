@@ -24,6 +24,25 @@ It works fully offline, never deletes permanently, and keeps a durable record of
 | ![Folder screen with a demo folder ready to scan and the scan options](docs/images/choose-folder.png) | ![Approval asking to move one photo to the Recycle Bin, with its path and what the cleanup covers](docs/images/approve-cleanup.png) | ![Cleanup finished with one photo moved to the Recycle Bin](docs/images/cleanup-results.png) |
 | Preflight checks the folder is local and readable, and the scan options sit on the same screen. | Nothing moves until you approve. The approval lists every photo and where it goes. | Each photo is sent on its own, and its result is kept in History. |
 
+### New in 1.1: find photos by what they show
+
+An on-device image model (SigLIP 2) reads every photo during the scan. Type a few words on Review and
+Albumen lists this scan's photos that fit them, most likely first, each with its set. Nothing leaves
+the PC, and the list marks nothing for removal.
+
+![Review right after a scan: the search box above the kinds of duplicates found, with 8 Maybe similar sets](docs/images/review-search.png)
+
+| "at sea" | "food" |
+|---|---|
+| ![Find photos by what they show: 12 likely matches for "at sea", ships and sea views first](docs/images/likely-matches.png) | ![Find photos by what they show: 4 likely matches for "food", the dinner photos](docs/images/likely-matches-food.png) |
+
+| Maybe similar, found by the model | Sharpest photo of a set |
+|---|---|
+| ![Compare view of two shots of the same ship that the model put in one Maybe similar set](docs/images/maybe-similar.png) | ![A set where the suggested best photo is marked as the sharpest and largest file](docs/images/sharpest.png) |
+
+The same model groups shots of one moment that the pixel hash misses, such as a ship that moved
+between frames, as Maybe similar. A classical sharpness measure names the sharpest photo of a set.
+
 ## Why it is interesting
 
 Deleting someone's photos is a one-way door, so Albumen is designed around one question:
