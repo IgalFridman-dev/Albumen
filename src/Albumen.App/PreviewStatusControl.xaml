@@ -17,6 +17,7 @@
                    HorizontalAlignment="Left"
                    Stretch="Uniform"
                    StretchDirection="Both"
+                   RenderOptions.BitmapScalingMode="HighQuality"
                    AutomationProperties.Name="Active comparison preview" />
         </ScrollViewer>
         <TextBox x:Name="PreviewFullPathTextBox"
