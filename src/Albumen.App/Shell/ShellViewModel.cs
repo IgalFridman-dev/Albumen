@@ -436,7 +436,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ? FormatScanCounts(count) : string.Empty;
     public string SemanticProgressText => photoSnapshot?.Scan.Semantic is { State: SemanticState.Indexing } semantic
         ? $"{semantic.Indexed.ToString("N0", CultureInfo.InvariantCulture)} of {semantic.Total.ToString("N0", CultureInfo.InvariantCulture)} photos ready. "
-            + "Cancel skips the rest; identical copies and look-alikes found so far are kept."
+            + "Cancel skips the rest; identical copies and look-alikes already found are kept."
         : string.Empty;
     public bool HasSemanticProgress => SemanticProgressText.Length != 0;
     public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
