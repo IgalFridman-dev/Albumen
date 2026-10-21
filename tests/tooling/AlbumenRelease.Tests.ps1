@@ -849,6 +849,40 @@ try {
         -Pattern 'forbidden|model' `
         -Because 'an empty model directory must not evade the recursive release-content policy'
 
+    $modelPackage = Copy-Package -SourcePath $cleanPackage -Name 'approved-models'
+    [System.IO.Directory]::CreateDirectory((Join-Path $modelPackage 'models')) | Out-Null
+    foreach ($modelName in @('manifest.json', 'text.onnx', 'tokenizer.model', 'vision.onnx')) {
+        Write-Utf8NoBom -Path (Join-Path $modelPackage ('models\' + $modelName)) -Content "model fixture $modelName"
+    }
+    New-AlbumenReleaseManifest `
+        -PackagePath $modelPackage `
+        -OutputPath (Join-Path $modelPackage 'release-manifest.json') | Out-Null
+    Assert-Equal `
+        'models/manifest.json=model,models/text.onnx=model,models/tokenizer.model=model,models/vision.onnx=model' `
+        ((@((Read-Manifest -PackagePath $modelPackage).payload |
+            Where-Object { ([string]$_.path).StartsWith('models/', [System.StringComparison]::Ordinal) } |
+            ForEach-Object { "$($_.path)=$($_.kind)" }) | Sort-Object) -join ',') `
+        'exactly the four approved model paths must enter the manifest as model payload'
+    Test-AlbumenRelease -PackagePath $modelPackage | Out-Null
+    $script:passed++
+
+    $unapprovedModel = Copy-Package -SourcePath $modelPackage -Name 'unapproved-model'
+    Write-Utf8NoBom -Path (Join-Path $unapprovedModel 'models\extra.onnx') -Content 'unapproved model'
+    Assert-ThrowsLike `
+        -Action { Test-AlbumenRelease -PackagePath $unapprovedModel | Out-Null } `
+        -Pattern 'forbidden|model|extra|set|payload' `
+        -Because 'a model file outside the approved paths must be rejected'
+
+    $tamperedModel = Copy-Package -SourcePath $modelPackage -Name 'tampered-model'
+    $tamperedModelPath = Join-Path $tamperedModel 'models\text.onnx'
+    $tamperedModelBytes = [System.IO.File]::ReadAllBytes($tamperedModelPath)
+    $tamperedModelBytes[0] = $tamperedModelBytes[0] -bxor 1
+    [System.IO.File]::WriteAllBytes($tamperedModelPath, $tamperedModelBytes)
+    Assert-ThrowsLike `
+        -Action { Test-AlbumenRelease -PackagePath $tamperedModel | Out-Null } `
+        -Pattern 'hash|SHA-256' `
+        -Because 'same-length model corruption must be rejected at launch'
+
     $reparseBeforePolicyFixture = Copy-Package `
         -SourcePath $cleanPackage `
         -Name 'reparse-before-native-policy'
@@ -978,6 +1012,38 @@ try {
     Assert-Equal 'sdk-version' `
         ($wrongSdkCalls.Name -join ',') `
         'a wrong selected SDK must fail immediately after the version probe and before restore or publish'
+
+    foreach ($modelCase in @(
+            @{ Name = 'missing'; Pattern = 'missing'; Mutate = { param($Root) Remove-Item -LiteralPath (Join-Path $Root 'text.onnx') } },
+            @{ Name = 'length'; Pattern = 'length|SHA-256'; Mutate = { param($Root) [System.IO.File]::AppendAllText((Join-Path $Root 'vision.onnx'), 'x') } },
+            @{ Name = 'hash'; Pattern = 'length|SHA-256'; Mutate = {
+                    param($Root)
+                    $path = Join-Path $Root 'tokenizer.model'
+                    $bytes = [System.IO.File]::ReadAllBytes($path)
+                    $bytes[0] = $bytes[0] -bxor 1
+                    [System.IO.File]::WriteAllBytes($path, $bytes)
+                } }
+        )) {
+        $caseModels = Join-Path $testRoot ('models-' + $modelCase.Name)
+        Copy-Item -Recurse -LiteralPath $syntheticModels -Destination $caseModels
+        & $modelCase.Mutate $caseModels
+        $modelCalls = [System.Collections.Generic.List[object]]::new()
+        $modelOperations = New-SyntheticReleaseOperations -Calls $modelCalls -DriftSecondPublish $false
+        Assert-ThrowsLike `
+            -Action {
+                & $builderPath `
+                    -RepositoryRoot $syntheticRepository `
+                    -OutputRoot (Join-Path $testRoot ('models-' + $modelCase.Name + '-output')) `
+                    -SdkRoot $syntheticSdk `
+                    -PackagesRoot $syntheticPackages `
+                    -ModelsRoot $caseModels -SourceIdentity 'synthetic-source-identity' `
+                    -CaptureOnly `
+                    -Operations $modelOperations | Out-Null
+            } `
+            -Pattern $modelCase.Pattern `
+            -Because "a $($modelCase.Name) model file must fail against models/manifest.json"
+        Assert-Equal 0 $modelCalls.Count "a $($modelCase.Name) model file must fail before any external call"
+    }
     $rootGlobalJson = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'global.json') |
         ConvertFrom-Json
     Assert-Equal 'disable' `
