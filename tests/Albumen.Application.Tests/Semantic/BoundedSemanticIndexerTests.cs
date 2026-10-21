@@ -96,14 +96,15 @@ public sealed class BoundedSemanticIndexerTests
     }
 
     [Fact]
-    public async Task AnUnexpectedPhotoReaderFaultIsFailedAndNotThrown()
+    public async Task AnUnexpectedPhotoReaderFaultSkipsOnlyThatPhoto()
     {
         var fixture = new IndexerFixture();
         fixture.Images.Throw[1] = new InvalidOperationException("bug");
 
         var result = await fixture.IndexAsync(fixture.Rows(2));
 
-        Assert.Equal(SemanticState.Failed, result.State);
+        Assert.Equal((SemanticState.Ready, 2, 2, 1), (result.State, result.Total, result.Processed, result.Indexed));
+        Assert.Equal([2L], fixture.Store.Stored.Keys);
     }
 
     [Fact]
@@ -152,6 +153,19 @@ public sealed class BoundedSemanticIndexerTests
         Assert.InRange(fixture.Images.MaximumLive, 1, 3);
         Assert.InRange(fixture.Encoder.MaximumLive, 1, 3);
         Assert.All(fixture.Store.Batches, size => Assert.InRange(size, 1, BoundedSemanticIndexer.BatchSize));
+    }
+
+    [Fact]
+    public async Task ProgressIsReportedPerSavedBatchNotPerPhoto()
+    {
+        var fixture = new IndexerFixture(workers: 4);
+
+        var result = await fixture.IndexAsync(fixture.Rows(640));
+
+        Assert.Equal((SemanticState.Ready, 640), (result.State, result.Indexed));
+        // 640 photos are 10 full batches; a slow machine may add a few interval saves.
+        Assert.InRange(fixture.Progress.Count, 2, 40);
+        Assert.Equal(640, fixture.Progress[^1].Indexed);
     }
 }
 

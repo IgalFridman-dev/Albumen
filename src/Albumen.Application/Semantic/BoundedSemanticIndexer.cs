@@ -15,6 +15,9 @@ public sealed class BoundedSemanticIndexer : ISemanticIndexer
     /// <summary>Most vectors written in one transaction.</summary>
     public const int BatchSize = 64;
 
+    /// <summary>Longest a vector waits to be saved and counted, in milliseconds.</summary>
+    public const int ReportInterval = 250;
+
     private readonly IVisionLanguageEncoder encoder;
     private readonly IEncoderImageSource images;
     private readonly IEmbeddingStore store;
@@ -64,21 +67,37 @@ public sealed class BoundedSemanticIndexer : ISemanticIndexer
             if (eligible.IsEmpty) return Finished(state);
             await progress(state).ConfigureAwait(false);
             pipeline = RunAsync(context, profile, eligible, work, done.Writer, stop.Token);
-            await foreach (var item in done.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            var reported = 0;
+            var flushAt = 0L;
+            while (true)
             {
+                if (!done.Reader.TryRead(out var item))
+                {
+                    // Vectors are saved and reported in batches: when full, or when ReportInterval has
+                    // passed since the first unsaved one, so a 50k-photo Scan is not 50k UI updates.
+                    var wait = state.Processed == reported
+                        ? Timeout.Infinite
+                        : (int)Math.Max(0, flushAt - Environment.TickCount64);
+                    var ready = await WaitToReadAsync(done.Reader, wait, cancellationToken).ConfigureAwait(false);
+                    if (ready == false) break;
+                    if (ready is null)
+                    {
+                        state = await SaveAsync(context, profile, batch, state, progress, cancellationToken).ConfigureAwait(false);
+                        reported = state.Processed;
+                    }
+                    continue;
+                }
                 if (item.Failure is { } failure) return Stopped(state, failure);
+                if (state.Processed == reported) flushAt = Environment.TickCount64 + ReportInterval;
                 state = state with { Processed = state.Processed + 1 };
                 if (item.Vector is { } vector)
                     batch.Add(new(item.Row.Token.OccurrenceId, item.Row.Content!.Sha256, vector));
-                if (batch.Count < BatchSize && done.Reader.TryPeek(out _)) continue;
-                if (batch.Count != 0)
-                {
-                    await store.AddAsync(context.Pin.ScanId, profile, batch, cancellationToken).ConfigureAwait(false);
-                    state = state with { Indexed = state.Indexed + batch.Count };
-                    batch.Clear();
-                }
-                await progress(state).ConfigureAwait(false);
+                if (batch.Count < BatchSize && Environment.TickCount64 < flushAt) continue;
+                state = await SaveAsync(context, profile, batch, state, progress, cancellationToken).ConfigureAwait(false);
+                reported = state.Processed;
             }
+            if (state.Processed != reported)
+                state = await SaveAsync(context, profile, batch, state, progress, cancellationToken).ConfigureAwait(false);
             await pipeline.ConfigureAwait(false);
             return Finished(state);
         }
@@ -99,6 +118,39 @@ public sealed class BoundedSemanticIndexer : ISemanticIndexer
                 try { await pipeline.ConfigureAwait(false); }
                 catch (OperationCanceledException) { }
             }
+        }
+    }
+
+    private async Task<SemanticSnapshot> SaveAsync(ScanRunContext context, EncoderProfile profile,
+        List<StoredEmbedding> batch, SemanticSnapshot state, Func<SemanticSnapshot, Task> progress,
+        CancellationToken cancellationToken)
+    {
+        if (batch.Count != 0)
+        {
+            await store.AddAsync(context.Pin.ScanId, profile, batch, cancellationToken).ConfigureAwait(false);
+            state = state with { Indexed = state.Indexed + batch.Count };
+            batch.Clear();
+        }
+        await progress(state).ConfigureAwait(false);
+        return state;
+    }
+
+    // True when an item is ready, false when the workers are done, null when the wait ran out.
+    private static async Task<bool?> WaitToReadAsync(ChannelReader<Encoded> reader, int milliseconds,
+        CancellationToken cancellationToken)
+    {
+        if (milliseconds == Timeout.Infinite)
+            return await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false);
+        if (milliseconds == 0) return null;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(milliseconds);
+        try
+        {
+            return await reader.WaitToReadAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
         }
     }
 
@@ -148,16 +200,21 @@ public sealed class BoundedSemanticIndexer : ISemanticIndexer
     {
         await foreach (var row in reader.ReadAllAsync(token).ConfigureAwait(false))
         {
+            EncoderImage? image;
+            try
+            {
+                image = await images.ReadAsync(context, row, profile.DecodeEdge, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+            catch (Exception)
+            {
+                // A photo that cannot be read or decoded is skipped; the snapshot discloses the gap.
+                image = null;
+            }
             Encoded result;
             try
             {
-                var image = await images.ReadAsync(context, row, profile.DecodeEdge, token).ConfigureAwait(false);
                 result = image is null ? new(row, null, null) : Encode(profile, row, image);
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                result = new(row, null, null);
             }
             catch (Exception)
             {
