@@ -13,7 +13,7 @@ public sealed class SqliteSchemaVersionFiveTests
     private static readonly string[] ExpectedTables =
     [
         "action_items", "action_revalidations", "action_transitions", "override_evidence",
-        "scan_accounting", "scan_file_occurrences", "scan_lifecycle", "scan_stage_checkpoints", "scans",
+        "scan_accounting", "scan_embeddings", "scan_file_occurrences", "scan_lifecycle", "scan_stage_checkpoints", "scans",
     ];
 
     private const string ExpectedLifecycleSql = """
@@ -97,6 +97,7 @@ public sealed class SqliteSchemaVersionFiveTests
         {
             await SeedEpicOneFactsAsync(versionFour);
             await ExecuteAsync(versionFour, """
+                DROP TABLE scan_embeddings;
                 DROP TABLE scan_stage_checkpoints;
                 DROP TABLE scan_accounting;
                 DROP TABLE scan_lifecycle;
@@ -112,7 +113,7 @@ public sealed class SqliteSchemaVersionFiveTests
                 scan.Pin.ScanId, TestContext.Current.CancellationToken)).Record);
 
         await using var verify = await fixture.OpenRawAsync(SqliteOpenMode.ReadOnly);
-        Assert.Equal(5L, await ScalarAsync(verify, "PRAGMA user_version;"));
+        Assert.Equal(6L, await ScalarAsync(verify, "PRAGMA user_version;"));
         Assert.Equal(before, await LegacyFactsAsync(verify));
         Assert.Equal(ExpectedTables, await UserTableNamesAsync(verify));
     }
@@ -123,6 +124,7 @@ public sealed class SqliteSchemaVersionFiveTests
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
+    [InlineData(6)]
     public async Task EveryVersionFiveMigrationStepFailureLeavesVersionFourFactsUnchanged(int faultStep)
     {
         await using var fixture = new ScanIdentityFixture();
@@ -138,6 +140,7 @@ public sealed class SqliteSchemaVersionFiveTests
         {
             await SeedEpicOneFactsAsync(versionFour);
             await ExecuteAsync(versionFour, """
+                DROP TABLE scan_embeddings;
                 DROP TABLE scan_stage_checkpoints;
                 DROP TABLE scan_accounting;
                 DROP TABLE scan_lifecycle;
@@ -169,7 +172,7 @@ public sealed class SqliteSchemaVersionFiveTests
                 Guid.Parse("d318e25e-0c09-42df-918c-d63337ad1b9f"), TestContext.Current.CancellationToken);
 
         await using var connection = await fixture.OpenRawAsync(SqliteOpenMode.ReadOnly);
-        Assert.Equal(5L, await ScalarAsync(connection, "PRAGMA user_version;"));
+        Assert.Equal(6L, await ScalarAsync(connection, "PRAGMA user_version;"));
         Assert.Equal(ExpectedTables, await UserTableNamesAsync(connection));
         Assert.Equal(Normalize(ExpectedLifecycleSql), await TableSqlAsync(connection, "scan_lifecycle"));
         Assert.Equal(Normalize(ExpectedStageSql), await TableSqlAsync(connection, "scan_stage_checkpoints"));
