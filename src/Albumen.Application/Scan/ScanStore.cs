@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Albumen.Application.Semantic;
 using Albumen.Domain.Scan;
 using Albumen.Domain.Scope;
 
@@ -61,6 +62,14 @@ internal sealed class ScanStore
 
     public ScanStoreMutation<NearDuplicateCommit> PrepareNearDuplicates(NearDuplicateBatch batch) =>
         Prepare(store => store.CommitNearDuplicates(batch));
+
+    public ScanStoreMutation<bool> PrepareEmbeddingMatches(ImmutableArray<EmbeddingMatch> matches) =>
+        Prepare(store =>
+        {
+            store.nearGroups.ReplaceMatches(matches,
+                store.occurrences.Values.OrderBy(row => row.Token.OccurrenceId).ToImmutableArray());
+            return true;
+        });
 
     public T Apply<T>(ScanStoreMutation<T> mutation)
     {

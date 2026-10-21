@@ -471,9 +471,13 @@ public sealed partial class ReviewCoordinator : IReviewCoordinator, IReviewResul
         if (edge.HammingDistance < 0 || edge.ColorDistance < 0) return false;
         var near = edge.HammingDistance <= NearDuplicateThresholds.NearHammingMaximum
             && edge.ColorDistance <= NearDuplicateThresholds.NearColorMaximum;
-        return kind == NearRelationshipKind.Near ? near
-            : !near && edge.HammingDistance <= NearDuplicateThresholds.UncertainHammingMaximum
-                && edge.ColorDistance <= NearDuplicateThresholds.UncertainColorMaximum;
+        var uncertain = !near && edge.HammingDistance <= NearDuplicateThresholds.UncertainHammingMaximum
+            && edge.ColorDistance <= NearDuplicateThresholds.UncertainColorMaximum;
+        // A model match relates only a pair the hash does not, and only as Maybe similar (E4-S6).
+        if (edge.Cosine is { } cosine)
+            return kind == NearRelationshipKind.Uncertain && !near && !uncertain
+                && MaybeSimilarThresholds.IsMatch(cosine);
+        return kind == NearRelationshipKind.Near ? near : uncertain;
     }
 
     private static bool SameBytes(ContentRevision left, ContentRevision right) =>
