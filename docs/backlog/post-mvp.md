@@ -674,6 +674,8 @@ full size on its own: the view model's `OpenLikelyMatchAsync` only navigates to 
 develop as a side notification ("can't be verified") with no way to run it anyway. The 1.0.0 and
 1.1.0 ZIPs are unsigned too, so any PC with Smart App Control On blocks them the same way; on other
 PCs SmartScreen offers "More info → Run anyway". README and the 1.1.0 release notes state this.
+The same PC ran 1.0.0 and earlier local builds, so Smart App Control most likely left evaluation
+mode and turned itself On in between (not confirmed from the CodeIntegrity log).
 
 ### What it needs
 
