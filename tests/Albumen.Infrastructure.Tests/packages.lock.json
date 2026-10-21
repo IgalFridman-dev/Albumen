@@ -228,6 +228,16 @@
           "Albumen.Infrastructure.Windows": "[1.0.0, )"
         }
       },
+      "albumen.corpus": {
+        "type": "Project",
+        "dependencies": {
+          "Albumen.Analysis": "[1.0.0, )",
+          "Albumen.Application": "[1.0.0, )",
+          "Albumen.Domain": "[1.0.0, )",
+          "Albumen.Infrastructure.Onnx": "[1.0.0, )",
+          "Albumen.Infrastructure.Windows": "[1.0.0, )"
+        }
+      },
       "albumen.application": {
         "type": "Project",
         "dependencies": {

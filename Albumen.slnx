@@ -15,4 +15,7 @@
     <Project Path="tests/Albumen.Infrastructure.Tests/Albumen.Infrastructure.Tests.csproj" />
     <Project Path="tests/Albumen.Scenarios.Tests/Albumen.Scenarios.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Albumen.Corpus/Albumen.Corpus.csproj" />
+  </Folder>
 </Solution>
