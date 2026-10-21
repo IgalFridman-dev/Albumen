@@ -543,3 +543,27 @@ The test read `late.IsCompleted` once, right after pumping the owner, but the re
 registration can complete just after the owner goes idle. On a slow runner the test then waited for a
 checkpoint write that correctly never comes. It now waits for whichever comes first, the rejection or
 the late write, so it still catches a real admission bug. Scan finalisation itself was not at fault.
+
+## PM-020 — Analyze each photo in one pass
+
+**Status:** Proposed 2026-10-21; not started. After 1.2.0.
+
+**Priority:** After the 1.2.0 release
+
+**Origin:** Owner comment on the E4-S3 design, 2026-10-21
+
+In 1.1 a Scan reads every photo up to three times, in three stages that each run over the whole
+folder: SHA-256 for identical copies, then the Near pass (one decode at 256 px for the difference hash
+and colour, one at 1024 px for sharpness, one photo at a time), then the SigLIP 2 vectors (E4-S3:
+hash again, one decode at 512 px, parallel workers). The stages are kept apart in 1.1 so a model
+failure or Cancel in the vector stage cannot touch the Exact and Near results.
+
+The proposal: one worker per photo reads, hashes and decodes it once, then computes the difference
+hash, sharpness and vector from that decode, with the stages still reporting separate outcomes.
+
+### Completion criteria
+
+- The cost of the extra reads and decodes is measured on the owner's PC and the Golden VM before any
+  change (E4-S3 records the vector stage on its own; the Near stage has no timing yet).
+- If it is worth it: one pass per photo with the same per-stage outcomes and isolation, the same
+  Exact/Near/blur results on the labelled corpus, and a measured speed-up.
