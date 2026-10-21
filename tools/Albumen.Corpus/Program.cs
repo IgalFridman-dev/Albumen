@@ -19,12 +19,9 @@ try
             var (photos, ignored) = CorpusLabels.FromFolders(corpus);
             CorpusLabels.Write(corpus, photos);
             foreach (var file in ignored)
-                Console.WriteLine($"Ignored (not JPEG or PNG): {file}");
+                Console.WriteLine($"Ignored (not a JPEG or PNG in a set or single folder): {file}");
             foreach (var photo in photos.Where(photo => photo.Set.Length == 0 && photo.Blur is CorpusLabels.ObviousBlur or CorpusLabels.Ambiguous))
                 Console.WriteLine($"Not measured (blur is only compared within a set): {photo.Path}");
-            foreach (var set in photos.Where(photo => photo.Set.Length > 0).GroupBy(photo => photo.Set)
-                         .Where(set => set.Any(photo => photo.Blur == CorpusLabels.ObviousBlur) && set.All(photo => photo.Blur != CorpusLabels.Sharp)))
-                Console.WriteLine($"Set without a sharp photo, so its blur is not measured: {set.Key}");
             Console.WriteLine($"Wrote {CorpusLabels.FileName} {CorpusLabels.Version(corpus)}: {photos.Count} photos, "
                 + $"{photos.Where(photo => photo.Set.Length > 0).Select(photo => photo.Set).Distinct().Count()} sets, "
                 + string.Join(", ", CorpusLabels.BlurSlices.Select(slice => $"{photos.Count(photo => photo.Blur == slice)} {slice}")) + ".");

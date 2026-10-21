@@ -108,7 +108,12 @@ internal static class CorpusReport
             + string.Join(", ", CorpusLabels.BlurSlices.Where(slice => slice != CorpusLabels.ObviousBlur)
                 .Select(slice => Invariant($"{slice} {blurrier.Count(index => photos[index].Blur == slice)}"))) + ".");
         Line(Invariant($"- Obvious-blur relevance (share of \"blurrier\" calls that are obvious blur; target 90%): {Percent(blurrier.Count(index => photos[index].Blur == CorpusLabels.ObviousBlur), blurrier.Count)}."));
-        Line(Invariant($"- Obvious-blur photos in sets called blurrier: {Percent(blurrier.Count(index => photos[index].Blur == CorpusLabels.ObviousBlur), obvious)} of {obvious}."));
+        Line(Invariant($"- Obvious-blur photos in sets called blurrier: {Percent(blurrier.Count(index => photos[index].Blur == CorpusLabels.ObviousBlur), obvious)} of {obvious}. ")
+            + "This is an upper bound: Review only compares photos the hash put in one set.");
+        var linked = sets.SelectMany(set => set.Where(index => blurrier.Contains(index) && photos[index].Blur == CorpusLabels.ObviousBlur
+            && NearDuplicateThresholds.Classify(features[index].Signature, features[set.MaxBy(other => features[other].Sharpness)].Signature).Kind
+                != NearRelationshipKind.NotRelated)).Count();
+        Line(Invariant($"- Of those, the hash links the photo to its set's sharpest (Look-alike or Maybe similar): {Percent(linked, obvious)} of {obvious}."));
         Line(Invariant($"- Ambiguous photos in sets called blurrier: {blurrier.Count(index => photos[index].Blur == CorpusLabels.Ambiguous)} of {photos.Count(photo => photo.Set.Length > 0 && photo.Blur == CorpusLabels.Ambiguous)}."));
         var sharpest = sets.Select(set => SharpnessComparison.Sharpest(
             set.Select(index => ((long)index, features[index].Sharpness)).ToList())).OfType<long>().Select(index => (int)index).ToList();
