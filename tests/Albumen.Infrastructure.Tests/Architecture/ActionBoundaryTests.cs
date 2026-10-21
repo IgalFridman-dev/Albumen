@@ -124,7 +124,7 @@ public sealed class ActionBoundaryTests
             .Where(directory => File.Exists(Path.Combine(directory, Path.GetFileName(directory) + ".csproj")))
             .Select(directory => Path.GetFileName(directory)!).Order(StringComparer.Ordinal).ToArray();
         Assert.Equal(["Albumen.Analysis", "Albumen.App", "Albumen.Application", "Albumen.Domain",
-            "Albumen.Infrastructure.Sqlite", "Albumen.Infrastructure.Windows"], projects);
+            "Albumen.Infrastructure.Onnx", "Albumen.Infrastructure.Sqlite", "Albumen.Infrastructure.Windows"], projects);
         // Load every production assembly explicitly: discovery must not depend
         // on which types happened to be used by earlier tests.
         foreach (var type in projects.Select(project => Assembly.Load(new AssemblyName(project)))
@@ -140,6 +140,8 @@ public sealed class ActionBoundaryTests
             {
                 Assert.DoesNotMatch(@"\b(SqliteActionJournalStore|Microsoft\.Data\.Sqlite|SqliteConnection)\b", source);
             }
+            if (!relative.StartsWith("Albumen.Infrastructure.Onnx" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                Assert.DoesNotMatch(@"\bMicrosoft\.ML\b", source);
             if (relative.Contains(Path.DirectorySeparatorChar + "Action" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             {
                 Assert.DoesNotMatch(@"\b(File|Directory)\s*\.\s*(Delete|Move|Replace)\s*\(", source);

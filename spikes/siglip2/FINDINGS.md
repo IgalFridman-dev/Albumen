@@ -21,7 +21,7 @@ is needed; CLIP was not evaluated.
 | Decode for the encoder | WIC decode at a 512 edge, then the Pillow-style resize | Reusing the Near stage's 256 decode drops the mean image cosine to 0.97 and moves the best photo for half the prompts. A 512 decode costs the same as 256 here and gives 0.995. |
 | D2 signature reuse | Deferred to 1.2 | Every 1.1 scan re-embeds every photo. Run in parallel, patch16 costs 25.6 ms per photo on this PC: about 4.3 minutes per 10,000 photos. |
 | Indexing pipeline (story 4) | Whole photos in parallel, one inference thread each, one shared session | 2.5x the throughput of one photo across all threads (25.6 vs about 63 ms per photo for patch16) for about 0.27 GB more peak RAM. |
-| Text tower size (story 3) | Open | fp32 text is 1,077 MB of the 1.43 GB total. An 8-bit vocabulary table halves it but drops text cosine to 0.990 and moves the best photo for 2 to 3 more prompts. Try fp16 weight storage first; otherwise ship the text tower as an optional download (`Unavailable` without it). |
+| Text tower size (story 3) | Resolved in E4-S2: 16-bit vocabulary table, text tower 702 MB, shipped in the one ZIP; same best photo as fp32 for 13/15 prompts. Previously open: | fp32 text is 1,077 MB of the 1.43 GB total. An 8-bit vocabulary table halves it but drops text cosine to 0.990 and moves the best photo for 2 to 3 more prompts. Try fp16 weight storage first; otherwise ship the text tower as an optional download (`Unavailable` without it). |
 
 ## Throughput (fp32, 512 decode, 111 photos, decode + resize + one-thread inference per worker)
 

@@ -10,6 +10,7 @@ public sealed class ProjectDependencyPolicyTests
         "Albumen.App",
         "Albumen.Application",
         "Albumen.Domain",
+        "Albumen.Infrastructure.Onnx",
         "Albumen.Infrastructure.Sqlite",
         "Albumen.Infrastructure.Windows",
     ];
