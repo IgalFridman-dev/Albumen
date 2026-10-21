@@ -158,8 +158,18 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
                 return (null, new(null, Unavailable($"The model file {file.Path} is not installed.")));
             }
 
-            using var stream = File.OpenRead(path);
-            if (stream.Length != file.Length)
+            long length;
+            try
+            {
+                using var stream = File.OpenRead(path);
+                length = stream.Length;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return (null, new(null, Unavailable($"The model file {file.Path} could not be read: {exception.Message}")));
+            }
+
+            if (length != file.Length)
             {
                 return (null, new(null, Failed($"The model file {file.Path} has the wrong size.")));
             }
@@ -187,70 +197,100 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
     {
         var manifest = installed.Value.Manifest!;
         var file = select(manifest);
-        if (Verify(file) is { } corrupt)
+        var (model, corrupt) = OpenVerified(file);
+        if (corrupt is not null)
         {
             return new(null, null, corrupt);
         }
 
-        SentencePieceTokenizer? tokenizer = null;
-        if (input == TokenInput)
+        // The verified file stays open, so it cannot be replaced before the session has read it.
+        using (model)
         {
-            if (Verify(manifest.Files.Tokenizer) is { } corruptTokenizer)
+            SentencePieceTokenizer? tokenizer = null;
+            if (input == TokenInput)
             {
-                return new(null, null, corruptTokenizer);
+                var (tokenizerModel, corruptTokenizer) = OpenVerified(manifest.Files.Tokenizer);
+                if (corruptTokenizer is not null)
+                {
+                    return new(null, null, corruptTokenizer);
+                }
+
+                try
+                {
+                    using (tokenizerModel)
+                    {
+                        tokenizer = SentencePieceTokenizer.Create(tokenizerModel!, addBeginningOfSentence: false, addEndOfSentence: false);
+                    }
+                }
+                catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException
+                                                      or Google.Protobuf.InvalidProtocolBufferException)
+                {
+                    return new(null, null, Failed($"The tokenizer could not be loaded: {exception.Message}"));
+                }
             }
 
+            InferenceSession session;
             try
             {
-                using var stream = File.OpenRead(Path.Combine(modelsDirectory, manifest.Files.Tokenizer.Path));
-                tokenizer = SentencePieceTokenizer.Create(stream, addBeginningOfSentence: false, addEndOfSentence: false);
+                // Albumen sends no telemetry; ONNX Runtime's Windows diagnostic events are on by default.
+                OrtEnv.Instance().DisableTelemetryEvents();
+                using var options = new SessionOptions { IntraOpNumThreads = intraOpThreads };
+                session = new InferenceSession(Path.Combine(modelsDirectory, file.Path), options);
             }
-            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException
-                                                  or Google.Protobuf.InvalidProtocolBufferException)
+            catch (OnnxRuntimeException exception)
             {
-                return new(null, null, Failed($"The tokenizer could not be loaded: {exception.Message}"));
+                return new(null, null, Failed($"The model file {file.Path} could not be opened: {exception.Message}"));
             }
-        }
+            catch (Exception exception) when (exception is TypeInitializationException or DllNotFoundException
+                                                  or EntryPointNotFoundException or BadImageFormatException)
+            {
+                return new(null, null, Failed($"ONNX Runtime could not be loaded: {exception.Message}"));
+            }
 
-        InferenceSession session;
-        try
-        {
-            using var options = new SessionOptions { IntraOpNumThreads = intraOpThreads };
-            session = new InferenceSession(Path.Combine(modelsDirectory, file.Path), options);
+            return CheckShapes(session, input, inputShape(manifest), manifest.Dimension, file)
+                ?? new(session, tokenizer, null);
         }
-        catch (OnnxRuntimeException exception)
-        {
-            return new(null, null, Failed($"The model file {file.Path} could not be opened: {exception.Message}"));
-        }
+    }
 
-        var expectedInput = inputShape(manifest);
+    private static Tower? CheckShapes(InferenceSession session, string input, int[] expectedInput, int expectedDimension, ModelFile file)
+    {
         if (session.InputMetadata.Count != 1
             || !session.InputMetadata.TryGetValue(input, out var inputMetadata)
+            || inputMetadata.ElementType != (input == TokenInput ? typeof(long) : typeof(float))
             || !inputMetadata.Dimensions.Skip(1).SequenceEqual(expectedInput)
             || session.OutputMetadata.Count != 1
             || !session.OutputMetadata.TryGetValue(EmbeddingOutput, out var outputMetadata)
+            || outputMetadata.ElementType != typeof(float)
             || outputMetadata.Dimensions is not [_, var dimension]
-            || dimension != manifest.Dimension)
+            || dimension != expectedDimension)
         {
             session.Dispose();
             return new(null, null, Failed($"The model file {file.Path} does not have the expected inputs or outputs."));
         }
 
-        return new(session, tokenizer, null);
+        return null;
     }
 
-    private EncoderFailure? Verify(ModelFile file)
+    /// <summary>Opens the file read-only (writers and renames blocked) and returns it rewound if its checksum matches.</summary>
+    private (FileStream? Stream, EncoderFailure? Failure) OpenVerified(ModelFile file)
     {
+        FileStream? stream = null;
         try
         {
-            using var stream = File.OpenRead(Path.Combine(modelsDirectory, file.Path));
-            return stream.Length == file.Length && Convert.ToHexString(SHA256.HashData(stream)) == file.Sha256
-                ? null
-                : Failed($"The model file {file.Path} does not match its checksum.");
+            stream = File.OpenRead(Path.Combine(modelsDirectory, file.Path));
+            if (stream.Length == file.Length && Convert.ToHexString(SHA256.HashData(stream)) == file.Sha256)
+            {
+                stream.Position = 0;
+                return (stream, null);
+            }
+
+            stream.Dispose();
+            return (null, Failed($"The model file {file.Path} does not match its checksum."));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return Unavailable($"The model file {file.Path} could not be read: {exception.Message}");
+            stream?.Dispose();
+            return (null, Unavailable($"The model file {file.Path} could not be read: {exception.Message}"));
         }
     }
 
