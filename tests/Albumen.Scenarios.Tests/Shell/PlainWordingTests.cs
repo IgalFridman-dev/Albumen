@@ -102,7 +102,7 @@ public sealed class PlainWordingTests
     }
 
     [Fact]
-    public void PreparingPhotosForSearchSaysWhatItDoesAndThatCancelKeepsTheResults()
+    public void IndexingPhotosSaysWhatItDoesAndThatCancelKeepsTheResults()
     {
         var fixture = new ExactShellFixture();
         fixture.Workflow.Publish(fixture.Workflow.Current with
@@ -115,8 +115,8 @@ public sealed class PlainWordingTests
             },
         });
 
-        Assert.Equal("Scanning: getting photos ready for search and look-alikes", fixture.ViewModel.ScanStatus);
-        Assert.Equal("1,234 of 10,000 photos ready. Cancel skips the rest; identical copies and look-alikes already found are kept.",
+        Assert.Equal("Scanning: indexing photos", fixture.ViewModel.ScanStatus);
+        Assert.Equal("1,234 of 10,000 photos indexed. Cancel skips the rest; identical copies and look-alikes already found are kept.",
             fixture.ViewModel.SemanticProgressText);
         Assert.True(fixture.ViewModel.HasSemanticProgress);
         Assert.DoesNotContain("vector", fixture.ViewModel.SemanticProgressText, StringComparison.OrdinalIgnoreCase);

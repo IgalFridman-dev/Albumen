@@ -392,7 +392,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             ScanSessionStatus.Idle => "Not started",
             ScanSessionStatus.Checking => "Getting ready: checking the folder",
             ScanSessionStatus.Running when scan.Semantic.State == SemanticState.Indexing =>
-                "Scanning: getting photos ready for search and look-alikes",
+                "Scanning: indexing photos",
             ScanSessionStatus.Running => scan.Enumeration.State is ScanStageState.Pending or ScanStageState.Running
                 ? "Scanning: finding photos"
                 : scan.Counts.Outstanding > 0 ? "Scanning: reading photos"
@@ -435,7 +435,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public string ScanCountsText => photoSnapshot is { Scan.Counts: var count }
         ? FormatScanCounts(count) : string.Empty;
     public string SemanticProgressText => photoSnapshot?.Scan.Semantic is { State: SemanticState.Indexing } semantic
-        ? $"{semantic.Indexed.ToString("N0", CultureInfo.InvariantCulture)} of {semantic.Total.ToString("N0", CultureInfo.InvariantCulture)} photos ready. "
+        ? $"{semantic.Indexed.ToString("N0", CultureInfo.InvariantCulture)} of {semantic.Total.ToString("N0", CultureInfo.InvariantCulture)} photos indexed. "
             + "Cancel skips the rest; identical copies and look-alikes already found are kept."
         : string.Empty;
     public bool HasSemanticProgress => SemanticProgressText.Length != 0;
