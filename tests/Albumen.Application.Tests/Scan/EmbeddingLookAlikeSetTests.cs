@@ -87,6 +87,19 @@ public sealed class EmbeddingLookAlikeSetTests
     }
 
     [Fact]
+    public void ALookAlikeGroupKeepsItsIdAndRevisionWhenModelMatchesArrive()
+    {
+        var (store, _) = Commit([0, 0b1, ulong.MaxValue]);
+        var before = Assert.Single(StoredFixture(store));
+
+        Commit(store, (1, 3, Match), (2, 3, Match));
+
+        var after = StoredFixture(store).Single(group => group.Category == CandidateCategory.NearDuplicate);
+        Assert.Equal((before.GroupId, before.GroupRevision), (after.GroupId, after.GroupRevision));
+        Assert.True(store.MatchesGroup(before.GroupId, before.GroupRevision));
+    }
+
+    [Fact]
     public void ModelMatchesDoNotChainPhotosTogether()
     {
         var (store, rows) = Commit([0, ulong.MaxValue, 0xFFFF_FFFF]);
@@ -268,6 +281,8 @@ public sealed class EmbeddingLookAlikeSetTests
         }
         return [.. hashes];
     }
+
+    private static ImmutableArray<CandidateGroup> StoredFixture(ScanStore store) => StoreFixture.Snapshot(store).Groups;
 
     private static bool IsNear(CandidateGroup group) => group.Category == CandidateCategory.NearDuplicate;
 
