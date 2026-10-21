@@ -20,8 +20,14 @@ function Get-AlbumenReleaseSha256 {
     $stream = [System.IO.File]::OpenRead($LiteralPath)
     try {
         # CNG uses the CPU's SHA extensions; Windows PowerShell's default SHA256 is managed and
-        # several times slower, which every launch would pay on the model files.
-        $algorithm = New-Object System.Security.Cryptography.SHA256Cng
+        # several times slower, which every launch would pay on the model files. PowerShell 7's
+        # default is already CNG-backed and has no SHA256Cng type.
+        $algorithm = if ('System.Security.Cryptography.SHA256Cng' -as [type]) {
+            New-Object System.Security.Cryptography.SHA256Cng
+        }
+        else {
+            [System.Security.Cryptography.SHA256]::Create()
+        }
         try {
             return ([System.BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '')
         }
