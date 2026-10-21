@@ -116,7 +116,7 @@ public sealed class PlainWordingTests
         });
 
         Assert.Equal("Scanning: getting photos ready for search and look-alikes", fixture.ViewModel.ScanStatus);
-        Assert.Equal("1,234 of 10,000 photos ready. Cancel skips the rest; identical copies and look-alikes found so far are kept.",
+        Assert.Equal("1,234 of 10,000 photos ready. Cancel skips the rest; identical copies and look-alikes already found are kept.",
             fixture.ViewModel.SemanticProgressText);
         Assert.True(fixture.ViewModel.HasSemanticProgress);
         Assert.DoesNotContain("vector", fixture.ViewModel.SemanticProgressText, StringComparison.OrdinalIgnoreCase);
