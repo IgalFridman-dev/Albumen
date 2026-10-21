@@ -57,7 +57,8 @@ public static class CompositionRoot
             new WicEncoderImageSource(reader, analyzer, new WicPreviewDecoder()),
             stores.Embeddings, Environment.ProcessorCount);
         var scan = new ScanCoordinator(scheduler, preflight, executor, stores.ScanIdentities,
-            stores.ScanCheckpoints, nearDuplicates, semanticIndex);
+            stores.ScanCheckpoints, nearDuplicates, semanticIndex,
+            new StoredEmbeddingMatcher(encoder, stores.Embeddings));
         var review = new ReviewCoordinator(scheduler,
             new BoundedReviewRevalidator(reader, analyzer), stores.OverrideEvidence,
             actionSafety: new ProtectedActionSafetyValidator(reader, analyzer));
