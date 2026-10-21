@@ -543,3 +543,38 @@ The test read `late.IsCompleted` once, right after pumping the owner, but the re
 registration can complete just after the owner goes idle. On a slow runner the test then waited for a
 checkpoint write that correctly never comes. It now waits for whichever comes first, the rejection or
 the late write, so it still catches a real admission bug. Scan finalisation itself was not at fault.
+
+## PM-019 — Search as a Review filter
+
+**Status:** Approved for 1.2 on 2026-10-21; not started. Builds on E4-S4 (1.1).
+
+**Priority:** 1.2.0
+
+**Origin:** Owner decision in the project thread "When to compute vectors for Likely matches",
+2026-10-21
+
+**Size:** Medium
+
+In 1.1, Likely matches (E4-S4) is a separate ranked list that leaves the other categories alone. In
+1.2 the same search becomes a filter over all of Review, so a user can narrow the whole scan to one
+subject, mark photos, search for something else and keep going.
+
+### Flow
+
+- Review has a search bar at the top. Typing a prompt such as "at sea" filters every category
+  (Identical copies, Look-alike, Maybe similar) to the photos that match, using a cutoff set from the
+  E3-S6 corpus.
+- A set is shown whole when any of its members matches, so Keep/Remove decisions are always made
+  with the full set in view.
+- Keep/Remove marks survive searching again and clearing the search. Clearing shows every photo
+  again, with the marks still in place.
+- Approve cleanup acts on every marked photo, including ones the current search hides. Its wording
+  and count say so.
+- Decide then whether the 1.1 ranked list folds into the filter or stays as a separate view.
+
+### Completion criteria
+
+- The filter reuses the E4-S4 ranking query; no second scoring path.
+- Selection, survivor rule and approval are unchanged by filtering; tests prove marks survive
+  search, re-search and clear.
+- The cutoff and its measured precision/recall on the corpus are recorded in the evidence.
