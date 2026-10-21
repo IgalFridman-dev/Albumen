@@ -131,11 +131,12 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         var operation = await inbox.CommandAsync(() =>
         {
             if (active is not { } operation) return null;
-            // While the photos are indexed, Cancel skips only the rest of the index:
+            // Once the photos are indexed, Cancel skips only the rest of the index:
             // the Exact and Near results are already complete.
-            if (operation.Indexing is { } indexing)
+            if (operation.SemanticStage)
             {
-                indexing.Cancel();
+                try { operation.Indexing?.Cancel(); }
+                catch (AggregateException) { /* The index still stops; its callbacks are its own. */ }
                 return null;
             }
             AcceptCancellation(operation);
@@ -483,12 +484,13 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         var rows = await inbox.CommandAsync(() =>
         {
             if (!ReferenceEquals(active, operation) || operation.Canceled || operation.Faulted) return default;
+            operation.SemanticStage = true;
             operation.Indexing = CancellationTokenSource.CreateLinkedTokenSource(operation.Token);
             return operation.Store.Snapshot(ScanStatus.Running, operation.Enumeration).Occurrences;
         }).ConfigureAwait(false);
         if (rows.IsDefault) return;
         var indexing = operation.Indexing!;
-        SemanticSnapshot result;
+        SemanticSnapshot? result = null;
         try
         {
             result = await indexer.IndexAsync(operation.Context, rows,
@@ -505,18 +507,20 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             await inbox.CommandAsync(() =>
             {
                 operation.Indexing = null;
-                return true;
+                return result is null || ApplySemantic(operation, result);
             }).ConfigureAwait(false);
             indexing.Dispose();
         }
-        await inbox.CommandAsync(() => ApplySemantic(operation, result)).ConfigureAwait(false);
     }
 
     private bool ApplySemantic(Operation operation, SemanticSnapshot semantic)
     {
-        if (!ReferenceEquals(active, operation) || operation.Finished || operation.Faulted) return false;
+        if (!ReferenceEquals(active, operation) || operation.Canceled || operation.Finished || operation.Faulted)
+            return false;
         operation.Semantic = semantic;
-        PublishResults(operation);
+        // Rows, groups and counts are unchanged: republish the current snapshot with the new state
+        // instead of rebuilding the Scan on the owner's thread.
+        Publish(current);
         return true;
     }
 
@@ -914,6 +918,8 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         public SemanticSnapshot Semantic { get; set; } = SemanticSnapshot.Idle;
         // Set while the photos are indexed; canceling it skips the rest of the index only.
         public CancellationTokenSource? Indexing { get; set; }
+        // From the index's start on, Cancel never cancels the Scan.
+        public bool SemanticStage { get; set; }
         public ScanLifecycleState LifecycleState { get; set; } = ScanLifecycleState.Preflight;
         public long LifecycleRevision { get; set; } = 1;
         public bool DurableStarted { get; set; }
