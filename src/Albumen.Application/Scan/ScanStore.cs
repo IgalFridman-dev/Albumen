@@ -179,7 +179,8 @@ internal sealed class ScanStore
                 || (result.Outcome.State == ScanStageState.Succeeded) != (result.Signature is not null)
                 || (row.Exact.State != ScanStageState.Succeeded
                     && (result.Signature is not null || result.Outcome.State != ScanStageState.NotApplicable))
-                || (result.Signature is not null && result.Signature.ImplementationRevision != batch.ImplementationRevision))
+                || (result.Signature is not null && result.Signature.ImplementationRevision != batch.ImplementationRevision)
+                || (result.Sharpness is { } sharpness && (result.Signature is null || !double.IsFinite(sharpness) || sharpness < 0)))
                 return new(false);
         }
 
@@ -193,6 +194,7 @@ internal sealed class ScanStore
             {
                 VisualFeatures = result.Outcome,
                 NearDuplicate = near,
+                Sharpness = result.Sharpness,
             };
         }
         nearGroups.Replace(batch.Results, occurrences.Values.OrderBy(row => row.Token.OccurrenceId).ToImmutableArray());
