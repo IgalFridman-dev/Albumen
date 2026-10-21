@@ -28,9 +28,11 @@ flowchart LR
   App --> Analysis
   App --> Sqlite
   App --> Windows
+  App --> Onnx
   Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature"] --> Application
   Sqlite["Infrastructure.Sqlite<br/>schema v5, journals, records"] --> Application
   Windows["Infrastructure.Windows<br/>Win32 scope/traversal, WIC decode,<br/>IFileOperation Recycle Bin"] --> Application
+  Onnx["Infrastructure.Onnx<br/>SigLIP 2 encoder on ONNX Runtime<br/>(1.1; not wired until E4-S3)"] --> Application
   Application["Albumen.Application<br/>workflows, coordinators, ports"] --> Domain["Albumen.Domain<br/>pure rules & policies"]
 ```
 
@@ -85,6 +87,6 @@ Key ideas:
 | `Albumen.Domain.Tests` | pure policies (survivor, scope, transitions) |
 | `Albumen.Application.Tests` | coordinators, workflows, fakes for ports |
 | `Albumen.Analysis.Tests` | hashing and perceptual signatures |
-| `Albumen.Infrastructure.Tests` | Win32/WIC/SQLite adapters + architecture rules |
+| `Albumen.Infrastructure.Tests` | Win32/WIC/SQLite/ONNX adapters + architecture rules |
 | `Albumen.Scenarios.Tests` | real WPF window, keyboard and automation flows |
 | `tests/tooling/*.Tests.ps1` | PowerShell tests for VM and release scripts |
