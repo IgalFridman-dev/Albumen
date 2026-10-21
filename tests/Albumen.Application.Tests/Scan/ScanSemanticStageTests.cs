@@ -133,6 +133,71 @@ public sealed class ScanSemanticStageTests
         Assert.Equal(SemanticSnapshot.Idle, fixture.Owner.Current.Semantic);
     }
 
+    [Theory]
+    [InlineData("new scan")]
+    [InlineData("invalidated")]
+    public async Task AReplacedScanStopsItsIndexAndPublishesNothingFromIt(string replacement)
+    {
+        var stopped = ScanTestData.Signal<bool>();
+        var late = new SemanticSnapshot(SemanticState.Ready, 2, 1, 1, "profile", "");
+        var calls = 0;
+        var indexer = new RecordingSemanticIndexer
+        {
+            Index = async (_, progress, token) =>
+            {
+                if (++calls > 1) return Ready;
+                await progress(Indexing);
+                await Task.Delay(Timeout.Infinite, token).ContinueWith(_ => { }, TaskScheduler.Default);
+                await progress(late);
+                stopped.TrySetResult(token.IsCancellationRequested);
+                return late;
+            },
+        };
+        await using var fixture = Fixture(new RecordingNearPipeline(), indexer);
+        await fixture.Start();
+        await fixture.Until(snapshot => snapshot.Semantic.State == SemanticState.Indexing);
+        var replaced = fixture.Owner.Current.Pin;
+        var published = new List<ScanSnapshot>();
+        fixture.Owner.SnapshotChanged += (_, snapshot) => published.Add(snapshot);
+
+        if (replacement == "new scan") await fixture.Start(scope: 2, rules: 2);
+        else await fixture.Pump(fixture.Owner.InvalidateAsync(2, null));
+        await fixture.Pump(stopped.Task);
+
+        Assert.True(await stopped.Task);
+        Assert.NotEmpty(published);
+        Assert.DoesNotContain(published, snapshot => snapshot.Semantic == late);
+        Assert.All(published.Where(snapshot => snapshot.Pin == replaced),
+            snapshot => Assert.Equal(SemanticSnapshot.Idle, snapshot.Semantic));
+    }
+
+    [Fact]
+    public async Task DisposingTheOwnerStopsTheIndexBeforeItSettles()
+    {
+        var returned = false;
+        var indexer = new RecordingSemanticIndexer
+        {
+            Index = async (_, progress, token) =>
+            {
+                await progress(Indexing);
+                await Task.Delay(Timeout.Infinite, token).ContinueWith(_ => { }, TaskScheduler.Default);
+                await progress(Ready);
+                returned = token.IsCancellationRequested;
+                return Ready;
+            },
+        };
+        await using var fixture = Fixture(new RecordingNearPipeline(), indexer);
+        await fixture.Start();
+        await fixture.Until(snapshot => snapshot.Semantic.State == SemanticState.Indexing);
+        var published = new List<ScanSnapshot>();
+        fixture.Owner.SnapshotChanged += (_, snapshot) => published.Add(snapshot);
+
+        await fixture.Pump(fixture.Owner.DisposeAsync().AsTask());
+
+        Assert.True(returned);
+        Assert.DoesNotContain(published, snapshot => snapshot.Semantic == Ready);
+    }
+
     private static CoordinatorFixture Fixture(INearDuplicatePipeline near, ISemanticIndexer indexer) =>
         new(new BoundedScanExecutor(new ScanTestEnumerator(2), new ScanTestReader(), new ScanTestAnalyzer()),
             nearDuplicates: near, semanticIndex: indexer);
