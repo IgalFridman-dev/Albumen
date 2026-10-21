@@ -578,3 +578,30 @@ subject, mark photos, search for something else and keep going.
 - Selection, survivor rule and approval are unchanged by filtering; tests prove marks survive
   search, re-search and clear.
 - The cutoff and its measured precision/recall on the corpus are recorded in the evidence.
+
+## PM-020 — Analyze each photo in one pass
+
+**Status:** Proposed 2026-10-21; not started. After 1.2.0.
+
+**Priority:** After the 1.2.0 release
+
+**Origin:** Owner comment on the E4-S3 design, 2026-10-21
+
+In 1.1 a Scan reads every photo up to three times, in three stages that each run over the whole
+folder: SHA-256 for identical copies, then the Near pass (one decode at 256 px for the difference hash
+and colour, one at 1024 px for sharpness, one photo at a time), then the SigLIP 2 vectors (E4-S3:
+hash again, one decode at 512 px, parallel workers). The stages are kept apart in 1.1 so a model
+failure or Cancel in the vector stage cannot touch the Exact and Near results.
+
+The proposal: one worker per photo reads, hashes and decodes it once, then computes the difference
+hash, sharpness and vector from that decode, with the stages still reporting separate outcomes.
+
+### Completion criteria
+
+- The cost of the extra reads and decodes is measured on the owner's PC and the Golden VM before any
+  change. Measured so far: the whole vector stage (hash, 512 px decode, encode) takes 73.5 ms per photo
+  on the Golden VM with 4 workers (200 photos at 1600x1200, peak working set 566 MB;
+  [E4-S3 evidence](../evidence/e4-s3/verification.md)). The share of that spent on the read and
+  decode, and any Near stage timing, are not measured yet.
+- If it is worth it: one pass per photo with the same per-stage outcomes and isolation, the same
+  Exact/Near/blur results on the labelled corpus, and a measured speed-up.

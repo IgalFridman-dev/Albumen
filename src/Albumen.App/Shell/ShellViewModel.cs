@@ -10,6 +10,7 @@ using Albumen.Application.Action;
 using Albumen.Application.LocalData;
 using Albumen.Application.Scan;
 using Albumen.Domain.Action;
+using Albumen.Application.Semantic;
 using Albumen.Application.Shell;
 using ScanSessionStatus = Albumen.Application.Scan.ScanStatus;
 using ReviewLevel = Albumen.App.Shell.ReviewNavigationLevel;
@@ -390,6 +391,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             ScanSessionStatus.Idle => "Not started",
             ScanSessionStatus.Checking => "Getting ready: checking the folder",
+            ScanSessionStatus.Running when scan.Semantic.State == SemanticState.Indexing =>
+                "Scanning: indexing photos",
             ScanSessionStatus.Running => scan.Enumeration.State is ScanStageState.Pending or ScanStageState.Running
                 ? "Scanning: finding photos"
                 : scan.Counts.Outstanding > 0 ? "Scanning: reading photos"
@@ -431,6 +434,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public bool HasReviewContinuation => ReviewContinuationText.Length != 0;
     public string ScanCountsText => photoSnapshot is { Scan.Counts: var count }
         ? FormatScanCounts(count) : string.Empty;
+    public string SemanticProgressText => photoSnapshot?.Scan.Semantic is { State: SemanticState.Indexing } semantic
+        ? $"{semantic.Indexed.ToString("N0", CultureInfo.InvariantCulture)} of {semantic.Total.ToString("N0", CultureInfo.InvariantCulture)} photos indexed. "
+            + "Cancel skips the rest; identical copies and look-alikes already found are kept."
+        : string.Empty;
+    public bool HasSemanticProgress => SemanticProgressText.Length != 0;
     public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
         ? "Scan complete: every file in the folder was included. Unsupported, failed, and canceled files are listed separately."
         : "Partial results: the scan is incomplete, so these results don't cover every file in the folder.";
@@ -877,7 +885,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (previousReviewStatusText != ReviewStatusText) OnPropertyChanged(nameof(ReviewStatusText));
         foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsChooseFolderPhase), nameof(IsScanPhase), nameof(IsReviewPhase), nameof(IsActionPhase),
             nameof(CanContinue), nameof(CanStartScan), nameof(CanScanFolder), nameof(CanOpenReview),
-            nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze),
+            nameof(RecursionSummary), nameof(ScanCountsText), nameof(SemanticProgressText), nameof(HasSemanticProgress), nameof(CoverageStatus), nameof(CouldNotAnalyze),
             nameof(ScanOutcomeSummaries), nameof(CanContinueReview), nameof(ContinueReviewHint),
             nameof(HasContinueReviewHint), nameof(ReviewContinuationText), nameof(HasReviewContinuation) })
             OnPropertyChanged(name);
