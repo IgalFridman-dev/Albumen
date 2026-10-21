@@ -605,3 +605,61 @@ hash, sharpness and vector from that decode, with the stages still reporting sep
   decode, and any Near stage timing, are not measured yet.
 - If it is worth it: one pass per photo with the same per-stage outcomes and isolation, the same
   Exact/Near/blur results on the labelled corpus, and a measured speed-up.
+
+## PM-021 — Find small objects in text search
+
+**Status:** Proposed 2026-10-21; not started. After 1.1.
+
+**Priority:** After the 1.1 release, decided on corpus numbers
+
+**Origin:** Owner's checks of E4-S4 (Likely matches) on his own photos, 2026-10-21
+
+The shipped model, SigLIP 2 base at 224 px, sees a photo squashed to 224 by 224. An object that fills
+the frame scores well (the owner's "jetski" and "food" photos are all listed, with nothing else), but
+a small object does not: "watch" listed 2 of about 8 photos with a wrist watch, and small flags were
+missed, with the flag photos scoring 0.076 to 0.083 in cosine where unrelated photos reach 0.0735.
+The cut-off cannot fix this; the signal is not there at that size.
+
+### Options
+
+- The 384 px or 512 px variants of the same SigLIP 2 family (`google/siglip2-base-patch16-384`,
+  `-512`): more pixels per object, the same text tower and the same vector size, at a higher per-photo
+  cost (the vision tower's work grows with the square of the side) and a larger download.
+- Keep 224 px and record the limit in the README.
+
+### Completion criteria
+
+- Each candidate is measured in the E4-S1 spike harness (`spikes/siglip2/`) on the E3-S6 labelled
+  corpus with a small-object set added (a watch, a flag, a phone in hand), reporting recall at the
+  E4-S4 cut-off, ms per photo and model size.
+- A change of model is an `EncoderProfile` change: vectors are recomputed on the next Scan, the
+  manifest and parity fixtures are regenerated, and the release inventory gate in `eng/release/`
+  approves the new files.
+
+## PM-022 — A likely match that cannot be opened looks clickable
+
+**Status:** Proposed 2026-10-21; not started. For the 1.2 UI pass (with PM-009 and PM-005).
+
+**Priority:** 1.2, with the other Review page changes
+
+**Origin:** Owner's check of E4-S4 (Likely matches) on his own photos, 2026-10-21: clicking some
+photos in the results list does nothing, neither compare nor a full-size view.
+
+### Likely cause, from the code
+
+The results list shows every photo the model ranks, but a card only opens a photo that is in an open
+Review set; that is where Keep / Remove lives. A photo "Not in any set" (no identical copy or
+look-alike, so nothing to decide) has its card disabled (`IsEnabled="{Binding CanOpen}"`), and the
+only cue is the small line "Not in any set: nothing to decide" under the thumbnail. The same happens
+when the photo's set was closed by a cleanup since the search. Disabled WPF buttons with a thumbnail
+inside do not look disabled, so the card reads as a broken click. The list also never shows a photo
+full size on its own: the view model's `OpenLikelyMatchAsync` only navigates to a set member.
+
+### Fix to consider
+
+- Open any listed photo in the preview, with the set's Keep / Remove only when it has a set, so a
+  click always does something.
+- Until then, make the disabled state visible (greyed thumbnail, the "nothing to decide" line as the
+  card's main text) and expose it to UI Automation.
+- Check the "weird quirks with some photos" the owner saw elsewhere in Review against the same cause
+  (a member whose set closed) before treating them as a separate bug.

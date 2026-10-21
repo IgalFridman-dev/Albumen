@@ -16,6 +16,8 @@ internal sealed record ModelManifest(
     int MaxTokens,
     int PadId,
     int Dimension,
+    double LogitScale,
+    double LogitBias,
     ModelFiles Files)
 {
     public const string FileName = "manifest.json";
@@ -42,6 +44,11 @@ internal sealed record ModelManifest(
         if (manifest.ImageSize <= 0 || manifest.MaxTokens < 2 || manifest.PadId < 0 || manifest.Dimension <= 0)
         {
             throw new JsonException("The model manifest has an invalid size, token or dimension value.");
+        }
+
+        if (!double.IsFinite(manifest.LogitScale) || manifest.LogitScale <= 0 || !double.IsFinite(manifest.LogitBias))
+        {
+            throw new JsonException("The model manifest has an invalid logit scale or bias.");
         }
 
         foreach (var file in manifest.All)

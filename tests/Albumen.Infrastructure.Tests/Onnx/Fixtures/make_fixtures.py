@@ -94,7 +94,8 @@ def main():
     files = {key: {"path": name, "length": (HERE / name).stat().st_size, "sha256": sha256(HERE / name)}
              for key, name in [("vision", "vision.onnx"), ("text", "text.onnx"), ("tokenizer", "tokenizer.model")]}
     manifest = {"schemaVersion": 1, "model": "fixture/tiny", "license": "MIT", "imageSize": IMAGE_SIZE,
-                "maxTokens": MAX_TOKENS, "padId": 0, "dimension": DIMENSION, "files": files}
+                "maxTokens": MAX_TOKENS, "padId": 0, "dimension": DIMENSION, "logitScale": 10.0, "logitBias": -1.0,
+                "files": files}
     (HERE / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (HERE / "expected.json").write_text(json.dumps({"prompts": prompts, "resize": resize_reference()}) + "\n",
                                         encoding="utf-8")

@@ -185,7 +185,9 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
             manifest.MaxTokens,
             manifest.PadId,
             manifest.Dimension,
-            PipelineRevision);
+            PipelineRevision,
+            manifest.LogitScale,
+            manifest.LogitBias);
         return (manifest, new(profile, null));
     }
 

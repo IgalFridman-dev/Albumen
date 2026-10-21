@@ -120,6 +120,7 @@ public sealed class OnnxVisionLanguageEncoderTests : IDisposable
     [InlineData("schemaVersion", "2")]
     [InlineData("dimension", "0")]
     [InlineData("license", "null")]
+    [InlineData("logitScale", "0")]
     [InlineData("unexpected", "1")]
     public void InvalidManifestFails(string property, string json)
     {

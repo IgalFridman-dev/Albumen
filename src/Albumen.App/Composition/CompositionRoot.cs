@@ -89,7 +89,7 @@ public static class CompositionRoot
             maximumEdge: 320);
         return new ShellViewModel(
             workflow, photoWorkflow, dialog, new SemanticClearingScanData(stores.ScanData, scan),
-            preview, thumbnails);
+            preview, thumbnails, new LikelyMatchesQuery(encoder, stores.Embeddings));
     }
 
     // Clearing the local Scan data removes the stored vectors too, so the shown Scan's
