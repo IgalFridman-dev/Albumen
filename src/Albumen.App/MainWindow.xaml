@@ -436,6 +436,25 @@
                 </Grid>
             </Border>
         </DataTemplate>
+        <!-- One likely match: thumbnail, name and the set it is in. Opening it shows it in
+             that set, where Keep / Remove works as usual; the list itself marks nothing. -->
+        <DataTemplate x:Key="LikelyMatchTemplate">
+            <Button Width="156" Margin="2,3" Padding="6" Click="OnOpenLikelyMatchClick"
+                    IsEnabled="{Binding CanOpen}"
+                    Style="{StaticResource Albumen.CardButton}"
+                    ToolTip="Open in its set"
+                    AutomationProperties.AutomationId="open-likely-match"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.PositionInSet="{Binding Photo.PositionInSet}"
+                    AutomationProperties.SizeOfSet="{Binding Photo.SizeOfSet}">
+                <StackPanel>
+                    <app:PhotoThumbnail Width="140" Height="105" Member="{Binding Photo}"
+                            Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    <TextBlock Margin="0,6,0,0" Text="{Binding Photo.FileName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.Caption}" Text="{Binding Context}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Button>
+        </DataTemplate>
         </ResourceDictionary>
     </Window.Resources>
 
@@ -1242,6 +1261,56 @@
                         </StackPanel>
                     </Expander>
                 </StackPanel>
+
+                <!-- Likely matches: a prompt ranks this Scan's photos. It is a list of its own and
+                     changes nothing in the kinds and sets below. -->
+                <Border x:Name="LikelyMatchesPanel" Margin="0,10,0,0" Padding="12" CornerRadius="12"
+                        DataContext="{Binding LikelyMatches}"
+                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                        BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                        AutomationProperties.Name="Likely matches">
+                    <StackPanel>
+                        <TextBlock Text="Find photos by what they show" Style="{StaticResource Albumen.SectionTitle}" />
+                        <DockPanel Margin="0,6,0,0">
+                            <Button x:Name="LikelyMatchesShowAllButton" DockPanel.Dock="Right" Content="Show all Review results"
+                                    MinHeight="34" Padding="14,4" Margin="8,0,0,0" Style="{StaticResource Albumen.Button}"
+                                    Command="{Binding ShowAllCommand}" Click="OnLikelyMatchesShowAllClick"
+                                    Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button x:Name="LikelyMatchesFindButton" DockPanel.Dock="Right" Content="Find" MinHeight="34" Padding="18,4"
+                                    Margin="8,0,0,0" Style="{StaticResource Albumen.PrimaryButton}"
+                                    Command="{Binding SearchCommand}" />
+                            <TextBox x:Name="LikelyMatchesPromptBox" MinHeight="34" VerticalContentAlignment="Center" Padding="6,2"
+                                     Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
+                                     IsEnabled="{Binding CanSearch}"
+                                     AutomationProperties.Name="Describe the photos to find"
+                                     AutomationProperties.HelpText="{x:Static shell:LikelyMatchesViewModel.PromptHelpText}">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
+                                </TextBox.InputBindings>
+                            </TextBox>
+                        </DockPanel>
+                        <TextBlock x:Name="LikelyMatchesStatusText" Margin="0,6,0,0" Text="{Binding StatusText}" TextWrapping="Wrap"
+                                   AutomationProperties.Name="Likely matches status" AutomationProperties.ItemStatus="{Binding StatusText}"
+                                   AutomationProperties.LiveSetting="Polite" />
+                        <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding ScopeText}" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding SelectionOutsideText}" TextWrapping="Wrap"
+                                   Visibility="{Binding HasSelectionOutside, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <ListBox x:Name="LikelyMatchesList" Margin="0,8,0,0" ItemsSource="{Binding Results}"
+                                 ItemTemplate="{StaticResource LikelyMatchTemplate}"
+                                 ScrollViewer.CanContentScroll="True"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                                 VirtualizingPanel.ScrollUnit="Item"
+                                 Visibility="{Binding HasResults, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                 AutomationProperties.Name="Likely matches in this Scan">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <VirtualizingStackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                        </ListBox>
+                    </StackPanel>
+                </Border>
 
                 <Grid x:Name="ReviewNavigationGrid" Height="300" Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
