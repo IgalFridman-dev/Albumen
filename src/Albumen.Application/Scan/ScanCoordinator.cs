@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Albumen.Application.Scope;
+using Albumen.Application.Semantic;
 using Albumen.Application.Shell;
 using Albumen.Domain.Scan;
 using Albumen.Domain.Scope;
@@ -22,6 +23,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
     private readonly IScanIdentityStore identities;
     private readonly IScanCheckpointStore checkpoints;
     private readonly INearDuplicatePipeline? nearDuplicates;
+    private readonly ISemanticIndexer? semanticIndex;
     private readonly HashSet<Operation> operations = [];
     private Operation? active;
     private ScanSnapshot current = ScanSnapshotProjector.Create(null, ScanStatus.Idle, Pending, [], []);
@@ -36,7 +38,8 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         IScanExecutor executor,
         IScanIdentityStore identities,
         IScanCheckpointStore checkpoints,
-        INearDuplicatePipeline? nearDuplicates = null)
+        INearDuplicatePipeline? nearDuplicates = null,
+        ISemanticIndexer? semanticIndex = null)
     {
         inbox = new ScanOwnerInbox(scheduler);
         this.preflight = preflight ?? throw new ArgumentNullException(nameof(preflight));
@@ -44,6 +47,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         this.identities = identities ?? throw new ArgumentNullException(nameof(identities));
         this.checkpoints = checkpoints ?? throw new ArgumentNullException(nameof(checkpoints));
         this.nearDuplicates = nearDuplicates;
+        this.semanticIndex = semanticIndex;
     }
 
     public ScanSnapshot Current => Volatile.Read(ref current);
@@ -127,6 +131,13 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         var operation = await inbox.CommandAsync(() =>
         {
             if (active is not { } operation) return null;
+            // While the photos are indexed, Cancel skips only the rest of the index:
+            // the Exact and Near results are already complete.
+            if (operation.Indexing is { } indexing)
+            {
+                indexing.Cancel();
+                return null;
+            }
             AcceptCancellation(operation);
             return operation;
         }).ConfigureAwait(false);
@@ -425,6 +436,12 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                     return true;
                 }).ConfigureAwait(false);
             }
+            if (semanticIndex is not null
+                && operation.Context.Options.Near == NearDuplicateMode.Conservative
+                && !operation.Token.IsCancellationRequested)
+            {
+                await IndexAsync(operation, semanticIndex).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (operation.Token.IsCancellationRequested) { }
         catch (Exception)
@@ -460,6 +477,61 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             }).ConfigureAwait(false);
         }
     }
+
+    private async Task IndexAsync(Operation operation, ISemanticIndexer indexer)
+    {
+        var rows = await inbox.CommandAsync(() =>
+        {
+            if (!ReferenceEquals(active, operation) || operation.Canceled || operation.Faulted) return default;
+            operation.Indexing = CancellationTokenSource.CreateLinkedTokenSource(operation.Token);
+            return operation.Store.Snapshot(ScanStatus.Running, operation.Enumeration).Occurrences;
+        }).ConfigureAwait(false);
+        if (rows.IsDefault) return;
+        var indexing = operation.Indexing!;
+        SemanticSnapshot result;
+        try
+        {
+            result = await indexer.IndexAsync(operation.Context, rows,
+                progress => inbox.CommandAsync(() => ApplySemantic(operation, progress)),
+                indexing.Token).ConfigureAwait(false);
+        }
+        catch (Exception) when (!operation.Token.IsCancellationRequested)
+        {
+            // Semantic failure stays semantic: the Scan finishes with its own outcome.
+            result = new(SemanticState.Failed, 0, 0, 0, null, "Preparing photos for search failed unexpectedly.");
+        }
+        finally
+        {
+            await inbox.CommandAsync(() =>
+            {
+                operation.Indexing = null;
+                return true;
+            }).ConfigureAwait(false);
+            indexing.Dispose();
+        }
+        await inbox.CommandAsync(() => ApplySemantic(operation, result)).ConfigureAwait(false);
+    }
+
+    private bool ApplySemantic(Operation operation, SemanticSnapshot semantic)
+    {
+        if (!ReferenceEquals(active, operation) || operation.Finished || operation.Faulted) return false;
+        operation.Semantic = semantic;
+        PublishResults(operation);
+        return true;
+    }
+
+    /// <summary>
+    /// The stored vectors were cleared with the local Scan data: a settled Scan returns to not prepared.
+    /// </summary>
+    public Task ForgetSemanticIndexAsync() =>
+        inbox.CommandAsync(() =>
+        {
+            if (active is not { Finished: true } operation || operation.Semantic.State == SemanticState.Idle)
+                return false;
+            operation.Semantic = SemanticSnapshot.Idle;
+            Publish(current);
+            return true;
+        });
 
     private StartupPreparation? PrepareStartup(Operation operation, ScopePreflightEvidence evidence)
     {
@@ -711,7 +783,11 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
 
     private void Publish(ScanSnapshot snapshot)
     {
-        snapshot = snapshot with { HasUnsettledWork = operations.Count != 0 };
+        snapshot = snapshot with
+        {
+            HasUnsettledWork = operations.Count != 0,
+            Semantic = active is { } owner && snapshot.Pin == owner.Context.Pin ? owner.Semantic : SemanticSnapshot.Idle,
+        };
         var terminalIsDurable = active is { DurableStarted: true } terminalOperation
             && snapshot.Pin == terminalOperation.Context.Pin
             && ScanTransitionPolicy.IsTerminal(terminalOperation.LifecycleState);
@@ -835,6 +911,9 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         public TaskCompletionSource Settled { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public StageOutcome Enumeration { get; set; } = Pending;
+        public SemanticSnapshot Semantic { get; set; } = SemanticSnapshot.Idle;
+        // Set while the photos are indexed; canceling it skips the rest of the index only.
+        public CancellationTokenSource? Indexing { get; set; }
         public ScanLifecycleState LifecycleState { get; set; } = ScanLifecycleState.Preflight;
         public long LifecycleRevision { get; set; } = 1;
         public bool DurableStarted { get; set; }
