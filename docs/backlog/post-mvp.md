@@ -570,3 +570,33 @@ hash, sharpness and vector from that decode, with the stages still reporting sep
   decode, and any Near stage timing, are not measured yet.
 - If it is worth it: one pass per photo with the same per-stage outcomes and isolation, the same
   Exact/Near/blur results on the labelled corpus, and a measured speed-up.
+
+## PM-021 — Find small objects in text search
+
+**Status:** Proposed 2026-10-21; not started. After 1.1.
+
+**Priority:** After the 1.1 release, decided on corpus numbers
+
+**Origin:** Owner's checks of E4-S4 (Likely matches) on his own photos, 2026-10-21
+
+The shipped model, SigLIP 2 base at 224 px, sees a photo squashed to 224 by 224. An object that fills
+the frame scores well (the owner's "jetski" and "food" photos are all listed, with nothing else), but
+a small object does not: "watch" listed 2 of about 8 photos with a wrist watch, and small flags were
+missed, with the flag photos scoring 0.076 to 0.083 in cosine where unrelated photos reach 0.0735.
+The cut-off cannot fix this; the signal is not there at that size.
+
+### Options
+
+- The 384 px or 512 px variants of the same SigLIP 2 family (`google/siglip2-base-patch16-384`,
+  `-512`): more pixels per object, the same text tower and the same vector size, at a higher per-photo
+  cost (the vision tower's work grows with the square of the side) and a larger download.
+- Keep 224 px and record the limit in the README.
+
+### Completion criteria
+
+- Each candidate is measured in the E4-S1 spike harness (`spikes/siglip2/`) on the E3-S6 labelled
+  corpus with a small-object set added (a watch, a flag, a phone in hand), reporting recall at the
+  E4-S4 cut-off, ms per photo and model size.
+- A change of model is an `EncoderProfile` change: vectors are recomputed on the next Scan, the
+  manifest and parity fixtures are regenerated, and the release inventory gate in `eng/release/`
+  approves the new files.
