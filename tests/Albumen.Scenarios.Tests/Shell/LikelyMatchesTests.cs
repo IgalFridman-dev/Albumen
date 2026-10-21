@@ -20,12 +20,17 @@ public sealed class LikelyMatchesTests
     [InlineData(SemanticState.Indexing, false, "Getting photos ready for search: 3 of 6 ready.")]
     [InlineData(SemanticState.Ready, true, "Describe what's in a photo, for example “at sea”, and press Enter.")]
     [InlineData(SemanticState.Empty, false, "No photo in this Scan could be prepared for search.")]
-    [InlineData(SemanticState.Unavailable, false, "Search isn't installed: the model files are missing. Everything else in Review works.")]
+    [InlineData(SemanticState.Unavailable, false, "Search isn't installed: The model file text.onnx is not installed. Everything else in Review works.")]
     [InlineData(SemanticState.Failed, false, "Search isn't available for this Scan: The photo search data could not be saved. Everything else in Review works.")]
     public void EachSearchStateHasItsOwnWordsAndOnlyReadyCanSearch(SemanticState state, bool canSearch, string text)
     {
         var fixture = new Fixture(index: new(state, 6, 3, 3, Fixture.Profile.Fingerprint,
-            state == SemanticState.Failed ? "The photo search data could not be saved." : ""));
+            state switch
+            {
+                SemanticState.Failed => "The photo search data could not be saved.",
+                SemanticState.Unavailable => "The model file text.onnx is not installed.",
+                _ => "",
+            }));
 
         Assert.Equal(text, fixture.Matches.StatusText);
         Assert.Equal(canSearch, fixture.Matches.CanSearch);

@@ -85,7 +85,7 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
                     $"Getting photos ready for search: {Count(index.Indexed)} of {Count(index.Total)} ready.",
                 SemanticState.Empty => "No photo in this Scan could be prepared for search.",
                 SemanticState.Unavailable =>
-                    "Search isn't installed: the model files are missing. Everything else in Review works.",
+                    $"Search isn't installed: {Reason(index.Reason)} Everything else in Review works.",
                 SemanticState.Failed =>
                     $"Search isn't available for this Scan: {Reason(index.Reason)} Everything else in Review works.",
                 _ => ReadyText,
