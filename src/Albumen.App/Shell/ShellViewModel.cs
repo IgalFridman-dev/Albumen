@@ -1431,7 +1431,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             ReviewCategoryKind.Exact => "The files are identical, byte for byte.",
             ReviewCategoryKind.Uncertain when similarity?.Cosine is not null =>
-                "Similar content: matched by what the photos show, not by their pixels",
+                "Similar content: matched by what the photos show, not by their pixels.",
             ReviewCategoryKind.Near or ReviewCategoryKind.Uncertain when similarity is not null =>
                 $"Picture difference {similarity.HammingDistance.ToString(CultureInfo.InvariantCulture)}, color difference {similarity.ColorDistance.ToString(CultureInfo.InvariantCulture)} (lower is closer)",
             _ => unavailable,

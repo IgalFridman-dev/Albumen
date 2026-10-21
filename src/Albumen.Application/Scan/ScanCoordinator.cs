@@ -541,7 +541,8 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             matches = await matcher.MatchAsync(operation.Context.Pin.ScanId, start.Profile, start.Contents,
                 start.Matching.Token).ConfigureAwait(false);
         }
-        catch (Exception) when (!operation.Token.IsCancellationRequested)
+        catch (Exception exception) when (exception is not OperationCanceledException
+            || !operation.Token.IsCancellationRequested)
         {
             // Canceled or failed: Review shows the hash sets only.
         }

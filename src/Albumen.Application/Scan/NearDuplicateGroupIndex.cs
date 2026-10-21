@@ -9,13 +9,16 @@ namespace Albumen.Application.Scan;
 internal sealed class NearDuplicateGroupIndex
 {
     private readonly Dictionary<string, PublishedGroup> published = [];
-    private ImmutableArray<NearFeatureResult> results = [];
+    // The analyzed photos and their hash relationships, kept so model matches reuse them.
+    private ImmutableArray<NearFeatureResult> successful = [];
+    private ImmutableArray<NearDuplicateEvidence> relationships = [];
     private ImmutableArray<EmbeddingMatch> matches = [];
     private ImmutableArray<CandidateGroupProjection> projections = [];
 
     private NearDuplicateGroupIndex(NearDuplicateGroupIndex source)
     {
-        results = source.results;
+        successful = source.successful;
+        relationships = source.relationships;
         matches = source.matches;
         projections = source.projections;
         foreach (var pair in source.published) published.Add(pair.Key, pair.Value);
@@ -27,7 +30,22 @@ internal sealed class NearDuplicateGroupIndex
 
     public void Replace(ImmutableArray<NearFeatureResult> results, ImmutableArray<ScanFileOccurrence> rows)
     {
-        this.results = results;
+        successful = results
+            .Where(result => result.Outcome.State == ScanStageState.Succeeded && result.Signature is not null)
+            .OrderBy(result => result.Token.OccurrenceId)
+            .ToImmutableArray();
+        var related = ImmutableArray.CreateBuilder<NearDuplicateEvidence>();
+        for (var leftIndex = 0; leftIndex < successful.Length; leftIndex++)
+        for (var rightIndex = leftIndex + 1; rightIndex < successful.Length; rightIndex++)
+        {
+            var left = successful[leftIndex];
+            var right = successful[rightIndex];
+            if (SameBytes(left.Content!, right.Content!)) continue;
+            var evidence = NearDuplicateThresholds.Classify(
+                left.Signature!, right.Signature!, left.Token, right.Token);
+            if (evidence.Kind != NearRelationshipKind.NotRelated) related.Add(evidence);
+        }
+        relationships = related.ToImmutable();
         matches = [];
         Build(rows);
     }
@@ -41,28 +59,12 @@ internal sealed class NearDuplicateGroupIndex
 
     private void Build(ImmutableArray<ScanFileOccurrence> rows)
     {
-        var successful = results
-            .Where(result => result.Outcome.State == ScanStageState.Succeeded && result.Signature is not null)
-            .OrderBy(result => result.Token.OccurrenceId)
-            .ToArray();
-        var relationships = new List<NearDuplicateEvidence>();
-        for (var leftIndex = 0; leftIndex < successful.Length; leftIndex++)
-        for (var rightIndex = leftIndex + 1; rightIndex < successful.Length; rightIndex++)
-        {
-            var left = successful[leftIndex];
-            var right = successful[rightIndex];
-            if (SameBytes(left.Content!, right.Content!)) continue;
-            var evidence = NearDuplicateThresholds.Classify(
-                left.Signature!, right.Signature!, left.Token, right.Token);
-            if (evidence.Kind != NearRelationshipKind.NotRelated) relationships.Add(evidence);
-        }
-
         // Look-alike sets come from the hash alone, so they are the same with or without the model.
         // The model's matches only add Maybe-similar sets and pairs. Its links merge after every hash
         // link, so each hash merge happens exactly as without it; a Look-alike set that then takes in
         // a model match appears again inside that Maybe-similar set, and stays Look-alike on its own.
         var hash = Projections(relationships, rows);
-        var model = ModelRelationships(successful);
+        var model = ModelRelationships();
         var all = model.Count == 0 ? hash : Projections([.. relationships, .. model], rows);
         projections = hash.Where(value => value.Category == CandidateCategory.NearDuplicate)
             .Concat(all.Where(value => value.Category != CandidateCategory.NearDuplicate))
@@ -73,7 +75,7 @@ internal sealed class NearDuplicateGroupIndex
 
     // A model match relates a pair only where the hash does not: a pair the hash calls Near or
     // Uncertain keeps the hash's evidence.
-    private List<NearDuplicateEvidence> ModelRelationships(NearFeatureResult[] successful)
+    private List<NearDuplicateEvidence> ModelRelationships()
     {
         var model = new List<NearDuplicateEvidence>();
         if (matches.IsDefaultOrEmpty) return model;
