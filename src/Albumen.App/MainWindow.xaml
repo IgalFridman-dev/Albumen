@@ -1296,6 +1296,7 @@
                         <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding SelectionOutsideText}" TextWrapping="Wrap"
                                    Visibility="{Binding HasSelectionOutside, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <ListBox x:Name="LikelyMatchesList" Margin="0,8,0,0" ItemsSource="{Binding Results}"
+                                 PreviewMouseWheel="OnReviewListPreviewMouseWheel" PreviewKeyDown="OnReviewListPreviewKeyDown"
                                  ItemTemplate="{StaticResource LikelyMatchTemplate}"
                                  ScrollViewer.CanContentScroll="True"
                                  ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled"
