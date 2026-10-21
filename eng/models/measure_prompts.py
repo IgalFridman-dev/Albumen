@@ -6,9 +6,10 @@ size, then [-1, 1]) and a bare prompt becomes the caption "a photo of …", like
 
     python measure_prompts.py --photos <folder> --prompts jetski computer flag food
 
-Prints, per prompt, the best-scoring photos with the model's probability and cosine, then how
-many photos pass each candidate cut-off. Share that output; file names stay on the PC unless you
-paste them.
+Prints, per prompt, the best-scoring photos with the model's probability and cosine, marks with *
+the ones the app would list (LikelyMatchesQuery's rule: within a fiftieth of the best photo's odds
+and at least 0.01%), then how many photos pass each candidate cut-off. Share that output; file
+names stay on the PC unless you paste them.
 """
 import argparse
 from pathlib import Path
@@ -22,6 +23,8 @@ MODEL = "google/siglip2-base-patch16-224"
 MAX_LENGTH = 64
 TEMPLATE = "a photo of "
 CUT_OFFS = [0.5, 0.3, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005]
+MINIMUM_SCORE = 0.0001  # LikelyMatchesQuery.MinimumScore
+LEAST_ODDS_RELATIVE_TO_BEST = 1 / 50  # LikelyMatchesQuery.LeastOddsRelativeToBest
 
 
 def preprocess(path, size):
@@ -67,11 +70,14 @@ def main():
         with torch.no_grad():
             text = unit(model.text_model(input_ids=tokens["input_ids"]).pooler_output.numpy())[0]
         cosines = images @ text
-        probabilities = 1 / (1 + np.exp(-(scale * cosines + bias)))
+        logits = scale * cosines + bias
+        probabilities = 1 / (1 + np.exp(-logits))
+        floor = max(np.log(MINIMUM_SCORE / (1 - MINIMUM_SCORE)), logits.max() + np.log(LEAST_ODDS_RELATIVE_TO_BEST))
+        listed = logits >= floor
         order = np.argsort(-cosines)
-        print(f"\n== {caption!r}")
-        for i in order[: args.top]:
-            print(f"  p={probabilities[i] * 100:6.2f}%  cos={cosines[i]:.4f}  {files[i].name}")
+        print(f"\n== {caption!r}: the app lists {int(listed.sum())} photos (down to cos={(floor - bias) / scale:.4f})")
+        for i in order[: max(args.top, int(listed.sum()))]:
+            print(f"  {'*' if listed[i] else ' '} p={probabilities[i] * 100:6.2f}%  cos={cosines[i]:.4f}  {files[i].name}")
         counts = "  ".join(f"p>={c:g}: {int((probabilities >= c).sum())}" for c in CUT_OFFS)
         print(f"  photos passing: {counts}")
         print(f"  cosine median={np.median(cosines):.4f} 90th={np.percentile(cosines, 90):.4f} max={cosines.max():.4f}")

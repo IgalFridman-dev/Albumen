@@ -54,7 +54,7 @@ public sealed class LikelyMatchesTests
         await fixture.SearchAsync("  at   sea ");
 
         Assert.True(fixture.Matches.IsActive);
-        Assert.Equal("5 likely matches in this Scan for “at sea”", fixture.Matches.StatusText);
+        Assert.Equal("5 likely matches in this Scan for “at sea”, most likely first", fixture.Matches.StatusText);
         Assert.Equal([1L, 12L, 21L, 22L, 50L], Ids(fixture));
         Assert.Equal(["Identical copies set 1", "Look-alike set 1", "Maybe similar set 1", "Maybe similar set 1",
             "Not in any set: nothing to decide"], Items(fixture).Select(item => item.Context));
@@ -280,13 +280,13 @@ public sealed class LikelyMatchesTests
         }
     }
 
-    // With scale 100 and bias -10 a photo matches at cosine 0.1 and up: "at sea" ranks the grouped
-    // photos (2 falls below) and photo 50; "lone" finds only 50.
+    // Photos within ln 50 / 100 = 0.039 cosine of the best one are listed: "at sea" ranks the grouped
+    // photos (2 falls far below) and photo 50; "lone" finds only 50.
     private sealed class PromptScores : IEmbeddingStore
     {
         private static readonly Dictionary<long, (float AtSea, float Lone)> Scores = new()
         {
-            [1] = (0.3f, 0), [2] = (0.01f, 0), [12] = (0.25f, 0), [21] = (0.2f, 0), [22] = (0.2f, 0), [50] = (0.15f, 0.5f),
+            [1] = (0.3f, 0), [2] = (0.01f, 0), [12] = (0.29f, 0), [21] = (0.28f, 0), [22] = (0.28f, 0), [50] = (0.27f, 0.5f),
         };
 
         public ValueTask ClearAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
