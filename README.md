@@ -6,7 +6,7 @@
 ![C#](https://img.shields.io/badge/C%23-14-239120)
 ![Offline](https://img.shields.io/badge/network-none-success)
 
-**Find duplicate photos on Windows, review each group, and send only what you approve to the Recycle Bin.**
+**Find duplicate and look-alike photos on Windows, search them by what they show, and send only what you approve to the Recycle Bin.**
 
 *Albumen was called PhotoSift until October 2026. It was renamed because another Windows duplicate-photo app already uses that name.*
 
@@ -14,8 +14,10 @@
 
 Albumen is a privacy-first desktop app for Windows 11 built with .NET 10, C# 14 and WPF. It scans one
 local folder for byte-identical and conservatively near-identical JPEG/PNG images, groups them for
-review, and moves only the files you explicitly approve to the Recycle Bin. It works fully offline,
-never deletes permanently, and keeps a durable record of every action it takes.
+review, and moves only the files you explicitly approve to the Recycle Bin. Since 1.1 an on-device
+SigLIP 2 image model also finds photos of the same moment that the hash misses and lets you search the
+scan by a short description, and a classical sharpness measure points out the sharpest photo of a set.
+It works fully offline, never deletes permanently, and keeps a durable record of every action it takes.
 
 | 1. Choose a folder | 2. Approve exactly what goes | 3. See every outcome |
 |---|---|---|
@@ -44,6 +46,9 @@ Deleting someone's photos is a one-way door, so Albumen is designed around one q
 |---|---|
 | **Exact duplicates** | Streaming SHA-256 over file bytes; hard links are recognized as aliases of the same file, not as copies. |
 | **Near duplicates** | Managed dHash plus a color signature with conservative thresholds; borderline pairs are left ungrouped. |
+| **Maybe similar** | SigLIP 2 photo vectors (ONNX Runtime, on the CPU) join photos whose cosine is high but whose hash differs, such as a burst where the subject moved. These sets are never pre-marked. |
+| **Text search** | "Find photos by what they show" ranks the scan's photos against a short prompt by brute-force cosine over the stored vectors: no vector database. It only lists photos; it marks nothing. |
+| **Sharpest photo** | A tiled variance-of-Laplacian measure on the decoded photo; "sharpest" is the first reason on a set's suggested best photo. |
 | **Guided workflow** | Four steps (Choose folder → Scan → Review → Clean up), each unlocked only when the previous one is valid. The folder and the scan options share one screen. |
 | **Safe scope** | Preflight rejects network shares, cloud-only placeholders and protected system folders before scanning. |
 | **Review** | Exact and Near categories, virtualized groups, bounded previews, keyboard navigation and a suggested survivor you can override. |
@@ -62,8 +67,10 @@ flowchart LR
   App --> Analysis
   App --> Sqlite
   App --> Windows
-  Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature"] --> Application
-  Sqlite["Infrastructure.Sqlite<br/>schema v5, journals, records"] --> Application
+  App --> Onnx
+  Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature<br/>sharpness"] --> Application
+  Sqlite["Infrastructure.Sqlite<br/>schema v6, journals, records, photo vectors"] --> Application
+  Onnx["Infrastructure.Onnx<br/>SigLIP 2 encoder on ONNX Runtime"] --> Application
   Windows["Infrastructure.Windows<br/>Win32 scope and traversal, WIC decode,<br/>IFileOperation Recycle Bin"] --> Application
   Application["Albumen.Application<br/>workflows, coordinators, ports"] --> Domain["Albumen.Domain<br/>pure rules and policies"]
 ```
@@ -75,6 +82,7 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 |---|---|
 | UI | WPF with the Fluent theme, MVVM, UI Automation for keyboard and screen reader support |
 | Imaging | Windows Imaging Component (WIC) for orientation-aware decoding and bounded previews |
+| Image model | SigLIP 2 base patch16-224 exported to ONNX, run by `Microsoft.ML.OnnxRuntime` (CPU); SentencePiece tokenizer from `Microsoft.ML.Tokenizers`; files pinned by SHA-256 in `models/manifest.json` |
 | File system | Win32 traversal and identity APIs, `IFileOperation` for Recycle Bin moves |
 | Storage | SQLite (`Microsoft.Data.Sqlite`) with forward-only schema migrations and WAL |
 | Tests | xUnit v3 (5 projects), script tests for the PowerShell tooling |
@@ -82,9 +90,9 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 
 ## Quality and verification
 
-- **About 23,500 lines of production C# and 40,000 lines of tests** across Domain, Application,
+- **About 25,600 lines of production C# and 43,800 lines of tests** across Domain, Application,
   Analysis, Infrastructure and real-window WPF scenario suites.
-- **Full suite: 1,888 / 1,888 passing** in the official gate on the release candidate.
+- **Full suite: 2,070 / 2,070 passing** in the official gate on the last 1.1 feature commit.
 - **Isolated verification VM.** Official gates run in a Hyper-V VM with no network adapter, restored
   from a known checkpoint for every run. This proves the offline guarantee and keeps runs reproducible.
 - **Reproducible release.** Two independent locked, self-contained publishes are compared file by
@@ -97,7 +105,8 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 ## Getting started
 
 **To run it** you need Windows 11 x64 and nothing else: the release is self-contained, so no .NET
-install is required.
+install is required. The 1.1 ZIP is about 1.1 GB because it carries the image model (1,112 MB of
+model files) and the Visual C++ runtime that ONNX Runtime needs.
 
 1. Download the ZIP from the latest release and extract it to a local folder.
 2. Run `Start-Albumen.cmd`. It checks every packaged file against its manifest, then starts the app.
@@ -117,19 +126,34 @@ Some Infrastructure and WPF scenario tests exercise real Windows APIs and expect
 the official gate scripts live in [`eng/verification/`](eng/verification/) and are described in
 [`.claude/skills/verify-gates/SKILL.md`](.claude/skills/verify-gates/SKILL.md).
 
-## Known limitations (V1)
+## Measured numbers
+
+Raw observations, not benchmarks or promises. The verification VM has 2 CPUs and 4 GiB and no network.
+
+| What | Number |
+|---|---|
+| Model files | 1,112 MB (vision 372 MB, text 736 MB, tokenizer 4 MB) |
+| Indexing a photo during the scan | 73.5 ms per photo in the VM (4 workers, 200 photos); 25.6 ms on a desktop PC with 24 workers |
+| Peak memory while indexing | 566 MB working set in the VM |
+| One text search over 10,000 photos | 70 ms (median) in the VM |
+
+## Known limitations
 
 - Accessibility work is not complete. The local-data warning now raises a screen-reader
   announcement, but that has not yet been checked with Narrator (PM-002, PM-005). Albumen makes
   no accessibility-compliance claim.
 - HEIF support depends on the installed Windows codec and is best effort; JPEG and PNG are supported.
 - Near-duplicate quality was validated on a small labeled corpus. Human review is always required.
+- The Maybe-similar cosine threshold (0.92) and the blur thresholds are provisional: they have not
+  yet been measured on a labelled set of real photos.
+- Text search misses small objects in the frame (the model sees the photo at 224 px), and every scan
+  recomputes the photo vectors; nothing is reused across scans.
 - A first scan of 300 images took 12.1 s on a 2-CPU, 4 GiB VM. That is an observation, not a benchmark.
 
 ## Roadmap
 
-- **V1.1:** blur detection as review evidence, and reuse of previously computed signatures across scans.
-- **V1.2:** on-device semantic "likely matches" using a local image encoder, still fully offline.
+- **1.2:** accessibility pass, dark mode, search as a Review filter, and reuse of computed signatures
+  and vectors across scans.
 
 Deferred work is tracked in [`docs/backlog/post-mvp.md`](docs/backlog/post-mvp.md).
 
@@ -154,8 +178,8 @@ Product planning used the BMAD Method (brief → PRD → UX → architecture →
 ## Repository layout
 
 ```text
-src/            6 production projects: Domain, Application, Analysis,
-                Infrastructure.Sqlite, Infrastructure.Windows, App
+src/            7 production projects: Domain, Application, Analysis,
+                Infrastructure.Sqlite, Infrastructure.Windows, Infrastructure.Onnx, App
 tests/          5 xUnit v3 projects + PowerShell tooling tests
 eng/            Hyper-V verification gates and release packaging scripts
 docs/           HOW-IT-WORKS and the deferred-work backlog
