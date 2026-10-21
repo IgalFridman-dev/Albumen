@@ -225,7 +225,7 @@ public sealed class LikelyMatchesTests
     private sealed class Fixture
     {
         public static readonly EncoderProfile Profile = new(
-            "siglip2-test", new string('A', 64), new string('B', 64), new string('C', 64), 512, 224, 64, 0, 3, 1);
+            "siglip2-test", new string('A', 64), new string('B', 64), new string('C', 64), 512, 224, 64, 0, 3, 1, 100, -10);
 
         public static readonly SemanticSnapshot Ready = new(SemanticState.Ready, 6, 6, 6, Profile.Fingerprint, "");
 
@@ -273,14 +273,15 @@ public sealed class LikelyMatchesTests
             Prompts.Add(prompt);
             return new(prompt switch
             {
-                "at sea" => new float[] { 1, 0, 0 },
-                "lone" => [0, 1, 0],
+                "a photo of at sea" => new float[] { 1, 0, 0 },
+                "a photo of lone" => [0, 1, 0],
                 _ => [0, 0, 1],
             }, null);
         }
     }
 
-    // "at sea" ranks the grouped photos (2 falls below the minimum) and photo 50; "lone" finds only 50.
+    // With scale 100 and bias -10 a photo matches at cosine 0.1 and up: "at sea" ranks the grouped
+    // photos (2 falls below) and photo 50; "lone" finds only 50.
     private sealed class PromptScores : IEmbeddingStore
     {
         private static readonly Dictionary<long, (float AtSea, float Lone)> Scores = new()

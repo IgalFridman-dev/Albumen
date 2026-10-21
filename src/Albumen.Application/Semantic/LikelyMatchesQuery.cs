@@ -19,7 +19,7 @@ public enum LikelyMatchesOutcome
     Failed,
 }
 
-/// <summary>One photo of the Scan and its cosine score against the prompt.</summary>
+/// <summary>One photo of the Scan and the model's probability that the prompt fits it.</summary>
 public sealed record LikelyMatch(long OccurrenceId, float Score);
 
 public sealed record LikelyMatchesResult(
@@ -45,10 +45,16 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
     public const int MaximumPromptLength = 60;
 
     /// <summary>
-    /// Lowest cosine shown as a likely match. Provisional: chosen from SigLIP 2's typical
-    /// photo-to-prompt scores, to be measured on the E3-S6 labelled corpus.
+    /// Lowest probability shown as a likely match: the model finds the prompt more likely to fit
+    /// the photo than not. To be measured on the E3-S6 labelled corpus.
     /// </summary>
-    public const float MinimumScore = 0.06f;
+    public const float MinimumScore = 0.5f;
+
+    /// <summary>
+    /// SigLIP was trained on captions, so a bare word such as "jetski" is encoded as the caption
+    /// "a photo of jetski". A prompt that already says "photo" is encoded as written.
+    /// </summary>
+    public const string PromptTemplate = "a photo of ";
 
     // Scores equal to this many decimals are a tie, broken by occurrence id, so CPU rounding
     // differences between machines cannot reorder near-equal photos.
@@ -90,7 +96,8 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
                 "The search model changed after this Scan. Scan again to search.");
 
         // The first prompt loads the text model, which takes about a second: keep it off the caller.
-        var text = await Task.Run(() => encoder.EncodeText(profile, normalized), cancellationToken).ConfigureAwait(false);
+        var caption = normalized.Contains("photo", StringComparison.OrdinalIgnoreCase) ? normalized : PromptTemplate + normalized;
+        var text = await Task.Run(() => encoder.EncodeText(profile, caption), cancellationToken).ConfigureAwait(false);
         if (text.Failure is { } failure) return Failure(normalized, failure);
 
         var content = scan.Occurrences
@@ -105,7 +112,7 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
                 if (!content.TryGetValue(stored.OccurrenceId, out var sha256)
                     || !string.Equals(sha256, stored.Sha256, StringComparison.Ordinal))
                     return;
-                var score = MathF.Round(Dot(text.Vector.Span, stored.Vector), ScoreDecimals);
+                var score = MathF.Round(Probability(profile, Dot(text.Vector.Span, stored.Vector)), ScoreDecimals);
                 if (score >= MinimumScore) scores.Add(new(stored.OccurrenceId, score));
             }, cancellationToken).ConfigureAwait(false);
         }
@@ -125,6 +132,10 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
     private static LikelyMatchesResult Failure(string prompt, EncoderFailure failure) => LikelyMatchesResult.Of(
         failure.Kind == EncoderFailureKind.Unavailable ? LikelyMatchesOutcome.Unavailable : LikelyMatchesOutcome.Failed,
         prompt, failure.Reason);
+
+    // The model's own reading of a cosine: sigmoid(scale * cosine + bias), as it was trained.
+    private static float Probability(EncoderProfile profile, float cosine) =>
+        (float)(1 / (1 + Math.Exp(-(profile.LogitScale * cosine + profile.LogitBias))));
 
     // Both vectors are L2-normalized, so their dot product is the cosine.
     private static float Dot(ReadOnlySpan<float> left, ReadOnlySpan<float> right)

@@ -10,7 +10,7 @@ namespace Albumen.Infrastructure.Tests.Sqlite;
 public sealed class SqliteEmbeddingStoreTests
 {
     private static readonly EncoderProfile Profile = new(
-        "siglip2-test", new string('A', 64), new string('B', 64), new string('C', 64), 512, 224, 64, 0, 4, 1);
+        "siglip2-test", new string('A', 64), new string('B', 64), new string('C', 64), 512, 224, 64, 0, 4, 1, 100, -10);
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 

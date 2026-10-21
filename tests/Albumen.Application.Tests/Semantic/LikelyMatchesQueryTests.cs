@@ -10,7 +10,7 @@ namespace Albumen.Application.Tests.Semantic;
 public sealed class LikelyMatchesQueryTests
 {
     private static readonly EncoderProfile Profile = new(
-        "siglip2-test", new string('A', 64), new string('B', 64), new string('C', 64), 512, 224, 64, 0, 2, 1);
+        "siglip2-test", new string('A', 64), new string('B', 64), new string('C', 64), 512, 224, 64, 0, 2, 1, 100, -10);
 
     private static readonly SemanticSnapshot Ready = new(SemanticState.Ready, 4, 4, 4, Profile.Fingerprint, "");
 
@@ -18,24 +18,27 @@ public sealed class LikelyMatchesQueryTests
     public async Task PhotosAreRankedByDescendingScoreWithTiesByOccurrenceId()
     {
         var fixture = new Fixture();
-        fixture.Store.Add(4, Unit(0.5f));
-        fixture.Store.Add(1, Unit(0.9f));
-        fixture.Store.Add(3, Unit(0.5f));
-        fixture.Store.Add(2, Unit(0.7f));
+        fixture.Store.Add(4, Unit(0.11f));
+        fixture.Store.Add(1, Unit(0.15f));
+        fixture.Store.Add(3, Unit(0.11f));
+        fixture.Store.Add(2, Unit(0.13f));
 
         var result = await fixture.RankAsync("at sea");
 
         Assert.Equal(LikelyMatchesOutcome.Matches, result.Outcome);
         Assert.Equal([1L, 2L, 3L, 4L], result.Matches.Select(match => match.OccurrenceId));
-        Assert.Equal(0.9f, result.Matches[0].Score, 5);
+        // The score is the model's probability: sigmoid(100 * 0.11 - 10).
+        Assert.Equal(0.73106f, result.Matches[2].Score, 5);
+        Assert.Equal(result.Matches[2].Score, result.Matches[3].Score);
     }
 
     [Fact]
     public async Task PhotosBelowTheMinimumScoreAreLeftOutAndNoneLeftIsNoMatches()
     {
         var fixture = new Fixture();
-        fixture.Store.Add(1, Unit(LikelyMatchesQuery.MinimumScore));
-        fixture.Store.Add(2, Unit(LikelyMatchesQuery.MinimumScore - 0.001f));
+        // With scale 100 and bias -10 the probability reaches MinimumScore (0.5) at cosine 0.1.
+        fixture.Store.Add(1, Unit(0.1f));
+        fixture.Store.Add(2, Unit(0.099f));
         fixture.Store.Add(3, Unit(-0.4f));
 
         var some = await fixture.RankAsync("at sea");
@@ -59,7 +62,7 @@ public sealed class LikelyMatchesQueryTests
         var second = await fixture.RankAsync("at sea");
 
         Assert.Equal(first.Matches, second.Matches);
-        Assert.Equal(["at sea", "at sea"], fixture.Encoder.Prompts);
+        Assert.Equal(["a photo of at sea", "a photo of at sea"], fixture.Encoder.Prompts);
         Assert.Equal(0, fixture.Encoder.Images);
         Assert.Equal([(fixture.ScanId, Profile), (fixture.ScanId, Profile)], fixture.Store.Reads);
     }
@@ -88,7 +91,17 @@ public sealed class LikelyMatchesQueryTests
         var rejected = await fixture.RankAsync(longest + "b");
 
         Assert.Equal((LikelyMatchesOutcome.TooLong, longest + "b"), (rejected.Outcome, rejected.Prompt));
-        Assert.Equal([longest], fixture.Encoder.Prompts);
+        Assert.Equal([LikelyMatchesQuery.PromptTemplate + longest], fixture.Encoder.Prompts);
+    }
+
+    [Fact]
+    public async Task APromptThatAlreadySaysPhotoIsEncodedAsWritten()
+    {
+        var fixture = new Fixture();
+
+        await fixture.RankAsync("A Photo of my dog");
+
+        Assert.Equal(["A Photo of my dog"], fixture.Encoder.Prompts);
     }
 
     [Theory]
@@ -166,7 +179,7 @@ public sealed class LikelyMatchesQueryTests
     {
         var random = new Random(1234);
         var vectors = Enumerable.Range(1, 500)
-            .Select(id => (Id: (long)id, Vector: Unit((float)Math.Round(random.NextDouble() * 2 - 1, 2))))
+            .Select(id => (Id: (long)id, Vector: Unit((float)Math.Round(random.NextDouble() * 0.1 + 0.08, 3))))
             .ToArray();
         var ordered = new Fixture();
         foreach (var (id, vector) in vectors) ordered.Store.Add(id, vector);

@@ -6,6 +6,8 @@
   "maxTokens": 8,
   "padId": 0,
   "dimension": 4,
+  "logitScale": 10.0,
+  "logitBias": -1.0,
   "files": {
     "vision": {
       "path": "vision.onnx",
