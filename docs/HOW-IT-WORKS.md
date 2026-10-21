@@ -95,7 +95,7 @@ Key ideas:
 Measured in the verification VM (2 CPU, 4 GiB, no network); raw numbers, not targets:
 indexing 73.5 ms per photo with 4 workers and a 566 MB peak working set; one text search over
 10,000 stored vectors 70 ms. The release ZIP is about 1.1 GB, almost all of it model.
-Sources: `docs/evidence/e4-s3`, `e4-s4` and `e4-s5`.
+The full measurements are in the verification records of the development repository.
 
 ## Tests at a glance
 
