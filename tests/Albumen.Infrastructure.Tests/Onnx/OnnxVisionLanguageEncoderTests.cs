@@ -166,6 +166,32 @@ public sealed class OnnxVisionLanguageEncoderTests : IDisposable
     }
 
     [Fact]
+    public void LockedModelFileIsUnavailable()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows enforces share modes.");
+        using var locked = new FileStream(Path.Combine(models, "vision.onnx"), FileMode.Open, FileAccess.Read, FileShare.None);
+        using var encoder = new OnnxVisionLanguageEncoder(models);
+
+        Assert.Equal(EncoderFailureKind.Unavailable, encoder.LoadProfile().Failure!.Kind);
+    }
+
+    [Fact]
+    public void CorruptTokenizerFailsOnlyText()
+    {
+        File.WriteAllText(Path.Combine(models, "tokenizer.model"), "not a sentencepiece model");
+        EditManifest(manifest =>
+        {
+            manifest["files"]!["tokenizer"]!["length"] = new FileInfo(Path.Combine(models, "tokenizer.model")).Length;
+            manifest["files"]!["tokenizer"]!["sha256"] = Sha256("tokenizer.model");
+        });
+        using var encoder = new OnnxVisionLanguageEncoder(models);
+        var profile = encoder.LoadProfile().Profile!;
+
+        Assert.Equal(EncoderFailureKind.Failed, encoder.EncodeText(profile, "a dog").Failure!.Kind);
+        Assert.Null(encoder.EncodeImage(profile, SyntheticImage(0, 64, 48)).Failure);
+    }
+
+    [Fact]
     public void UnexpectedOutputNameFails()
     {
         File.Copy(Path.Combine(FixturesPath, "vision-wrong-output.onnx"), Path.Combine(models, "vision.onnx"), overwrite: true);
