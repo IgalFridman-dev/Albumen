@@ -273,7 +273,7 @@ public sealed class SqliteSchemaVersionFiveTests
         return string.Join('\n', rows);
     }
 
-    private static async Task SeedEpicOneFactsAsync(SqliteConnection connection)
+    internal static async Task SeedEpicOneFactsAsync(SqliteConnection connection)
     {
         await ExecuteAsync(connection, """
             INSERT INTO override_evidence VALUES (
@@ -291,7 +291,7 @@ public sealed class SqliteSchemaVersionFiveTests
             """);
     }
 
-    private static async Task<string> DatabaseSnapshotAsync(SqliteConnection connection)
+    internal static async Task<string> DatabaseSnapshotAsync(SqliteConnection connection)
     {
         var tables = await UserTableNamesAsync(connection);
         var snapshot = new List<string>
