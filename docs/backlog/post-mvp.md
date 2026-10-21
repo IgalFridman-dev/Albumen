@@ -663,3 +663,31 @@ full size on its own: the view model's `OpenLikelyMatchAsync` only navigates to 
   card's main text) and expose it to UI Automation.
 - Check the "weird quirks with some photos" the owner saw elsewhere in Review against the same cause
   (a member whose set closed) before treating them as a separate bug.
+
+## PM-023 — Sign the release so Smart App Control lets it run
+
+**Status:** Proposed 2026-10-21; not started. For 1.2, the first public release.
+
+**Priority:** 1.2, before the public announcement
+
+**Origin:** The owner's PC has Smart App Control On (2026-10-21). It blocked a fresh local build of
+develop as a side notification ("can't be verified") with no way to run it anyway. The 1.0.0 and
+1.1.0 ZIPs are unsigned too, so any PC with Smart App Control On blocks them the same way; on other
+PCs SmartScreen offers "More info → Run anyway". README and the 1.1.0 release notes state this.
+The same PC ran 1.0.0 and earlier local builds, so Smart App Control most likely left evaluation
+mode and turned itself On in between (not confirmed from the CodeIntegrity log).
+
+### What it needs
+
+- A code-signing identity Windows trusts. Likely route: Azure Trusted Signing with the owner's
+  Microsoft account (check its eligibility rules for individual developers and the monthly cost
+  first); otherwise a standard code-signing certificate.
+- Sign every Albumen PE in the package (`Albumen.App.exe` and the `Albumen.*.dll` files) after the
+  two publishes are compared and before the checksum manifest and ZIP are made, so `Start-Albumen.cmd`
+  still verifies the signed bytes. Microsoft's runtime files are already signed.
+- The release inventory and evidence record the signer and certificate thumbprint.
+
+### Completion criteria
+
+- The signed ZIP starts on a Windows 11 VM with Smart App Control On, with no prompt to bypass.
+- The release builder's equality and tamper checks still pass on the signed files.
