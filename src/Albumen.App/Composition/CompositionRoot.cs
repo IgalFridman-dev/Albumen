@@ -2,6 +2,7 @@ using System.IO;
 using Albumen.App.Shell;
 using Albumen.Analysis.Exact;
 using Albumen.Analysis.NearDuplicate;
+using Albumen.Analysis.Sharpness;
 using Albumen.Application.Scan;
 using Albumen.Application.Review;
 using Albumen.Application.Action;
@@ -47,7 +48,7 @@ public static class CompositionRoot
         var stores = new SqliteAlbumenStores(databasePath);
         var nearDuplicates = new BoundedNearDuplicatePipeline(
             new WicNearFeatureSource(reader, analyzer, new WicPreviewDecoder(),
-                new ManagedPerceptualSignature()));
+                new ManagedPerceptualSignature(), new ManagedSharpness()));
         var scan = new ScanCoordinator(
             scheduler, preflight, executor, stores.ScanIdentities, stores.ScanCheckpoints, nearDuplicates);
         var review = new ReviewCoordinator(scheduler,
@@ -65,11 +66,13 @@ public static class CompositionRoot
             review,
             stores);
         var dialog = new WpfReviewDialogService(() => System.Windows.Application.Current?.MainWindow);
+        // The viewer decodes large enough to stay sharp on high-DPI screens and when
+        // zoomed; the cache keeps the two compared photos.
         var preview = new BoundedReviewPreviewSource(
             reader,
             new WicPreviewDecoder(),
-            new BoundedThumbnailCache(64L * 1024 * 1024),
-            maximumEdge: 1024);
+            new BoundedThumbnailCache(160L * 1024 * 1024),
+            maximumEdge: 4096);
         var thumbnails = new BoundedReviewPreviewSource(
             reader,
             new WicPreviewDecoder(),

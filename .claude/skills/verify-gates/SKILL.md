@@ -12,7 +12,7 @@ WPF; say "not run" for anything it could not execute.
 | Check | Proves | Does not prove |
 |---|---|---|
 | Local `dotnet test` | Unit/scenario behavior on the dev host | Anything the host blocks (see below) |
-| CI (`.github/workflows/ci.yml`, windows-latest) | Locked restore, warnings-as-errors build, suites minus `Category=GoldenVm` | Action/Recycle Bin/SQLite acceptance, offline smoke |
+| CI (`.github/workflows/ci.yml`, windows-latest; releases into `main` and manual runs only) | Locked restore, warnings-as-errors build, suites minus `Category=GoldenVm` | Action/Recycle Bin/SQLite acceptance, offline smoke |
 | Golden VM `Full` | The official gate for a story | - |
 
 Never report CI green or a host run as Architecture/Core/Full PASS.

@@ -1328,7 +1328,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             if (cancellationToken.IsCancellationRequested
                 || thumbnail is not { PixelWidth: { } width, PixelHeight: { } height })
                 return;
-            facts.Add(new(member.OccurrenceId, width, height, member.ByteCount));
+            facts.Add(new(member.OccurrenceId, width, height, member.ByteCount, member.Sharpness));
         }
         if (!cancellationToken.IsCancellationRequested && suggestionGroupId == group.GroupId)
             ActiveReviewSuggestion = SuggestedBestPhoto.Pick(facts);
