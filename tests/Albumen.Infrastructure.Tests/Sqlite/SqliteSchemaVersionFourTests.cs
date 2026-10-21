@@ -11,7 +11,7 @@ public sealed class SqliteSchemaVersionFourTests
     private static readonly string[] ExpectedTables =
     [
         "action_items", "action_revalidations", "action_transitions",
-        "override_evidence", "scan_accounting", "scan_file_occurrences",
+        "override_evidence", "scan_accounting", "scan_embeddings", "scan_file_occurrences",
         "scan_lifecycle", "scan_stage_checkpoints", "scans",
     ];
 
@@ -57,7 +57,7 @@ public sealed class SqliteSchemaVersionFourTests
 
         await AlbumenSchema.InitializeAsync(connection, observer: null, TestContext.Current.CancellationToken);
 
-        Assert.Equal(5L, await ScalarAsync(connection, "PRAGMA user_version;"));
+        Assert.Equal(6L, await ScalarAsync(connection, "PRAGMA user_version;"));
         Assert.Equal(ExpectedTables, await UserTableNamesAsync(connection));
         Assert.Equal(Normalize(ExpectedScansSql), await TableSqlAsync(connection, "scans"));
         Assert.Equal(Normalize(ExpectedOccurrencesSql), await TableSqlAsync(connection, "scan_file_occurrences"));
@@ -75,7 +75,7 @@ public sealed class SqliteSchemaVersionFourTests
 
         await AlbumenSchema.InitializeAsync(connection, observer: null, TestContext.Current.CancellationToken);
 
-        Assert.Equal(5L, await ScalarAsync(connection, "PRAGMA user_version;"));
+        Assert.Equal(6L, await ScalarAsync(connection, "PRAGMA user_version;"));
         Assert.Equal(OverrideRow, await RowAsync(connection, "override_evidence"));
         if (version >= 2)
         {

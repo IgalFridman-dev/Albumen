@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Albumen.Application.Scan;
 using Albumen.Application.Scope;
+using Albumen.Application.Semantic;
 using Albumen.Application.Shell;
 using Albumen.Domain.Scan;
 using Albumen.Domain.Scope;
@@ -246,7 +247,8 @@ internal sealed class CoordinatorFixture : IAsyncDisposable
         IScanExecutor? executor = null,
         CoordinatorIdentityStore? identities = null,
         CoordinatorCheckpointStore? checkpoints = null,
-        INearDuplicatePipeline? nearDuplicates = null)
+        INearDuplicatePipeline? nearDuplicates = null,
+        ISemanticIndexer? semanticIndex = null)
     {
         Identities = identities ?? new CoordinatorIdentityStore();
         Checkpoints = checkpoints ?? new CoordinatorCheckpointStore();
@@ -257,7 +259,8 @@ internal sealed class CoordinatorFixture : IAsyncDisposable
             executor ?? Executor,
             Identities,
             Checkpoints,
-            nearDuplicates);
+            nearDuplicates,
+            semanticIndex);
     }
     public Task Pump(Task task) => ScanTestData.Bound(Scheduler.PumpUntilAsync(task));
     public Task Start(long scope = 1, long rules = 1) => Pump(Owner.StartAsync(Ready(scope), new ExactRuleConfirmation(scope, rules), CancellationToken.None));
