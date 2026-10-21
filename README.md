@@ -146,6 +146,7 @@ Raw observations, not benchmarks or promises. The verification VM has 2 CPUs and
 | Model files | 1,112 MB (vision 372 MB, text 736 MB, tokenizer 4 MB) |
 | Indexing a photo during the scan | 73.5 ms per photo in the VM (4 workers, 200 photos); 25.6 ms on a desktop PC with 24 workers |
 | Peak memory while indexing | 566 MB working set in the VM |
+| App memory on a clean PC | 0.7 GB after a scan of the demo photos, 1.7 GB once a text search has loaded the text model |
 | One text search over 10,000 photos | 70 ms (median) in the VM |
 
 ## Known limitations
