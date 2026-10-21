@@ -176,6 +176,63 @@ public sealed class ReviewCoordinatorTests
         Assert.Empty(f.Executor.Runs);
     }
 
+    [Fact]
+    public async Task MaybeSimilarSetWithAModelMatchOpensReview()
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        var occurrences = request.Scan.Occurrences;
+        var groups = request.Scan.Groups.SetItem(2, request.Scan.Groups[2] with
+        {
+            Similarity = [new(occurrences[2].Token, occurrences[3].Token, 40, 30, NearRelationshipKind.Uncertain)
+            {
+                Cosine = MaybeSimilarThresholds.CosineMinimum,
+            }],
+        });
+        request = request with { Scan = request.Scan with { Groups = groups } };
+
+        var opened = await f.Open(request);
+
+        Assert.Equal(ReviewCommandOutcome.Committed, opened.Outcome);
+        await f.Run();
+    }
+
+    [Theory]
+    [InlineData("below-threshold")]
+    [InlineData("hash-related-pair")]
+    [InlineData("look-alike-group")]
+    public async Task AModelMatchIsAcceptedOnlyAsMaybeSimilarForAPairTheHashDoesNotRelate(string mismatch)
+    {
+        await using var f = new ReviewFixture();
+        var request = MixedRequest(f.Request, includeTerminalFailures: false);
+        var occurrences = request.Scan.Occurrences;
+        var groups = request.Scan.Groups;
+        groups = mismatch switch
+        {
+            "below-threshold" => groups.SetItem(2, groups[2] with
+            {
+                Similarity = [new(occurrences[2].Token, occurrences[3].Token, 40, 30, NearRelationshipKind.Uncertain)
+                {
+                    Cosine = MaybeSimilarThresholds.CosineMinimum - 0.01f,
+                }],
+            }),
+            "hash-related-pair" => groups.SetItem(2, groups[2] with
+            {
+                Similarity = [groups[2].Similarity[0] with { Cosine = 0.99f }],
+            }),
+            _ => groups.SetItem(1, groups[1] with
+            {
+                Similarity = groups[1].Similarity.SetItem(0, groups[1].Similarity[0] with { Cosine = 0.99f }),
+            }),
+        };
+        request = request with { Scan = request.Scan with { Groups = groups } };
+
+        var opened = await f.Open(request);
+
+        Assert.Equal(ReviewCommandOutcome.Invalid, opened.Outcome);
+        Assert.Empty(f.Executor.Runs);
+    }
+
     [Theory]
     [InlineData("foreign-endpoint")]
     [InlineData("wrong-kind")]
