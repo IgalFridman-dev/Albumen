@@ -41,6 +41,11 @@ public sealed class StoredEmbeddingMatcher(IVisionLanguageEncoder encoder, IEmbe
         return Pairs(vectors, cancellationToken);
     }
 
+    /// <summary>
+    /// Each photo keeps only its <see cref="Neighbours"/> closest matches (highest cosine, then lowest
+    /// occurrence id), so a folder where almost every pair matches stays at most that many matches
+    /// per photo instead of one per pair. No set can hold more photos than that anyway.
+    /// </summary>
     public static ImmutableArray<EmbeddingMatch> Pairs(IReadOnlyList<StoredEmbedding> vectors,
         CancellationToken cancellationToken)
     {
@@ -49,13 +54,23 @@ public sealed class StoredEmbeddingMatcher(IVisionLanguageEncoder encoder, IEmbe
         var found = new List<EmbeddingMatch>();
         Parallel.For(0, ordered.Length, new ParallelOptions { CancellationToken = cancellationToken },
             () => new List<EmbeddingMatch>(),
-            (left, _, local) =>
+            (row, _, local) =>
             {
-                for (var right = left + 1; right < ordered.Length; right++)
+                var closest = new List<(float Cosine, int Other)>(Neighbours + 1);
+                for (var other = 0; other < ordered.Length; other++)
                 {
-                    var cosine = Cosine(ordered[left].Vector, ordered[right].Vector);
-                    if (MaybeSimilarThresholds.IsMatch(cosine))
-                        local.Add(new(ordered[left].OccurrenceId, ordered[right].OccurrenceId, cosine));
+                    if (other == row) continue;
+                    var cosine = Cosine(ordered[row].Vector, ordered[other].Vector);
+                    if (!MaybeSimilarThresholds.IsMatch(cosine)
+                        || closest.Count == Neighbours && cosine <= closest[^1].Cosine) continue;
+                    var at = closest.FindIndex(kept => kept.Cosine < cosine);
+                    closest.Insert(at < 0 ? closest.Count : at, (cosine, other));
+                    if (closest.Count > Neighbours) closest.RemoveAt(Neighbours);
+                }
+                foreach (var (cosine, other) in closest)
+                {
+                    var (left, right) = row < other ? (row, other) : (other, row);
+                    local.Add(new(ordered[left].OccurrenceId, ordered[right].OccurrenceId, cosine));
                 }
                 return local;
             },
@@ -63,8 +78,11 @@ public sealed class StoredEmbeddingMatcher(IVisionLanguageEncoder encoder, IEmbe
             {
                 lock (found) found.AddRange(local);
             });
-        return [.. found.OrderBy(match => match.Left).ThenBy(match => match.Right)];
+        return [.. found.DistinctBy(match => (match.Left, match.Right))
+            .OrderBy(match => match.Left).ThenBy(match => match.Right)];
     }
+
+    public const int Neighbours = MaybeSimilarThresholds.MaximumSetSize - 1;
 
     // The vectors are L2-normalized, so their dot product is the cosine. A fixed width of eight lanes,
     // summed in a fixed order, gives the same value on every CPU; Vector<T> would change with it.

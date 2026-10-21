@@ -29,6 +29,37 @@ public sealed class StoredEmbeddingMatcherTests
     }
 
     [Fact]
+    public void InAFolderWhereEveryPairMatchesEachPhotoKeepsOnlyItsClosestMatches()
+    {
+        // 300 identical vectors: 44,850 matching pairs, of which each photo keeps the lowest ids.
+        var vectors = Enumerable.Range(1, 300).Select(id => Embedding(id, Unit(0))).ToArray();
+
+        var matches = StoredEmbeddingMatcher.Pairs(vectors, TestContext.Current.CancellationToken);
+
+        Assert.All(vectors, vector => Assert.InRange(
+            matches.Count(match => match.Left == vector.OccurrenceId || match.Right == vector.OccurrenceId),
+            1, vectors.Length - 1));
+        Assert.InRange(matches.Length, 1, vectors.Length * StoredEmbeddingMatcher.Neighbours);
+        Assert.Contains(matches, match => (match.Left, match.Right) == (1, StoredEmbeddingMatcher.Neighbours + 1));
+        Assert.DoesNotContain(matches, match => (match.Left, match.Right) == (299, 300));
+        Assert.Equal(matches, StoredEmbeddingMatcher.Pairs([.. vectors.Reverse()], TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public void EachPhotoKeepsItsHighestCosinesFirst()
+    {
+        var vectors = new[] { Embedding(1, Unit(0)) }
+            .Concat(Enumerable.Range(2, StoredEmbeddingMatcher.Neighbours + 5)
+                .Select(id => Embedding(id, Turned(0.99f - id * 0.001f))))
+            .ToArray();
+
+        var matches = StoredEmbeddingMatcher.Pairs(vectors, TestContext.Current.CancellationToken);
+
+        var kept = matches.Where(match => match.Left == 1).Select(match => match.Right).ToArray();
+        Assert.Equal(Enumerable.Range(2, StoredEmbeddingMatcher.Neighbours).Select(id => (long)id), kept);
+    }
+
+    [Fact]
     public void TheCosineIsTheDotProductForEveryDimension()
     {
         var random = new Random(4);
@@ -79,24 +110,6 @@ public sealed class StoredEmbeddingMatcherTests
 
         Assert.ThrowsAny<OperationCanceledException>(() =>
             StoredEmbeddingMatcher.Pairs(vectors, new CancellationToken(canceled: true)));
-    }
-
-    /// <summary>Records the brute-force time for a 10,000-photo Scan; asserts only that it completes.</summary>
-    [Fact]
-    [Trait("Category", "GoldenVm")]
-    public void TenThousandPhotosAreComparedWithoutAVectorDatabase()
-    {
-        const int Photos = 10_000;
-        var random = new Random(10);
-        var vectors = Enumerable.Range(1, Photos).Select(id => Embedding(id, Normalized(random, 768))).ToArray();
-
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        var matches = StoredEmbeddingMatcher.Pairs(vectors, TestContext.Current.CancellationToken);
-        clock.Stop();
-
-        Assert.Empty(matches);
-        TestContext.Current.TestOutputHelper?.WriteLine(
-            $"embedding-match: photos={Photos} cores={Environment.ProcessorCount} ms={clock.ElapsedMilliseconds}");
     }
 
     private static StoredEmbedding Embedding(long id, float[] vector) => new(id, Sha(id), vector);
