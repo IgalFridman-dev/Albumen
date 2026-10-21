@@ -15,7 +15,9 @@ public sealed class EncoderProfileTests
         MaxTokens: 64,
         PadId: 0,
         Dimension: 768,
-        PipelineRevision: 1);
+        PipelineRevision: 1,
+        LogitScale: 117.0,
+        LogitBias: -12.0);
 
     [Fact]
     public void FingerprintIsTheSha256OfAFixedCanonicalForm()
@@ -50,4 +52,8 @@ public sealed class EncoderProfileTests
         Assert.Equal(fingerprints.Count, fingerprints.Distinct(StringComparer.Ordinal).Count());
         Assert.All(mutations, mutation => Assert.NotEqual(Profile, mutation));
     }
+
+    [Fact]
+    public void TheCalibrationChangesNoVectorSoItIsOutsideTheFingerprint() =>
+        Assert.Equal(Profile.Fingerprint, (Profile with { LogitScale = 50, LogitBias = -5 }).Fingerprint);
 }

@@ -6,7 +6,8 @@ Runs on the dev PC (needs Hugging Face access). Nothing here ships or runs in th
 
 Writes vision.onnx (fp32), text.onnx (fp32 with a 16-bit vocabulary table), tokenizer.model,
 siglip2-reference.json (token ids and PyTorch embeddings for synthetic images and fixed prompts)
-and prints sizes, SHA-256 values and the PyTorch-vs-ONNX Runtime cosines.
+and prints sizes, SHA-256 values, the model's logit scale and bias (for models/manifest.json) and
+the PyTorch-vs-ONNX Runtime cosines.
 """
 import argparse
 import hashlib
@@ -152,8 +153,10 @@ def main():
     (out / "siglip2-reference.json").write_text(json.dumps(reference, ensure_ascii=False), encoding="utf-8")
     files = {name: {"length": (out / name).stat().st_size, "sha256": sha256(out / name)}
              for name in ["vision.onnx", "text.onnx", "tokenizer.model"]}
+    # The learned sigmoid calibration: p(prompt fits photo) = sigmoid(scale * cosine + bias).
+    calibration = {"logitScale": model.logit_scale.exp().item(), "logitBias": model.logit_bias.item()}
     print(json.dumps({"files": files, "text_fp32_mb": text_fp32_mb, "pad_id": tokenizer.pad_token_id,
-                      "min_cosine_torch_vs_onnx": checks}, indent=2))
+                      **calibration, "min_cosine_torch_vs_onnx": checks}, indent=2))
 
 
 if __name__ == "__main__":
