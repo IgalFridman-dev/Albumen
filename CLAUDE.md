@@ -11,7 +11,7 @@ Read [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) first for the map of the code 
 
 | Need | Path |
 |---|---|
-| App code (6 projects) | `src/` — Domain → Application → Analysis / Infrastructure.* → App |
+| App code (7 projects) | `src/` — Domain → Application → Analysis / Infrastructure.* (Sqlite, Windows, Onnx) → App |
 | Tests (5 xUnit v3 projects + PowerShell tooling tests) | `tests/` |
 | Build/verify/release scripts (PowerShell) | `eng/verification/`, `eng/release/` |
 | Product, UX, architecture, epics (BMAD planning) | `_bmad-output/planning-artifacts/` |
@@ -58,7 +58,7 @@ dotnet build Albumen.slnx -c Release --no-restore
 dotnet test  Albumen.slnx -c Release --no-build
 ```
 
-The official gates (Architecture / Core / Full, last Full = 1,888/1,888 on `e6b6a74`) run inside a NIC-free
+The official gates (Architecture / Core / Full, last Full = 2,070/2,070 on `399f1eb`) run inside a NIC-free
 Hyper-V "Golden VM" because the dev host blocks unsigned binaries: see the `verify-gates`
 skill. A Linux container can read and edit code but cannot build or run WPF.
 
