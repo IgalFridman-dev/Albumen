@@ -11,7 +11,7 @@ namespace Albumen.Infrastructure.Tests.Architecture;
 public sealed class PermanentDeleteFallbackTests
 {
     private static readonly string[] ProductionAssemblies =
-        ["Albumen.Domain", "Albumen.Application", "Albumen.Analysis", "Albumen.App", "Albumen.Infrastructure.Sqlite", "Albumen.Infrastructure.Windows"];
+        ["Albumen.Domain", "Albumen.Application", "Albumen.Analysis", "Albumen.App", "Albumen.Infrastructure.Onnx", "Albumen.Infrastructure.Sqlite", "Albumen.Infrastructure.Windows"];
 
     [Fact]
     public void GeneratedComContractsKeepEveryWindowsSdkVtableSlotAndPreservedHResult()

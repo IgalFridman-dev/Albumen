@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Albumen.Application.Semantic;
 using Albumen.Application.Shell;
 using Albumen.Domain.Scan;
 
@@ -31,6 +32,9 @@ public sealed record ScanSnapshot(
     ScanCounts Counts)
 {
     public bool HasUnsettledWork { get; init; }
+
+    // Reported beside the Scan, never inside it: no semantic state changes a row, group or count.
+    public SemanticSnapshot Semantic { get; init; } = SemanticSnapshot.Idle;
 }
 
 public interface IScanCoordinator : IAsyncDisposable

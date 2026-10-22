@@ -10,6 +10,7 @@ using Albumen.Application.Action;
 using Albumen.Application.LocalData;
 using Albumen.Application.Scan;
 using Albumen.Domain.Action;
+using Albumen.Application.Semantic;
 using Albumen.Application.Shell;
 using ScanSessionStatus = Albumen.Application.Scan.ScanStatus;
 using ReviewLevel = Albumen.App.Shell.ReviewNavigationLevel;
@@ -103,6 +104,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly ObservableCollection<ActionRecordViewModel> actionRecoveryRecords = [];
     private readonly object lifetime = new();
     private Task? disposalTask;
+    // Where Review was when the first likely match was opened; Show all returns there.
+    private (ReviewLevel Level, ReviewCategoryKind? Category, Guid? Group, long? Member)? likelyMatchesReturn;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
@@ -153,6 +156,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         OpenReviewGroupCommand = new AsyncCommand(OpenReviewGroupAsync);
         OpenReviewMemberCommand = new AsyncCommand(
             OpenReviewMemberAsync, allowConcurrentExecutions: true);
+        OpenLikelyMatchCommand = new AsyncCommand(
+            OpenLikelyMatchAsync, allowConcurrentExecutions: true);
+        LikelyMatches = new(null);
         ReviewBackCommand = new AsyncCommand(ReviewBackAsync,
             canExecute: () => ReviewNavigationLevel != ReviewLevel.Categories);
         ShowPreviousReviewMemberCommand = new AsyncCommand(() => ShowAdjacentReviewMemberAsync(-1),
@@ -177,9 +183,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         IReviewDialogService? reviewDialog = null,
         ILocalScanDataControl? localScanDataControl = null,
         IReviewPreviewSource? reviewPreviewSource = null,
-        IReviewPreviewSource? reviewThumbnailSource = null) : this(scope)
+        IReviewPreviewSource? reviewThumbnailSource = null,
+        LikelyMatchesQuery? likelyMatches = null) : this(scope)
     {
         photoWorkflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
+        LikelyMatches = new(likelyMatches);
+        LikelyMatches.Cleared += ReturnFromLikelyMatches;
         this.reviewDialog = reviewDialog;
         this.localScanDataControl = localScanDataControl;
         this.reviewPreviewSource = reviewPreviewSource;
@@ -206,6 +215,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand OpenReviewCategoryCommand { get; }
     public AsyncCommand OpenReviewGroupCommand { get; }
     public AsyncCommand OpenReviewMemberCommand { get; }
+    public AsyncCommand OpenLikelyMatchCommand { get; }
+    public LikelyMatchesViewModel LikelyMatches { get; }
     public AsyncCommand ReviewBackCommand { get; }
     public AsyncCommand ShowPreviousReviewMemberCommand { get; }
     public AsyncCommand ShowNextReviewMemberCommand { get; }
@@ -390,6 +401,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             ScanSessionStatus.Idle => "Not started",
             ScanSessionStatus.Checking => "Getting ready: checking the folder",
+            ScanSessionStatus.Running when scan.Semantic.State == SemanticState.Indexing =>
+                "Scanning: indexing photos",
             ScanSessionStatus.Running => scan.Enumeration.State is ScanStageState.Pending or ScanStageState.Running
                 ? "Scanning: finding photos"
                 : scan.Counts.Outstanding > 0 ? "Scanning: reading photos"
@@ -431,6 +444,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public bool HasReviewContinuation => ReviewContinuationText.Length != 0;
     public string ScanCountsText => photoSnapshot is { Scan.Counts: var count }
         ? FormatScanCounts(count) : string.Empty;
+    public string SemanticProgressText => photoSnapshot?.Scan.Semantic is { State: SemanticState.Indexing } semantic
+        ? $"{semantic.Indexed.ToString("N0", CultureInfo.InvariantCulture)} of {semantic.Total.ToString("N0", CultureInfo.InvariantCulture)} photos indexed. "
+            + "Cancel skips the rest; identical copies and look-alikes already found are kept."
+        : string.Empty;
+    public bool HasSemanticProgress => SemanticProgressText.Length != 0;
     public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
         ? "Scan complete: every file in the folder was included. Unsupported, failed, and canceled files are listed separately."
         : "Partial results: the scan is incomplete, so these results don't cover every file in the folder.";
@@ -821,6 +839,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var previousRecovery = photoSnapshot?.ActionRecovery;
         var previousActionReview = photoSnapshot?.ActionReview;
         var previousReview = photoSnapshot?.Review;
+        var previousScan = photoSnapshot?.Scan;
         var previousReviewStatusText = ReviewStatusText;
         var preserveReviewProjection = ReviewProjectionUnchanged(photoSnapshot?.Review, snapshot.Review)
             && (snapshot.Review.Pin is not null || ScanProjectionUnchanged(photoSnapshot?.Scan, snapshot.Scan));
@@ -860,6 +879,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             RestoreReviewNavigation(previousNavigationLevel, previousCategory,
                 previousGroupId, previousMemberId);
         }
+        if (previousScan?.Pin != snapshot.Scan.Pin) likelyMatchesReturn = null;
+        LikelyMatches.Update(snapshot);
         legacyCouldNotAnalyze = null;
         ScanOutcomeSummaries = ProjectOutcomeSummaries(snapshot.Scan);
         ProjectReview(snapshot.Review);
@@ -877,7 +898,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (previousReviewStatusText != ReviewStatusText) OnPropertyChanged(nameof(ReviewStatusText));
         foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsChooseFolderPhase), nameof(IsScanPhase), nameof(IsReviewPhase), nameof(IsActionPhase),
             nameof(CanContinue), nameof(CanStartScan), nameof(CanScanFolder), nameof(CanOpenReview),
-            nameof(RecursionSummary), nameof(ScanCountsText), nameof(CoverageStatus), nameof(CouldNotAnalyze),
+            nameof(RecursionSummary), nameof(ScanCountsText), nameof(SemanticProgressText), nameof(HasSemanticProgress), nameof(CoverageStatus), nameof(CouldNotAnalyze),
             nameof(ScanOutcomeSummaries), nameof(CanContinueReview), nameof(ContinueReviewHint),
             nameof(HasContinueReviewHint), nameof(ReviewContinuationText), nameof(HasReviewContinuation) })
             OnPropertyChanged(name);
@@ -1075,7 +1096,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         return null;
     }
 
-    private static bool InCategory(CandidateGroup group, ReviewCategoryKind category) => category switch
+    internal static bool InCategory(CandidateGroup group, ReviewCategoryKind category) => category switch
     {
         ReviewCategoryKind.Exact => group.Category == CandidateCategory.Exact && !group.Uncertain,
         ReviewCategoryKind.Near => group.Category == CandidateCategory.NearDuplicate && !group.Uncertain,
@@ -1111,6 +1132,26 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         SetReviewNavigation(ReviewLevel.Comparisons, ActiveReviewCategory, ActiveReviewGroup, member);
         await LoadActiveReviewPreviewAsync(member);
+    }
+
+    private async Task OpenLikelyMatchAsync(object? parameter)
+    {
+        if (parameter is not LikelyMatchItemViewModel { Set: { } set } match) return;
+        var category = ReviewCategories.FirstOrDefault(row => row.Category == set.Category);
+        if (category?.FindGroup(set.GroupId) is not { } group
+            || group.FindMember(match.Photo.OccurrenceId) is not { } member)
+            return;
+        likelyMatchesReturn ??= (ReviewNavigationLevel, ActiveReviewCategory?.Category,
+            ActiveReviewGroup?.GroupId, ActiveReviewMember?.OccurrenceId);
+        SetReviewNavigation(ReviewLevel.Comparisons, category, group, member);
+        await LoadActiveReviewPreviewAsync(member);
+    }
+
+    private void ReturnFromLikelyMatches()
+    {
+        if (likelyMatchesReturn is not { } back) return;
+        likelyMatchesReturn = null;
+        RestoreReviewNavigation(back.Level, back.Category, back.Group, back.Member);
     }
 
     private Task ReviewBackAsync()
@@ -1328,7 +1369,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             if (cancellationToken.IsCancellationRequested
                 || thumbnail is not { PixelWidth: { } width, PixelHeight: { } height })
                 return;
-            facts.Add(new(member.OccurrenceId, width, height, member.ByteCount));
+            facts.Add(new(member.OccurrenceId, width, height, member.ByteCount, member.Sharpness));
         }
         if (!cancellationToken.IsCancellationRequested && suggestionGroupId == group.GroupId)
             ActiveReviewSuggestion = SuggestedBestPhoto.Pick(facts);
@@ -1422,6 +1463,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var confidence = category switch
         {
             ReviewCategoryKind.Exact => "The files are identical, byte for byte.",
+            ReviewCategoryKind.Uncertain when similarity?.Cosine is not null =>
+                "Similar content: matched by what the photos show, not by their pixels.",
             ReviewCategoryKind.Near or ReviewCategoryKind.Uncertain when similarity is not null =>
                 $"Picture difference {similarity.HammingDistance.ToString(CultureInfo.InvariantCulture)}, color difference {similarity.ColorDistance.ToString(CultureInfo.InvariantCulture)} (lower is closer)",
             _ => unavailable,

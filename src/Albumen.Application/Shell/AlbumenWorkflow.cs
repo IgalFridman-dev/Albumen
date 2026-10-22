@@ -40,7 +40,7 @@ public sealed class AlbumenWorkflow : IAlbumenWorkflow
     private static readonly IEqualityComparer<NearDuplicateEvidence> similarityComparison =
         EqualityComparer<NearDuplicateEvidence>.Create(SameSimilarity,
             edge => edge.Left.GetHashCode() ^ edge.Right.GetHashCode()
-                ^ HashCode.Combine(edge.HammingDistance, edge.ColorDistance, edge.Kind));
+                ^ HashCode.Combine(edge.HammingDistance, edge.ColorDistance, edge.Kind, edge.Cosine));
     private static readonly IEqualityComparer<CandidateGroup> candidateComparison =
         EqualityComparer<CandidateGroup>.Create(SameCandidate, group => group.GroupId.GetHashCode());
 
@@ -594,7 +594,8 @@ public sealed class AlbumenWorkflow : IAlbumenWorkflow
         left == right || (left is not null && right is not null
             && left.Left == right.Right && left.Right == right.Left
             && left.HammingDistance == right.HammingDistance
-            && left.ColorDistance == right.ColorDistance && left.Kind == right.Kind);
+            && left.ColorDistance == right.ColorDistance && left.Kind == right.Kind
+            && left.Cosine == right.Cosine);
 
     private static bool SameArray<T>(ImmutableArray<T> left, ImmutableArray<T> right,
         IEqualityComparer<T>? comparison = null) where T : notnull =>

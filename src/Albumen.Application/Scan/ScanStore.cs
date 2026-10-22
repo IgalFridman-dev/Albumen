@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Albumen.Application.Semantic;
 using Albumen.Domain.Scan;
 using Albumen.Domain.Scope;
 
@@ -61,6 +62,14 @@ internal sealed class ScanStore
 
     public ScanStoreMutation<NearDuplicateCommit> PrepareNearDuplicates(NearDuplicateBatch batch) =>
         Prepare(store => store.CommitNearDuplicates(batch));
+
+    public ScanStoreMutation<bool> PrepareEmbeddingMatches(ImmutableArray<EmbeddingMatch> matches) =>
+        Prepare(store =>
+        {
+            store.nearGroups.ReplaceMatches(matches,
+                store.occurrences.Values.OrderBy(row => row.Token.OccurrenceId).ToImmutableArray());
+            return true;
+        });
 
     public T Apply<T>(ScanStoreMutation<T> mutation)
     {
@@ -179,7 +188,8 @@ internal sealed class ScanStore
                 || (result.Outcome.State == ScanStageState.Succeeded) != (result.Signature is not null)
                 || (row.Exact.State != ScanStageState.Succeeded
                     && (result.Signature is not null || result.Outcome.State != ScanStageState.NotApplicable))
-                || (result.Signature is not null && result.Signature.ImplementationRevision != batch.ImplementationRevision))
+                || (result.Signature is not null && result.Signature.ImplementationRevision != batch.ImplementationRevision)
+                || (result.Sharpness is { } sharpness && (result.Signature is null || !double.IsFinite(sharpness) || sharpness < 0)))
                 return new(false);
         }
 
@@ -193,6 +203,7 @@ internal sealed class ScanStore
             {
                 VisualFeatures = result.Outcome,
                 NearDuplicate = near,
+                Sharpness = result.Sharpness,
             };
         }
         nearGroups.Replace(batch.Results, occurrences.Values.OrderBy(row => row.Token.OccurrenceId).ToImmutableArray());

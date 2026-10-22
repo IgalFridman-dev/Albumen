@@ -12,8 +12,8 @@ first two share one screen, so the list shows four steps.
 | Step | Phase | What happens on screen |
 |---|---|---|
 | 1 | **Choose folder** (phases ChooseScope + ConfirmRules) | Pick one local folder, "Include subfolders", and "Look-alikes" (identical copies are always found, as the caption says). A status strip says one sentence per state (ready with the photo count, checking, blocked, not checked); blocking reasons (network, cloud-only, protected folders) appear under it, and the folder check counts, restrictions and the scan options' status wait under "Details". One "Scan N photos" button continues, confirms the options for this folder and starts the scan, each step checked by the workflow owner as before. |
-| 2 | **Scan** | Progress and live counts; "Cancel Scan". Outcome categories show what was grouped, skipped or unsupported. |
-| 3 | **Review** | Kinds shown as Identical copies / Look-alike / Maybe similar / Couldn't check (internally Exact / Near / Uncertain / CouldNotAnalyze) → sets → photos with bounded previews and side-by-side compare. The user switches photos to Remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). |
+| 2 | **Scan** | Progress and live counts; "Cancel Scan". With Look-alikes on, a last stage indexes the photos for search (Cancel there skips only that stage). Outcome categories show what was grouped, skipped or unsupported. |
+| 3 | **Review** | Kinds shown as Identical copies / Look-alike / Maybe similar / Couldn't check (internally Exact / Near / Uncertain / CouldNotAnalyze) → sets → photos with bounded previews and side-by-side compare. The user switches photos to Remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). Above the kinds, "Find photos by what they show" takes a short prompt and lists this Scan's likely matches by rank, each with its set; opening one shows it in that set. The list marks nothing; "Show all Review results" clears it. |
 | 4 | **Clean up** (phase ApproveCleanup) | The Review page ends with "Move N photos to the Recycle Bin?": the first marked photos with thumbnails and paths, then the full accounting. "Move to Recycle Bin" sends them one at a time and shows a progress bar, a card per photo (moved, skipped and why, or unknown) and a summary when it ends. |
 
 A **History** view in the top bar lists every saved cleanup (one card each, with every photo's
@@ -28,9 +28,11 @@ flowchart LR
   App --> Analysis
   App --> Sqlite
   App --> Windows
-  Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature"] --> Application
-  Sqlite["Infrastructure.Sqlite<br/>schema v5, journals, records"] --> Application
+  App --> Onnx
+  Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature<br/>sharpness"] --> Application
+  Sqlite["Infrastructure.Sqlite<br/>schema v6, journals, records, photo vectors"] --> Application
   Windows["Infrastructure.Windows<br/>Win32 scope/traversal, WIC decode,<br/>IFileOperation Recycle Bin"] --> Application
+  Onnx["Infrastructure.Onnx<br/>SigLIP 2 encoder on ONNX Runtime"] --> Application
   Application["Albumen.Application<br/>workflows, coordinators, ports"] --> Domain["Albumen.Domain<br/>pure rules & policies"]
 ```
 
@@ -54,6 +56,8 @@ sequenceDiagram
   UI->>Scan: Start Scan (options)
   Scan->>OS: enumerate files, read bytes under a lease
   Scan->>Scan: Exact groups (SHA-256) + Near groups (dHash ≤4, color ≤12)
+  Scan->>Scan: photo vectors (SigLIP 2, parallel; Look-alikes on)
+  Scan->>Scan: Maybe-similar sets from vector cosine (Near stays hash-only)
   Scan->>DB: checkpoints + accounting
   UI->>Rev: select files, keep ≥1 survivor
   Rev->>Act: sealed ApprovedActionRequest
@@ -70,13 +74,28 @@ Key ideas:
   blocks the action and is shown as such; interrupted actions are reconciled on restart, never replayed.
 - **Near duplicates are conservative**: thresholds live in `Application/Scan/NearDuplicateThresholds.cs`;
   borderline pairs are not grouped.
+- **The photo model only adds Maybe similar**: two photos the hash does not relate are Maybe similar
+  when their vectors' cosine reaches `Application/Scan/MaybeSimilarThresholds.cs` (provisional until
+  the labelled corpus sets it). Look-alike sets are built from the hash alone, so they are the same
+  with or without the model; nothing the model finds is pre-marked.
 
 ## Where data lives
 
 - `%LOCALAPPDATA%\Albumen\albumen.db` — SQLite (scan identity, checkpoints, override
-  evidence, action journal and records). "Clear scan data" (in History) removes scan data only.
+  evidence, action journal and records, and the last Scan's photo vectors). "Clear scan data" (in History) removes scan data only.
+- `models\` next to `Albumen.App.exe` — the SigLIP 2 files (`vision.onnx`, `text.onnx`,
+  `tokenizer.model`, 1,112 MB) and `manifest.json` with each file's length and SHA-256. A missing or
+  changed file makes only the semantic features unavailable; Exact, Look-alike, Review and cleanup
+  work without them.
 - Photos are only read, never modified; removal = Windows Recycle Bin (restorable).
 - No network access at all (verified by network audits in a VM with no network adapter).
+
+## What the model costs
+
+Measured in the verification VM (2 CPU, 4 GiB, no network); raw numbers, not targets:
+indexing 73.5 ms per photo with 4 workers and a 566 MB peak working set; one text search over
+10,000 stored vectors 70 ms. The release ZIP is about 1.1 GB, almost all of it model.
+The full measurements are in the verification records of the development repository.
 
 ## Tests at a glance
 
@@ -84,7 +103,7 @@ Key ideas:
 |---|---|
 | `Albumen.Domain.Tests` | pure policies (survivor, scope, transitions) |
 | `Albumen.Application.Tests` | coordinators, workflows, fakes for ports |
-| `Albumen.Analysis.Tests` | hashing and perceptual signatures |
-| `Albumen.Infrastructure.Tests` | Win32/WIC/SQLite adapters + architecture rules |
+| `Albumen.Analysis.Tests` | hashing, perceptual signatures and sharpness |
+| `Albumen.Infrastructure.Tests` | Win32/WIC/SQLite/ONNX adapters + architecture rules |
 | `Albumen.Scenarios.Tests` | real WPF window, keyboard and automation flows |
 | `tests/tooling/*.Tests.ps1` | PowerShell tests for VM and release scripts |

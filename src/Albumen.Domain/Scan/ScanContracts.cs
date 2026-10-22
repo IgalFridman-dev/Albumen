@@ -165,6 +165,10 @@ public sealed record ScanFileOccurrence
 
     public StageOutcome NearDuplicate { get; init; } =
         new(ScanStageState.Pending, ScanReason.None);
+
+    // Fine-detail score from the visual-features pass; null when that pass did not succeed.
+    // It only compares photos within one set (SharpnessComparison).
+    public double? Sharpness { get; init; }
 }
 
 public enum CandidateCategory
@@ -212,7 +216,14 @@ public sealed record NearDuplicateEvidence(
     OccurrenceToken Right,
     int HammingDistance,
     int ColorDistance,
-    NearRelationshipKind Kind);
+    NearRelationshipKind Kind)
+{
+    /// <summary>
+    /// Set only when the photo model related a pair the hash does not: such a pair is Maybe similar
+    /// (<see cref="NearRelationshipKind.Uncertain"/>) and never Near.
+    /// </summary>
+    public float? Cosine { get; init; }
+}
 
 public sealed record CandidateGroup(
     Guid GroupId,

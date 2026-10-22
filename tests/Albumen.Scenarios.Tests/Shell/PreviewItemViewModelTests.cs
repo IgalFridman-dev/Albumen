@@ -3,6 +3,7 @@ using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using Albumen.App;
 using Albumen.App.Shell;
 using Albumen.Infrastructure.Windows.Preview;
@@ -58,6 +59,17 @@ public sealed class PreviewItemViewModelTests
             {
                 window.Close();
             }
+        });
+    }
+
+    [Fact]
+    public void ViewerPhotoIsResampledWithHighQualityScaling()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var control = new PreviewStatusControl();
+            var image = Assert.IsType<Image>(control.FindName("PreviewImage"));
+            Assert.Equal(BitmapScalingMode.HighQuality, RenderOptions.GetBitmapScalingMode(image));
         });
     }
 }

@@ -279,6 +279,45 @@ public sealed class NearDuplicateGroupTests
         Assert.Equal(1, snapshot.Counts.Failed);
     }
 
+    [Fact]
+    public void SharpnessReachesTheOccurrenceAndItsLookAlikeSet()
+    {
+        var store = ExactRows(2);
+        var rows = StoreFixture.Snapshot(store).Occurrences;
+
+        Assert.True(store.CommitNearDuplicates(new(rows[0].Token.Pin, "managed-dhash-bgra-v1", [
+            Success(rows[0], 0) with { Sharpness = 812.5 }, Success(rows[1], 1) with { Sharpness = 90 }])).Accepted);
+        var snapshot = StoreFixture.Snapshot(store);
+
+        Assert.Equal([812.5, 90], snapshot.Occurrences.Select(row => row.Sharpness));
+        Assert.Equal([812.5, 90], Assert.Single(snapshot.Groups).Members.Select(row => row.Sharpness));
+    }
+
+    [Theory]
+    [InlineData(-1.0)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void ImpossibleSharpnessRejectsTheBatch(double sharpness)
+    {
+        var store = ExactRows(2);
+        var rows = StoreFixture.Snapshot(store).Occurrences;
+
+        Assert.False(store.CommitNearDuplicates(new(rows[0].Token.Pin, "managed-dhash-bgra-v1", [
+            Success(rows[0], 0) with { Sharpness = sharpness }, Success(rows[1], 1)])).Accepted);
+        Assert.All(StoreFixture.Snapshot(store).Occurrences, row => Assert.Null(row.Sharpness));
+    }
+
+    [Fact]
+    public void SharpnessWithoutAnalyzedFeaturesRejectsTheBatch()
+    {
+        var store = ExactRows(2);
+        var rows = StoreFixture.Snapshot(store).Occurrences;
+        var failure = new StageOutcome(ScanStageState.FailedRetryable, ScanReason.ReadFailure);
+
+        Assert.False(store.CommitNearDuplicates(new(rows[0].Token.Pin, "managed-dhash-bgra-v1", [
+            Success(rows[0], 0), new NearFeatureResult(rows[1].Token, rows[1].Content, null, failure, 50)])).Accepted);
+    }
+
     private static ScanStore ExactRows(int count)
     {
         var store = new ScanStore(ScanTestData.Context());

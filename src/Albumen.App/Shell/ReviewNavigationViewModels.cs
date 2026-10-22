@@ -127,12 +127,15 @@ public sealed class ReviewGroupViewModel
             .Select((member, index) => (OccurrenceId: member.Occurrence.Token.OccurrenceId, Index: index))
             .ToDictionary(pair => pair.OccurrenceId, pair => pair.Index);
         var canChangeSelection = reviewAllowsSelection && !group.Sealed;
+        var blurrier = SharpnessComparison.Blurrier(members
+            .Select(member => (member.Occurrence.Token.OccurrenceId, member.Occurrence.Sharpness)).ToArray());
         Members = new(members.Length, index => new ScanOccurrenceViewModel(
             members[index], IsAlias(members, index), canChangeSelection,
             () => changeSelection(SelectionCommandKind.Toggle,
                 ImmutableArray.Create(members[index].Occurrence.Token.OccurrenceId)),
             index + 1, members.Length,
-            members[index].SelectedInGroup is { } holder ? describeSet?.Invoke(holder) : null));
+            members[index].SelectedInGroup is { } holder ? describeSet?.Invoke(holder) : null,
+            blurrier.Contains(members[index].Occurrence.Token.OccurrenceId)));
         MemberCount = members.Length;
         Summary = FormatSummary(positionInSet, MemberCount);
         // A set is settled once marks held elsewhere leave at most one photo undecided:

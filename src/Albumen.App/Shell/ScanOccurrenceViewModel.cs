@@ -25,7 +25,8 @@ public sealed class ScanOccurrenceViewModel
         Func<Task> toggle,
         int positionInSet = 0,
         int sizeOfSet = 0,
-        string? markedElsewhereIn = null)
+        string? markedElsewhereIn = null,
+        bool looksBlurrier = false)
         : this(member.Occurrence, isAlias, new AsyncCommand(toggle,
             canExecute: () => selectionEnabled && member.Eligibility == ReviewEligibilityState.Eligible
                 && member.SelectedInGroup is null),
@@ -33,6 +34,7 @@ public sealed class ScanOccurrenceViewModel
     {
         Eligibility = member.Eligibility;
         UnavailableReason = member.Reason;
+        LooksBlurrier = looksBlurrier;
         IsMarkedElsewhere = member.SelectedInGroup is not null;
         CanSelect = member.Eligibility == ReviewEligibilityState.Eligible && selectionEnabled && !IsMarkedElsewhere;
         EligibilityText = IsMarkedElsewhere
@@ -47,7 +49,8 @@ public sealed class ScanOccurrenceViewModel
         if (member.Eligibility == ReviewEligibilityState.Eligible && !CanSelect && !IsMarkedElsewhere)
             EligibilityText += "; can't be changed right now";
         AutomationName = $"{(IsSelected ? "Marked for removal" : "Kept")}: {member.Occurrence.DiscoveredPath}";
-        ItemStatus = $"{EligibilityText}; {PathKind}; {Allocation}";
+        ItemStatus = $"{EligibilityText}; {PathKind}; {Allocation}"
+            + (looksBlurrier ? $"; {BlurrierText}" : string.Empty);
     }
 
     private ScanOccurrenceViewModel(
@@ -64,6 +67,7 @@ public sealed class ScanOccurrenceViewModel
         Outcome = $"Enumerate: {occurrence.Enumerate.State} ({occurrence.Enumerate.Reason}); Exact: {occurrence.Exact.State} ({occurrence.Exact.Reason})";
         ByteLength = occurrence.Content?.ByteLength.ToString(CultureInfo.InvariantCulture) ?? "Unknown";
         ByteCount = occurrence.Content?.ByteLength;
+        Sharpness = occurrence.Sharpness;
         SizeText = ByteCount is { } bytes ? FormatSize(bytes) : "Size unknown";
         FileName = Path.GetFileName(occurrence.DiscoveredPath.TrimEnd('\\', '/')) is { Length: > 0 } name
             ? name : occurrence.DiscoveredPath;
@@ -91,6 +95,10 @@ public sealed class ScanOccurrenceViewModel
     public string NextStep { get; }
     public string ByteLength { get; }
     public long? ByteCount { get; }
+    public double? Sharpness { get; }
+    // Blur evidence, shown as a badge: never a mark or a choice.
+    public bool LooksBlurrier { get; }
+    public const string BlurrierText = "Blurrier than the sharpest photo in this set";
     public string SizeText { get; }
     public string FileName { get; }
     public string PhysicalIdentity { get; }
