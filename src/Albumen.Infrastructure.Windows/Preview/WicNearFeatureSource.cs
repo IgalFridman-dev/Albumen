@@ -7,9 +7,13 @@ public sealed class WicNearFeatureSource(
     IProtectedFileReader reader,
     IExactContentAnalyzer exact,
     WicPreviewDecoder decoder,
-    IPerceptualSignatureAnalyzer signatures) : INearFeatureSource
+    IPerceptualSignatureAnalyzer signatures,
+    ISharpnessAnalyzer sharpness) : INearFeatureSource
 {
     public const int MaximumEdge = 256;
+    // Sharpness needs a larger frame for blur to survive the downscale (the Review viewer shows
+    // the same size). It is a second decode so the dHash keeps seeing exactly what it did.
+    public const int SharpnessEdge = 1024;
 
     public async ValueTask<NearFeatureResult> AnalyzeAsync(
         ScanRunContext context, ScanFileOccurrence row, CancellationToken cancellationToken)
@@ -33,10 +37,22 @@ public sealed class WicNearFeatureSource(
             return decoded.Availability == PreviewAvailability.Unsupported
                 ? Failure(row, ScanStageState.Unsupported, ScanReason.CodecUnavailable)
                 : Failure(row, ScanStageState.FailedRetryable, ScanReason.ReadFailure);
-        var signature = signatures.Extract(
-            frame.Width, frame.Height, frame.AnalysisPixels.Span);
+        var signature = signatures.Extract(frame.Width, frame.Height, frame.AnalysisPixels.Span);
         return new(row.Token, content, signature,
-            new StageOutcome(ScanStageState.Succeeded, ScanReason.None));
+            new StageOutcome(ScanStageState.Succeeded, ScanReason.None),
+            await MeasureSharpnessAsync(lease, row, cancellationToken).ConfigureAwait(false));
+    }
+
+    // Scores compare only at one scale, so a photo smaller than SharpnessEdge (never enlarged)
+    // or one that fails this second decode gets no score and no blur claim.
+    private async Task<double?> MeasureSharpnessAsync(
+        IProtectedFileLease lease, ScanFileOccurrence row, CancellationToken cancellationToken)
+    {
+        using var decoded = await decoder.DecodeAsync(
+            lease, row.ResolvedPath, SharpnessEdge, cancellationToken).ConfigureAwait(false);
+        return decoded.Frame is { } frame && Math.Max(frame.Width, frame.Height) == SharpnessEdge
+            ? sharpness.Analyze(frame.Width, frame.Height, frame.AnalysisPixels.Span)
+            : null;
     }
 
     private static NearFeatureResult Failure(ScanFileOccurrence row,

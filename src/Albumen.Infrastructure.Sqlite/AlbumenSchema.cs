@@ -2,12 +2,13 @@ using Microsoft.Data.Sqlite;
 using Albumen.Infrastructure.Sqlite.Action;
 using Albumen.Infrastructure.Sqlite.Review;
 using Albumen.Infrastructure.Sqlite.Scan;
+using Albumen.Infrastructure.Sqlite.Semantic;
 
 namespace Albumen.Infrastructure.Sqlite;
 
 internal static class AlbumenSchema
 {
-    internal const int Version = 5;
+    internal const int Version = 6;
 
     internal static async Task ValidateAsync(SqliteConnection connection, int expectedVersion,
         CancellationToken token, SqliteTransaction? transaction = null)
@@ -50,6 +51,11 @@ internal static class AlbumenSchema
             expected.Add("sqlite_autoindex_scan_lifecycle_1", ("index", "scan_lifecycle", null));
             expected.Add("sqlite_autoindex_scan_stage_checkpoints_1", ("index", "scan_stage_checkpoints", null));
             expected.Add("sqlite_autoindex_scan_accounting_1", ("index", "scan_accounting", null));
+        }
+        if (expectedVersion >= 6)
+        {
+            expected.Add("scan_embeddings", ("table", "scan_embeddings", EmbeddingSchema.CreateTableSql));
+            expected.Add("sqlite_autoindex_scan_embeddings_1", ("index", "scan_embeddings", null));
         }
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -125,7 +131,12 @@ internal static class AlbumenSchema
                 await SqliteDatabaseOwner.ExecuteAsync(connection, ScanCheckpointSchema.CreateAccountingSql, token).ConfigureAwait(false);
                 await ObserveAsync(++step).ConfigureAwait(false);
             }
-            await SqliteDatabaseOwner.ExecuteAsync(connection, "PRAGMA user_version=5;", token).ConfigureAwait(false);
+            if (source < 6)
+            {
+                await SqliteDatabaseOwner.ExecuteAsync(connection, EmbeddingSchema.CreateTableSql, token).ConfigureAwait(false);
+                await ObserveAsync(++step).ConfigureAwait(false);
+            }
+            await SqliteDatabaseOwner.ExecuteAsync(connection, "PRAGMA user_version=6;", token).ConfigureAwait(false);
             await ObserveAsync(++step).ConfigureAwait(false);
             await ValidateAsync(connection, Version, token).ConfigureAwait(false);
             await ObserveAsync(++step).ConfigureAwait(false);

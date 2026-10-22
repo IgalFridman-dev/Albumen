@@ -10,12 +10,14 @@ internal static class ProjectDependencyPolicy
             ["Albumen.Domain"] = CreateSet(),
             ["Albumen.Application"] = CreateSet("Albumen.Domain"),
             ["Albumen.Analysis"] = CreateSet("Albumen.Application", "Albumen.Domain"),
+            ["Albumen.Infrastructure.Onnx"] = CreateSet("Albumen.Application", "Albumen.Domain"),
             ["Albumen.Infrastructure.Sqlite"] = CreateSet("Albumen.Application", "Albumen.Domain"),
             ["Albumen.Infrastructure.Windows"] = CreateSet("Albumen.Application", "Albumen.Domain"),
             ["Albumen.App"] = CreateSet(
                 "Albumen.Domain",
                 "Albumen.Application",
                 "Albumen.Analysis",
+                "Albumen.Infrastructure.Onnx",
                 "Albumen.Infrastructure.Sqlite",
                 "Albumen.Infrastructure.Windows"),
         };

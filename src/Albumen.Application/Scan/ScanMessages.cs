@@ -35,7 +35,8 @@ public sealed record NearFeatureResult(
     OccurrenceToken Token,
     ContentRevision? Content,
     PerceptualSignature? Signature,
-    StageOutcome Outcome);
+    StageOutcome Outcome,
+    double? Sharpness = null);
 
 public sealed record NearDuplicateBatch(
     ScanPin Pin,

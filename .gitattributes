@@ -1,3 +1,5 @@
 # Preserve captured upstream license bytes across Windows checkouts.
 eng/release/licenses/**/*.txt -text
 eng/release/licenses/*.txt -text
+# The model release tag is derived from the manifest bytes.
+src/Albumen.Infrastructure.Onnx/models/manifest.json -text

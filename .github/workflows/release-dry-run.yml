@@ -2,6 +2,7 @@ name: Release dry run
 
 on:
   pull_request:
+    branches: [main]
     paths:
       - 'eng/release/**'
       - 'eng/Verify-RuntimeBoundary.ps1'
@@ -15,6 +16,10 @@ on:
 permissions:
   contents: read
 
+# Model files are too large for git. They live as assets of the GitHub release
+# tagged models-<first 12 hex of the models manifest SHA-256>, uploaded once per
+# export; the builder verifies every length and SHA-256 against the manifest.
+
 concurrency:
   group: release-dry-run-${{ github.ref }}
   cancel-in-progress: true
@@ -26,7 +31,7 @@ env:
 # Runs the real release builder (two locked restores and publishes, file-by-file
 # comparison, inventory and notices checks, packaging) on a hosted runner with
 # network access. It is not the offline Golden VM capture, which remains the
-# release gate; it catches builder and packaging breaks on every PR.
+# release gate; it catches builder and packaging breaks on release PRs into main.
 jobs:
   build-release:
     name: Build release candidate (windows-latest)
@@ -40,6 +45,30 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Locate model files
+        id: models
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash src/Albumen.Infrastructure.Onnx/models/manifest.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          "tag=models-$($hash.Substring(0, 12))" >> $env:GITHUB_OUTPUT
+          "path=$env:RUNNER_TEMP/albumen-models" >> $env:GITHUB_OUTPUT
+
+      - name: Restore model cache
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.models.outputs.path }}
+          key: ${{ steps.models.outputs.tag }}
+
+      - name: Download model files
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download '${{ steps.models.outputs.tag }}' --repo $env:GITHUB_REPOSITORY --dir '${{ steps.models.outputs.path }}'
+          if ($LASTEXITCODE -ne 0) { throw 'Model release ${{ steps.models.outputs.tag }} is missing; upload the exported model files first.' }
+
       - name: Build release candidate
         shell: pwsh
         run: |
@@ -50,6 +79,7 @@ jobs:
             -OutputRoot $output `
             -SdkRoot $env:DOTNET_ROOT `
             -PackagesRoot $packages `
+            -ModelsRoot '${{ steps.models.outputs.path }}' `
             -SourceIdentity $env:GITHUB_SHA
           $result | Format-List | Out-String | Write-Output
           "CANDIDATE=$($result.candidatePath)" >> $env:GITHUB_ENV

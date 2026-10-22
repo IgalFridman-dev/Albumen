@@ -12,7 +12,7 @@ WPF; say "not run" for anything it could not execute.
 | Check | Proves | Does not prove |
 |---|---|---|
 | Local `dotnet test` | Unit/scenario behavior on the dev host | Anything the host blocks (see below) |
-| CI (`.github/workflows/ci.yml`, windows-latest) | Locked restore, warnings-as-errors build, suites minus `Category=GoldenVm` | Action/Recycle Bin/SQLite acceptance, offline smoke |
+| CI (`.github/workflows/ci.yml`, windows-latest; releases into `main` and manual runs only) | Locked restore, warnings-as-errors build, suites minus `Category=GoldenVm` | Action/Recycle Bin/SQLite acceptance, offline smoke |
 | Golden VM `Full` | The official gate for a story | - |
 
 Never report CI green or a host run as Architecture/Core/Full PASS.
@@ -37,6 +37,9 @@ The dev host's Application Control blocks unsigned builds, so gates run in a NIC
 "Golden VM" restored from `Toolchain-Evaluation-Base`.
 - One-time: `eng/verification/Repair-AlbumenGoldenVmCredential.ps1`, then
   `eng/verification/Initialize-AlbumenGoldenVm.ps1`.
+- The VM needs the SigLIP 2 model files (`vision.onnx`, `text.onnx`, `tokenizer.model` and
+  `models/manifest.json`) at `C:\PhotoSift\models`: the `GoldenVm` parity test reads them there
+  (or from `ALBUMEN_MODELS_DIR`). They come from the dev-repo release `models-<manifest hash>`.
 - One stage: `pwsh -NoProfile -File eng/verification/Invoke-AlbumenHyperV.ps1 -Stage Full`
   (`Architecture` = Infrastructure/architecture tests, `Core` = Domain+Application+Analysis+
   Scenarios, `Full` = all five suites + runtime boundary + offline WPF smoke).
@@ -48,6 +51,7 @@ The dev host's Application Control blocks unsigned builds, so gates run in a NIC
 ## Release
 `eng/release/New-AlbumenRelease.ps1` builds the self-contained `win-x64` ZIP (bundled .NET and
 WPF runtime, PM-008) and
-`Test-AlbumenRelease.ps1` re-verifies it. Required: two identical publishes, SHA256SUMS, and
+`Test-AlbumenRelease.ps1` re-verifies it. `-ModelsRoot` names the folder with the model files;
+each must match its length and SHA-256 in `models/manifest.json`. Required: two identical publishes, SHA256SUMS, and
 owner approval of the dependency inventory (`release-dependencies.json`). Any package change goes
 through that gate.

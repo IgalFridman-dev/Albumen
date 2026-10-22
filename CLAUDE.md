@@ -11,7 +11,7 @@ Read [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) first for the map of the code 
 
 | Need | Path |
 |---|---|
-| App code (6 projects) | `src/` — Domain → Application → Analysis / Infrastructure.* → App |
+| App code (7 projects) | `src/` — Domain → Application → Analysis / Infrastructure.* (Sqlite, Windows, Onnx) → App |
 | Tests (5 xUnit v3 projects + PowerShell tooling tests) | `tests/` |
 | Build/verify/release scripts (PowerShell) | `eng/verification/`, `eng/release/` |
 | Product, UX, architecture, epics (BMAD planning) | `_bmad-output/planning-artifacts/` |
@@ -19,7 +19,9 @@ Read [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) first for the map of the code 
 | Sprint state — source of truth for "what's next" | `_bmad-output/implementation-artifacts/sprint-status.yaml` |
 | Per-story design + implementation plans | `docs/superpowers/specs/`, `docs/superpowers/plans/` |
 | Verification evidence per story | `docs/evidence/eX-sY/` |
-| Deferred work (PM-001…PM-007) | `docs/backlog/post-mvp.md` |
+| Labelled photo corpus tool (E3-S6, not shipped) | `tools/Albumen.Corpus/` |
+| Backlog (PM-001…PM-020) | `docs/backlog/post-mvp.md` |
+| Release plan for 1.1 (SigLIP 2, text search, blur) | `docs/superpowers/specs/2026-10-19-albumen-1.1-siglip2-release-plan.md` |
 | Docs index / authority rules | `docs/README.md` |
 
 The folder names `_bmad-output/` and `docs/superpowers/` are kept from the original
@@ -36,8 +38,9 @@ BMAD + Superpowers (Codex) workflow because hundreds of evidence links point int
   Requested/Executing journal rows; uncertain work is never auto-replayed; at least one
   survivor per group.
 - **Offline**: no network calls, no telemetry, no cloud inference. E5-S3 proves this.
-- **Lean V1 / YAGNI**: implement only the current story's `SPEC.md`. Blur and Signature
-  reuse are V1.1; Semantic/Likely Matches is V1.2.
+- **YAGNI**: implement only the current story's `SPEC.md`, clear and concise, only what the
+  current release needs. 1.1 = SigLIP 2 look-alikes, text search and classical blur; 1.2 =
+  accessibility, dark mode, Signature reuse; see the release plan.
 - **Truthful status**: never mark a story done or claim PASS without the evidence the SPEC
   requires. Record limitations instead (see `CONCERNS` verdict in E5-S5).
 - Don't claim accessibility compliance (PM-005 open).
@@ -55,7 +58,7 @@ dotnet build Albumen.slnx -c Release --no-restore
 dotnet test  Albumen.slnx -c Release --no-build
 ```
 
-The official gates (Architecture / Core / Full, last Full = 1,888/1,888 on `e6b6a74`) run inside a NIC-free
+The official gates (Architecture / Core / Full, last Full = 2,070/2,070 on `399f1eb`) run inside a NIC-free
 Hyper-V "Golden VM" because the dev host blocks unsigned binaries: see the `verify-gates`
 skill. A Linux container can read and edit code but cannot build or run WPF.
 

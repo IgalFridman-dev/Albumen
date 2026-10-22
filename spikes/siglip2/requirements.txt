@@ -1,0 +1,9 @@
+torch>=2.6
+transformers>=4.49
+huggingface_hub
+onnx
+onnxruntime==1.31.0
+pillow
+sentencepiece
+protobuf
+numpy

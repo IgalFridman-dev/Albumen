@@ -42,10 +42,13 @@ $forbiddenDependencyPatterns = @(
     'ImageSharp',
     'SkiaSharp',
     'Magick',
-    'Onnx',
     'TensorFlow')
 
 $approvedPackages = [ordered]@{
+    'Google.Protobuf' = [pscustomobject]@{
+        Version = '3.30.2'
+        Sha512 = 'Y2aOVLIt75yeeEWigg9V9YnjsEm53sADtLGq0gLhwaXpk3iu8tYSoauolyhenagA2sWno2TQ2WujI0HQd6s1Vw=='
+    }
     'Microsoft.Data.Sqlite' = [pscustomobject]@{
         Version = '10.0.11'
         Sha512 = '7je7UELzm131GiLYc4PpZvfKXIgIyzPM+v+tjcd/nbnuWRfgcONYKzDTqJlURxwVCFsVnlpmq6y6yn4qvR8QXQ=='
@@ -53,6 +56,18 @@ $approvedPackages = [ordered]@{
     'Microsoft.Data.Sqlite.Core' = [pscustomobject]@{
         Version = '10.0.11'
         Sha512 = 'hubA20AGenQ4Sx0ElWaPpB8DISjXpdx463+1zOGRslsT0e/t/06ITv+pHsop8CcJ0d8PZLfgnT7juCDVD79Dkw=='
+    }
+    'Microsoft.ML.OnnxRuntime' = [pscustomobject]@{
+        Version = '1.31.0'
+        Sha512 = '7v58S0xqY1ZmLui5BnK3FQEWagRhmhkR/9yLrxF5rQGppGfcMaw7W0a2wgT1SWnT6ug0dmr1B2I4VWhlY/yvng=='
+    }
+    'Microsoft.ML.OnnxRuntime.Managed' = [pscustomobject]@{
+        Version = '1.31.0'
+        Sha512 = 'o9nvEiddLLlAMOHN0XZ/06Oal0W6S7iWiSb8lzQAwfQKNOZtX4C8he5/I7Mc/DlSprNfovAW6kCkwX2BAE0JHw=='
+    }
+    'Microsoft.ML.Tokenizers' = [pscustomobject]@{
+        Version = '2.0.1'
+        Sha512 = 'RZN3zslVWinBCMDAnbZWEY8lQbMkP54Yxm1s5NigPcrvYFzXMrDjNcVM9afq4SZHf1BV1rEmO0p7ZdfBLDbu4g=='
     }
     'SQLitePCLRaw.bundle_e_sqlite3' = [pscustomobject]@{
         Version = '2.1.12'
@@ -70,11 +85,25 @@ $approvedPackages = [ordered]@{
         Version = '2.1.12'
         Sha512 = 'W3oH4XIfCzFrgUSDKHhN6N+dgzA5YHOR2VxX8GB6Qy7CyrJJgxPEG8NirgYWlPQC5P2jz2knSsexWu4tDUL33g=='
     }
+    'System.Numerics.Tensors' = [pscustomobject]@{
+        Version = '9.0.0'
+        Sha512 = 'hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A=='
+    }
 }
 $approvedPackageLibraries = @($approvedPackages.GetEnumerator() | ForEach-Object {
     "$($_.Key)/$($_.Value.Version)"
 })
 $sqliteDependencyPattern = '^(?:Microsoft\.Data\.Sqlite|SQLitePCL)'
+# The SigLIP 2 files listed in models/manifest.json; any other model-shaped file is still forbidden.
+$approvedModelPaths = @('models/text.onnx', 'models/tokenizer.model', 'models/vision.onnx')
+# Approved files whose names look like framework content but are not in the runtime packs:
+# a package assembly, and the app-local Visual C++ runtime that onnxruntime.dll imports.
+$approvedPackageRuntimePaths = @('System.Numerics.Tensors.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+# Microsoft.ML.Tokenizers 2.0.1 contains an HttpClient helper reachable only through URL-loading
+# APIs Albumen never calls; Albumen loads its SentencePiece model from a local file. Pinned by hash.
+$approvedNetworkMarkerBinaries = @{
+    'Microsoft.ML.Tokenizers.dll' = '3130D6AB12517CE8B0BAE3C59CC6EDC8145B1BCC64221C06AD7D603A802EE5B5'
+}
 
 function Get-JsonPropertyNames {
     param(
@@ -245,7 +274,8 @@ function Read-SelfContainedFrameworkClosure {
         [System.IO.Path]::DirectorySeparatorChar
     foreach ($file in @(Get-ChildItem -File -Force -Recurse -LiteralPath $resolvedOutputDirectory)) {
         $relativePath = $file.FullName.Substring($outputPrefix.Length).Replace('\', '/')
-        if ($file.Name -match $frameworkShapedPattern -and -not $seen.ContainsKey($relativePath)) {
+        if ($file.Name -match $frameworkShapedPattern -and -not $seen.ContainsKey($relativePath) -and
+            $approvedPackageRuntimePaths -cnotcontains $relativePath) {
             throw "Runtime artifact is outside the exact pinned framework closure: $relativePath"
         }
     }
@@ -349,7 +379,8 @@ function Assert-NoForbiddenRuntimeArtifacts {
         if (-not $isFrameworkContent -and $file.Name -match $updaterArtifactPattern) {
             $violations.Add("$relativePath -> updater artifact")
         }
-        if (-not $isFrameworkContent -and $file.Name -match $modelArtifactPattern) {
+        if (-not $isFrameworkContent -and $file.Name -match $modelArtifactPattern -and
+            $approvedModelPaths -cnotcontains $canonicalRelativePath) {
             $violations.Add("$relativePath -> model artifact")
         }
 
@@ -365,7 +396,10 @@ function Assert-NoForbiddenRuntimeArtifacts {
             $binaryCount++
             $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
             $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
-            if ($ascii -match $binaryPattern) {
+            $isApprovedMarker = $approvedNetworkMarkerBinaries.ContainsKey($canonicalRelativePath) -and
+                (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash -ceq
+                    $approvedNetworkMarkerBinaries[$canonicalRelativePath]
+            if ($ascii -match $binaryPattern -and -not $isApprovedMarker) {
                 $violations.Add("$relativePath -> forbidden binary capability marker")
             }
         }
@@ -510,6 +544,7 @@ $expectedProjects = @(
     'Albumen.App',
     'Albumen.Application',
     'Albumen.Domain',
+    'Albumen.Infrastructure.Onnx',
     'Albumen.Infrastructure.Sqlite',
     'Albumen.Infrastructure.Windows')
 $projectPaths = @(Get-ChildItem -Recurse -File -Filter '*.csproj' -LiteralPath (
@@ -565,7 +600,10 @@ foreach ($projectPath in $projectPaths) {
     }
 }
 
-$expectedDirectPackageReferences = @('Albumen.Infrastructure.Sqlite=Microsoft.Data.Sqlite')
+$expectedDirectPackageReferences = @(
+    'Albumen.Infrastructure.Onnx=Microsoft.ML.OnnxRuntime',
+    'Albumen.Infrastructure.Onnx=Microsoft.ML.Tokenizers',
+    'Albumen.Infrastructure.Sqlite=Microsoft.Data.Sqlite')
 $actualDirectPackageReferences = @($directPackageReferences | Sort-Object -Unique)
 if ([string]::Join('|', $actualDirectPackageReferences) -cne
     [string]::Join('|', $expectedDirectPackageReferences)) {
@@ -623,6 +661,20 @@ $nativeSqliteSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeSqlite
 if ($nativeSqliteSha256 -cne 'B7385D722C83FB52142A00477A726723745916D22A555711EE89834C1111FB2E') {
     throw "SQLite native runtime hash differs from the approved win-x64 closure: $nativeSqliteSha256"
 }
+# The app-local Visual C++ runtime from the official VC_redist.x64.exe 14.44.35211.0 (owner-approved).
+$approvedVcRuntime = [ordered]@{
+    'msvcp140.dll' = '0F885B509A685D2BBFA652FED26B5FB31D88FBDAB0A978C641D1C7B8AA460AA9'
+    'msvcp140_1.dll' = 'BFAD5AEF4C63A669E3C140655CDFDF395B6C979B400A447BD5DCB65ED8826C3D'
+    'vcruntime140.dll' = 'D5E4D9A3E835FA679450145D6A7D94E36573A509317111904D9B3712C30D9066'
+    'vcruntime140_1.dll' = '1F2D41C4AA5DB0BC33EBF7B66D72943A817D7CE6CBE880502A9403823633093F'
+}
+foreach ($entry in $approvedVcRuntime.GetEnumerator()) {
+    $vcRuntimePath = Join-Path $outputDirectory $entry.Key
+    if (-not [System.IO.File]::Exists($vcRuntimePath) -or
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $vcRuntimePath).Hash -cne $entry.Value) {
+        throw "Visual C++ runtime differs from the approved app-local files: $($entry.Key)"
+    }
+}
 
 Write-Output 'ALBUMEN_RUNTIME_BOUNDARY_OK'
 Write-Output "TargetFramework=net10.0-windows"
@@ -633,6 +685,7 @@ Write-Output "RuntimeLibraries=$($runtimeLibraries -join ',')"
 Write-Output "SourceFilesScanned=$sourceFileCount"
 Write-Output "ProductionPackages=$($distinctPackageLibraries -join ',')"
 Write-Output "SQLiteNativeSha256=$nativeSqliteSha256"
+Write-Output "VcRuntimeFiles=$($approvedVcRuntime.Keys -join ',')"
 Write-Output "OutputFiles=$($outputFiles -join ',')"
 Write-Output "RuntimeBinariesScanned=$($artifactInspection.BinaryCount)"
 Write-Output "RuntimeConfigsScanned=$($artifactInspection.ConfigCount)"

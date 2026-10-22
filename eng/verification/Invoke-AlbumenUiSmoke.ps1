@@ -45,6 +45,12 @@ param(
     [ValidateRange(600, 2160)]
     [int]$ScreenHeight = 1000,
 
+    # A folder inside the guest with the model files (vision.onnx, text.onnx,
+    # tokenizer.model), copied next to the packaged manifest so the photo model
+    # works. The Seeded-* checkpoints have them at C:\PhotoSift\models.
+    [Parameter()]
+    [string]$GuestModelsRoot,
+
     # Leave the VM running at the desktop after collection instead of turning
     # it off and restoring the checkpoint, so the app can be inspected by hand.
     [Parameter()]
@@ -318,6 +324,14 @@ try {
         New-Item -ItemType Directory -Path $AppPath, $OutputPath -Force | Out-Null
     } -ArgumentList $guestAppPath, $guestOutputPath
     Copy-Item -Path (Join-Path $PackagePath '*') -Destination $guestAppPath -Recurse -Force -ToSession $session
+    if (-not [string]::IsNullOrWhiteSpace($GuestModelsRoot)) {
+        Write-Output "Copying the model files from $GuestModelsRoot in the guest."
+        Invoke-Command -Session $session -ScriptBlock {
+            param($ModelsRoot, $AppPath)
+            $names = 'vision.onnx', 'text.onnx', 'tokenizer.model'
+            Copy-Item -LiteralPath ($names | ForEach-Object { Join-Path $ModelsRoot $_ }) -Destination (Join-Path $AppPath 'models') -Force
+        } -ArgumentList $GuestModelsRoot, $guestAppPath
+    }
 
     Write-Output "Launching Albumen on the guest desktop for $LaunchSeconds seconds."
     Invoke-Command -Session $session -ScriptBlock {

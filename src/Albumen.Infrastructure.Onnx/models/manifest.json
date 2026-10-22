@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "model": "google/siglip2-base-patch16-224",
+  "license": "Apache-2.0",
+  "imageSize": 224,
+  "maxTokens": 64,
+  "padId": 0,
+  "dimension": 768,
+  "logitScale": 112.66889953613281,
+  "logitBias": -16.771724700927734,
+  "files": {
+    "vision": { "path": "vision.onnx", "length": 371748468, "sha256": "D787E0827FBCA899B5E962AD44400CDE8E51F9D9B09271CCD1A16B375642C087" },
+    "text": { "path": "text.onnx", "length": 736185139, "sha256": "9E5660E6EA728C0F6AAF41943DFA30EAE76A06DF9A9EEF6AE89077D69BEF09AD" },
+    "tokenizer": { "path": "tokenizer.model", "length": 4241003, "sha256": "61A7B147390C64585D6C3543DD6FC636906C9AF3865A5548F27F31AEE1D4C8E2" }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "model": "fixture/tiny",
+  "license": "MIT",
+  "imageSize": 224,
+  "maxTokens": 8,
+  "padId": 0,
+  "dimension": 4,
+  "logitScale": 10.0,
+  "logitBias": -1.0,
+  "files": {
+    "vision": {
+      "path": "vision.onnx",
+      "length": 278,
+      "sha256": "7A4166A2DE5DD7C004603D0D07A4E27CCBE0D504AD09CD7C1A6D9B9F5BB68903"
+    },
+    "text": {
+      "path": "text.onnx",
+      "length": 292,
+      "sha256": "D929001DFDBAC014F4968C629822E6CBBA8DDEC93DC02016779ECF1960386015"
+    },
+    "tokenizer": {
+      "path": "tokenizer.model",
+      "length": 728,
+      "sha256": "25204DE938790E2475E482024941C5430111EC30A498F33635EBF29D388D62DA"
+    }
+  }
+}

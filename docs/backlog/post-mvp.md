@@ -176,7 +176,9 @@ Any later feature begins with a fresh product/design review based on shipped V1 
 
 ## PM-005 — Complete accessibility hardening after the recruiter-demo V1
 
-**Status:** Backlog — accepted recruiter-demo V1 limitation
+**Status:** Backlog — accepted recruiter-demo V1 limitation. Scheduled for Albumen 1.2 (the first
+public release) by the [1.1 release plan](../superpowers/specs/2026-10-19-albumen-1.1-siglip2-release-plan.md);
+E4-S5 covers only the new semantic states.
 
 **Priority:** Post-MVP accessibility hardening
 
@@ -262,7 +264,8 @@ sizes, not only through layout unit tests.
 
 ## PM-007 — Support Windows dark mode
 
-**Status:** Backlog
+**Status:** Backlog — scheduled for Albumen 1.2 by the
+[1.1 release plan](../superpowers/specs/2026-10-19-albumen-1.1-siglip2-release-plan.md).
 
 **Priority:** Post-V1 presentation
 
@@ -488,3 +491,203 @@ bottom one and skips the two in the middle; with the window enlarged it works fi
 - WPF scenario tests at the default window size with large text (font size 24, so the four cards
   overflow the list by two): one notch moves one card, three touchpad deltas of 40 move one
   card, and a notch at the list's end moves the page.
+
+## PM-017 — Albumen 1.1: SigLIP 2 look-alikes, text search and blur
+
+**Status:** Approved 2026-10-19; stories ready for dev after the rename (PR #33). Plan:
+`docs/superpowers/specs/2026-10-19-albumen-1.1-siglip2-release-plan.md`.
+
+**Priority:** The next release after 1.0.0
+
+**Origin:** Owner decision in the project thread "V1.0.1 scope and blur detection", 2026-10-19
+
+1.0.0 is the recruiter and beta build. The owner wants the app to be genuinely usable before it goes
+public, which means look-alike grouping that survives a moving subject, text search over the scan,
+and blur detection. One on-device SigLIP 2 model serves grouping and search; blur stays a classical
+pixel measure. Accessibility (PM-005, PM-002) and dark mode (PM-007) follow in 1.2, the first public
+release. Standing owner instruction for 1.1: YAGNI, clear and concise code, only what this release
+needs.
+
+### Stories and order
+
+E4-S1 spike → E3-S6 corpus → E4-S2 profile and packaging → E4-S3 index → E4-S6 look-alike sets and
+E4-S4 text search → E4-S5 acceptance and release. E3-S3 blur runs in parallel. E2-S4 is deferred to
+1.2 unless decision D2 (measured embedding cost) pulls an embeddings-only version in.
+
+### Completion criteria
+
+- Each story closed through the story workflow with Golden VM evidence.
+- The 1.1.0 ZIP rebuilt offline from the sealed cache launches on the runtime-free VM with no network
+  and completes an Exact, a Look-alike and a text-search review.
+- README states measured model size, per-photo CPU time and corpus precision/recall with limitations;
+  PM-005 remains recorded as open.
+
+## PM-018 — Make the scan close-ordering test deterministic
+
+**Status:** Fixed in [#39](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/39) (`cb04915`,
+test-only) before the 1.0.0 release; the app is unchanged.
+
+**Priority:** Before the 1.0.0 release
+
+**Origin:** GitHub CI, 2026-10-19
+
+`ScanCheckpointCoordinatorTests.CallbackArrivingDuringTerminalPersistenceCannotOverwriteTerminalTruth`
+(`endEnumeration: False` case) timed out after 10 s in `PumpNext` on the first `Build and test
+(windows-latest)` run of [#31](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/31) and
+[#35](https://github.com/IgalFridman-dev/PhotoSift-dev/pull/35), both docs-only, and failed a third
+time on #39.
+
+### Cause and fix
+
+The test read `late.IsCompleted` once, right after pumping the owner, but the rejection of the late
+registration can complete just after the owner goes idle. On a slow runner the test then waited for a
+checkpoint write that correctly never comes. It now waits for whichever comes first, the rejection or
+the late write, so it still catches a real admission bug. Scan finalisation itself was not at fault.
+
+## PM-019 — Search as a Review filter
+
+**Status:** Approved for 1.2 on 2026-10-21; not started. Builds on E4-S4 (1.1).
+
+**Priority:** 1.2.0
+
+**Origin:** Owner decision in the project thread "When to compute vectors for Likely matches",
+2026-10-21
+
+**Size:** Medium
+
+In 1.1, Likely matches (E4-S4) is a separate ranked list that leaves the other categories alone. In
+1.2 the same search becomes a filter over all of Review, so a user can narrow the whole scan to one
+subject, mark photos, search for something else and keep going.
+
+### Flow
+
+- Review has a search bar at the top. Typing a prompt such as "at sea" filters every category
+  (Identical copies, Look-alike, Maybe similar) to the photos that match, using a cutoff set from the
+  E3-S6 corpus.
+- A set is shown whole when any of its members matches, so Keep/Remove decisions are always made
+  with the full set in view.
+- Keep/Remove marks survive searching again and clearing the search. Clearing shows every photo
+  again, with the marks still in place.
+- Approve cleanup acts on every marked photo, including ones the current search hides. Its wording
+  and count say so.
+- Decide then whether the 1.1 ranked list folds into the filter or stays as a separate view.
+
+### Completion criteria
+
+- The filter reuses the E4-S4 ranking query; no second scoring path.
+- Selection, survivor rule and approval are unchanged by filtering; tests prove marks survive
+  search, re-search and clear.
+- The cutoff and its measured precision/recall on the corpus are recorded in the evidence.
+
+## PM-020 — Analyze each photo in one pass
+
+**Status:** Proposed 2026-10-21; not started. After 1.2.0.
+
+**Priority:** After the 1.2.0 release
+
+**Origin:** Owner comment on the E4-S3 design, 2026-10-21
+
+In 1.1 a Scan reads every photo up to three times, in three stages that each run over the whole
+folder: SHA-256 for identical copies, then the Near pass (one decode at 256 px for the difference hash
+and colour, one at 1024 px for sharpness, one photo at a time), then the SigLIP 2 vectors (E4-S3:
+hash again, one decode at 512 px, parallel workers). The stages are kept apart in 1.1 so a model
+failure or Cancel in the vector stage cannot touch the Exact and Near results.
+
+The proposal: one worker per photo reads, hashes and decodes it once, then computes the difference
+hash, sharpness and vector from that decode, with the stages still reporting separate outcomes.
+
+### Completion criteria
+
+- The cost of the extra reads and decodes is measured on the owner's PC and the Golden VM before any
+  change. Measured so far: the whole vector stage (hash, 512 px decode, encode) takes 73.5 ms per photo
+  on the Golden VM with 4 workers (200 photos at 1600x1200, peak working set 566 MB;
+  [E4-S3 evidence](../evidence/e4-s3/verification.md)). The share of that spent on the read and
+  decode, and any Near stage timing, are not measured yet.
+- If it is worth it: one pass per photo with the same per-stage outcomes and isolation, the same
+  Exact/Near/blur results on the labelled corpus, and a measured speed-up.
+
+## PM-021 — Find small objects in text search
+
+**Status:** Proposed 2026-10-21; not started. After 1.1.
+
+**Priority:** After the 1.1 release, decided on corpus numbers
+
+**Origin:** Owner's checks of E4-S4 (Likely matches) on his own photos, 2026-10-21
+
+The shipped model, SigLIP 2 base at 224 px, sees a photo squashed to 224 by 224. An object that fills
+the frame scores well (the owner's "jetski" and "food" photos are all listed, with nothing else), but
+a small object does not: "watch" listed 2 of about 8 photos with a wrist watch, and small flags were
+missed, with the flag photos scoring 0.076 to 0.083 in cosine where unrelated photos reach 0.0735.
+The cut-off cannot fix this; the signal is not there at that size.
+
+### Options
+
+- The 384 px or 512 px variants of the same SigLIP 2 family (`google/siglip2-base-patch16-384`,
+  `-512`): more pixels per object, the same text tower and the same vector size, at a higher per-photo
+  cost (the vision tower's work grows with the square of the side) and a larger download.
+- Keep 224 px and record the limit in the README.
+
+### Completion criteria
+
+- Each candidate is measured in the E4-S1 spike harness (`spikes/siglip2/`) on the E3-S6 labelled
+  corpus with a small-object set added (a watch, a flag, a phone in hand), reporting recall at the
+  E4-S4 cut-off, ms per photo and model size.
+- A change of model is an `EncoderProfile` change: vectors are recomputed on the next Scan, the
+  manifest and parity fixtures are regenerated, and the release inventory gate in `eng/release/`
+  approves the new files.
+
+## PM-022 — A likely match that cannot be opened looks clickable
+
+**Status:** Proposed 2026-10-21; not started. For the 1.2 UI pass (with PM-009 and PM-005).
+
+**Priority:** 1.2, with the other Review page changes
+
+**Origin:** Owner's check of E4-S4 (Likely matches) on his own photos, 2026-10-21: clicking some
+photos in the results list does nothing, neither compare nor a full-size view.
+
+### Likely cause, from the code
+
+The results list shows every photo the model ranks, but a card only opens a photo that is in an open
+Review set; that is where Keep / Remove lives. A photo "Not in any set" (no identical copy or
+look-alike, so nothing to decide) has its card disabled (`IsEnabled="{Binding CanOpen}"`), and the
+only cue is the small line "Not in any set: nothing to decide" under the thumbnail. The same happens
+when the photo's set was closed by a cleanup since the search. Disabled WPF buttons with a thumbnail
+inside do not look disabled, so the card reads as a broken click. The list also never shows a photo
+full size on its own: the view model's `OpenLikelyMatchAsync` only navigates to a set member.
+
+### Fix to consider
+
+- Open any listed photo in the preview, with the set's Keep / Remove only when it has a set, so a
+  click always does something.
+- Until then, make the disabled state visible (greyed thumbnail, the "nothing to decide" line as the
+  card's main text) and expose it to UI Automation.
+- Check the "weird quirks with some photos" the owner saw elsewhere in Review against the same cause
+  (a member whose set closed) before treating them as a separate bug.
+
+## PM-023 — Sign the release so Smart App Control lets it run
+
+**Status:** Proposed 2026-10-21; not started. For 1.2, the first public release.
+
+**Priority:** 1.2, before the public announcement
+
+**Origin:** The owner's PC has Smart App Control On (2026-10-21). It blocked a fresh local build of
+develop as a side notification ("can't be verified") with no way to run it anyway. The 1.0.0 and
+1.1.0 ZIPs are unsigned too, so any PC with Smart App Control On blocks them the same way; on other
+PCs SmartScreen offers "More info → Run anyway". README and the 1.1.0 release notes state this.
+The same PC ran 1.0.0 and earlier local builds, so Smart App Control most likely left evaluation
+mode and turned itself On in between (not confirmed from the CodeIntegrity log).
+
+### What it needs
+
+- A code-signing identity Windows trusts. Likely route: Azure Trusted Signing with the owner's
+  Microsoft account (check its eligibility rules for individual developers and the monthly cost
+  first); otherwise a standard code-signing certificate.
+- Sign every Albumen PE in the package (`Albumen.App.exe` and the `Albumen.*.dll` files) after the
+  two publishes are compared and before the checksum manifest and ZIP are made, so `Start-Albumen.cmd`
+  still verifies the signed bytes. Microsoft's runtime files are already signed.
+- The release inventory and evidence record the signer and certificate thumbprint.
+
+### Completion criteria
+
+- The signed ZIP starts on a Windows 11 VM with Smart App Control On, with no prompt to bypass.
+- The release builder's equality and tamper checks still pass on the signed files.

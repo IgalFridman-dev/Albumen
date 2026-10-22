@@ -38,6 +38,7 @@ internal sealed class SqliteScanDataControl(SqliteDatabaseOwner owner) : ILocalS
                         BlockedMessage);
                 }
 
+                await DeleteAsync(connection, "scan_embeddings", transaction, token).ConfigureAwait(false);
                 await DeleteAsync(connection, "scan_accounting", transaction, token).ConfigureAwait(false);
                 await DeleteAsync(connection, "scan_stage_checkpoints", transaction, token).ConfigureAwait(false);
                 await DeleteAsync(connection, "scan_lifecycle", transaction, token).ConfigureAwait(false);
