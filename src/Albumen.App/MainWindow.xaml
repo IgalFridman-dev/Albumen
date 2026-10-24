@@ -195,8 +195,8 @@
                                     </Condition>
                                     <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
                                 </MultiDataTrigger.Conditions>
-                                <Setter Property="Background" Value="{StaticResource Albumen.AccentSoftBrush}" />
-                                <Setter Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
+                                <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                             </MultiDataTrigger>
                             <MultiDataTrigger>
                                 <MultiDataTrigger.Conditions>
@@ -254,8 +254,8 @@
                                     </Condition>
                                     <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
                                 </MultiDataTrigger.Conditions>
-                                <Setter Property="Background" Value="{StaticResource Albumen.AccentSoftBrush}" />
-                                <Setter Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
+                                <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                             </MultiDataTrigger>
                             <MultiDataTrigger>
                                 <MultiDataTrigger.Conditions>
@@ -313,7 +313,7 @@
                     <Style TargetType="Border">
                         <Setter Property="BorderThickness" Value="1" />
                         <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                        <Setter Property="BorderBrush" Value="{StaticResource Albumen.BorderBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderBrush}" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                 <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
@@ -325,7 +325,7 @@
                                         <Binding Path="DataContext.ActiveReviewMember.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
                                     </MultiBinding>
                                 </DataTrigger.Binding>
-                                <Setter Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                                 <Setter Property="BorderThickness" Value="2" />
                             </DataTrigger>
                             <MultiDataTrigger>
@@ -523,7 +523,7 @@
                 <Border Width="36" Height="36" CornerRadius="9" VerticalAlignment="Top">
                     <Border.Style>
                         <Style TargetType="Border">
-                            <Setter Property="Background" Value="{StaticResource Albumen.AccentBrush}" />
+                            <Setter Property="Background" Value="{DynamicResource Albumen.AccentBrush}" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                     <Setter Property="Background" Value="Transparent" />
@@ -555,8 +555,8 @@
                         <Border Margin="0,3,0,0" Padding="10,2" CornerRadius="10" VerticalAlignment="Center">
                             <Border.Style>
                                 <Style TargetType="Border">
-                                    <Setter Property="Background" Value="{StaticResource Albumen.SuccessSoftBrush}" />
-                                    <Setter Property="TextElement.Foreground" Value="{StaticResource Albumen.SuccessBrush}" />
+                                    <Setter Property="Background" Value="{DynamicResource Albumen.SuccessSoftBrush}" />
+                                    <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.SuccessBrush}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                             <Setter Property="Background" Value="Transparent" />
@@ -654,7 +654,7 @@
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsCurrent}" Value="True">
                                                 <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                                <Setter Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                                             </DataTrigger>
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
@@ -675,10 +675,10 @@
                                     <Border Width="26" Height="26" CornerRadius="13" HorizontalAlignment="Left" VerticalAlignment="Center">
                                         <Border.Style>
                                             <Style TargetType="Border">
-                                                <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                                                <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                                        <Setter Property="Background" Value="{StaticResource Albumen.AccentBrush}" />
+                                                        <Setter Property="Background" Value="{DynamicResource Albumen.AccentBrush}" />
                                                         <Setter Property="TextElement.Foreground" Value="White" />
                                                     </DataTrigger>
                                                     <!-- In High Contrast the number follows the step's own text color,
@@ -746,7 +746,7 @@
                                         <Setter Property="CornerRadius" Value="6" />
                                         <Setter Property="Padding" Value="4" />
                                         <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                        <Setter Property="BorderBrush" Value="{StaticResource Albumen.BorderStrongBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                         <Setter Property="BorderThickness" Value="1" />
                                         <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
                                         <Setter Property="Effect">
@@ -768,7 +768,7 @@
                                         </Setter>
                                     </Style>
                                     <Style x:Key="HeroHill" TargetType="Path">
-                                        <Setter Property="Fill" Value="{StaticResource Albumen.AccentBrush}" />
+                                        <Setter Property="Fill" Value="{DynamicResource Albumen.AccentBrush}" />
                                         <Setter Property="Opacity" Value="0.55" />
                                         <Setter Property="Stretch" Value="Fill" />
                                         <Setter Property="Data" Value="M 0,44 L 16,24 L 26,34 L 38,18 L 56,44 Z" />
@@ -819,7 +819,7 @@
                                     <Border Width="40" Height="40" Margin="0,0,14,0" CornerRadius="10" VerticalAlignment="Top">
                                         <Border.Style>
                                             <Style TargetType="Border">
-                                                <Setter Property="Background" Value="{StaticResource Albumen.AccentSoftBrush}" />
+                                                <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                                         <Setter Property="Background" Value="Transparent" />
@@ -833,7 +833,7 @@
                                               Data="M 0,2 Q 0,0 2,0 L 7,0 L 9,2 L 18,2 Q 20,2 20,4 L 20,14 Q 20,16 18,16 L 2,16 Q 0,16 0,14 Z M 0,5 L 20,5 L 20,6 L 0,6 Z">
                                             <Path.Style>
                                                 <Style TargetType="Path">
-                                                    <Setter Property="Fill" Value="{StaticResource Albumen.AccentBrush}" />
+                                                    <Setter Property="Fill" Value="{DynamicResource Albumen.AccentBrush}" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                                             <Setter Property="Fill" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
@@ -855,7 +855,7 @@
                                                  AutomationProperties.Name="Selected folder">
                                             <TextBox.Style>
                                                 <Style TargetType="TextBox" BasedOn="{StaticResource Albumen.PathText}">
-                                                    <Setter Property="Foreground" Value="{StaticResource Albumen.MutedTextBrush}" />
+                                                    <Setter Property="Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                                             <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
@@ -901,21 +901,21 @@
                                 <Border x:Name="FolderStatusStrip" Margin="0,14,0,0" Padding="12,9" CornerRadius="8" BorderThickness="1">
                                     <Border.Style>
                                         <Style TargetType="Border">
-                                            <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                                            <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                             <Setter Property="BorderBrush" Value="Transparent" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsReady}" Value="True">
-                                                    <Setter Property="Background" Value="{StaticResource Albumen.SuccessSoftBrush}" />
+                                                    <Setter Property="Background" Value="{DynamicResource Albumen.SuccessSoftBrush}" />
                                                 </DataTrigger>
                                                 <!-- An empty folder passes the check but is nothing to celebrate. -->
                                                 <DataTrigger Binding="{Binding SupportedCount}" Value="0">
-                                                    <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                                                    <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsBlocked}" Value="True">
-                                                    <Setter Property="Background" Value="{StaticResource Albumen.WarningSoftBrush}" />
+                                                    <Setter Property="Background" Value="{DynamicResource Albumen.WarningSoftBrush}" />
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsCanceled}" Value="True">
-                                                    <Setter Property="Background" Value="{StaticResource Albumen.WarningSoftBrush}" />
+                                                    <Setter Property="Background" Value="{DynamicResource Albumen.WarningSoftBrush}" />
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                                     <Setter Property="Background" Value="Transparent" />
@@ -987,8 +987,8 @@
                                         Visibility="{Binding IsBlocked, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <Border.Style>
                                         <Style TargetType="Border">
-                                            <Setter Property="Background" Value="{StaticResource Albumen.WarningSoftBrush}" />
-                                            <Setter Property="BorderBrush" Value="{StaticResource Albumen.WarningBorderBrush}" />
+                                            <Setter Property="Background" Value="{DynamicResource Albumen.WarningSoftBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Albumen.WarningBrush}" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                                     <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.InfoBrushKey}}" />
@@ -1007,7 +1007,7 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border Height="1" Margin="0,16" Background="{StaticResource Albumen.BorderBrush}" />
+                                <Border Height="1" Margin="0,16" Background="{DynamicResource Albumen.BorderBrush}" />
 
                                 <app:CommandSwitchCheckBox x:Name="IncludeSubfoldersCheckBox"
                                           Style="{StaticResource Albumen.SwitchCheckBox}"
@@ -1085,7 +1085,7 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <Border Height="1" Margin="0,16" Background="{StaticResource Albumen.BorderBrush}" />
+                                <Border Height="1" Margin="0,16" Background="{DynamicResource Albumen.BorderBrush}" />
 
                                 <!-- The card's footer: the one next step. -->
                                 <WrapPanel>
@@ -1128,7 +1128,7 @@
                                     <Setter Property="Margin" Value="0,2,10,0" />
                                     <Setter Property="VerticalAlignment" Value="Top" />
                                     <Setter Property="Stretch" Value="Uniform" />
-                                    <Setter Property="Fill" Value="{StaticResource Albumen.SuccessBrush}" />
+                                    <Setter Property="Fill" Value="{DynamicResource Albumen.SuccessBrush}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                             <Setter Property="Fill" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
@@ -1180,7 +1180,7 @@
                                            AutomationProperties.Name="Scan status" AutomationProperties.ItemStatus="{Binding ScanStatus}"
                                            AutomationProperties.LiveSetting="Polite" />
                                 <ProgressBar Height="8" Margin="0,14,0,0" IsIndeterminate="{Binding IsScanBusy}"
-                                             Foreground="{StaticResource Albumen.AccentBrush}"
+                                             Foreground="{DynamicResource Albumen.AccentBrush}"
                                              AutomationProperties.Name="Scan activity"
                                              AutomationProperties.ItemStatus="{Binding ScanStatus}" />
                                 <TextBlock Margin="0,12,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding ScanCountsText}" />
@@ -1188,7 +1188,7 @@
                                            Text="{Binding SemanticProgressText}"
                                            Visibility="{Binding HasSemanticProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
-                                <Border Height="1" Margin="0,16" Background="{StaticResource Albumen.BorderBrush}" />
+                                <Border Height="1" Margin="0,16" Background="{DynamicResource Albumen.BorderBrush}" />
 
                                 <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
                                               ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
@@ -1456,7 +1456,7 @@
                                             <Border Width="64" Height="48" CornerRadius="6" VerticalAlignment="Top">
                                                 <Border.Style>
                                                     <Style TargetType="Border">
-                                                        <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                                                        <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                                                 <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
@@ -1503,8 +1503,8 @@
                                 </StackPanel>
                                 <Border.Style>
                                     <Style TargetType="Border">
-                                        <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
-                                        <Setter Property="TextElement.Foreground" Value="{StaticResource Albumen.MutedTextBrush}" />
+                                        <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
+                                        <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                                 <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
@@ -1572,8 +1572,8 @@
                                      AutomationProperties.ItemStatus="{Binding ActionProgressText}">
                             <ProgressBar.Style>
                                 <Style TargetType="ProgressBar">
-                                    <Setter Property="Foreground" Value="{StaticResource Albumen.AccentBrush}" />
-                                    <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource Albumen.AccentBrush}" />
+                                    <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                     <Setter Property="BorderThickness" Value="0" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
@@ -1621,8 +1621,8 @@
                         <Border Padding="12,10" CornerRadius="8">
                             <Border.Style>
                                 <Style TargetType="Border">
-                                    <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
-                                    <Setter Property="TextElement.Foreground" Value="{StaticResource Albumen.MutedTextBrush}" />
+                                    <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
+                                    <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />

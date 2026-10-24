@@ -11,6 +11,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Albumen.App.Shell;
+using Albumen.App.Themes;
 using Albumen.Application.Review;
 using Albumen.Domain.Review;
 using Albumen.Domain.Workflow;
@@ -19,6 +20,7 @@ namespace Albumen.App;
 
 public partial class MainWindow : Window
 {
+    private readonly ResourceDictionary palette = new();
     private ShellViewModel? shellViewModel;
     private int dataContextGeneration;
     private bool isClosed;
@@ -39,6 +41,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // The window applies the palette itself because tests construct it without App.
+        Resources.MergedDictionaries.Add(palette);
+        ApplyPalette();
+        SystemParameters.StaticPropertyChanged += OnSystemParametersChanged;
         ReviewPageScrollViewer.AddHandler(RequestBringIntoViewEvent,
             new RequestBringIntoViewEventHandler(OnReviewListItemBringIntoView), true);
         ActionPageScrollViewer.AddHandler(RequestBringIntoViewEvent,
@@ -52,6 +58,18 @@ public partial class MainWindow : Window
             new KeyboardFocusChangedEventHandler(OnReviewKeyboardFocusChanged), true);
         if (System.Windows.Application.Current is { } application)
             application.Exit += OnApplicationExit;
+    }
+
+    private void ApplyPalette() => AlbumenPalette.Apply(palette, SystemParameters.HighContrast);
+
+    // Raised on the thread that saw the setting change, so the window re-reads it on its own.
+    private void OnSystemParametersChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName != nameof(SystemParameters.HighContrast)) return;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (!isClosed) ApplyPalette();
+        });
     }
 
     private void OnDataContextChanged(
@@ -954,6 +972,7 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs eventArgs)
     {
         isClosed = true;
+        SystemParameters.StaticPropertyChanged -= OnSystemParametersChanged;
         dataContextGeneration++;
         if (shellViewModel is not null)
         {
