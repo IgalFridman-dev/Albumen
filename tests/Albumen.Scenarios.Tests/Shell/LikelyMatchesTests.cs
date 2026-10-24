@@ -110,7 +110,7 @@ public sealed class LikelyMatchesTests
 
         Assert.Equal(ReviewNavigationLevel.Comparisons, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Equal(ReviewCategoryKind.Near, fixture.ViewModel.ActiveReviewCategory!.Category);
-        Assert.Equal(12, fixture.ViewModel.ActiveReviewMember!.OccurrenceId);
+        Assert.Equal(12, fixture.ViewModel.LeftViewer.Member?.OccurrenceId);
 
         await fixture.Matches.ShowAllCommand.ExecuteAsync();
 

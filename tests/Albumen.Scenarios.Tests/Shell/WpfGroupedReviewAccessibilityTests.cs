@@ -20,20 +20,6 @@ public sealed class WpfGroupedReviewAccessibilityTests
     private static readonly string[] ReviewDetailNames =
         ["ReviewEvidencePanel", "SelectionSummaryText", "ApproveCleanupButton"];
 
-    private static readonly string[] EvidenceTextNames =
-    [
-        "ReviewEvidenceFullPathText",
-        "ReviewEvidenceDimensionsText",
-        "ReviewEvidenceSizeText",
-        "ReviewEvidenceRelevantDateText",
-        "ReviewEvidenceCategoryText",
-        "ReviewEvidenceConfidenceText",
-        "ReviewEvidenceUncertaintyText",
-        "ReviewEvidenceTransformationsText",
-        "ReviewEvidenceReasonText",
-        "ReviewEvidenceRecommendationText",
-    ];
-
     [Fact]
     public void PointerAndKeyboardNavigateCompareAndBackWithoutSelectingCleanup()
     {
@@ -80,7 +66,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
 
                 Assert.Equal(ReviewNavigationLevel.Comparisons,
                     fixture.ViewModel.ReviewNavigationLevel);
-                Assert.NotNull(fixture.ViewModel.ActiveReviewMember);
+                Assert.Same(member, fixture.ViewModel.LeftViewer.Member);
                 Assert.Empty(fixture.Workflow.SelectionCommands);
                 Assert.Single(fixture.Preview.Requests);
 
@@ -89,36 +75,15 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 Assert.Contains("Review", breadcrumb.Text, StringComparison.Ordinal);
                 Assert.Contains("Identical copies", breadcrumb.Text, StringComparison.Ordinal);
 
-                var evidence = Assert.IsAssignableFrom<FrameworkElement>(
+                var viewer = Assert.IsAssignableFrom<FrameworkElement>(
                     window.FindName("ReviewEvidencePanel"));
-                Assert.Contains("Identical copies", AutomationProperties.GetName(evidence),
-                    StringComparison.Ordinal);
-                Assert.Contains("You choose what to remove", AutomationProperties.GetItemStatus(evidence),
-                    StringComparison.Ordinal);
-                Assert.Contains("Uncertainty: Unavailable",
-                    AutomationProperties.GetItemStatus(evidence), StringComparison.Ordinal);
+                Assert.Equal($"Left Viewer: {member.FileName}", AutomationProperties.GetName(viewer));
+                Assert.Equal(member.ItemStatus, AutomationProperties.GetItemStatus(viewer));
                 var preview = Assert.Single(Descendants<PreviewStatusControl>(window));
                 Assert.True(preview.IsVisible);
-                Assert.Same(fixture.ViewModel.ActiveReviewPreview, preview.DataContext);
+                Assert.Same(fixture.ViewModel.LeftViewer.Preview, preview.DataContext);
                 Assert.Contains("Unavailable",
                     AutomationProperties.GetItemStatus(preview), StringComparison.Ordinal);
-                Assert.Equal(fixture.ViewModel.ActiveReviewMember!.ResolvedPath,
-                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceFullPathText")).Text);
-                Assert.Contains("Unavailable",
-                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceDimensionsText")).Text,
-                    StringComparison.Ordinal);
-                Assert.Contains("512 bytes",
-                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceSizeText")).Text,
-                    StringComparison.Ordinal);
-                Assert.Contains("Unavailable",
-                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceRelevantDateText")).Text,
-                    StringComparison.Ordinal);
-                Assert.Contains("Unavailable",
-                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceTransformationsText")).Text,
-                    StringComparison.Ordinal);
-                Assert.Contains("Unavailable",
-                    Assert.IsType<TextBlock>(window.FindName("ReviewEvidenceReasonText")).Text,
-                    StringComparison.Ordinal);
 
                 Assert.Null(window.FindName("ExactGroupsList"));
                 Assert.Null(window.FindName("CouldNotAnalyzeList"));
@@ -229,8 +194,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 var openMember = Descendants<Button>(row).First(button =>
                     AutomationProperties.GetAutomationId(button) == "open-review-member");
                 Click(openMember);
-                Assert.NotNull(fixture.ViewModel.ActiveReviewMember);
-                Assert.Equal(1, fixture.ViewModel.ActiveReviewMember!.OccurrenceId);
+                Assert.Equal(1, fixture.ViewModel.LeftViewer.Member?.OccurrenceId);
                 Assert.Empty(fixture.Workflow.SelectionCommands);
             }
             finally
@@ -337,11 +301,6 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 Assert.Same(textBrush, window.Foreground);
                 Assert.All(new[] { categoriesPanel, groupsPanel, comparisonsPanel }, panel =>
                     Assert.Same(activeBorder, Assert.IsAssignableFrom<Border>(panel).BorderBrush));
-                foreach (var name in EvidenceTextNames)
-                {
-                    Assert.Equal(TextWrapping.Wrap,
-                        Assert.IsType<TextBlock>(window.FindName(name)).TextWrapping);
-                }
             }
             finally
             {

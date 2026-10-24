@@ -14,7 +14,7 @@ namespace Albumen.Scenarios.Tests.Shell;
 public sealed class WpfReviewViewerTests
 {
     [Fact]
-    public void CompareAddsASecondPreviewThatSharesTheZoomAndCloseRemovesIt()
+    public void TheRightViewerAddsASecondPreviewThatSharesTheZoomAndClearingRemovesIt()
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
@@ -22,29 +22,27 @@ public sealed class WpfReviewViewerTests
             var viewModel = fixture.ViewModel;
             WpfReviewSelectionTests.OpenFirstGroupedComparison(viewModel);
             var group = Assert.IsType<ReviewGroupViewModel>(viewModel.ActiveReviewGroup);
-            viewModel.OpenReviewMemberCommand.ExecuteAsync(group.Members[0]).GetAwaiter().GetResult();
+            Place(viewModel, ViewerSide.Left, group, 0);
             var window = new MainWindow { DataContext = viewModel, Width = 1280, Height = 800 };
             try
             {
                 ShowAndDrain(window);
                 Assert.Single(WpfReviewSelectionTests.Descendants<PreviewStatusControl>(window));
 
-                viewModel.CompareReviewMemberCommand.ExecuteAsync(group.Members[1]).GetAwaiter().GetResult();
+                Place(viewModel, ViewerSide.Right, group, 1);
                 ShowAndDrain(window);
                 var previews = WpfReviewSelectionTests.Descendants<PreviewStatusControl>(window).ToArray();
                 Assert.Equal(2, previews.Length);
                 Assert.All(previews, preview => Assert.True(preview.IsVisible));
-                Assert.True(Assert.IsType<Button>(window.FindName("CloseCompareButton")).IsVisible);
 
                 Assert.IsType<Slider>(window.FindName("ReviewZoomSlider")).Value = 2;
                 ShowAndDrain(window);
                 Assert.All(previews, preview => Assert.Equal(2.0, preview.Zoom));
                 Assert.Equal(previews[0].FitHeight, previews[1].FitHeight);
 
-                viewModel.CloseCompareCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+                viewModel.ClearViewerCommand.ExecuteAsync(ViewerSide.Right).GetAwaiter().GetResult();
                 ShowAndDrain(window);
                 Assert.Single(WpfReviewSelectionTests.Descendants<PreviewStatusControl>(window));
-                Assert.False(Assert.IsType<Button>(window.FindName("CloseCompareButton")).IsVisible);
             }
             finally
             {
@@ -54,7 +52,7 @@ public sealed class WpfReviewViewerTests
     }
 
     [Fact]
-    public void ComparedPhotosPanTogetherByTheSameShareOfTheirWidth()
+    public void ViewedPhotosPanTogetherByTheSameShareOfTheirWidth()
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
@@ -65,8 +63,8 @@ public sealed class WpfReviewViewerTests
             viewModel.OpenReviewCategoryCommand.ExecuteAsync(near).GetAwaiter().GetResult();
             var group = near.Groups[0];
             viewModel.OpenReviewGroupCommand.ExecuteAsync(group).GetAwaiter().GetResult();
-            viewModel.OpenReviewMemberCommand.ExecuteAsync(group.Members[0]).GetAwaiter().GetResult();
-            viewModel.CompareReviewMemberCommand.ExecuteAsync(group.Members[1]).GetAwaiter().GetResult();
+            Place(viewModel, ViewerSide.Left, group, 0);
+            Place(viewModel, ViewerSide.Right, group, 1);
             var window = new MainWindow { DataContext = viewModel, Width = 1280, Height = 800 };
             try
             {
@@ -131,39 +129,6 @@ public sealed class WpfReviewViewerTests
         });
     }
 
-    [Fact]
-    public void EnterOnACardsCompareButtonComparesInsteadOfOpeningThePhoto()
-    {
-        WpfReviewSelectionTests.RunOnSta(() =>
-        {
-            var fixture = GroupedWpfFixture.Create();
-            var viewModel = fixture.ViewModel;
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(viewModel);
-            var group = Assert.IsType<ReviewGroupViewModel>(viewModel.ActiveReviewGroup);
-            viewModel.OpenReviewMemberCommand.ExecuteAsync(group.Members[0]).GetAwaiter().GetResult();
-            var window = new MainWindow { DataContext = viewModel, Width = 1280, Height = 800 };
-            try
-            {
-                ShowAndDrain(window);
-                var list = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                var compare = WpfReviewSelectionTests.Descendants<Button>(list)
-                    .Single(button => button.IsVisible && Equals(button.Content, "Compare")
-                        && ReferenceEquals(button.DataContext, group.Members[1]));
-                compare.Focus();
-
-                WpfReviewSelectionTests.Press(compare, System.Windows.Input.Key.Enter);
-                ShowAndDrain(window);
-
-                Assert.Same(group.Members[0], viewModel.ActiveReviewMember);
-                Assert.Same(group.Members[1], viewModel.ComparedReviewMember);
-            }
-            finally
-            {
-                window.Close();
-            }
-        });
-    }
-
     [Theory]
     [InlineData(1280, 800)]
     [InlineData(680, 520)]
@@ -175,7 +140,6 @@ public sealed class WpfReviewViewerTests
             var viewModel = fixture.ViewModel;
             WpfReviewSelectionTests.OpenFirstGroupedComparison(viewModel);
             var group = Assert.IsType<ReviewGroupViewModel>(viewModel.ActiveReviewGroup);
-            viewModel.OpenReviewMemberCommand.ExecuteAsync(group.Members[0]).GetAwaiter().GetResult();
             var window = new MainWindow { DataContext = viewModel, Width = width, Height = height };
             try
             {
@@ -186,22 +150,16 @@ public sealed class WpfReviewViewerTests
                 var card = Assert.IsType<ListBoxItem>(list.ItemContainerGenerator.ContainerFromItem(group.Members[1]));
                 // The list scrolls by item, so its own viewport height counts cards, not pixels.
                 var viewport = WpfReviewSelectionTests.Descendants<ScrollContentPresenter>(list).First();
-                var compare = WpfReviewSelectionTests.Descendants<Button>(card)
-                    .Single(button => button.IsVisible && Equals(button.Content, "Compare"));
-
-                foreach (var part in new FrameworkElement[] { card, compare })
-                {
-                    var bounds = part.TransformToAncestor(viewport).TransformBounds(
-                        new Rect(new Point(), part.RenderSize));
-                    Assert.True(bounds.Top >= -0.5 && bounds.Bottom <= viewport.ActualHeight + 0.5,
-                        $"{part.GetType().Name} bounds {bounds} fell outside the photo list height {viewport.ActualHeight}.");
-                }
+                var bounds = card.TransformToAncestor(viewport).TransformBounds(
+                    new Rect(new Point(), card.RenderSize));
+                Assert.True(bounds.Top >= -0.5 && bounds.Bottom <= viewport.ActualHeight + 0.5,
+                    $"Card bounds {bounds} fell outside the photo list height {viewport.ActualHeight}.");
 
                 var open = WpfReviewSelectionTests.Descendants<Button>(card).Single(button =>
                     System.Windows.Automation.AutomationProperties.GetAutomationId(button) == "open-review-member");
                 open.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 ShowAndDrain(window);
-                Assert.Same(group.Members[1], viewModel.ActiveReviewMember);
+                Assert.Same(group.Members[1], viewModel.LeftViewer.Member);
                 var page = Assert.IsType<ScrollViewer>(window.FindName("ReviewPageScrollViewer"));
                 var viewer = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("ReviewEvidencePanel"));
                 var top = viewer.TransformToAncestor(page).Transform(new Point()).Y;
@@ -257,6 +215,10 @@ public sealed class WpfReviewViewerTests
             }
         });
     }
+
+    private static void Place(ShellViewModel viewModel, ViewerSide side, ReviewGroupViewModel group, int index) =>
+        viewModel.PlaceInViewerCommand.ExecuteAsync(new PlaceInViewer(side, group.GroupId, group.Members[index]))
+            .GetAwaiter().GetResult();
 
     private static void ShowAndDrain(Window window)
     {

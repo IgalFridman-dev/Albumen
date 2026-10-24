@@ -72,7 +72,8 @@ public sealed class WpfGroupedReviewVirtualizationTests
                 Assert.Equal(2, comparisons.Items.Count);
                 Assert.Empty(preview.Requests);
 
-                viewModel.OpenReviewMemberCommand.ExecuteAsync(last.Members[1])
+                viewModel.PlaceInViewerCommand.ExecuteAsync(
+                        new PlaceInViewer(ViewerSide.Left, last.GroupId, last.Members[1]))
                     .GetAwaiter().GetResult();
                 WpfReviewSelectionTests.Drain();
 

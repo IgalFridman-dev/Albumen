@@ -41,7 +41,6 @@ public sealed class GroupedReviewNavigationTests
         Assert.Equal(ReviewNavigationLevel.Groups, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Same(near, fixture.ViewModel.ActiveReviewCategory);
         Assert.Null(fixture.ViewModel.ActiveReviewGroup);
-        Assert.Null(fixture.ViewModel.ActiveReviewMember);
         Assert.Equal(["Review", "Look-alike"], fixture.ViewModel.ReviewBreadcrumbs);
 
         var group = near.Groups[0];
@@ -49,14 +48,14 @@ public sealed class GroupedReviewNavigationTests
 
         Assert.Equal(ReviewNavigationLevel.Comparisons, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Same(group, fixture.ViewModel.ActiveReviewGroup);
-        Assert.Null(fixture.ViewModel.ActiveReviewMember);
         Assert.StartsWith("Set 1: ", group.Summary, StringComparison.Ordinal);
         Assert.Equal(["Review", "Look-alike", group.Summary], fixture.ViewModel.ReviewBreadcrumbs);
 
         var member = group.Members[1];
-        await fixture.ViewModel.OpenReviewMemberCommand.ExecuteAsync(member);
+        await fixture.ViewModel.PlaceInViewerCommand.ExecuteAsync(
+            new PlaceInViewer(ViewerSide.Left, group.GroupId, member));
 
-        Assert.Same(member, fixture.ViewModel.ActiveReviewMember);
+        Assert.Same(member, fixture.ViewModel.LeftViewer.Member);
         Assert.Equal(ReviewNavigationLevel.Comparisons, fixture.ViewModel.ReviewNavigationLevel);
 
         await fixture.ViewModel.ReviewBackCommand.ExecuteAsync();
@@ -64,7 +63,8 @@ public sealed class GroupedReviewNavigationTests
         Assert.Equal(ReviewNavigationLevel.Groups, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Same(near, fixture.ViewModel.ActiveReviewCategory);
         Assert.Null(fixture.ViewModel.ActiveReviewGroup);
-        Assert.Null(fixture.ViewModel.ActiveReviewMember);
+        // The viewers are not a navigation level: going back leaves the photo shown.
+        Assert.Same(member, fixture.ViewModel.LeftViewer.Member);
 
         await fixture.ViewModel.ReviewBackCommand.ExecuteAsync();
 
@@ -115,9 +115,12 @@ public sealed class GroupedReviewNavigationTests
 
         await fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(fixture.ViewModel.ReviewCategories[1]);
         await fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(near);
-        await fixture.ViewModel.OpenReviewMemberCommand.ExecuteAsync(markedElsewhere);
+        await fixture.ViewModel.PlaceInViewerCommand.ExecuteAsync(
+            new PlaceInViewer(ViewerSide.Left, near.GroupId, markedElsewhere));
 
-        Assert.Same(markedElsewhere, fixture.ViewModel.ActiveReviewMember);
+        Assert.Same(markedElsewhere, fixture.ViewModel.LeftViewer.Member);
+        Assert.True(fixture.ViewModel.LeftViewer.IsMarked);
+        Assert.False(fixture.ViewModel.LeftViewer.CanRemove);
         Assert.Single(fixture.Workflow.SelectionCommands);
     }
 
