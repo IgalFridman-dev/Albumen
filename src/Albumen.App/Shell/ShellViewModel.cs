@@ -126,13 +126,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 new ChangeScopeRecursionCommand(RequireBoolean(parameter)), CancellationToken.None),
             allowConcurrentExecutions: true);
         ContinueCommand = new AsyncCommand(() => photoWorkflow?.ContinueAsync() ?? Task.CompletedTask);
-        ChangeNearDuplicateModeCommand = new AsyncCommand(
-            parameter => photoWorkflow?.SetScanOptionsAsync(new(
-                ExactDuplicateMode.Enabled,
-                RequireBoolean(parameter)
-                    ? NearDuplicateMode.Conservative
-                    : NearDuplicateMode.Disabled)) ?? Task.CompletedTask,
-            canExecute: () => CanChangeScanOptions);
         ConfirmExactRulesCommand = new AsyncCommand(() => photoWorkflow?.ConfirmExactRulesAsync() ?? Task.CompletedTask);
         StartScanCommand = new AsyncCommand(() => photoWorkflow?.StartScanAsync() ?? Task.CompletedTask);
         ScanFolderCommand = new AsyncCommand(ScanFolderAsync);
@@ -200,7 +193,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
 
     public AsyncCommand ContinueCommand { get; }
-    public AsyncCommand ChangeNearDuplicateModeCommand { get; }
     public AsyncCommand ConfirmExactRulesCommand { get; }
     public AsyncCommand StartScanCommand { get; }
     public AsyncCommand ScanFolderCommand { get; }
@@ -379,19 +371,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         { HasUnsettledWork: true } or
         { Status: ScanSessionStatus.Checking or ScanSessionStatus.Running };
     public bool CanOpenReview => photoSnapshot?.Scan.Pin is not null;
-    public bool NearDuplicatesEnabled => photoSnapshot?.Options.Near == NearDuplicateMode.Conservative;
+    private const string AlwaysFoundText = "Identical copies and look-alikes are always found. Nothing is marked for you.";
     public string ScanOptionsGuidance => photoSnapshot?.Options is { } options
         ? options.IsValid
-            ? (options.Near == NearDuplicateMode.Conservative
-                ? "Identical copies are always included. Look-alikes use one careful, fixed setting, and close calls are shown as Maybe similar. Nothing is marked for you."
-                : "Identical copies are always included. Look-alikes are off for the next scan. Nothing is marked for you.")
-              + (photoSnapshot.Scan.Pin is not null
-                ? " Changing an option clears the current results and your marks, and you scan again."
+            ? AlwaysFoundText + (photoSnapshot.Scan.Pin is not null
+                ? " Changing Include subfolders clears the current results and your marks, and you scan again."
                 : string.Empty)
             : options.ValidationGuidance
-        : "Identical copies are always included. Look-alikes are on unless you turn them off. Nothing is marked for you.";
+        : AlwaysFoundText;
     // The guidance is a live region, so it is shown only when it has something to say:
-    // invalid options, or the warning that changing an option clears the current results.
+    // invalid options, or the warning that changing subfolders clears the current results.
     public bool HasScanOptionsGuidance => photoSnapshot is { } snapshot
         && (!snapshot.Options.IsValid || snapshot.Scan.Pin is not null);
     public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";
@@ -848,7 +837,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var previousBusy = IsScanBusy;
         var previousCanConfirm = CanConfirmExactRules;
         var previousCanChangeOptions = CanChangeScanOptions;
-        var previousOptions = photoSnapshot?.Options;
         var previousGuidance = ScanOptionsGuidance;
         var previousHasGuidance = HasScanOptionsGuidance;
         Apply(snapshot.Scope);
@@ -863,11 +851,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ProjectAction(previousAction, previousActionReview, snapshot);
         ProjectActionRecovery(previousRecovery, snapshot.ActionRecovery);
         Phases = Project(snapshot.Phases);
-        RuleSetStatus = snapshot.Rules is null
-            ? "not confirmed yet (Scan confirms them)"
-            : snapshot.Rules.Options.Near == NearDuplicateMode.Conservative
-                ? "identical copies and look-alikes, confirmed"
-                : "identical copies only, confirmed";
+        RuleSetStatus = snapshot.Rules is null ? "not confirmed yet (Scan confirms them)" : "confirmed";
         if (!preserveReviewProjection)
         {
             var previousNavigationLevel = ReviewNavigationLevel;
@@ -903,7 +887,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             nameof(HasContinueReviewHint), nameof(ReviewContinuationText), nameof(HasReviewContinuation) })
             OnPropertyChanged(name);
         ContinueReviewCommand.NotifyCanExecuteChanged();
-        if (previousOptions != snapshot.Options) OnPropertyChanged(nameof(NearDuplicatesEnabled));
         if (previousGuidance != ScanOptionsGuidance) OnPropertyChanged(nameof(ScanOptionsGuidance));
         if (previousHasGuidance != HasScanOptionsGuidance) OnPropertyChanged(nameof(HasScanOptionsGuidance));
         if (!preserveReviewProjection)
@@ -919,11 +902,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             OnPropertyChanged(nameof(IsScanBusy));
         }
         if (previousCanConfirm != CanConfirmExactRules) OnPropertyChanged(nameof(CanConfirmExactRules));
-        if (previousCanChangeOptions != CanChangeScanOptions)
-        {
-            ChangeNearDuplicateModeCommand.NotifyCanExecuteChanged();
-            OnPropertyChanged(nameof(CanChangeScanOptions));
-        }
+        if (previousCanChangeOptions != CanChangeScanOptions) OnPropertyChanged(nameof(CanChangeScanOptions));
         if (previousStatus != ScanStatus) OnPropertyChanged(nameof(ScanStatus));
         if (previousPhase != CurrentPhase) OnPropertyChanged(nameof(CurrentPhase));
     }

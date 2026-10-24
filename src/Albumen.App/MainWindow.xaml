@@ -923,21 +923,9 @@
                                            Style="{StaticResource Albumen.MutedText}"
                                            Text="{Binding SubfoldersCaption}" />
 
-                                <app:CommandSwitchCheckBox x:Name="NearDuplicatesCheckBox"
-                                          Margin="0,14,0,0"
-                                          Style="{StaticResource Albumen.SwitchCheckBox}"
-                                          Content="Look-alikes"
-                                          IsChecked="{Binding NearDuplicatesEnabled, Mode=OneWay}"
-                                          IsEnabled="{Binding CanChangeScanOptions}"
-                                          Command="{Binding ChangeNearDuplicateModeCommand}"
-                                          CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
-                                          AutomationProperties.Name="Look-alikes"
-                                          AutomationProperties.HelpText="Finds a resized or re-saved copy of the same photo with one careful, fixed setting. Close calls are shown as Maybe similar." />
-                                <TextBlock x:Name="NearDuplicatesCaption" Margin="56,3,0,0"
-                                           Style="{StaticResource Albumen.MutedText}"
-                                           Text="Bursts and near-identical shots. Identical copies are always found." />
 
-                                <!-- A live region, shown only when it has something to say. -->
+                                <!-- A live region, shown only when it has something to say: invalid options,
+                                     or that changing subfolders after a scan clears its results. -->
                                 <TextBlock x:Name="ScanOptionsGuidanceText"
                                            Margin="0,14,0,0"
                                            Style="{StaticResource Albumen.MutedText}"

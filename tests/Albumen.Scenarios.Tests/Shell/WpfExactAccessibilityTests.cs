@@ -72,7 +72,6 @@ public sealed class WpfExactAccessibilityTests
         });
     }
 
-
     [Fact]
     public void InvalidOptionsExposeLiveGuidanceAndBlockTheScan()
     {

@@ -80,7 +80,7 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
             return index.State switch
             {
                 SemanticState.Idle =>
-                    "Search isn't ready for this Scan. Turn on Look-alikes and scan again to search photos by what they show.",
+                    "Search isn't ready for this Scan. Scan again to search photos by what they show.",
                 SemanticState.Indexing =>
                     $"Getting photos ready for search: {Count(index.Indexed)} of {Count(index.Total)} ready.",
                 SemanticState.Empty => "No photo in this Scan could be prepared for search.",
