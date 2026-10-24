@@ -11,8 +11,8 @@
         Height="720"
         MinWidth="680"
         MinHeight="520"
-        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-        Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+        Background="{DynamicResource Albumen.WindowBrush}"
+        Foreground="{DynamicResource Albumen.TextBrush}"
         FontFamily="Segoe UI Variable Text, Segoe UI"
         WindowStartupLocation="CenterScreen">
     <Window.CommandBindings>
@@ -31,16 +31,10 @@
                 <Setter.Value>
                     <ControlTemplate>
                         <Rectangle Margin="2" StrokeThickness="2" StrokeDashArray="1,1"
-                                   Stroke="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                                   Stroke="{DynamicResource Albumen.TextBrush}" />
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
-        </Style>
-        <Style x:Key="DangerButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="#FFB3261E" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="FocusVisualStyle" Value="{StaticResource ActionFocusVisual}" />
         </Style>
         <DataTemplate x:Key="ScanOutcomeSummaryTemplate">
             <StackPanel Margin="0,2">
@@ -55,8 +49,8 @@
         <!-- One photo in a cleanup: what it is, where it was, and what happened to it. -->
         <DataTemplate x:Key="ActionItemTemplate">
             <app:ReviewAutomationBorder Margin="0,4" Padding="14,10" BorderThickness="1" CornerRadius="10"
-                    Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    Background="{DynamicResource Albumen.SurfaceBrush}"
+                    BorderBrush="{DynamicResource Albumen.BorderBrush}"
                     AutomationProperties.AutomationId="action-item"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding ItemStatus}">
@@ -79,7 +73,7 @@
         </DataTemplate>
         <DataTemplate x:Key="ActionRecordItemTemplate">
             <app:ReviewAutomationBorder Margin="0,8,0,0" Padding="0,8,0,0" BorderThickness="0,1,0,0"
-                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    BorderBrush="{DynamicResource Albumen.BorderBrush}"
                     AutomationProperties.AutomationId="action-record-item"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding StatusText}">
@@ -121,6 +115,9 @@
             </Border>
         </DataTemplate>
         <Style x:Key="ReviewListStyle" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
             <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
             <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
@@ -130,6 +127,14 @@
                 <Setter.Value>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <!-- The cards inside show what is open; the item adds no chrome. -->
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
                     </Style>
                 </Setter.Value>
             </Setter>
@@ -193,7 +198,6 @@
                                             </MultiBinding>
                                         </Condition.Binding>
                                     </Condition>
-                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
                                 </MultiDataTrigger.Conditions>
                                 <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
                                 <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
@@ -210,7 +214,6 @@
                                     </Condition>
                                     <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
                                 </MultiDataTrigger.Conditions>
-                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
                                 <Setter Property="BorderThickness" Value="2" />
                             </MultiDataTrigger>
                         </Style.Triggers>
@@ -252,7 +255,6 @@
                                             </MultiBinding>
                                         </Condition.Binding>
                                     </Condition>
-                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
                                 </MultiDataTrigger.Conditions>
                                 <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
                                 <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
@@ -269,7 +271,6 @@
                                     </Condition>
                                     <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
                                 </MultiDataTrigger.Conditions>
-                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
                                 <Setter Property="BorderThickness" Value="2" />
                             </MultiDataTrigger>
                         </Style.Triggers>
@@ -312,12 +313,9 @@
                 <Border.Style>
                     <Style TargetType="Border">
                         <Setter Property="BorderThickness" Value="1" />
-                        <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                        <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
                         <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderBrush}" />
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                            </DataTrigger>
                             <DataTrigger Value="True">
                                 <DataTrigger.Binding>
                                     <MultiBinding Converter="{StaticResource EqualValuesConverter}">
@@ -328,20 +326,6 @@
                                 <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                                 <Setter Property="BorderThickness" Value="2" />
                             </DataTrigger>
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Value="True">
-                                        <Condition.Binding>
-                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
-                                                <Binding Path="OccurrenceId" />
-                                                <Binding Path="DataContext.ActiveReviewMember.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                            </MultiBinding>
-                                        </Condition.Binding>
-                                    </Condition>
-                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
-                                </MultiDataTrigger.Conditions>
-                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
-                            </MultiDataTrigger>
                         </Style.Triggers>
                     </Style>
                 </Border.Style>
@@ -459,46 +443,6 @@
     </Window.Resources>
 
     <Grid>
-    <!-- Decorative soft glow behind the workflow. Hidden in High Contrast and while
-         reviewing photos, where a tinted background would distort how colors look. -->
-    <Grid x:Name="BackgroundGlow" IsHitTestVisible="False" ClipToBounds="True">
-        <Grid.Style>
-            <Style TargetType="Grid">
-                <Style.Triggers>
-                    <DataTrigger Binding="{Binding IsReviewPhase}" Value="True">
-                        <Setter Property="Visibility" Value="Collapsed" />
-                    </DataTrigger>
-                    <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                        <Setter Property="Visibility" Value="Collapsed" />
-                    </DataTrigger>
-                </Style.Triggers>
-            </Style>
-        </Grid.Style>
-        <Rectangle>
-            <Rectangle.Fill>
-                <RadialGradientBrush Center="0.05,-0.1" GradientOrigin="0.05,-0.1" RadiusX="0.75" RadiusY="0.8">
-                    <GradientStop Color="#FFDCE7FF" Offset="0" />
-                    <GradientStop Color="#00DCE7FF" Offset="1" />
-                </RadialGradientBrush>
-            </Rectangle.Fill>
-        </Rectangle>
-        <Rectangle>
-            <Rectangle.Fill>
-                <RadialGradientBrush Center="1,-0.05" GradientOrigin="1,-0.05" RadiusX="0.6" RadiusY="0.75">
-                    <GradientStop Color="#FFEFE4FF" Offset="0" />
-                    <GradientStop Color="#00EFE4FF" Offset="1" />
-                </RadialGradientBrush>
-            </Rectangle.Fill>
-        </Rectangle>
-        <Rectangle>
-            <Rectangle.Fill>
-                <RadialGradientBrush Center="0.6,1.1" GradientOrigin="0.6,1.1" RadiusX="0.6" RadiusY="0.7">
-                    <GradientStop Color="#FFDDF5EE" Offset="0" />
-                    <GradientStop Color="#00DDF5EE" Offset="1" />
-                </RadialGradientBrush>
-            </Rectangle.Fill>
-        </Rectangle>
-    </Grid>
     <Grid Margin="24,16,24,16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -520,33 +464,12 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Border Width="36" Height="36" CornerRadius="9" VerticalAlignment="Top">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Background" Value="{DynamicResource Albumen.AccentBrush}" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                    <Setter Property="Background" Value="Transparent" />
-                                    <Setter Property="BorderThickness" Value="1" />
-                                    <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
+                <Border Width="36" Height="36" CornerRadius="9" VerticalAlignment="Top"
+                        Background="{DynamicResource Albumen.AccentBrush}">
                     <Path Width="18" Height="18" Stretch="Uniform" StrokeThickness="2"
                           StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                          Data="M 3,6 L 15,6 L 15,18 L 3,18 Z M 7,3 L 18,3 L 18,14 M 5,15 L 8,11.5 L 11,14.5 L 13,12.5">
-                        <Path.Style>
-                            <Style TargetType="Path">
-                                <Setter Property="Stroke" Value="White" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                        <Setter Property="Stroke" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Path.Style>
-                    </Path>
+                          Stroke="{DynamicResource Albumen.OnAccentBrush}"
+                          Data="M 3,6 L 15,6 L 15,18 L 3,18 Z M 7,3 L 18,3 L 18,14 M 5,15 L 8,11.5 L 11,14.5 L 13,12.5" />
                 </Border>
                 <StackPanel Grid.Column="1" Margin="12,0,0,0">
                     <WrapPanel>
@@ -559,10 +482,8 @@
                                     <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.SuccessBrush}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                            <Setter Property="Background" Value="Transparent" />
                                             <Setter Property="BorderThickness" Value="1" />
-                                            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                            <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -575,7 +496,7 @@
             <!-- Shown only while Action records load or after local data failed to load. -->
             <Border x:Name="LocalDataStatusBanner" Grid.Row="1" Grid.ColumnSpan="2"
                     Margin="0,8,0,0" CornerRadius="4"
-                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    BorderBrush="{DynamicResource Albumen.BorderBrush}"
                     Visibility="{Binding HasActionRecoveryStatus, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Border.Style>
                     <Style TargetType="Border">
@@ -585,8 +506,8 @@
                             <DataTrigger Binding="{Binding IsLocalDataFaulted}" Value="True">
                                 <Setter Property="BorderThickness" Value="1" />
                                 <Setter Property="Padding" Value="12,8" />
-                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.InfoBrushKey}}" />
-                                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}" />
+                                <Setter Property="Background" Value="{DynamicResource Albumen.WarningSoftBrush}" />
+                                <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.WarningBrush}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -597,7 +518,7 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <Path Width="16" Height="16" Margin="0,1,10,0" VerticalAlignment="Top" Stretch="Uniform"
-                          Fill="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}"
+                          Fill="{DynamicResource Albumen.WarningBrush}"
                           Data="M 9,0 L 18,18 L 0,18 Z M 8,5 L 10,5 L 10,12 L 8,12 Z M 8,14 L 10,14 L 10,16 L 8,16 Z"
                           Visibility="{Binding IsLocalDataFaulted, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <TextBlock x:Name="LocalDataStatusText" Grid.Column="1"
@@ -653,7 +574,7 @@
                                     <Style TargetType="Button" BasedOn="{StaticResource Albumen.StepButton}">
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                                                <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
                                                 <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                                             </DataTrigger>
                                             <MultiDataTrigger>
@@ -661,7 +582,6 @@
                                                     <Condition Binding="{Binding IsCurrent}" Value="True" />
                                                     <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
                                                 </MultiDataTrigger.Conditions>
-                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
                                                 <Setter Property="BorderThickness" Value="2" />
                                             </MultiDataTrigger>
                                         </Style.Triggers>
@@ -679,7 +599,7 @@
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsCurrent}" Value="True">
                                                         <Setter Property="Background" Value="{DynamicResource Albumen.AccentBrush}" />
-                                                        <Setter Property="TextElement.Foreground" Value="White" />
+                                                        <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.OnAccentBrush}" />
                                                     </DataTrigger>
                                                     <!-- In High Contrast the number follows the step's own text color,
                                                          so an unavailable step reads as GrayText throughout. -->
@@ -745,7 +665,7 @@
                                         <Setter Property="Height" Value="52" />
                                         <Setter Property="CornerRadius" Value="6" />
                                         <Setter Property="Padding" Value="4" />
-                                        <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+                                        <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                         <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                         <Setter Property="BorderThickness" Value="1" />
                                         <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
@@ -758,25 +678,18 @@
                                     <Style x:Key="HeroSky" TargetType="Rectangle">
                                         <Setter Property="RadiusX" Value="3" />
                                         <Setter Property="RadiusY" Value="3" />
-                                        <Setter Property="Fill">
-                                            <Setter.Value>
-                                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                                    <GradientStop Color="#DCE7FF" Offset="0" />
-                                                    <GradientStop Color="#EFF4FF" Offset="1" />
-                                                </LinearGradientBrush>
-                                            </Setter.Value>
-                                        </Setter>
+                                        <Setter Property="Fill" Value="{DynamicResource Albumen.AccentSoftBrush}" />
                                     </Style>
                                     <Style x:Key="HeroHill" TargetType="Path">
-                                        <Setter Property="Fill" Value="{DynamicResource Albumen.AccentBrush}" />
-                                        <Setter Property="Opacity" Value="0.55" />
+                                        <Setter Property="Fill" Value="{DynamicResource Albumen.AccentLineBrush}" />
+                                        <Setter Property="Opacity" Value="0.8" />
                                         <Setter Property="Stretch" Value="Fill" />
                                         <Setter Property="Data" Value="M 0,44 L 16,24 L 26,34 L 38,18 L 56,44 Z" />
                                     </Style>
                                     <Style x:Key="HeroSun" TargetType="Ellipse">
                                         <Setter Property="Width" Value="10" />
                                         <Setter Property="Height" Value="10" />
-                                        <Setter Property="Fill" Value="#F5C38B" />
+                                        <Setter Property="Fill" Value="{DynamicResource Albumen.WarningBrush}" />
                                         <Setter Property="HorizontalAlignment" Value="Right" />
                                         <Setter Property="VerticalAlignment" Value="Top" />
                                         <Setter Property="Margin" Value="0,6,8,0" />
@@ -816,32 +729,13 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Width="40" Height="40" Margin="0,0,14,0" CornerRadius="10" VerticalAlignment="Top">
-                                        <Border.Style>
-                                            <Style TargetType="Border">
-                                                <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                        <Setter Property="Background" Value="Transparent" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Border.Style>
+                                    <Border Width="40" Height="40" Margin="0,0,14,0" CornerRadius="10" VerticalAlignment="Top"
+                                            Background="{DynamicResource Albumen.AccentSoftBrush}">
                                         <!-- A folder, as geometry: no font glyph, nothing to fall back to. -->
                                         <Path Width="20" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center"
                                               Stretch="Uniform"
-                                              Data="M 0,2 Q 0,0 2,0 L 7,0 L 9,2 L 18,2 Q 20,2 20,4 L 20,14 Q 20,16 18,16 L 2,16 Q 0,16 0,14 Z M 0,5 L 20,5 L 20,6 L 0,6 Z">
-                                            <Path.Style>
-                                                <Style TargetType="Path">
-                                                    <Setter Property="Fill" Value="{DynamicResource Albumen.AccentBrush}" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                            <Setter Property="Fill" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Path.Style>
-                                        </Path>
+                                              Fill="{DynamicResource Albumen.AccentBrush}"
+                                              Data="M 0,2 Q 0,0 2,0 L 7,0 L 9,2 L 18,2 Q 20,2 20,4 L 20,14 Q 20,16 18,16 L 2,16 Q 0,16 0,14 Z M 0,5 L 20,5 L 20,6 L 0,6 Z" />
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock x:Name="FolderNameText" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
@@ -857,9 +751,6 @@
                                                 <Style TargetType="TextBox" BasedOn="{StaticResource Albumen.PathText}">
                                                     <Setter Property="Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
                                                     <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                                        </DataTrigger>
                                                         <DataTrigger Binding="{Binding SelectedPath}" Value="">
                                                             <Setter Property="Visibility" Value="Collapsed" />
                                                         </DataTrigger>
@@ -919,7 +810,7 @@
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                                     <Setter Property="Background" Value="Transparent" />
-                                                    <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderBrush}" />
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -936,7 +827,7 @@
                                               VerticalAlignment="Top"
                                               AutomationProperties.ItemStatus="{Binding ScopeStatus}"
                                               AutomationProperties.Name="{Binding ScopeStatus, StringFormat='Folder status: {0}'}"
-                                              Fill="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                                              Fill="{DynamicResource Albumen.TextBrush}"
                                               Stretch="Uniform">
                                             <Path.Style>
                                                 <Style TargetType="Path">
@@ -989,13 +880,6 @@
                                         <Style TargetType="Border">
                                             <Setter Property="Background" Value="{DynamicResource Albumen.WarningSoftBrush}" />
                                             <Setter Property="BorderBrush" Value="{DynamicResource Albumen.WarningBrush}" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                    <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.InfoBrushKey}}" />
-                                                    <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" />
-                                                    <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
                                         </Style>
                                     </Border.Style>
                                     <StackPanel>
@@ -1129,11 +1013,6 @@
                                     <Setter Property="VerticalAlignment" Value="Top" />
                                     <Setter Property="Stretch" Value="Uniform" />
                                     <Setter Property="Fill" Value="{DynamicResource Albumen.SuccessBrush}" />
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                            <Setter Property="Fill" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
                                 </Style>
                                 <Style x:Key="TrustText" TargetType="TextBlock" BasedOn="{StaticResource Albumen.MutedText}">
                                     <Setter Property="FontSize" Value="13" />
@@ -1266,8 +1145,8 @@
                      changes nothing in the kinds and sets below. -->
                 <Border x:Name="LikelyMatchesPanel" Margin="0,10,0,0" Padding="12" CornerRadius="12"
                         DataContext="{Binding LikelyMatches}"
-                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                        BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                        Background="{DynamicResource Albumen.SurfaceBrush}"
+                        BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}"
                         AutomationProperties.Name="Likely matches">
                     <StackPanel>
                         <TextBlock Text="Find photos by what they show" Style="{StaticResource Albumen.SectionTitle}" />
@@ -1320,8 +1199,8 @@
                         <ColumnDefinition x:Name="ReviewComparisonsColumn" Width="*" />
                     </Grid.ColumnDefinitions>
                     <Border x:Name="ReviewCategoriesPanel" Grid.Column="0" Margin="0,0,4,0" Padding="6" CornerRadius="12"
-                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                            Background="{DynamicResource Albumen.SurfaceBrush}"
+                            BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="What was found" Style="{StaticResource Albumen.SectionTitle}" Margin="6,4,6,6" />
                             <ListBox x:Name="ReviewCategoriesList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ReviewCategories}"
@@ -1331,8 +1210,8 @@
                         </DockPanel>
                     </Border>
                     <Border x:Name="ReviewGroupsPanel" Grid.Column="1" Margin="4,0" Padding="6" CornerRadius="12"
-                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                            Background="{DynamicResource Albumen.SurfaceBrush}"
+                            BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="Sets" Style="{StaticResource Albumen.SectionTitle}" Margin="6,4,6,6" />
                             <ListBox x:Name="ReviewGroupsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewGroups}"
@@ -1342,8 +1221,8 @@
                         </DockPanel>
                     </Border>
                     <Border x:Name="ReviewComparisonsPanel" Grid.Column="2" Margin="4,0,0,0" Padding="6" CornerRadius="12"
-                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                            Background="{DynamicResource Albumen.SurfaceBrush}"
+                            BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="Photos in this set" Style="{StaticResource Albumen.SectionTitle}" Margin="6,4,6,6" />
                             <ListBox x:Name="ReviewComparisonsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewMembers}"
@@ -1358,8 +1237,8 @@
                 <!-- Viewer: the open photo large, Previous / Next through the set, and an
                      optional second photo side by side with one zoom for both. -->
                 <app:ReviewAutomationBorder x:Name="ReviewEvidencePanel" Padding="14" CornerRadius="12"
-                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                        BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                        Background="{DynamicResource Albumen.SurfaceBrush}"
+                        BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}"
                         AutomationProperties.AutomationId="review-evidence"
                         AutomationProperties.Name="{Binding ActiveReviewEvidence.AutomationName}"
                         AutomationProperties.ItemStatus="{Binding ActiveReviewEvidence.ItemStatus}">
@@ -1433,8 +1312,8 @@
 
                     <app:ReviewAutomationBorder x:Name="ApprovalPanel" Margin="0,8,0,0" Padding="16" Focusable="True" CornerRadius="12"
                             FocusVisualStyle="{StaticResource Albumen.FocusVisual}"
-                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                            Background="{DynamicResource Albumen.SurfaceBrush}"
+                            BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}"
                             AutomationProperties.AutomationId="approval-panel"
                             AutomationProperties.Name="Cleanup approval disclosure"
                             AutomationProperties.ItemStatus="{Binding ApprovalAutomationStatus}">
@@ -1459,8 +1338,8 @@
                                                         <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                                                <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                                                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                                                 <Setter Property="BorderThickness" Value="1" />
                                                             </DataTrigger>
                                                         </Style.Triggers>
@@ -1507,10 +1386,10 @@
                                         <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                                <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                                 <Setter Property="BorderThickness" Value="1" />
-                                                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                                <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.TextBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -1534,8 +1413,8 @@
             </ScrollViewer>
                 <!-- Sticky selection bar: what is marked, and a way to the approval panel. -->
                 <Border x:Name="ReviewSelectionBar" Grid.Row="1" Margin="4,8,20,0" Padding="14,8" CornerRadius="12"
-                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                        BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                        Background="{DynamicResource Albumen.SurfaceBrush}"
+                        BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}">
                     <DockPanel>
                         <Button x:Name="ReviewCleanupButton" DockPanel.Dock="Right" Content="Review cleanup" MinHeight="34" Padding="14,4"
                                 Margin="10,0,0,0" Style="{StaticResource Albumen.Button}"
@@ -1577,9 +1456,9 @@
                                     <Setter Property="BorderThickness" Value="0" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
-                                            <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            <Setter Property="Foreground" Value="{DynamicResource Albumen.AccentBrush}" />
+                                            <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                             <Setter Property="BorderThickness" Value="1" />
                                         </DataTrigger>
                                     </Style.Triggers>
@@ -1615,7 +1494,7 @@
                              Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ActionItemTemplate}"
                              AutomationProperties.Name="Photos in this cleanup and what happened to each"
                              BorderThickness="0" Background="Transparent"
-                             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                             Foreground="{DynamicResource Albumen.TextBrush}" />
                       <StackPanel x:Name="ActionNoticesPanel" Margin="0,12,0,0">
                         <!-- The recorded detail behind the summary above. -->
                         <Border Padding="12,10" CornerRadius="8">
@@ -1625,10 +1504,10 @@
                                     <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                            <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                             <Setter Property="BorderThickness" Value="1" />
-                                            <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.TextBrush}" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -1737,7 +1616,7 @@
                                         IsDefault="False"
                                         IsCancel="False"
                                         IsTabStop="True"
-                                        Style="{StaticResource DangerButtonStyle}"
+                                        Style="{StaticResource Albumen.DangerButton}"
                                         AutomationProperties.Name="Confirm clear local Scan data"
                                         AutomationProperties.HelpText="Clears local Scan data. Source photos and Action records remain unchanged."
                                         IsVisibleChanged="OnClearScanDataConfirmationVisibilityChanged"

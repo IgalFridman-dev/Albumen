@@ -24,8 +24,8 @@
                  Text="{Binding FullPath, Mode=OneWay}"
                  IsReadOnly="True"
                  TextWrapping="Wrap"
-                 Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                 Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                 Background="{DynamicResource Albumen.SurfaceBrush}"
+                 Foreground="{DynamicResource Albumen.TextBrush}"
                  AutomationProperties.Name="Full preview path" />
         <TextBlock x:Name="PreviewStatusText"
                    Text="{Binding StatusText, Mode=OneWay}"
