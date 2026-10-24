@@ -219,17 +219,13 @@ public partial class MainWindow : Window
         eventArgs.Handled = true;
     }
 
-    private AsyncCommand? FindSelectAllCommand(DependencyObject? source) =>
+    private static AsyncCommand? FindSelectAllCommand(DependencyObject? source) =>
         FindDataContext<ReviewGroupViewModel>(source)?.SelectAllCommand
-        ?? FindDataContext<ExactGroupViewModel>(source)?.SelectAllCommand
-        ?? (IsWithin(source, ReviewComparisonsList)
-            ? shellViewModel?.ActiveReviewGroup?.SelectAllCommand
-            : null);
+        ?? FindDataContext<ExactGroupViewModel>(source)?.SelectAllCommand;
 
-    private Guid? FindReviewGroupId(DependencyObject? source) =>
+    private static Guid? FindReviewGroupId(DependencyObject? source) =>
         FindDataContext<ReviewGroupViewModel>(source)?.GroupId
-        ?? FindDataContext<ExactGroupViewModel>(source)?.GroupId
-        ?? (IsWithin(source, ReviewComparisonsList) ? shellViewModel?.ActiveReviewGroup?.GroupId : null);
+        ?? FindDataContext<ExactGroupViewModel>(source)?.GroupId;
 
     private static bool IsWithin(DependencyObject? source, DependencyObject ancestor)
     {
@@ -259,11 +255,6 @@ public partial class MainWindow : Window
             ?? FindDataContext<LikelyMatchItemViewModel>(source);
         if (ReferenceEquals(list, ReviewCategoriesList) && item is ReviewCategoryViewModel category)
             shellViewModel.OpenReviewCategoryCommand.Execute(category);
-        else if (ReferenceEquals(list, ReviewGroupsList) && item is ReviewGroupViewModel group)
-            shellViewModel.OpenReviewGroupCommand.Execute(group);
-        else if (ReferenceEquals(list, ReviewComparisonsList) && item is ScanOccurrenceViewModel member
-            && shellViewModel.ActiveReviewGroup is { } group)
-            shellViewModel.PlaceInViewerCommand.Execute(new PlaceInViewer(ViewerSide.Left, group.GroupId, member));
         else if (ReferenceEquals(list, LikelyMatchesList) && item is LikelyMatchItemViewModel match)
             shellViewModel.OpenLikelyMatchCommand.Execute(match);
         else
@@ -278,17 +269,11 @@ public partial class MainWindow : Window
             shellViewModel?.OpenReviewCategoryCommand.Execute(category);
     }
 
-    private void OnOpenReviewGroupClick(object sender, RoutedEventArgs eventArgs)
-    {
-        if (sender is Button { DataContext: ReviewGroupViewModel group })
-            shellViewModel?.OpenReviewGroupCommand.Execute(group);
-    }
-
     private void OnOpenReviewMemberClick(object sender, RoutedEventArgs eventArgs)
     {
-        if (sender is not Button { DataContext: ScanOccurrenceViewModel member }
-            || shellViewModel?.ActiveReviewGroup is not { } group) return;
-        shellViewModel.PlaceInViewerCommand.Execute(new PlaceInViewer(ViewerSide.Left, group.GroupId, member));
+        if (sender is not Button { DataContext: ScanOccurrenceViewModel member } button
+            || FindReviewGroupId(button) is not { } groupId || shellViewModel is null) return;
+        shellViewModel.PlaceInViewerCommand.Execute(new PlaceInViewer(ViewerSide.Left, groupId, member));
         // Show the top of the viewer so the click visibly opens the photo, scrolling the
         // page no further than that so the photo list stays in sight.
         ReviewEvidencePanel.BringIntoView(new Rect(0, 0, ReviewEvidencePanel.ActualWidth,
@@ -456,33 +441,13 @@ public partial class MainWindow : Window
         var height = double.IsNaN(Height) ? ActualHeight : Height;
         ReviewSelectionBar.Visibility = height >= 640 ? Visibility.Visible : Visibility.Collapsed;
         var width = double.IsNaN(Width) ? ActualWidth : Width;
-        var level = shellViewModel?.ReviewNavigationLevel ?? ReviewNavigationLevel.Categories;
-        if (width >= 920)
-        {
-            ReviewCategoriesPanel.Visibility = Visibility.Visible;
-            ReviewGroupsPanel.Visibility = Visibility.Visible;
-            ReviewComparisonsPanel.Visibility = Visibility.Visible;
-            UpdateReviewColumnWidths();
-            return;
-        }
-
-        if (width >= 800)
-        {
-            ReviewCategoriesPanel.Visibility = Visibility.Visible;
-            ReviewGroupsPanel.Visibility = level == ReviewNavigationLevel.Groups
-                ? Visibility.Visible : Visibility.Collapsed;
-            ReviewComparisonsPanel.Visibility = level == ReviewNavigationLevel.Comparisons
-                ? Visibility.Visible : Visibility.Collapsed;
-            UpdateReviewColumnWidths();
-            return;
-        }
-
-        ReviewCategoriesPanel.Visibility = level == ReviewNavigationLevel.Categories
-            ? Visibility.Visible : Visibility.Collapsed;
-        ReviewGroupsPanel.Visibility = level == ReviewNavigationLevel.Groups
-            ? Visibility.Visible : Visibility.Collapsed;
-        ReviewComparisonsPanel.Visibility = level == ReviewNavigationLevel.Comparisons
-            ? Visibility.Visible : Visibility.Collapsed;
+        var galleryOpen = shellViewModel?.ReviewNavigationLevel == ReviewNavigationLevel.Gallery;
+        // A wide window shows the kinds beside the open kind's sets; a narrow one shows the
+        // open level only, and Back returns to the kinds.
+        var sideBySide = width >= 800;
+        ReviewCategoriesPanel.Visibility = sideBySide || !galleryOpen ? Visibility.Visible : Visibility.Collapsed;
+        ReviewGroupsPanel.Visibility = sideBySide || galleryOpen ? Visibility.Visible : Visibility.Collapsed;
+        ReviewComparisonsPanel.Visibility = Visibility.Collapsed;
         UpdateReviewColumnWidths();
     }
 
@@ -492,11 +457,7 @@ public partial class MainWindow : Window
             ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         ReviewGroupsColumn.Width = ReviewGroupsPanel.Visibility == Visibility.Visible
             ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        // An open set's photo cards get twice the room of the text lists beside them, so a
-        // card keeps a readable width and a height that fits the list.
-        var photosOpen = shellViewModel?.ReviewNavigationLevel == ReviewNavigationLevel.Comparisons;
-        ReviewComparisonsColumn.Width = ReviewComparisonsPanel.Visibility == Visibility.Visible
-            ? new GridLength(photosOpen ? 2 : 1, GridUnitType.Star) : new GridLength(0);
+        ReviewComparisonsColumn.Width = new GridLength(0);
     }
 
     private void QueueReviewNavigationFocus()
@@ -510,8 +471,7 @@ public partial class MainWindow : Window
             var target = level switch
             {
                 ReviewNavigationLevel.Categories => ReviewCategoriesList,
-                ReviewNavigationLevel.Groups => ReviewGroupsList,
-                ReviewNavigationLevel.Comparisons => ReviewComparisonsList,
+                ReviewNavigationLevel.Gallery => ReviewGroupsList,
                 _ => null,
             };
             if (target is null || !CanReceiveFocus(target)) return;
@@ -870,16 +830,6 @@ public partial class MainWindow : Window
     private ReviewSelectionCheckBox? FindCurrentSelectionControl(
         ReviewFocusIdentity identity)
     {
-        var group = shellViewModel?.ActiveReviewGroup;
-        var active = group?.GroupId == identity.GroupId
-            ? group.FindMember(identity.OccurrenceId)
-            : null;
-        if (active is not null)
-        {
-            ReviewComparisonsList.ScrollIntoView(active);
-            ReviewComparisonsList.ApplyTemplate();
-            ReviewComparisonsList.UpdateLayout();
-        }
         foreach (var control in Descendants<ReviewSelectionCheckBox>(ReviewComparisonsList))
         {
             if (control.DataContext is not ScanOccurrenceViewModel member

@@ -33,9 +33,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private IReviewPreviewSource? reviewPreviewSource;
     private IReviewPreviewSource? reviewThumbnailSource;
     private (ImmutableArray<ScanFileOccurrence> Source, Dictionary<long, ScanFileOccurrence>? ById) occurrenceIndex;
-    private SuggestedBest? activeReviewSuggestion;
-    private Guid? suggestionGroupId;
-    private CancellationTokenSource? suggestionCancellation;
     private AlbumenSnapshot? photoSnapshot;
     private ShellSnapshot? currentSnapshot;
     private ImmutableArray<PhaseItemViewModel> phases = [];
@@ -90,13 +87,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private ReviewLevel reviewNavigationLevel = ReviewLevel.Categories;
     private ImmutableArray<string> reviewBreadcrumbs = ["Review"];
     private ReviewCategoryViewModel? activeReviewCategory;
-    private ReviewGroupViewModel? activeReviewGroup;
     private readonly ObservableCollection<ActionItemViewModel> actionRows = [];
     private readonly ObservableCollection<ActionRecordViewModel> actionRecoveryRecords = [];
     private readonly object lifetime = new();
     private Task? disposalTask;
     // Where Review was when the first likely match was opened; Show all returns there.
-    private (ReviewLevel Level, ReviewCategoryKind? Category, Guid? Group)? likelyMatchesReturn;
+    private (ReviewLevel Level, ReviewCategoryKind? Category)? likelyMatchesReturn;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
@@ -139,7 +135,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         CancelClearScanDataCommand = new AsyncCommand(CancelClearScanDataAsync,
             canExecute: () => IsClearScanDataConfirmationPending);
         OpenReviewCategoryCommand = new AsyncCommand(OpenReviewCategoryAsync);
-        OpenReviewGroupCommand = new AsyncCommand(OpenReviewGroupAsync);
         PlaceInViewerCommand = new AsyncCommand(PlaceInViewerAsync, allowConcurrentExecutions: true);
         ClearViewerCommand = new AsyncCommand(parameter =>
         {
@@ -192,7 +187,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand ConfirmClearScanDataCommand { get; }
     public AsyncCommand CancelClearScanDataCommand { get; }
     public AsyncCommand OpenReviewCategoryCommand { get; }
-    public AsyncCommand OpenReviewGroupCommand { get; }
     public AsyncCommand OpenLikelyMatchCommand { get; }
     public LikelyMatchesViewModel LikelyMatches { get; }
     public AsyncCommand ReviewBackCommand { get; }
@@ -454,22 +448,12 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
     public string ReviewBreadcrumbText => string.Join(" > ", ReviewBreadcrumbs);
     public bool CanReviewBack => ReviewNavigationLevel != ReviewLevel.Categories;
+    // The open kind's sets, all of them, in the gallery.
     public LazyReviewCollection<ReviewGroupViewModel>? ActiveReviewGroups => ActiveReviewCategory?.Groups;
-    public LazyReviewCollection<ScanOccurrenceViewModel>? ActiveReviewMembers => ActiveReviewGroup?.Members;
     public ReviewCategoryViewModel? ActiveReviewCategory
     {
         get => activeReviewCategory;
         private set => activeReviewCategory = value;
-    }
-    public ReviewGroupViewModel? ActiveReviewGroup
-    {
-        get => activeReviewGroup;
-        private set => activeReviewGroup = value;
-    }
-    public SuggestedBest? ActiveReviewSuggestion
-    {
-        get => activeReviewSuggestion;
-        private set => SetField(ref activeReviewSuggestion, value);
     }
     // Which viewer shows this photo of this set, for the tile that shows it too.
     public ViewerSide? ViewerSideOf(long occurrenceId, Guid groupId) =>
@@ -832,10 +816,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         {
             var previousNavigationLevel = ReviewNavigationLevel;
             var previousCategory = ActiveReviewCategory?.Category;
-            var previousGroupId = ActiveReviewGroup?.GroupId;
             legacyExactGroups = null;
             ReviewCategories = ProjectReviewCategories(snapshot);
-            RestoreReviewNavigation(previousNavigationLevel, previousCategory, previousGroupId);
+            RestoreReviewNavigation(previousNavigationLevel, previousCategory);
             RefreshViewers(sessionChanged: previousReview?.Pin != snapshot.Review.Pin
                 || previousScan?.Pin != snapshot.Scan.Pin);
         }
@@ -1068,18 +1051,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             || !ReviewCategories.Any(row => ReferenceEquals(row, category)))
             throw new ArgumentException("Review category navigation requires a current category row.", nameof(parameter));
 
-        SetReviewNavigation(ReviewLevel.Groups, category, null);
-        return Task.CompletedTask;
-    }
-
-    private Task OpenReviewGroupAsync(object? parameter)
-    {
-        if (parameter is not ReviewGroupViewModel group
-            || ActiveReviewCategory is null
-            || group.Category != ActiveReviewCategory.Category)
-            throw new ArgumentException("Review group navigation requires a group in the active category.", nameof(parameter));
-
-        SetReviewNavigation(ReviewLevel.Comparisons, ActiveReviewCategory, group);
+        SetReviewNavigation(ReviewLevel.Gallery, category);
         return Task.CompletedTask;
     }
 
@@ -1090,8 +1062,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (category?.FindGroup(set.GroupId) is not { } group
             || group.FindMember(match.Photo.OccurrenceId) is not { } member)
             return;
-        likelyMatchesReturn ??= (ReviewNavigationLevel, ActiveReviewCategory?.Category, ActiveReviewGroup?.GroupId);
-        SetReviewNavigation(ReviewLevel.Comparisons, category, group);
+        likelyMatchesReturn ??= (ReviewNavigationLevel, ActiveReviewCategory?.Category);
+        SetReviewNavigation(ReviewLevel.Gallery, category);
         await PlaceInViewerAsync(new PlaceInViewer(ViewerSide.Left, group.GroupId, member));
     }
 
@@ -1099,75 +1071,49 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         if (likelyMatchesReturn is not { } back) return;
         likelyMatchesReturn = null;
-        RestoreReviewNavigation(back.Level, back.Category, back.Group);
+        RestoreReviewNavigation(back.Level, back.Category);
     }
 
     private Task ReviewBackAsync()
     {
-        if (ReviewNavigationLevel == ReviewLevel.Comparisons)
-            SetReviewNavigation(ReviewLevel.Groups, ActiveReviewCategory, null);
-        else if (ReviewNavigationLevel == ReviewLevel.Groups)
+        if (ReviewNavigationLevel == ReviewLevel.Gallery)
             ResetReviewNavigation();
         return Task.CompletedTask;
     }
 
     private void ResetReviewNavigation() =>
-        SetReviewNavigation(ReviewLevel.Categories, null, null);
+        SetReviewNavigation(ReviewLevel.Categories, null);
 
-    private void RestoreReviewNavigation(
-        ReviewLevel level,
-        ReviewCategoryKind? categoryKind,
-        Guid? groupId)
+    // A projection keeps the open kind open; its sets are the new projection's.
+    private void RestoreReviewNavigation(ReviewLevel level, ReviewCategoryKind? categoryKind)
     {
-        if (level == ReviewLevel.Categories || categoryKind is null)
-        {
-            ResetReviewNavigation();
-            return;
-        }
-
-        var category = ReviewCategories.FirstOrDefault(row => row.Category == categoryKind);
+        var category = level == ReviewLevel.Gallery
+            ? ReviewCategories.FirstOrDefault(row => row.Category == categoryKind)
+            : null;
         if (category is null)
-        {
             ResetReviewNavigation();
-            return;
-        }
-
-        if (level == ReviewLevel.Groups || groupId is null)
-        {
-            SetReviewNavigation(ReviewLevel.Groups, category, null);
-            return;
-        }
-
-        var group = category.FindGroup(groupId.Value);
-        SetReviewNavigation(group is null ? ReviewLevel.Groups : ReviewLevel.Comparisons, category, group);
+        else
+            SetReviewNavigation(ReviewLevel.Gallery, category);
     }
 
-    private void SetReviewNavigation(
-        ReviewLevel level,
-        ReviewCategoryViewModel? category,
-        ReviewGroupViewModel? group)
+    private void SetReviewNavigation(ReviewLevel level, ReviewCategoryViewModel? category)
     {
         var navigationLevelChanged = ReviewNavigationLevel != level;
         ReviewNavigationLevel = level;
         ActiveReviewCategory = category;
-        ActiveReviewGroup = group;
         ReviewBreadcrumbs = level switch
         {
             ReviewLevel.Categories => ["Review"],
-            ReviewLevel.Groups => ["Review", category!.Name],
-            ReviewLevel.Comparisons => ["Review", category!.Name, group!.Summary],
+            ReviewLevel.Gallery => ["Review", category!.Name],
             _ => throw new InvalidOperationException($"Unknown Review navigation level: {level}"),
         };
         if (navigationLevelChanged) OnPropertyChanged(nameof(ReviewNavigationLevel));
         OnPropertyChanged(nameof(ActiveReviewCategory));
-        OnPropertyChanged(nameof(ActiveReviewGroup));
         OnPropertyChanged(nameof(ReviewBreadcrumbs));
         OnPropertyChanged(nameof(ReviewBreadcrumbText));
         if (navigationLevelChanged) OnPropertyChanged(nameof(CanReviewBack));
         OnPropertyChanged(nameof(ActiveReviewGroups));
-        OnPropertyChanged(nameof(ActiveReviewMembers));
         ReviewBackCommand.NotifyCanExecuteChanged();
-        RefreshActiveSuggestion(group);
     }
 
     private ReviewViewerSlot Viewer(ViewerSide side) => side == ViewerSide.Left ? LeftViewer : RightViewer;
@@ -1265,48 +1211,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             result?.Dispose();
             slot.EndLoad(cancellation);
         }
-    }
-
-    // The "Suggested best" badge needs every photo's pixel size, which only a decode gives,
-    // so it appears once the set's thumbnails have loaded. It is a hint, never a Selection.
-    private void RefreshActiveSuggestion(ReviewGroupViewModel? group)
-    {
-        if (group?.GroupId == suggestionGroupId && group is not null) return;
-        var cancellation = Interlocked.Exchange(ref suggestionCancellation, null);
-        if (cancellation is not null)
-        {
-            cancellation.Cancel();
-            cancellation.Dispose();
-        }
-        suggestionGroupId = group?.GroupId;
-        ActiveReviewSuggestion = null;
-        if (group is null || ReviewThumbnails is not { } thumbnails
-            || group.Category is not (ReviewCategoryKind.Near or ReviewCategoryKind.Uncertain)
-            || group.MemberCount is < 2 or > SuggestedBestPhoto.MaximumSetSize)
-            return;
-
-        var next = new CancellationTokenSource();
-        suggestionCancellation = next;
-        _ = LoadSuggestionAsync(group, thumbnails, next.Token);
-    }
-
-    private async Task LoadSuggestionAsync(
-        ReviewGroupViewModel group,
-        ReviewThumbnailLoader thumbnails,
-        CancellationToken cancellationToken)
-    {
-        var facts = new List<PhotoFacts>(group.MemberCount);
-        for (var index = 0; index < group.MemberCount; index++)
-        {
-            var member = group.Members[index];
-            var thumbnail = await thumbnails.LoadAsync(member, cancellationToken);
-            if (cancellationToken.IsCancellationRequested
-                || thumbnail is not { PixelWidth: { } width, PixelHeight: { } height })
-                return;
-            facts.Add(new(member.OccurrenceId, width, height, member.ByteCount, member.Sharpness));
-        }
-        if (!cancellationToken.IsCancellationRequested && suggestionGroupId == group.GroupId)
-            ActiveReviewSuggestion = SuggestedBestPhoto.Pick(facts);
     }
 
     private (ScanRunContext Context, ScanFileOccurrence Occurrence)? ResolveOccurrence(long occurrenceId)
@@ -1886,7 +1790,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         LeftViewer.Clear();
         RightViewer.Clear();
-        RefreshActiveSuggestion(null);
         chooseScopeWorkflow.SnapshotChanged -= OnSnapshotChanged;
         if (photoWorkflow is not null)
             photoWorkflow.SnapshotChanged -= OnPhotoSnapshotChanged;

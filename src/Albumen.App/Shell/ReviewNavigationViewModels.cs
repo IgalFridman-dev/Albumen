@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using Albumen.Application.Review;
@@ -28,11 +29,11 @@ public static class ReviewCategoryNames
     };
 }
 
+// Opening a kind shows every one of its sets in the gallery; there is no set or photo level.
 public enum ReviewNavigationLevel
 {
     Categories,
-    Groups,
-    Comparisons,
+    Gallery,
 }
 
 public sealed class ReviewCategoryViewModel
@@ -94,9 +95,11 @@ public sealed class ReviewCategoryViewModel
     }
 }
 
-public sealed class ReviewGroupViewModel
+public sealed class ReviewGroupViewModel : INotifyPropertyChanged
 {
     private readonly Dictionary<long, int> memberIndexes;
+    private SuggestedBest? suggestion;
+    private bool suggestionSettled;
 
     internal ReviewGroupViewModel(
         CandidateGroup group,
@@ -199,6 +202,8 @@ public sealed class ReviewGroupViewModel
         ReplaceSelectionCommand = DisabledCommand(parameterized: true);
     }
 
+    public event PropertyChangedEventHandler? PropertyChanged;
+
     public Guid GroupId { get; }
     public ReviewCategoryKind Category { get; }
     public int MemberCount { get; }
@@ -213,8 +218,43 @@ public sealed class ReviewGroupViewModel
     public AsyncCommand SelectAllCommand { get; }
     public AsyncCommand ReplaceSelectionCommand { get; }
 
+    public SuggestedBest? Suggestion
+    {
+        get => suggestion;
+        private set
+        {
+            suggestion = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Suggestion)));
+        }
+    }
+
     internal ScanOccurrenceViewModel? FindMember(long occurrenceId) =>
         memberIndexes.TryGetValue(occurrenceId, out var index) ? Members[index] : null;
+
+    // The "Suggested best" badge needs every photo's pixel size, which only a decode gives, so
+    // the gallery starts this when the set is shown and cancels it when the set scrolls away.
+    // A finished pass is not repeated. It is a hint for look-alikes, never a Selection.
+    internal async Task LoadSuggestionAsync(ReviewThumbnailLoader thumbnails, CancellationToken cancellationToken)
+    {
+        if (suggestionSettled || Category is not (ReviewCategoryKind.Near or ReviewCategoryKind.Uncertain)
+            || MemberCount is < 2 or > SuggestedBestPhoto.MaximumSetSize)
+            return;
+        var facts = new List<PhotoFacts>(MemberCount);
+        for (var index = 0; index < MemberCount; index++)
+        {
+            var member = Members[index];
+            var thumbnail = await thumbnails.LoadAsync(member, cancellationToken);
+            if (cancellationToken.IsCancellationRequested) return;
+            if (thumbnail is not { PixelWidth: { } width, PixelHeight: { } height })
+            {
+                suggestionSettled = true;
+                return;
+            }
+            facts.Add(new(member.OccurrenceId, width, height, member.ByteCount, member.Sharpness));
+        }
+        suggestionSettled = true;
+        Suggestion = SuggestedBestPhoto.Pick(facts);
+    }
 
     private static bool IsAlias(ImmutableArray<ScanFileOccurrence> members, int index)
     {

@@ -244,46 +244,12 @@
         </DataTemplate>
         <!-- One set of photos inside the open kind. -->
         <DataTemplate x:Key="ReviewGroupTemplate">
-            <Button MinHeight="44" Margin="2,3" Click="OnOpenReviewGroupClick"
+            <Button MinHeight="44" Margin="2,3" Style="{StaticResource Albumen.CardButton}"
                     AutomationProperties.AutomationId="open-review-group"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding ItemStatus}"
                     AutomationProperties.PositionInSet="{Binding PositionInSet}"
                     AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
-                <Button.Style>
-                    <Style TargetType="Button" BasedOn="{StaticResource Albumen.CardButton}">
-                        <Style.Triggers>
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Value="True">
-                                        <Condition.Binding>
-                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
-                                                <Binding Path="GroupId" />
-                                                <Binding Path="DataContext.ActiveReviewGroup.GroupId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                            </MultiBinding>
-                                        </Condition.Binding>
-                                    </Condition>
-                                </MultiDataTrigger.Conditions>
-                                <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
-                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
-                            </MultiDataTrigger>
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Value="True">
-                                        <Condition.Binding>
-                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
-                                                <Binding Path="GroupId" />
-                                                <Binding Path="DataContext.ActiveReviewGroup.GroupId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                            </MultiBinding>
-                                        </Condition.Binding>
-                                    </Condition>
-                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
-                                </MultiDataTrigger.Conditions>
-                                <Setter Property="BorderThickness" Value="2" />
-                            </MultiDataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Button.Style>
                 <Grid>
                     <Grid.Style>
                         <!-- A set settled by marks held in other sets reads as done: dimmed,
