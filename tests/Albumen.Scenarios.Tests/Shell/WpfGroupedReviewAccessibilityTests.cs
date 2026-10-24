@@ -225,8 +225,10 @@ public sealed class WpfGroupedReviewAccessibilityTests
         });
     }
 
+    // From 800 px wide the kinds sit beside the gallery, a third of the width while no kind is
+    // open and a fixed 220 px once one is; below that only the open level shows, with Back.
     [Fact]
-    public void WideCompactAndStackedModesRetainDynamicBrushesAndScaledReadableEvidence()
+    public void SideBySideAndStackedModesKeepTheKindsNarrowAndRetainDynamicBrushes()
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
@@ -242,35 +244,45 @@ public sealed class WpfGroupedReviewAccessibilityTests
             {
                 ShowAndDrain(window);
                 var categoriesPanel = NamedElement(window, "ReviewCategoriesPanel");
-                var groupsPanel = NamedElement(window, "ReviewGroupsPanel");
-                var comparisonsPanel = NamedElement(window, "ReviewComparisonsPanel");
+                var galleryPanel = NamedElement(window, "ReviewGroupsPanel");
                 var navigation = NamedElement(window, "ReviewNavigationGrid");
+                var categoriesColumn = Assert.IsType<ColumnDefinition>(window.FindName("ReviewCategoriesColumn"));
                 Assert.True(categoriesPanel.IsVisible);
-                Assert.True(groupsPanel.IsVisible);
-                Assert.True(comparisonsPanel.IsVisible);
-                Assert.All(new[] { categoriesPanel, groupsPanel, comparisonsPanel }, panel =>
-                    Assert.True(panel.ActualWidth >= navigation.ActualWidth / 3 - 12));
-                Assert.True(categoriesPanel.ActualWidth + groupsPanel.ActualWidth
-                    + comparisonsPanel.ActualWidth >= navigation.ActualWidth - 20);
+                Assert.True(galleryPanel.IsVisible);
+                Assert.True(categoriesPanel.ActualWidth >= navigation.ActualWidth / 3 - 12);
 
                 Click(Descendants<Button>(categoriesPanel).First(button =>
                     AutomationProperties.GetAutomationId(button) == "open-review-category"));
-                window.Width = 900;
+                ShowAndDrain(window);
+                Assert.Equal(ReviewNavigationLevel.Gallery, fixture.ViewModel.ReviewNavigationLevel);
+                Assert.True(categoriesPanel.IsVisible);
+                Assert.True(galleryPanel.IsVisible);
+                Assert.Equal(220d, categoriesColumn.ActualWidth, 0.5);
+                Assert.True(galleryPanel.ActualWidth >= navigation.ActualWidth - 220 - 13);
+                // At twice the text size the short description wraps inside the narrow column.
+                var description = Descendants<TextBlock>(categoriesPanel).First(text =>
+                    text.Text == "The same file saved more than once.");
+                Assert.Equal(TextWrapping.Wrap, description.TextWrapping);
+                Assert.True(description.ActualWidth <= categoriesPanel.ActualWidth);
+
+                window.Width = 800;
                 ShowAndDrain(window);
                 Assert.True(categoriesPanel.IsVisible);
-                Assert.True(groupsPanel.IsVisible);
-                Assert.False(comparisonsPanel.IsVisible);
-                Assert.True(categoriesPanel.ActualWidth >= navigation.ActualWidth / 2 - 12);
-                Assert.True(groupsPanel.ActualWidth >= navigation.ActualWidth / 2 - 12);
-                Assert.True(categoriesPanel.ActualWidth + groupsPanel.ActualWidth >=
-                    navigation.ActualWidth - 20);
+                Assert.True(galleryPanel.IsVisible);
+                Assert.Equal(220d, categoriesColumn.ActualWidth, 0.5);
 
                 window.Width = 680;
                 ShowAndDrain(window);
                 Assert.False(categoriesPanel.IsVisible);
-                Assert.True(groupsPanel.IsVisible);
-                Assert.False(comparisonsPanel.IsVisible);
-                Assert.True(groupsPanel.ActualWidth >= navigation.ActualWidth - 12);
+                Assert.True(galleryPanel.IsVisible);
+                Assert.True(galleryPanel.ActualWidth >= navigation.ActualWidth - 13);
+
+                Click(Assert.IsType<Button>(window.FindName("ReviewBackButton")));
+                ShowAndDrain(window);
+                Assert.Equal(ReviewNavigationLevel.Categories, fixture.ViewModel.ReviewNavigationLevel);
+                Assert.True(categoriesPanel.IsVisible);
+                Assert.False(galleryPanel.IsVisible);
+                Assert.True(categoriesPanel.ActualWidth >= navigation.ActualWidth - 5);
 
                 var activeBorder = new SolidColorBrush(Color.FromRgb(12, 34, 56));
                 var windowBrush = new SolidColorBrush(Color.FromRgb(1, 2, 3));
@@ -282,8 +294,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
 
                 Assert.Same(windowBrush, window.Background);
                 Assert.Same(textBrush, window.Foreground);
-                Assert.All(new[] { categoriesPanel, groupsPanel, comparisonsPanel }, panel =>
-                    Assert.Same(activeBorder, Assert.IsAssignableFrom<Border>(panel).BorderBrush));
+                Assert.Same(activeBorder, Assert.IsAssignableFrom<Border>(categoriesPanel).BorderBrush);
             }
             finally
             {
@@ -336,11 +347,14 @@ public sealed class WpfGroupedReviewAccessibilityTests
         });
     }
 
+    // At the default 960x720 (side by side) and at 680x520 (stacked), a photo, the viewers with
+    // their Remove button, the approval and the kinds all stay reachable by scrolling the page
+    // and by keyboard focus.
     [Theory]
     [InlineData(double.NaN, double.NaN, 12d)]
     [InlineData(680d, 520d, 12d)]
     [InlineData(680d, 520d, 24d)]
-    public void ReviewPageReachesComparisonSelectionAndApprovalWithoutMaximizing(
+    public void ReviewPageReachesPhotosViewersAndApprovalWithoutMaximizing(
         double width, double height, double fontSize)
     {
         WpfReviewSelectionTests.RunOnSta(() =>
@@ -358,15 +372,21 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 Assert.True(page.IsVisible);
                 Assert.True(navigation.ActualHeight <= page.ViewportHeight,
                     $"Navigation height {navigation.ActualHeight} exceeded page viewport {page.ViewportHeight}.");
+                var stacked = (double.IsNaN(window.Width) ? window.ActualWidth : window.Width) < 800;
+                var categoriesPanel = NamedElement(window, "ReviewCategoriesPanel");
+                Assert.Equal(!stacked, categoriesPanel.IsVisible);
 
                 var gallery = NamedList(window, "ReviewGalleryList");
                 Assert.True(gallery.IsVisible);
                 Realize(gallery, gallery.Items[0]);
-                var selection = ReviewTiles.Tile(gallery, 1);
-                selection.BringIntoView();
+                var tile = ReviewTiles.Tile(gallery, 1);
+                tile.BringIntoView();
                 ShowAndDrain(window);
-                AssertInsideViewport(page, selection);
-                AssertInsideWindow(window, selection);
+                AssertInsideViewport(page, tile);
+                AssertInsideWindow(window, tile);
+                ReviewTiles.Focus(tile);
+                ReviewTiles.Invoke(tile);
+                ShowAndDrain(window);
 
                 foreach (var name in ReviewDetailNames)
                 {
@@ -376,6 +396,24 @@ public sealed class WpfGroupedReviewAccessibilityTests
                     AssertInsideViewport(page, element);
                 }
                 AssertInsideWindow(window, NamedElement(window, "ApproveCleanupButton"));
+                var remove = Assert.IsType<Button>(window.FindName("LeftViewerRemoveButton"));
+                Assert.True(remove.IsVisible);
+                remove.BringIntoView();
+                ShowAndDrain(window);
+                AssertInsideViewport(page, remove);
+                ReviewTiles.Focus(remove);
+
+                if (stacked)
+                {
+                    Click(Assert.IsType<Button>(window.FindName("ReviewBackButton")));
+                    ShowAndDrain(window);
+                }
+                var categories = NamedList(window, "ReviewCategoriesList");
+                Assert.True(categories.IsVisible);
+                categories.BringIntoView();
+                ShowAndDrain(window);
+                AssertInsideViewport(page, categories);
+                Assert.Empty(fixture.Workflow.SelectionCommands);
             }
             finally
             {
