@@ -26,14 +26,19 @@ public sealed class E2S5OutcomePresentationTests
             @"C:\Photos\outstanding.jpg", null, new(ScanStageState.Succeeded, ScanReason.None),
             new(ScanStageState.Running, ScanReason.None), null, new(null, null, false));
         var lookAlike = Succeeded(pin, 8, @"C:\Photos\look-alike.jpg", 8);
-        // The candidate is in an identical set and a look-alike set; it is counted once, as identical.
-        var identicalGroup = Group(pin, CandidateCategory.Exact, uncertain: false, candidate);
+        var maybeSimilar = Succeeded(pin, 9, @"C:\Photos\maybe-similar.jpg", 9);
+        var both = Succeeded(pin, 10, @"C:\Photos\both.jpg", 10);
+        // A photo is counted once, in the first of Maybe similar, identical, look-alike: the candidate
+        // (identical and look-alike) counts as identical; "both" (identical and Maybe similar) counts
+        // as Uncertain, like every photo in a Maybe-similar set.
+        var identicalGroup = Group(pin, CandidateCategory.Exact, uncertain: false, candidate, both);
         var lookAlikeGroup = Group(pin, CandidateCategory.NearDuplicate, uncertain: false, candidate, lookAlike);
         var uncertainGroup = Group(pin, CandidateCategory.Exact, uncertain: true, uncertain);
+        var maybeSimilarGroup = Group(pin, CandidateCategory.Uncertain, uncertain: false, maybeSimilar, both);
         var scan = new ScanSnapshot(pin, ScanStatus.Incomplete,
             new(ScanStageState.Succeeded, ScanReason.None),
-            [candidate, acceptable, uncertain, unsupported, canceled, failed, outstanding, lookAlike],
-            [identicalGroup, lookAlikeGroup, uncertainGroup], new(8, 4, 1, 1, 1, 1));
+            [candidate, acceptable, uncertain, unsupported, canceled, failed, outstanding, lookAlike, maybeSimilar, both],
+            [identicalGroup, lookAlikeGroup, uncertainGroup, maybeSimilarGroup], new(10, 6, 1, 1, 1, 1));
 
         fixture.Workflow.Publish(fixture.Workflow.Current with
         {
@@ -48,7 +53,7 @@ public sealed class E2S5OutcomePresentationTests
             ("In identical sets", 1L, "Review the set and choose manually."),
             ("In look-alike sets", 1L, "Review the set and choose manually."),
             ("Unique photos", 1L, "No duplicate candidate was found. Keep it, or scan again after the file changes."),
-            ("Uncertain", 1L, "Review it before selecting; Albumen could not classify it confidently."),
+            ("Uncertain", 3L, "Review it before selecting; Albumen could not classify it confidently."),
             ("Unsupported", 1L, "Use a supported JPEG or PNG file, then start a fresh Scan."),
             ("Canceled/unprocessed", 1L, "Start a fresh Scan to analyze this file."),
             ("Failed", 1L, "Check file access and health, then start a fresh Scan."),
@@ -70,8 +75,8 @@ public sealed class E2S5OutcomePresentationTests
             Scan = scan with
             {
                 Status = ScanStatus.Complete,
-                Occurrences = [candidate, acceptable, uncertain, unsupported, canceled, failed, lookAlike],
-                Counts = new(7, 4, 1, 1, 1, 0),
+                Occurrences = [candidate, acceptable, uncertain, unsupported, canceled, failed, lookAlike, maybeSimilar, both],
+                Counts = new(9, 6, 1, 1, 1, 0),
             },
         });
         Assert.Equal(
