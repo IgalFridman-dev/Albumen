@@ -182,18 +182,29 @@ public partial class MainWindow : Window
             || !ReferenceEquals(Keyboard.FocusedElement, element)
             || !CanReceiveFocus(element))
             return;
-        if (element.DataContext is ScanOccurrenceViewModel member
-            && FindReviewGroupId(element) is { } groupId)
+        if (ReviewFocusIdentityOf(element, session) is { } identity)
         {
             reviewFocusGeneration++;
-            reviewFocusIdentity = new(session, groupId, member.OccurrenceId,
-                IsWithin(element, ReviewGalleryList));
+            reviewFocusIdentity = identity;
             return;
         }
         if (reviewFocusIdentity?.Session != session || !IsDeliberateReviewFocusTarget(element)) return;
         reviewFocusGeneration++;
         reviewFocusIdentity = null;
     }
+
+    // The controls a mark is changed from: a photo's tile in its set, or a viewer's Remove
+    // button for the photo it shows. A projection or the override dialog gives focus back to
+    // the one that held it.
+    private static ReviewFocusIdentity? ReviewFocusIdentityOf(FrameworkElement element, ReviewSessionPin session) =>
+        element switch
+        {
+            { DataContext: ScanOccurrenceViewModel member } when FindReviewGroupId(element) is { } groupId =>
+                new ReviewFocusIdentity(session, groupId, member.OccurrenceId, Viewer: null),
+            ButtonBase { DataContext: ReviewViewerSlot { Member: { } shown, GroupId: { } groupId } slot } =>
+                new ReviewFocusIdentity(session, groupId, shown.OccurrenceId, slot.Side),
+            _ => null,
+        };
 
     private bool IsDeliberateReviewFocusTarget(FrameworkElement element) =>
         ReferenceEquals(element, ReviewHeading)
@@ -248,15 +259,13 @@ public partial class MainWindow : Window
 
         var source = eventArgs.OriginalSource as DependencyObject
             ?? Keyboard.FocusedElement as DependencyObject;
-        // A card's own buttons (such as Compare) act on Enter themselves.
+        // A card's own buttons act on Enter themselves.
         if (FindAncestor<Button>(source) is { } button && IsWithin(button, list)
             && !AutomationProperties.GetAutomationId(button).StartsWith("open-review-", StringComparison.Ordinal))
             return;
         var item = list.SelectedItem
             ?? FindDataContext<ReviewCategoryViewModel>(source)
-            ?? (object?)FindDataContext<ReviewGroupViewModel>(source)
-            ?? (object?)FindDataContext<ScanOccurrenceViewModel>(source)
-            ?? FindDataContext<LikelyMatchItemViewModel>(source);
+            ?? (object?)FindDataContext<LikelyMatchItemViewModel>(source);
         if (ReferenceEquals(list, ReviewCategoriesList) && item is ReviewCategoryViewModel category)
             shellViewModel.OpenReviewCategoryCommand.Execute(category);
         else if (ReferenceEquals(list, LikelyMatchesList) && item is LikelyMatchItemViewModel match)
@@ -271,16 +280,6 @@ public partial class MainWindow : Window
     {
         if (sender is Button { DataContext: ReviewCategoryViewModel category })
             shellViewModel?.OpenReviewCategoryCommand.Execute(category);
-    }
-
-    // A click (or Enter or Space) on a photo shows it in the Left Viewer while that viewer is
-    // empty, and does nothing otherwise; drag and drop place it anywhere.
-    private void OnReviewTileClick(object sender, RoutedEventArgs eventArgs)
-    {
-        if (sender is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } tile
-            || FindReviewGroupId(tile) is not { } groupId || shellViewModel is null) return;
-        shellViewModel.PlaceInViewerCommand.Execute(
-            new PlaceInViewer(ViewerSide.Left, groupId, member, OnlyIfEmpty: true));
     }
 
     // A shown set works out its Suggested best from its thumbnails; a set that scrolls away, or
@@ -940,12 +939,10 @@ public partial class MainWindow : Window
 
     internal ReviewFocusRestorationToken? CaptureReviewFocusRestorationToken(IInputElement invokingFocus)
     {
-        if (invokingFocus is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } element
+        if (invokingFocus is not FrameworkElement element
             || shellViewModel?.ReviewSession is not { } session
-            || FindReviewGroupId(element) is not { } groupId)
+            || ReviewFocusIdentityOf(element, session) is not { } identity)
             return null;
-        var identity = new ReviewFocusIdentity(session, groupId, member.OccurrenceId,
-            IsWithin(element, ReviewGalleryList));
         return identity == reviewFocusIdentity ? CaptureReviewFocusRestorationToken(identity) : null;
     }
 
@@ -956,7 +953,7 @@ public partial class MainWindow : Window
             || expected.ReviewSession != identity.Session)
             return null;
         return new(expected, dataContextGeneration, identity.Session, identity.GroupId,
-            identity.OccurrenceId, identity.GroupedSurface, reviewFocusGeneration);
+            identity.OccurrenceId, identity.Viewer, reviewFocusGeneration);
     }
 
     internal void QueueReviewFocusRestoration(
@@ -969,7 +966,7 @@ public partial class MainWindow : Window
             UpdateLayout();
             if (!IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration)) return;
             var identity = new ReviewFocusIdentity(token.Session, token.GroupId,
-                token.OccurrenceId, token.GroupedSurface);
+                token.OccurrenceId, token.Viewer);
             var target = FindCurrentSelectionControl(identity);
             if (target is null
                 || !IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration))
@@ -1003,17 +1000,29 @@ public partial class MainWindow : Window
         && token.ExpectedViewModel.IsReviewPhase
         && token.ExpectedViewModel.ReviewSession == token.Session
         && reviewFocusIdentity == new ReviewFocusIdentity(token.Session, token.GroupId,
-            token.OccurrenceId, token.GroupedSurface);
+            token.OccurrenceId, token.Viewer);
 
-    private ReviewSelectionCheckBox? FindCurrentSelectionControl(
+    // The viewer's Remove button while that viewer still shows the photo, or the photo's tile:
+    // its set is brought into view first, so only the sets around it are realized.
+    private FrameworkElement? FindCurrentSelectionControl(
         ReviewFocusIdentity identity)
     {
-        foreach (var control in Descendants<ReviewSelectionCheckBox>(ReviewGalleryList))
+        if (identity.Viewer is { } side)
         {
-            if (control.DataContext is not ScanOccurrenceViewModel member
-                || member.OccurrenceId != identity.OccurrenceId)
-                continue;
-            if (FindReviewGroupId(control) == identity.GroupId && CanReceiveFocus(control)) return control;
+            var button = side == ViewerSide.Left ? LeftViewerRemoveButton : RightViewerRemoveButton;
+            return shellViewModel?.ViewerSideOf(identity.OccurrenceId, identity.GroupId) == side
+                && CanReceiveFocus(button) ? button : null;
+        }
+        if (shellViewModel?.ActiveReviewCategory?.FindGroup(identity.GroupId) is { } group)
+        {
+            ReviewGalleryList.ScrollIntoView(group);
+            ReviewGalleryList.UpdateLayout();
+        }
+        foreach (var tile in Descendants<ReviewPhotoTile>(ReviewGalleryList))
+        {
+            if (tile.Member?.OccurrenceId == identity.OccurrenceId && tile.GroupId == identity.GroupId
+                && CanReceiveFocus(tile))
+                return tile;
         }
         return null;
     }
@@ -1121,14 +1130,15 @@ public partial class MainWindow : Window
         ReviewSessionPin Session,
         Guid GroupId,
         long OccurrenceId,
-        bool GroupedSurface,
+        ViewerSide? Viewer,
         long FocusGeneration);
 
+    // Viewer is null for the photo's tile and names the viewer for that viewer's Remove button.
     private sealed record ReviewFocusIdentity(
         ReviewSessionPin Session,
         Guid GroupId,
         long OccurrenceId,
-        bool GroupedSurface);
+        ViewerSide? Viewer);
 }
 
 public class ReviewAutomationBorder : Border
@@ -1296,68 +1306,3 @@ internal sealed class ReviewAnnouncementDiagnosticBuffer(int ownerThreadId)
         return new(captured, capacityOverflow, wrongThread, ownerThreadId);
     }
 }
-
-public class ReviewSelectionCheckBox : CheckBox
-{
-    private bool pressedShownChoice;
-
-    protected override AutomationPeer OnCreateAutomationPeer() =>
-        new ReviewSelectionCheckBoxAutomationPeer(this);
-
-    // The Keep | Remove style looks like two choices, so a mouse click on the choice that
-    // is already shown leaves it as it is instead of flipping it. Keyboard and UI
-    // Automation still toggle.
-    protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
-    {
-        pressedShownChoice = GetTemplateChild(IsChecked == true ? "RemovePart" : "KeepPart")
-            is UIElement { IsMouseOver: true };
-        base.OnMouseLeftButtonDown(e);
-    }
-
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        pressedShownChoice = false;
-        base.OnKeyDown(e);
-    }
-
-    protected override void OnClick()
-    {
-        if (pressedShownChoice)
-        {
-            pressedShownChoice = false;
-            return;
-        }
-        base.OnClick();
-    }
-
-    protected override void OnToggle()
-    {
-        // Selection is projected exclusively from the coordinator snapshot.
-        // OnClick still executes the bound command for every activation path.
-    }
-
-    internal void ActivateFromAutomation() => OnClick();
-}
-
-internal sealed class ReviewSelectionCheckBoxAutomationPeer(ReviewSelectionCheckBox owner)
-    : CheckBoxAutomationPeer(owner), IToggleProvider
-{
-    private ReviewSelectionCheckBox ReviewOwner => (ReviewSelectionCheckBox)Owner;
-
-    void IToggleProvider.Toggle()
-    {
-        if (!IsEnabled()) throw new ElementNotEnabledException();
-        ReviewOwner.Dispatcher.BeginInvoke(
-            DispatcherPriority.Input,
-            new Action(ReviewOwner.ActivateFromAutomation));
-    }
-
-    ToggleState IToggleProvider.ToggleState => ReviewOwner.IsChecked switch
-    {
-        true => ToggleState.On,
-        false => ToggleState.Off,
-        null => ToggleState.Indeterminate,
-    };
-}
-
-

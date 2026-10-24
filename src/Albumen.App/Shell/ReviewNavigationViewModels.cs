@@ -145,13 +145,18 @@ public sealed class ReviewGroupViewModel : INotifyPropertyChanged
         var canChangeSelection = reviewAllowsSelection && !group.Sealed;
         var blurrier = SharpnessComparison.Blurrier(members
             .Select(member => (member.Occurrence.Token.OccurrenceId, member.Occurrence.Sharpness)).ToArray());
+        var uncertaintyLine = category == ReviewCategoryKind.Uncertain
+            ? "A close call. Check these photos yourself."
+            : string.Empty;
         Members = new(members.Length, index => new ScanOccurrenceViewModel(
             members[index], IsAlias(members, index), canChangeSelection,
             () => changeSelection(SelectionCommandKind.Toggle,
                 ImmutableArray.Create(members[index].Occurrence.Token.OccurrenceId)),
             index + 1, members.Length,
             members[index].SelectedInGroup is { } holder ? describeSet?.Invoke(holder) : null,
-            blurrier.Contains(members[index].Occurrence.Token.OccurrenceId)));
+            blurrier.Contains(members[index].Occurrence.Token.OccurrenceId),
+            DescribeKind(category, group.Candidate, members[index].Occurrence.Token.OccurrenceId),
+            uncertaintyLine));
         MemberCount = members.Length;
         Summary = FormatSummary(positionInSet, MemberCount);
         // A set is settled once marks held elsewhere leave at most one photo undecided:
@@ -254,6 +259,22 @@ public sealed class ReviewGroupViewModel : INotifyPropertyChanged
         }
         suggestionSettled = true;
         Suggestion = SuggestedBestPhoto.Pick(facts);
+    }
+
+    // The set's evidence for one photo, from its first similarity edge.
+    private static string DescribeKind(ReviewCategoryKind category, CandidateGroup candidate, long occurrenceId)
+    {
+        if (category == ReviewCategoryKind.Exact) return "The files are identical, byte for byte.";
+        var similarity = candidate.Similarity.FirstOrDefault(edge =>
+            edge.Left.OccurrenceId == occurrenceId || edge.Right.OccurrenceId == occurrenceId);
+        return similarity switch
+        {
+            null => string.Empty,
+            { Cosine: not null } when category == ReviewCategoryKind.Uncertain =>
+                "Similar content: matched by what the photos show, not by their pixels.",
+            _ => string.Create(CultureInfo.InvariantCulture,
+                $"Picture difference {similarity.HammingDistance}, color difference {similarity.ColorDistance} (lower is closer)"),
+        };
     }
 
     private static bool IsAlias(ImmutableArray<ScanFileOccurrence> members, int index)

@@ -206,6 +206,22 @@ public sealed class PhotoThumbnail : Border
     }
 }
 
+// "Left Viewer" or "Right Viewer" for the tile whose photo, in that set, a viewer shows; empty
+// otherwise. Values: the tile's photo and set, then each viewer's photo and set.
+public sealed class ViewerOverlayConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (values is not [long occurrenceId, Guid groupId, var left, var leftSet, var right, var rightSet])
+            return string.Empty;
+        bool Shows(object shown, object set) => shown is long id && id == occurrenceId && set is Guid setId && setId == groupId;
+        return Shows(left, leftSet) ? "Left Viewer" : Shows(right, rightSet) ? "Right Viewer" : string.Empty;
+    }
+
+    public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 // One of two styles by a flag: a viewer's Remove button is red while its photo is marked.
 public sealed class BooleanToStyleConverter : IValueConverter
 {

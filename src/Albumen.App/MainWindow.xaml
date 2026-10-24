@@ -227,20 +227,128 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <app:ViewerOverlayConverter x:Key="ViewerOverlayConverter" />
+        <!-- One line of a photo's facts; an empty line is left out. -->
+        <Style x:Key="ReviewFactLine" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+            <Style.Triggers>
+                <Trigger Property="Text" Value="">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- A photo's facts, shown on hover over its tile: name, path, size, pixel size, why it is
+             in its set, and why it can't be marked when it can't. -->
+        <DataTemplate x:Key="ReviewPhotoFactsTemplate">
+            <StackPanel MaxWidth="420">
+                <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False"
+                         TextWrapping="Wrap" Margin="0,2,0,0" Style="{StaticResource Albumen.PathText}"
+                         AutomationProperties.Name="{Binding DiscoveredPath}" />
+                <TextBlock Style="{StaticResource ReviewFactLine}" Text="{Binding SizeText}" />
+                <TextBlock Style="{StaticResource ReviewFactLine}"
+                           Text="{Binding PlacementTarget.DimensionsText, RelativeSource={RelativeSource AncestorType=ToolTip}}" />
+                <TextBlock Style="{StaticResource ReviewFactLine}" Text="{Binding KindLine}" />
+                <TextBlock Style="{StaticResource ReviewFactLine}" Text="{Binding UncertaintyLine}" />
+                <TextBlock Style="{StaticResource ReviewFactLine}" Text="{x:Static shell:ScanOccurrenceViewModel.BlurrierText}"
+                           Visibility="{Binding LooksBlurrier, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <TextBlock Text="{Binding EligibilityText}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource ReviewFactLine}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CanSelect}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <TextBlock Style="{StaticResource ReviewFactLine}" Text="{x:Static shell:ScanOccurrenceViewModel.RecommendationText}" />
+            </StackPanel>
+        </DataTemplate>
         <!-- One photo of a set: its thumbnail on the dark ground with rounded corners, as wide as
-             its shape needs. A click shows it in the Left Viewer while that viewer is empty; it
-             can be dragged onto either viewer. -->
+             its shape needs. A photo a viewer shows is dimmed and names that viewer; a photo marked
+             for removal carries the Removed sign; the set's hints sit as chips at the bottom. A
+             click shows it in the Left Viewer while that viewer is empty; it can be dragged onto
+             either viewer; its menu marks it or places it. -->
         <DataTemplate x:Key="ReviewPhotoTileTemplate">
-            <Button Style="{StaticResource Albumen.ThumbnailButton}" Click="OnReviewTileClick"
+            <review:ReviewPhotoTile Style="{StaticResource Albumen.ThumbnailButton}" Member="{Binding}"
+                    GroupId="{Binding DataContext.GroupId, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                    PlaceCommand="{Binding DataContext.PlaceInViewerCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    DimensionsText="{Binding DimensionsText, ElementName=Thumbnail}"
                     PreviewMouseLeftButtonDown="OnTilePreviewMouseLeftButtonDown" PreviewMouseMove="OnTileMouseMove"
                     AutomationProperties.AutomationId="review-photo"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding ItemStatus}"
                     AutomationProperties.PositionInSet="{Binding PositionInSet}"
                     AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
-                <app:PhotoThumbnail Member="{Binding}" CornerRadius="8" LoadsWhenInView="True"
-                        Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
-            </Button>
+                <review:ReviewPhotoTile.ShownIn>
+                    <MultiBinding Converter="{StaticResource ViewerOverlayConverter}">
+                        <Binding Path="OccurrenceId" />
+                        <Binding Path="DataContext.GroupId" RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
+                        <Binding Path="DataContext.LeftViewer.Member.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                        <Binding Path="DataContext.LeftViewer.GroupId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                        <Binding Path="DataContext.RightViewer.Member.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                        <Binding Path="DataContext.RightViewer.GroupId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                    </MultiBinding>
+                </review:ReviewPhotoTile.ShownIn>
+                <Grid>
+                    <app:PhotoThumbnail x:Name="Thumbnail" Member="{Binding}" CornerRadius="8" LoadsWhenInView="True"
+                            Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}">
+                        <app:PhotoThumbnail.Style>
+                            <Style TargetType="app:PhotoThumbnail">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsShownInViewer, RelativeSource={RelativeSource AncestorType=review:ReviewPhotoTile}}" Value="True">
+                                        <Setter Property="Opacity" Value="0.4" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </app:PhotoThumbnail.Style>
+                    </app:PhotoThumbnail>
+                    <Border HorizontalAlignment="Center" VerticalAlignment="Center" Padding="10,4" CornerRadius="12"
+                            Background="{DynamicResource Albumen.PillBrush}"
+                            Visibility="{Binding IsShownInViewer, RelativeSource={RelativeSource AncestorType=review:ReviewPhotoTile}, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Text="{Binding ShownIn, RelativeSource={RelativeSource AncestorType=review:ReviewPhotoTile}}"
+                                   FontWeight="SemiBold" Foreground="{DynamicResource Albumen.TextBrush}" />
+                    </Border>
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="6" Padding="6,2" CornerRadius="6"
+                            Background="{DynamicResource Albumen.DangerBrush}"
+                            TextElement.Foreground="{DynamicResource Albumen.OnAccentBrush}"
+                            Visibility="{Binding IsSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Text="&#xE74D;" VerticalAlignment="Center" />
+                            <TextBlock Margin="4,0,0,0" Text="Removed" FontSize="12" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                    <WrapPanel VerticalAlignment="Bottom" Margin="6,0,0,6">
+                        <Border Style="{StaticResource Albumen.Badge}">
+                            <Border.Visibility>
+                                <MultiBinding Converter="{StaticResource EqualValuesToVisibilityConverter}">
+                                    <Binding Path="OccurrenceId" />
+                                    <Binding Path="DataContext.Suggestion.OccurrenceId" RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
+                                </MultiBinding>
+                            </Border.Visibility>
+                            <TextBlock TextTrimming="CharacterEllipsis">
+                                <Run Text="Suggested best:" />
+                                <Run Text="{Binding DataContext.Suggestion.Reason, RelativeSource={RelativeSource AncestorType=ItemsControl}, Mode=OneWay}" />
+                            </TextBlock>
+                        </Border>
+                        <Border Style="{StaticResource Albumen.Badge}"
+                                Visibility="{Binding LooksBlurrier, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="Blurrier" />
+                        </Border>
+                        <Border Style="{StaticResource Albumen.Badge}"
+                                Visibility="{Binding IsAliasPath, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="Another path to the same file" TextTrimming="CharacterEllipsis" />
+                        </Border>
+                        <Border Style="{StaticResource Albumen.Badge}"
+                                Visibility="{Binding IsMarkedElsewhere, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="{Binding MarkedElsewhereText}" TextTrimming="CharacterEllipsis" />
+                        </Border>
+                    </WrapPanel>
+                </Grid>
+            </review:ReviewPhotoTile>
         </DataTemplate>
         <!-- One set in the gallery: its label ("Set 2: 3 photos") with the accent line, what is
              marked in it, then all of its photos in justified rows. A set settled by marks held in
@@ -1016,7 +1124,7 @@
                     <TextBlock x:Name="ReviewResultsSummaryText" Margin="0,4,0,0" Style="{StaticResource Albumen.SectionTitle}"
                                Text="{Binding ReviewResultsSummary}" />
                     <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}"
-                               Text="Pick a kind, open a set and choose Keep or Remove for each photo. Nothing changes until you approve the cleanup below." />
+                               Text="Pick a kind to see its sets. Right-click a photo to mark it for removal or show it in a viewer. Nothing changes until you approve the cleanup below." />
                     <TextBlock x:Name="ReviewStatusText" Margin="0,6,0,0" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
                                AutomationProperties.Name="Review status" AutomationProperties.ItemStatus="{Binding ReviewStatusText}"
                                AutomationProperties.LiveSetting="Polite" />
