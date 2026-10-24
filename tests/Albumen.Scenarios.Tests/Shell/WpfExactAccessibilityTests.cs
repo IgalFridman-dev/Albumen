@@ -180,7 +180,7 @@ public sealed class WpfExactAccessibilityTests
                     (button.Content?.ToString()?.Contains("Remove", StringComparison.OrdinalIgnoreCase) == true ||
                      button.Name == "ApproveCleanupButton"));
                 var textBrush = new SolidColorBrush(Colors.Coral);
-                window.Resources[SystemColors.WindowTextBrushKey] = textBrush;
+                window.Resources["Albumen.TextBrush"] = textBrush;
                 Drain();
                 Assert.Same(textBrush, window.Foreground);
                 Assert.True(fixture.ViewModel.ReviewCategories.Single(category =>

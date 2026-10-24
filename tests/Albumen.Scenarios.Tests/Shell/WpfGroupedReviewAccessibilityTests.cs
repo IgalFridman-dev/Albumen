@@ -328,9 +328,9 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 var activeBorder = new SolidColorBrush(Color.FromRgb(12, 34, 56));
                 var windowBrush = new SolidColorBrush(Color.FromRgb(1, 2, 3));
                 var textBrush = new SolidColorBrush(Color.FromRgb(250, 249, 248));
-                window.Resources[SystemColors.ActiveBorderBrushKey] = activeBorder;
-                window.Resources[SystemColors.WindowBrushKey] = windowBrush;
-                window.Resources[SystemColors.WindowTextBrushKey] = textBrush;
+                window.Resources["Albumen.BorderBrush"] = activeBorder;
+                window.Resources["Albumen.WindowBrush"] = windowBrush;
+                window.Resources["Albumen.TextBrush"] = textBrush;
                 WpfReviewSelectionTests.Drain();
 
                 Assert.Same(windowBrush, window.Background);

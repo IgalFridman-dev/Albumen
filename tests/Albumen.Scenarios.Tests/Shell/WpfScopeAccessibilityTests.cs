@@ -241,7 +241,7 @@ public sealed class WpfScopeAccessibilityTests
 
                 var systemTextBrush = new SolidColorBrush(
                     Color.FromRgb(34, 68, 102));
-                window.Resources[SystemColors.WindowTextBrushKey] = systemTextBrush;
+                window.Resources["Albumen.TextBrush"] = systemTextBrush;
                 DrainDispatcher();
                 Assert.Same(systemTextBrush, icon.Fill);
 
@@ -425,8 +425,8 @@ public sealed class WpfScopeAccessibilityTests
         var windowBrush = new SolidColorBrush(Color.FromRgb(17, 34, 51));
         var textBrush = new SolidColorBrush(Color.FromRgb(238, 221, 204));
 
-        window.Resources[SystemColors.WindowBrushKey] = windowBrush;
-        window.Resources[SystemColors.WindowTextBrushKey] = textBrush;
+        window.Resources["Albumen.WindowBrush"] = windowBrush;
+        window.Resources["Albumen.TextBrush"] = textBrush;
         DrainDispatcher();
 
         Assert.Same(windowBrush, window.Background);

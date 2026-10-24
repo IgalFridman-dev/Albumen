@@ -74,7 +74,7 @@ public sealed class AlbumenPaletteTests
         });
     }
 
-    [Fact(Skip = "A2")]
+    [Fact]
     public void NoViewUsesSystemColorsDirectly()
     {
         var offenders = XamlFiles()
