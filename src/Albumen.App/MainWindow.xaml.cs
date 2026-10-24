@@ -261,8 +261,9 @@ public partial class MainWindow : Window
             shellViewModel.OpenReviewCategoryCommand.Execute(category);
         else if (ReferenceEquals(list, ReviewGroupsList) && item is ReviewGroupViewModel group)
             shellViewModel.OpenReviewGroupCommand.Execute(group);
-        else if (ReferenceEquals(list, ReviewComparisonsList) && item is ScanOccurrenceViewModel member)
-            shellViewModel.OpenReviewMemberCommand.Execute(member);
+        else if (ReferenceEquals(list, ReviewComparisonsList) && item is ScanOccurrenceViewModel member
+            && shellViewModel.ActiveReviewGroup is { } group)
+            shellViewModel.PlaceInViewerCommand.Execute(new PlaceInViewer(ViewerSide.Left, group.GroupId, member));
         else if (ReferenceEquals(list, LikelyMatchesList) && item is LikelyMatchItemViewModel match)
             shellViewModel.OpenLikelyMatchCommand.Execute(match);
         else
@@ -285,8 +286,9 @@ public partial class MainWindow : Window
 
     private void OnOpenReviewMemberClick(object sender, RoutedEventArgs eventArgs)
     {
-        if (sender is not Button { DataContext: ScanOccurrenceViewModel member }) return;
-        shellViewModel?.OpenReviewMemberCommand.Execute(member);
+        if (sender is not Button { DataContext: ScanOccurrenceViewModel member }
+            || shellViewModel?.ActiveReviewGroup is not { } group) return;
+        shellViewModel.PlaceInViewerCommand.Execute(new PlaceInViewer(ViewerSide.Left, group.GroupId, member));
         // Show the top of the viewer so the click visibly opens the photo, scrolling the
         // page no further than that so the photo list stays in sight.
         ReviewEvidencePanel.BringIntoView(new Rect(0, 0, ReviewEvidencePanel.ActualWidth,
@@ -324,7 +326,7 @@ public partial class MainWindow : Window
         ReviewPreviewStatusControl.FitHeight = Math.Max(240, viewport * 0.8);
     }
 
-    // The compared photo shares the viewer's size and zoom, and both photos pan together.
+    // The Right Viewer's photo shares the Left Viewer's size and zoom, and both photos pan together.
     private void OnComparedPreviewLoaded(object sender, RoutedEventArgs eventArgs)
     {
         if (sender is not PreviewStatusControl compared) return;
@@ -332,7 +334,7 @@ public partial class MainWindow : Window
             new Binding(nameof(Slider.Value)) { Source = ReviewZoomSlider });
         compared.SetBinding(PreviewStatusControl.FitHeightProperty,
             new Binding(nameof(PreviewStatusControl.FitHeight)) { Source = ReviewPreviewStatusControl });
-        compared.PreviewImage.SetValue(AutomationProperties.NameProperty, "Compared photo preview");
+        compared.PreviewImage.SetValue(AutomationProperties.NameProperty, "Photo in the Right Viewer");
         var main = ReviewPreviewStatusControl.PreviewImageScroller;
         var other = compared.PreviewImageScroller;
         // Photos of different widths pan by the same share of their own width.

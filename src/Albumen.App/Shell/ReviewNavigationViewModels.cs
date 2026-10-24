@@ -38,7 +38,10 @@ public enum ReviewNavigationLevel
 public sealed class ReviewCategoryViewModel
 {
     private readonly Func<Guid, int?> findGroupIndex;
+    private readonly Func<long, int?>? findSingletonIndex;
 
+    // Couldn't-check files are each their own set without a set id (Guid.Empty), so they are
+    // found by photo through findSingletonIndex.
     internal ReviewCategoryViewModel(
         ReviewCategoryKind category,
         string name,
@@ -46,7 +49,8 @@ public sealed class ReviewCategoryViewModel
         int positionInSet,
         int sizeOfSet,
         Func<int, ReviewGroupViewModel> groupFactory,
-        Func<Guid, int?> findGroupIndex)
+        Func<Guid, int?> findGroupIndex,
+        Func<long, int?>? findSingletonIndex = null)
     {
         Category = category;
         Name = name;
@@ -55,6 +59,7 @@ public sealed class ReviewCategoryViewModel
         SizeOfSet = sizeOfSet;
         Groups = new(groupCount, groupFactory);
         this.findGroupIndex = findGroupIndex;
+        this.findSingletonIndex = findSingletonIndex;
     }
 
     public ReviewCategoryKind Category { get; }
@@ -79,6 +84,14 @@ public sealed class ReviewCategoryViewModel
 
     internal ReviewGroupViewModel? FindGroup(Guid groupId) =>
         findGroupIndex(groupId) is { } index ? Groups[index] : null;
+
+    internal ScanOccurrenceViewModel? FindMember(Guid groupId, long occurrenceId)
+    {
+        if (findSingletonIndex is null) return FindGroup(groupId)?.FindMember(occurrenceId);
+        return groupId == Guid.Empty && findSingletonIndex(occurrenceId) is { } index
+            ? Groups[index].Members[0]
+            : null;
+    }
 }
 
 public sealed class ReviewGroupViewModel

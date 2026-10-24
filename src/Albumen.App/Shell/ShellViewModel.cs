@@ -36,11 +36,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private SuggestedBest? activeReviewSuggestion;
     private Guid? suggestionGroupId;
     private CancellationTokenSource? suggestionCancellation;
-    private ScanOccurrenceViewModel? comparedReviewMember;
-    private PreviewItemViewModel? comparedReviewPreview;
-    private Guid? comparedGroupId;
-    private CancellationTokenSource? comparePreviewCancellation;
-    private long comparePreviewRequest;
     private AlbumenSnapshot? photoSnapshot;
     private ShellSnapshot? currentSnapshot;
     private ImmutableArray<PhaseItemViewModel> phases = [];
@@ -96,22 +91,19 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private ImmutableArray<string> reviewBreadcrumbs = ["Review"];
     private ReviewCategoryViewModel? activeReviewCategory;
     private ReviewGroupViewModel? activeReviewGroup;
-    private ScanOccurrenceViewModel? activeReviewMember;
-    private PreviewItemViewModel? activeReviewPreview;
-    private ReviewComparisonEvidenceViewModel? activeReviewEvidence;
-    private CancellationTokenSource? activePreviewCancellation;
-    private long activePreviewRequest;
     private readonly ObservableCollection<ActionItemViewModel> actionRows = [];
     private readonly ObservableCollection<ActionRecordViewModel> actionRecoveryRecords = [];
     private readonly object lifetime = new();
     private Task? disposalTask;
     // Where Review was when the first likely match was opened; Show all returns there.
-    private (ReviewLevel Level, ReviewCategoryKind? Category, Guid? Group, long? Member)? likelyMatchesReturn;
+    private (ReviewLevel Level, ReviewCategoryKind? Category, Guid? Group)? likelyMatchesReturn;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
         ActionRows = new(actionRows);
         ActionRecoveryRecords = new(actionRecoveryRecords);
+        LeftViewer = new(ViewerSide.Left);
+        RightViewer = new(ViewerSide.Right);
         this.chooseScopeWorkflow = chooseScopeWorkflow
             ?? throw new ArgumentNullException(nameof(chooseScopeWorkflow));
         ChooseScopeCommand = new AsyncCommand(
@@ -148,24 +140,18 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             canExecute: () => IsClearScanDataConfirmationPending);
         OpenReviewCategoryCommand = new AsyncCommand(OpenReviewCategoryAsync);
         OpenReviewGroupCommand = new AsyncCommand(OpenReviewGroupAsync);
-        OpenReviewMemberCommand = new AsyncCommand(
-            OpenReviewMemberAsync, allowConcurrentExecutions: true);
+        PlaceInViewerCommand = new AsyncCommand(PlaceInViewerAsync, allowConcurrentExecutions: true);
+        ClearViewerCommand = new AsyncCommand(parameter =>
+        {
+            if (parameter is ViewerSide side) Viewer(side).Clear();
+            return Task.CompletedTask;
+        }, allowConcurrentExecutions: true);
+        SwapViewersCommand = new AsyncCommand(SwapViewersAsync, allowConcurrentExecutions: true);
         OpenLikelyMatchCommand = new AsyncCommand(
             OpenLikelyMatchAsync, allowConcurrentExecutions: true);
         LikelyMatches = new(null);
         ReviewBackCommand = new AsyncCommand(ReviewBackAsync,
             canExecute: () => ReviewNavigationLevel != ReviewLevel.Categories);
-        ShowPreviousReviewMemberCommand = new AsyncCommand(() => ShowAdjacentReviewMemberAsync(-1),
-            allowConcurrentExecutions: true, canExecute: () => AdjacentReviewMember(-1) is not null);
-        ShowNextReviewMemberCommand = new AsyncCommand(() => ShowAdjacentReviewMemberAsync(1),
-            allowConcurrentExecutions: true, canExecute: () => AdjacentReviewMember(1) is not null);
-        CompareReviewMemberCommand = new AsyncCommand(CompareReviewMemberAsync,
-            allowConcurrentExecutions: true);
-        CloseCompareCommand = new AsyncCommand(() =>
-        {
-            ClearComparedReviewPreview();
-            return Task.CompletedTask;
-        }, canExecute: () => ComparedReviewMember is not null);
         NavigateCommand = new AsyncCommand(parameter => photoWorkflow is not null && parameter is WorkflowPhase phase
             ? photoWorkflow.NavigateAsync(phase) : parameter is WorkflowPhase.ChooseScope
                 ? this.chooseScopeWorkflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None) : Task.CompletedTask);
@@ -207,14 +193,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand CancelClearScanDataCommand { get; }
     public AsyncCommand OpenReviewCategoryCommand { get; }
     public AsyncCommand OpenReviewGroupCommand { get; }
-    public AsyncCommand OpenReviewMemberCommand { get; }
     public AsyncCommand OpenLikelyMatchCommand { get; }
     public LikelyMatchesViewModel LikelyMatches { get; }
     public AsyncCommand ReviewBackCommand { get; }
-    public AsyncCommand ShowPreviousReviewMemberCommand { get; }
-    public AsyncCommand ShowNextReviewMemberCommand { get; }
-    public AsyncCommand CompareReviewMemberCommand { get; }
-    public AsyncCommand CloseCompareCommand { get; }
+    // The two viewers below the sets. Placing takes a PlaceInViewer, clearing a ViewerSide.
+    public ReviewViewerSlot LeftViewer { get; }
+    public ReviewViewerSlot RightViewer { get; }
+    public AsyncCommand PlaceInViewerCommand { get; }
+    public AsyncCommand ClearViewerCommand { get; }
+    public AsyncCommand SwapViewersCommand { get; }
     public ReviewThumbnailLoader? ReviewThumbnails { get; }
     public AsyncCommand NavigateCommand { get; }
     public bool HasLocalScanDataControl => localScanDataControl is not null;
@@ -479,37 +466,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         get => activeReviewGroup;
         private set => activeReviewGroup = value;
     }
-    public ScanOccurrenceViewModel? ActiveReviewMember
-    {
-        get => activeReviewMember;
-        private set => activeReviewMember = value;
-    }
-    public PreviewItemViewModel? ActiveReviewPreview
-    {
-        get => activeReviewPreview;
-        private set => activeReviewPreview = value;
-    }
-    public ReviewComparisonEvidenceViewModel? ActiveReviewEvidence
-    {
-        get => activeReviewEvidence;
-        private set => activeReviewEvidence = value;
-    }
     public SuggestedBest? ActiveReviewSuggestion
     {
         get => activeReviewSuggestion;
         private set => SetField(ref activeReviewSuggestion, value);
     }
-    public ScanOccurrenceViewModel? ComparedReviewMember
-    {
-        get => comparedReviewMember;
-        private set => comparedReviewMember = value;
-    }
-    public PreviewItemViewModel? ComparedReviewPreview
-    {
-        get => comparedReviewPreview;
-        private set => comparedReviewPreview = value;
-    }
-    public bool IsComparingReviewMembers => ComparedReviewMember is not null;
+    // Which viewer shows this photo of this set, for the tile that shows it too.
+    public ViewerSide? ViewerSideOf(long occurrenceId, Guid groupId) =>
+        LeftViewer.Shows(groupId, occurrenceId) ? ViewerSide.Left
+        : RightViewer.Shows(groupId, occurrenceId) ? ViewerSide.Right
+        : null;
     public string ReviewResultsSummary
     {
         get
@@ -867,11 +833,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             var previousNavigationLevel = ReviewNavigationLevel;
             var previousCategory = ActiveReviewCategory?.Category;
             var previousGroupId = ActiveReviewGroup?.GroupId;
-            var previousMemberId = ActiveReviewMember?.OccurrenceId;
             legacyExactGroups = null;
             ReviewCategories = ProjectReviewCategories(snapshot);
-            RestoreReviewNavigation(previousNavigationLevel, previousCategory,
-                previousGroupId, previousMemberId);
+            RestoreReviewNavigation(previousNavigationLevel, previousCategory, previousGroupId);
+            RefreshViewers(sessionChanged: previousReview?.Pin != snapshot.Review.Pin
+                || previousScan?.Pin != snapshot.Scan.Pin);
         }
         if (previousScan?.Pin != snapshot.Scan.Pin) likelyMatchesReturn = null;
         LikelyMatches.Update(snapshot);
@@ -1057,10 +1023,13 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         int positionInSet)
     {
         var rows = scan.Occurrences.Where(IsCouldNotAnalyze).ToImmutableArray();
+        var rowIndexes = new Dictionary<long, int>(rows.Length);
+        for (var row = 0; row < rows.Length; row++) rowIndexes.TryAdd(rows[row].Token.OccurrenceId, row);
         return new(ReviewCategoryKind.CouldNotAnalyze, ReviewCategoryNames.For(ReviewCategoryKind.CouldNotAnalyze), rows.Length,
             positionInSet, 4,
             index => new ReviewGroupViewModel(rows[index], index + 1, rows.Length),
-            _ => null);
+            _ => null,
+            occurrenceId => rowIndexes.TryGetValue(occurrenceId, out var index) ? index : null);
     }
 
     private static int? FindGroupIndex(
@@ -1099,7 +1068,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             || !ReviewCategories.Any(row => ReferenceEquals(row, category)))
             throw new ArgumentException("Review category navigation requires a current category row.", nameof(parameter));
 
-        SetReviewNavigation(ReviewLevel.Groups, category, null, null);
+        SetReviewNavigation(ReviewLevel.Groups, category, null);
         return Task.CompletedTask;
     }
 
@@ -1110,17 +1079,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             || group.Category != ActiveReviewCategory.Category)
             throw new ArgumentException("Review group navigation requires a group in the active category.", nameof(parameter));
 
-        SetReviewNavigation(ReviewLevel.Comparisons, ActiveReviewCategory, group, null);
+        SetReviewNavigation(ReviewLevel.Comparisons, ActiveReviewCategory, group);
         return Task.CompletedTask;
-    }
-
-    private async Task OpenReviewMemberAsync(object? parameter)
-    {
-        if (parameter is not ScanOccurrenceViewModel member || ActiveReviewGroup is null)
-            throw new ArgumentException("Review comparison navigation requires a member in the active group.", nameof(parameter));
-
-        SetReviewNavigation(ReviewLevel.Comparisons, ActiveReviewCategory, ActiveReviewGroup, member);
-        await LoadActiveReviewPreviewAsync(member);
     }
 
     private async Task OpenLikelyMatchAsync(object? parameter)
@@ -1130,36 +1090,34 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (category?.FindGroup(set.GroupId) is not { } group
             || group.FindMember(match.Photo.OccurrenceId) is not { } member)
             return;
-        likelyMatchesReturn ??= (ReviewNavigationLevel, ActiveReviewCategory?.Category,
-            ActiveReviewGroup?.GroupId, ActiveReviewMember?.OccurrenceId);
-        SetReviewNavigation(ReviewLevel.Comparisons, category, group, member);
-        await LoadActiveReviewPreviewAsync(member);
+        likelyMatchesReturn ??= (ReviewNavigationLevel, ActiveReviewCategory?.Category, ActiveReviewGroup?.GroupId);
+        SetReviewNavigation(ReviewLevel.Comparisons, category, group);
+        await PlaceInViewerAsync(new PlaceInViewer(ViewerSide.Left, group.GroupId, member));
     }
 
     private void ReturnFromLikelyMatches()
     {
         if (likelyMatchesReturn is not { } back) return;
         likelyMatchesReturn = null;
-        RestoreReviewNavigation(back.Level, back.Category, back.Group, back.Member);
+        RestoreReviewNavigation(back.Level, back.Category, back.Group);
     }
 
     private Task ReviewBackAsync()
     {
         if (ReviewNavigationLevel == ReviewLevel.Comparisons)
-            SetReviewNavigation(ReviewLevel.Groups, ActiveReviewCategory, null, null);
+            SetReviewNavigation(ReviewLevel.Groups, ActiveReviewCategory, null);
         else if (ReviewNavigationLevel == ReviewLevel.Groups)
             ResetReviewNavigation();
         return Task.CompletedTask;
     }
 
     private void ResetReviewNavigation() =>
-        SetReviewNavigation(ReviewLevel.Categories, null, null, null);
+        SetReviewNavigation(ReviewLevel.Categories, null, null);
 
     private void RestoreReviewNavigation(
         ReviewLevel level,
         ReviewCategoryKind? categoryKind,
-        Guid? groupId,
-        long? memberId)
+        Guid? groupId)
     {
         if (level == ReviewLevel.Categories || categoryKind is null)
         {
@@ -1176,44 +1134,23 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         if (level == ReviewLevel.Groups || groupId is null)
         {
-            SetReviewNavigation(ReviewLevel.Groups, category, null, null);
+            SetReviewNavigation(ReviewLevel.Groups, category, null);
             return;
         }
 
         var group = category.FindGroup(groupId.Value);
-        if (group is null)
-        {
-            SetReviewNavigation(ReviewLevel.Groups, category, null, null);
-            return;
-        }
-
-        var member = memberId is { } id ? group.FindMember(id) : null;
-        var reloadPreview = member is not null && ActiveReviewMember is not null;
-        SetReviewNavigation(ReviewLevel.Comparisons, category, group, member,
-            preservePreview: member is not null && !reloadPreview);
-        if (reloadPreview)
-            _ = LoadActiveReviewPreviewAsync(member!);
+        SetReviewNavigation(group is null ? ReviewLevel.Groups : ReviewLevel.Comparisons, category, group);
     }
 
     private void SetReviewNavigation(
         ReviewLevel level,
         ReviewCategoryViewModel? category,
-        ReviewGroupViewModel? group,
-        ScanOccurrenceViewModel? member,
-        bool preservePreview = false)
+        ReviewGroupViewModel? group)
     {
-        if (!preservePreview)
-            ClearActiveReviewPreview();
-        if (level != ReviewLevel.Comparisons || group?.GroupId != comparedGroupId
-            || member is not null && member.OccurrenceId == ComparedReviewMember?.OccurrenceId)
-            ClearComparedReviewPreview();
-        else if (ComparedReviewMember is { } compared && group?.FindMember(compared.OccurrenceId) is { } current)
-            ComparedReviewMember = current;
         var navigationLevelChanged = ReviewNavigationLevel != level;
         ReviewNavigationLevel = level;
         ActiveReviewCategory = category;
         ActiveReviewGroup = group;
-        ActiveReviewMember = member;
         ReviewBreadcrumbs = level switch
         {
             ReviewLevel.Categories => ["Review"],
@@ -1224,54 +1161,87 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (navigationLevelChanged) OnPropertyChanged(nameof(ReviewNavigationLevel));
         OnPropertyChanged(nameof(ActiveReviewCategory));
         OnPropertyChanged(nameof(ActiveReviewGroup));
-        OnPropertyChanged(nameof(ActiveReviewMember));
         OnPropertyChanged(nameof(ReviewBreadcrumbs));
         OnPropertyChanged(nameof(ReviewBreadcrumbText));
         if (navigationLevelChanged) OnPropertyChanged(nameof(CanReviewBack));
         OnPropertyChanged(nameof(ActiveReviewGroups));
         OnPropertyChanged(nameof(ActiveReviewMembers));
-        OnPropertyChanged(nameof(ComparedReviewMember));
         ReviewBackCommand.NotifyCanExecuteChanged();
-        ShowPreviousReviewMemberCommand.NotifyCanExecuteChanged();
-        ShowNextReviewMemberCommand.NotifyCanExecuteChanged();
         RefreshActiveSuggestion(group);
     }
 
-    private ScanOccurrenceViewModel? AdjacentReviewMember(int offset)
+    private ReviewViewerSlot Viewer(ViewerSide side) => side == ViewerSide.Left ? LeftViewer : RightViewer;
+
+    // The member of a set as the current projection shows it: Review re-creates its rows on
+    // every projection, so a viewer holds the set and the photo, not the row.
+    internal ScanOccurrenceViewModel? FindReviewMember(Guid groupId, long occurrenceId)
     {
-        if (ActiveReviewGroup is not { } group || ActiveReviewMember is not { } member) return null;
-        var index = member.PositionInSet - 1 + offset;
-        return index >= 0 && index < group.MemberCount ? group.Members[index] : null;
+        foreach (var category in ReviewCategories)
+        {
+            if (category.FindMember(groupId, occurrenceId) is { } member) return member;
+        }
+        return null;
     }
 
-    private Task ShowAdjacentReviewMemberAsync(int offset) =>
-        AdjacentReviewMember(offset) is { } next ? OpenReviewMemberAsync(next) : Task.CompletedTask;
-
-    private async Task CompareReviewMemberAsync(object? parameter)
+    private Task PlaceInViewerAsync(object? parameter)
     {
-        if (parameter is not ScanOccurrenceViewModel member || ActiveReviewGroup is not { } group
-            || group.FindMember(member.OccurrenceId) is null)
-            throw new ArgumentException("Comparison requires a member of the active group.", nameof(parameter));
-        if (ActiveReviewMember is null)
+        if (parameter is not PlaceInViewer place) return Task.CompletedTask;
+        var target = Viewer(place.Side);
+        var other = Viewer(place.Side == ViewerSide.Left ? ViewerSide.Right : ViewerSide.Left);
+        var occurrenceId = place.Member.OccurrenceId;
+        if ((place.OnlyIfEmpty && target.HasPhoto) || target.Shows(place.GroupId, occurrenceId))
+            return Task.CompletedTask;
+        // A photo is in at most one viewer: placing the other viewer's photo moves it here.
+        PreviewItemViewModel? moved = null;
+        if (other.Shows(place.GroupId, occurrenceId))
         {
-            await OpenReviewMemberAsync(member);
-            return;
+            moved = other.Preview;
+            other.Clear();
         }
-        if (ActiveReviewMember.OccurrenceId == member.OccurrenceId) return;
+        target.CancelLoad();
+        target.Show(place.GroupId, place.Member, moved);
+        return moved is null ? LoadViewerPreviewAsync(target, place.GroupId, place.Member) : Task.CompletedTask;
+    }
 
-        ClearComparedReviewPreview();
-        ComparedReviewMember = member;
-        comparedGroupId = group.GroupId;
-        OnPropertyChanged(nameof(ComparedReviewMember));
-        OnPropertyChanged(nameof(IsComparingReviewMembers));
-        CloseCompareCommand.NotifyCanExecuteChanged();
+    // Swapping keeps each photo's preview; with one viewer empty it is a move.
+    private Task SwapViewersAsync()
+    {
+        var left = (LeftViewer.Member, LeftViewer.GroupId, LeftViewer.Preview);
+        var right = (RightViewer.Member, RightViewer.GroupId, RightViewer.Preview);
+        LeftViewer.Clear();
+        RightViewer.Clear();
+        return Task.WhenAll(Show(LeftViewer, right), Show(RightViewer, left));
+
+        Task Show(ReviewViewerSlot slot, (ScanOccurrenceViewModel? Member, Guid? GroupId, PreviewItemViewModel? Preview) photo)
+        {
+            if (photo is not { Member: { } member, GroupId: { } groupId }) return Task.CompletedTask;
+            slot.Show(groupId, member, photo.Preview);
+            return photo.Preview is null ? LoadViewerPreviewAsync(slot, groupId, member) : Task.CompletedTask;
+        }
+    }
+
+    // After a projection each viewer follows its photo's new row, so the Remove button reads
+    // the mark as it is now. A photo that left Review empties its viewer, and so does a new
+    // Review session or Scan.
+    private void RefreshViewers(bool sessionChanged)
+    {
+        foreach (var slot in new[] { LeftViewer, RightViewer })
+        {
+            if (slot.Member is not { } member || slot.GroupId is not { } groupId) continue;
+            if (!sessionChanged && FindReviewMember(groupId, member.OccurrenceId) is { } current)
+                slot.Show(groupId, current, slot.Preview);
+            else
+                slot.Clear();
+        }
+    }
+
+    private async Task LoadViewerPreviewAsync(ReviewViewerSlot slot, Guid groupId, ScanOccurrenceViewModel member)
+    {
         var source = reviewPreviewSource;
         if (source is null || ResolveOccurrence(member.OccurrenceId) is not { } target) return;
 
-        var cancellation = new CancellationTokenSource();
+        var cancellation = slot.BeginLoad(out var request);
         var cancellationToken = cancellation.Token;
-        comparePreviewCancellation = cancellation;
-        var request = Interlocked.Increment(ref comparePreviewRequest);
         ReviewPreviewResult? result = null;
         try
         {
@@ -1284,11 +1254,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 result = ReviewPreviewResult.Failure(target.Occurrence.ResolvedPath,
                     PreviewAvailability.Unavailable, "Preview unavailable: the file could not be read.");
             }
-            if (request != Volatile.Read(ref comparePreviewRequest)
-                || ComparedReviewMember?.OccurrenceId != member.OccurrenceId)
-                return;
-            ComparedReviewPreview = new PreviewItemViewModel(result);
-            OnPropertyChanged(nameof(ComparedReviewPreview));
+            if (slot.IsCurrentLoad(request) && slot.Shows(groupId, member.OccurrenceId))
+                slot.SetPreview(new PreviewItemViewModel(result));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1296,30 +1263,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         finally
         {
             result?.Dispose();
-            if (ReferenceEquals(comparePreviewCancellation, cancellation))
-                comparePreviewCancellation = null;
-            cancellation.Dispose();
+            slot.EndLoad(cancellation);
         }
-    }
-
-    private void ClearComparedReviewPreview()
-    {
-        Interlocked.Increment(ref comparePreviewRequest);
-        var cancellation = Interlocked.Exchange(ref comparePreviewCancellation, null);
-        if (cancellation is not null)
-        {
-            cancellation.Cancel();
-            cancellation.Dispose();
-        }
-        var wasComparing = ComparedReviewMember is not null || ComparedReviewPreview is not null;
-        ComparedReviewMember = null;
-        ComparedReviewPreview = null;
-        comparedGroupId = null;
-        if (!wasComparing) return;
-        OnPropertyChanged(nameof(ComparedReviewMember));
-        OnPropertyChanged(nameof(ComparedReviewPreview));
-        OnPropertyChanged(nameof(IsComparingReviewMembers));
-        CloseCompareCommand.NotifyCanExecuteChanged();
     }
 
     // The "Suggested best" badge needs every photo's pixel size, which only a decode gives,
@@ -1381,123 +1326,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         return byId.TryGetValue(occurrenceId, out var occurrence)
             ? (new ScanRunContext(pin, scope), occurrence)
             : null;
-    }
-
-    private async Task LoadActiveReviewPreviewAsync(ScanOccurrenceViewModel member)
-    {
-        var source = reviewPreviewSource;
-        var snapshot = photoSnapshot;
-        var scope = snapshot?.Scope.Preflight?.Scope;
-        var pin = snapshot?.Scan.Pin;
-        var occurrence = snapshot?.Scan.Occurrences.FirstOrDefault(
-            row => row.Token.OccurrenceId == member.OccurrenceId);
-        if (source is null || scope is null || pin is null || occurrence is null)
-            return;
-
-        var cancellation = new CancellationTokenSource();
-        var cancellationToken = cancellation.Token;
-        activePreviewCancellation = cancellation;
-        var request = Interlocked.Increment(ref activePreviewRequest);
-        ReviewPreviewResult? result = null;
-        try
-        {
-            result = await source.LoadAsync(
-                new ScanRunContext(pin, scope), occurrence, cancellationToken);
-            if (request != Volatile.Read(ref activePreviewRequest)
-                || !ReferenceEquals(ActiveReviewMember, member))
-                return;
-
-            ActiveReviewPreview = new PreviewItemViewModel(result);
-            ActiveReviewEvidence = ProjectReviewEvidence(occurrence, result);
-            OnPropertyChanged(nameof(ActiveReviewPreview));
-            OnPropertyChanged(nameof(ActiveReviewEvidence));
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            if (request != Volatile.Read(ref activePreviewRequest)
-                || !ReferenceEquals(ActiveReviewMember, member))
-                return;
-            result = ReviewPreviewResult.Failure(
-                occurrence.ResolvedPath,
-                PreviewAvailability.Unavailable,
-                "Preview unavailable: the file could not be read.");
-            ActiveReviewPreview = new PreviewItemViewModel(result);
-            ActiveReviewEvidence = ProjectReviewEvidence(occurrence, result);
-            OnPropertyChanged(nameof(ActiveReviewPreview));
-            OnPropertyChanged(nameof(ActiveReviewEvidence));
-        }
-        finally
-        {
-            result?.Dispose();
-            if (ReferenceEquals(activePreviewCancellation, cancellation))
-                activePreviewCancellation = null;
-            cancellation.Dispose();
-        }
-    }
-
-    private ReviewComparisonEvidenceViewModel ProjectReviewEvidence(
-        ScanFileOccurrence occurrence,
-        ReviewPreviewResult result)
-    {
-        const string unavailable = "Unavailable";
-        var category = ActiveReviewGroup?.Category ?? ReviewCategoryKind.CouldNotAnalyze;
-        var candidate = photoSnapshot?.Scan.Groups.FirstOrDefault(
-            group => group.GroupId == ActiveReviewGroup?.GroupId);
-        var similarity = candidate?.Similarity.FirstOrDefault(edge =>
-            edge.Left.OccurrenceId == occurrence.Token.OccurrenceId
-            || edge.Right.OccurrenceId == occurrence.Token.OccurrenceId);
-        var confidence = category switch
-        {
-            ReviewCategoryKind.Exact => "The files are identical, byte for byte.",
-            ReviewCategoryKind.Uncertain when similarity?.Cosine is not null =>
-                "Similar content: matched by what the photos show, not by their pixels.",
-            ReviewCategoryKind.Near or ReviewCategoryKind.Uncertain when similarity is not null =>
-                $"Picture difference {similarity.HammingDistance.ToString(CultureInfo.InvariantCulture)}, color difference {similarity.ColorDistance.ToString(CultureInfo.InvariantCulture)} (lower is closer)",
-            _ => unavailable,
-        };
-        var uncertainty = category == ReviewCategoryKind.Uncertain
-            ? "A close call. Check these photos yourself."
-            : unavailable;
-        var reason = new[]
-            {
-                occurrence.NearDuplicate.Reason,
-                occurrence.VisualFeatures.Reason,
-                occurrence.Exact.Reason,
-                occurrence.Enumerate.Reason,
-            }
-            .FirstOrDefault(value => value != ScanReason.None);
-        return new(
-            occurrence.ResolvedPath,
-            ReviewCategoryNames.For(category),
-            result.SourcePixelWidth is { } width && result.SourcePixelHeight is { } height
-                ? $"{width.ToString(CultureInfo.InvariantCulture)} × {height.ToString(CultureInfo.InvariantCulture)} pixels"
-                : unavailable,
-            (result.ByteLength ?? occurrence.Content?.ByteLength) is { } bytes
-                ? $"{bytes.ToString(CultureInfo.InvariantCulture)} bytes"
-                : unavailable,
-            result.RelevantDate?.ToString("O", CultureInfo.InvariantCulture) ?? unavailable,
-            confidence,
-            uncertainty,
-            unavailable,
-            reason == ScanReason.None ? unavailable : reason.ToString());
-    }
-
-    private void ClearActiveReviewPreview()
-    {
-        Interlocked.Increment(ref activePreviewRequest);
-        var cancellation = Interlocked.Exchange(ref activePreviewCancellation, null);
-        if (cancellation is not null)
-        {
-            cancellation.Cancel();
-            cancellation.Dispose();
-        }
-        ActiveReviewPreview = null;
-        ActiveReviewEvidence = null;
-        OnPropertyChanged(nameof(ActiveReviewPreview));
-        OnPropertyChanged(nameof(ActiveReviewEvidence));
     }
 
     private static ImmutableArray<ScanOutcomeSummaryItemViewModel> ProjectOutcomeSummaries(
@@ -2056,8 +1884,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private async Task DisposeCoreAsync()
     {
-        ClearActiveReviewPreview();
-        ClearComparedReviewPreview();
+        LeftViewer.Clear();
+        RightViewer.Clear();
         RefreshActiveSuggestion(null);
         chooseScopeWorkflow.SnapshotChanged -= OnSnapshotChanged;
         if (photoWorkflow is not null)
