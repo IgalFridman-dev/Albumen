@@ -71,10 +71,10 @@ public sealed class ReviewCategoryViewModel
     public string AutomationName => $"{Name}: {CountText}";
     public string Description => Category switch
     {
-        ReviewCategoryKind.Exact => "The same file saved more than once. Keeping one loses nothing.",
+        ReviewCategoryKind.Exact => "The same file saved more than once.",
         ReviewCategoryKind.Near => "The same photo resized, recompressed or lightly edited.",
-        ReviewCategoryKind.Uncertain => "Photos that look close. Check them yourself before removing any.",
-        _ => "Files Albumen couldn't read or doesn't support. Nothing here can be removed.",
+        ReviewCategoryKind.Uncertain => "Photos that look close.",
+        _ => "Unsupported files.",
     };
     public string CountText => GroupCount == 1
         ? Category == ReviewCategoryKind.CouldNotAnalyze ? "1 file" : "1 set"

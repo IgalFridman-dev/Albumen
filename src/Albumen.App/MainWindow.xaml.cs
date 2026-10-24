@@ -628,14 +628,21 @@ public partial class MainWindow : Window
         UpdateReviewColumnWidths();
     }
 
-    // The gallery gets twice the room of the kinds beside it.
+    // Beside an open gallery the kinds keep a narrow fixed column and the photos take the rest;
+    // with no kind open the kinds take a third, and a level shown alone takes the full width.
     private void UpdateReviewColumnWidths()
     {
-        ReviewCategoriesColumn.Width = ReviewCategoriesPanel.Visibility == Visibility.Visible
-            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        ReviewGroupsColumn.Width = ReviewGroupsPanel.Visibility == Visibility.Visible
+        var categoriesShown = ReviewCategoriesPanel.Visibility == Visibility.Visible;
+        var galleryShown = ReviewGroupsPanel.Visibility == Visibility.Visible;
+        var galleryOpen = shellViewModel?.ReviewNavigationLevel == ReviewNavigationLevel.Gallery;
+        ReviewCategoriesColumn.Width = !categoriesShown ? new GridLength(0)
+            : galleryShown && galleryOpen ? new GridLength(ReviewCategoriesColumnWidth)
+            : new GridLength(1, GridUnitType.Star);
+        ReviewGroupsColumn.Width = galleryShown
             ? new GridLength(2, GridUnitType.Star) : new GridLength(0);
     }
+
+    private const double ReviewCategoriesColumnWidth = 220;
 
     private void QueueReviewNavigationFocus()
     {
