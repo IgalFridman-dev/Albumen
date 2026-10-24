@@ -183,7 +183,7 @@ public partial class MainWindow : Window
         {
             reviewFocusGeneration++;
             reviewFocusIdentity = new(session, groupId, member.OccurrenceId,
-                IsWithin(element, ReviewComparisonsList));
+                IsWithin(element, ReviewGalleryList));
             return;
         }
         if (reviewFocusIdentity?.Session != session || !IsDeliberateReviewFocusTarget(element)) return;
@@ -269,15 +269,58 @@ public partial class MainWindow : Window
             shellViewModel?.OpenReviewCategoryCommand.Execute(category);
     }
 
-    private void OnOpenReviewMemberClick(object sender, RoutedEventArgs eventArgs)
+    // A click (or Enter or Space) on a photo shows it in the Left Viewer while that viewer is
+    // empty, and does nothing otherwise; drag and drop place it anywhere.
+    private void OnReviewTileClick(object sender, RoutedEventArgs eventArgs)
     {
-        if (sender is not Button { DataContext: ScanOccurrenceViewModel member } button
-            || FindReviewGroupId(button) is not { } groupId || shellViewModel is null) return;
-        shellViewModel.PlaceInViewerCommand.Execute(new PlaceInViewer(ViewerSide.Left, groupId, member));
-        // Show the top of the viewer so the click visibly opens the photo, scrolling the
-        // page no further than that so the photo list stays in sight.
-        ReviewEvidencePanel.BringIntoView(new Rect(0, 0, ReviewEvidencePanel.ActualWidth,
-            Math.Min(ReviewEvidencePanel.ActualHeight, 160)));
+        if (sender is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } tile
+            || FindReviewGroupId(tile) is not { } groupId || shellViewModel is null) return;
+        shellViewModel.PlaceInViewerCommand.Execute(
+            new PlaceInViewer(ViewerSide.Left, groupId, member, OnlyIfEmpty: true));
+    }
+
+    // A shown set works out its Suggested best from its thumbnails; a set that scrolls away, or
+    // whose container is recycled for another set, stops.
+    private readonly Dictionary<FrameworkElement, CancellationTokenSource> suggestionLoads = [];
+
+    private void OnReviewSetLoaded(object sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is not FrameworkElement set) return;
+        set.DataContextChanged -= OnReviewSetDataContextChanged;
+        set.DataContextChanged += OnReviewSetDataContextChanged;
+        StartSuggestion(set);
+    }
+
+    private void OnReviewSetUnloaded(object sender, RoutedEventArgs eventArgs)
+    {
+        if (sender is not FrameworkElement set) return;
+        set.DataContextChanged -= OnReviewSetDataContextChanged;
+        StopSuggestion(set);
+    }
+
+    private void OnReviewSetDataContextChanged(object sender, DependencyPropertyChangedEventArgs eventArgs)
+    {
+        if (sender is not FrameworkElement set) return;
+        StopSuggestion(set);
+        if (set.IsLoaded) StartSuggestion(set);
+    }
+
+    private void StartSuggestion(FrameworkElement set)
+    {
+        if (set.DataContext is not ReviewGroupViewModel group
+            || shellViewModel?.ReviewThumbnails is not { } thumbnails
+            || suggestionLoads.ContainsKey(set))
+            return;
+        var cancellation = new CancellationTokenSource();
+        suggestionLoads[set] = cancellation;
+        _ = group.LoadSuggestionAsync(thumbnails, cancellation.Token);
+    }
+
+    private void StopSuggestion(FrameworkElement set)
+    {
+        if (!suggestionLoads.Remove(set, out var cancellation)) return;
+        cancellation.Cancel();
+        cancellation.Dispose();
     }
 
     private void OnOpenLikelyMatchClick(object sender, RoutedEventArgs eventArgs)
@@ -298,15 +341,15 @@ public partial class MainWindow : Window
     private void OnReviewSizeChanged(object sender, SizeChangedEventArgs eventArgs) =>
         UpdateReviewLayout();
 
-    // The navigation lists keep a bounded height so they stay virtualized inside the
-    // scrolling Review page, leaving room for the viewer below them to come into view.
-    // The lists scroll a whole card at a time, so they stay taller than one photo card:
-    // a shorter list would cut off the bottom of a card for good.
+    // The kinds and the gallery keep a bounded height so they stay virtualized inside the
+    // scrolling Review page, leaving room for the viewers below them to come into view. The
+    // kinds scroll a whole card at a time, so they stay taller than one card: a shorter list
+    // would cut off the bottom of a card for good.
     private void OnReviewPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
     {
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
         var viewport = eventArgs.NewSize.Height;
-        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.6, 300, 600));
+        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.6, 300, 720));
         // Scrolled to the viewer, the photo fills most of the page instead of a fixed thumbnail.
         ReviewPreviewStatusControl.FitHeight = Math.Max(240, viewport * 0.8);
     }
@@ -376,8 +419,7 @@ public partial class MainWindow : Window
     }
 
     private ScrollViewer? PageScrollerFor(DependencyObject element) =>
-        IsWithin(element, ReviewCategoriesList) || IsWithin(element, ReviewGroupsList)
-            || IsWithin(element, ReviewComparisonsList) ? ReviewPageScrollViewer
+        IsWithin(element, ReviewCategoriesList) || IsWithin(element, ReviewGalleryList) ? ReviewPageScrollViewer
         : IsWithin(element, ActionItemsList) ? ActionPageScrollViewer
         : null;
 
@@ -434,6 +476,41 @@ public partial class MainWindow : Window
         page.ScrollToVerticalOffset(page.VerticalOffset - eventArgs.Delta / 3.0);
     }
 
+    // The gallery scrolls by pixel, so a wheel notch moves it by the wheel's delta (a notch is
+    // 120 px, a touchpad's small deltas move it smoothly). At either end the page takes the wheel.
+    private void OnGalleryPreviewMouseWheel(object sender, MouseWheelEventArgs eventArgs)
+    {
+        if (sender is not DependencyObject gallery
+            || Descendants<ScrollViewer>(gallery).FirstOrDefault() is not { } scroller) return;
+        eventArgs.Handled = true;
+        var atLimit = eventArgs.Delta > 0
+            ? scroller.VerticalOffset <= 0
+            : scroller.VerticalOffset >= scroller.ScrollableHeight;
+        if (!atLimit)
+            scroller.ScrollToVerticalOffset(scroller.VerticalOffset - eventArgs.Delta);
+        else
+            ReviewPageScrollViewer.ScrollToVerticalOffset(ReviewPageScrollViewer.VerticalOffset - eventArgs.Delta / 3.0);
+    }
+
+    // Arrow keys move between the photos as they are laid out. The gallery's sets take no focus,
+    // so the list's own item navigation is not used.
+    private void OnGalleryPreviewKeyDown(object sender, KeyEventArgs eventArgs)
+    {
+        FocusNavigationDirection? direction = eventArgs.Key switch
+        {
+            Key.Left => FocusNavigationDirection.Left,
+            Key.Right => FocusNavigationDirection.Right,
+            Key.Up => FocusNavigationDirection.Up,
+            Key.Down => FocusNavigationDirection.Down,
+            _ => null,
+        };
+        if (direction is not { } move || Keyboard.FocusedElement is not UIElement focused
+            || !IsWithin(focused, ReviewGalleryList))
+            return;
+        focused.MoveFocus(new TraversalRequest(move));
+        eventArgs.Handled = true;
+    }
+
     private void UpdateReviewLayout()
     {
         if (!IsInitialized) return;
@@ -447,17 +524,16 @@ public partial class MainWindow : Window
         var sideBySide = width >= 800;
         ReviewCategoriesPanel.Visibility = sideBySide || !galleryOpen ? Visibility.Visible : Visibility.Collapsed;
         ReviewGroupsPanel.Visibility = sideBySide || galleryOpen ? Visibility.Visible : Visibility.Collapsed;
-        ReviewComparisonsPanel.Visibility = Visibility.Collapsed;
         UpdateReviewColumnWidths();
     }
 
+    // The gallery gets twice the room of the kinds beside it.
     private void UpdateReviewColumnWidths()
     {
         ReviewCategoriesColumn.Width = ReviewCategoriesPanel.Visibility == Visibility.Visible
             ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         ReviewGroupsColumn.Width = ReviewGroupsPanel.Visibility == Visibility.Visible
-            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        ReviewComparisonsColumn.Width = new GridLength(0);
+            ? new GridLength(2, GridUnitType.Star) : new GridLength(0);
     }
 
     private void QueueReviewNavigationFocus()
@@ -471,7 +547,7 @@ public partial class MainWindow : Window
             var target = level switch
             {
                 ReviewNavigationLevel.Categories => ReviewCategoriesList,
-                ReviewNavigationLevel.Gallery => ReviewGroupsList,
+                ReviewNavigationLevel.Gallery => ReviewGalleryList,
                 _ => null,
             };
             if (target is null || !CanReceiveFocus(target)) return;
@@ -767,7 +843,7 @@ public partial class MainWindow : Window
             || FindReviewGroupId(element) is not { } groupId)
             return null;
         var identity = new ReviewFocusIdentity(session, groupId, member.OccurrenceId,
-            IsWithin(element, ReviewComparisonsList));
+            IsWithin(element, ReviewGalleryList));
         return identity == reviewFocusIdentity ? CaptureReviewFocusRestorationToken(identity) : null;
     }
 
@@ -830,7 +906,7 @@ public partial class MainWindow : Window
     private ReviewSelectionCheckBox? FindCurrentSelectionControl(
         ReviewFocusIdentity identity)
     {
-        foreach (var control in Descendants<ReviewSelectionCheckBox>(ReviewComparisonsList))
+        foreach (var control in Descendants<ReviewSelectionCheckBox>(ReviewGalleryList))
         {
             if (control.DataContext is not ScanOccurrenceViewModel member
                 || member.OccurrenceId != identity.OccurrenceId)

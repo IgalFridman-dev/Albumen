@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:app="clr-namespace:Albumen.App"
         xmlns:shell="clr-namespace:Albumen.App.Shell"
+        xmlns:review="clr-namespace:Albumen.App.Review"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
@@ -140,43 +141,6 @@
                 </Setter.Value>
             </Setter>
         </Style>
-        <DataTemplate x:Key="OccurrenceTemplate">
-            <StackPanel Margin="4,6">
-                <TextBlock Text="{Binding PathKind}" FontWeight="SemiBold" />
-                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" TextWrapping="Wrap"
-                         AutomationProperties.Name="Discovered file path" />
-                <TextBox Text="{Binding ResolvedPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" TextWrapping="Wrap"
-                         AutomationProperties.Name="Resolved file path" />
-                <TextBlock Text="{Binding PhysicalIdentity}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding ByteLength, StringFormat='Content length: {0} bytes'}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Allocation}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Outcome}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding OutcomeLabel}" TextWrapping="Wrap" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding NextStep}" TextWrapping="Wrap" />
-            </StackPanel>
-        </DataTemplate>
-        <DataTemplate x:Key="ReviewOccurrenceTemplate">
-            <StackPanel Margin="4,6">
-                <app:ReviewSelectionCheckBox MinHeight="34"
-                          Padding="4"
-                          IsChecked="{Binding IsSelected, Mode=OneWay}"
-                          IsEnabled="{Binding CanSelect}"
-                          Command="{Binding ToggleSelectionCommand}"
-                          AutomationProperties.AutomationId="selection-control"
-                          AutomationProperties.Name="{Binding AutomationName}"
-                          AutomationProperties.ItemStatus="{Binding ItemStatus}"
-                           Content="{Binding EligibilityText}" />
-                <TextBlock Text="{Binding PathKind}" FontWeight="SemiBold" />
-                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False"
-                         TextWrapping="Wrap" AutomationProperties.Name="Discovered file path" />
-                <TextBox Text="{Binding ResolvedPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False"
-                         TextWrapping="Wrap" AutomationProperties.Name="Resolved file path" />
-                <TextBlock Text="{Binding PhysicalIdentity}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding ByteLength, StringFormat='Content length: {0} bytes'}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Allocation}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Outcome}" TextWrapping="Wrap" />
-            </StackPanel>
-        </DataTemplate>
         <app:EqualValuesConverter x:Key="EqualValuesConverter" />
         <app:EqualValuesToVisibilityConverter x:Key="EqualValuesToVisibilityConverter" />
         <!-- A kind of result (Identical copies, Look-alike, Maybe similar, couldn't check). -->
@@ -242,111 +206,87 @@
                 </Grid>
             </Button>
         </DataTemplate>
-        <!-- One set of photos inside the open kind. -->
-        <DataTemplate x:Key="ReviewGroupTemplate">
-            <Button MinHeight="44" Margin="2,3" Style="{StaticResource Albumen.CardButton}"
-                    AutomationProperties.AutomationId="open-review-group"
+        <!-- The gallery scrolls by pixel through the open kind's sets, a whole set per item;
+             the sets themselves take no focus, their photos do. -->
+        <Style x:Key="ReviewGalleryStyle" TargetType="ListBox" BasedOn="{StaticResource ReviewListStyle}">
+            <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
+            <Setter Property="KeyboardNavigation.TabNavigation" Value="Continue" />
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Focusable" Value="False" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- One photo of a set: its thumbnail on the dark ground with rounded corners, as wide as
+             its shape needs. A click shows it in the Left Viewer while that viewer is empty. -->
+        <DataTemplate x:Key="ReviewPhotoTileTemplate">
+            <Button Style="{StaticResource Albumen.ThumbnailButton}" Click="OnReviewTileClick"
+                    AutomationProperties.AutomationId="review-photo"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding ItemStatus}"
                     AutomationProperties.PositionInSet="{Binding PositionInSet}"
                     AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
-                <Grid>
-                    <Grid.Style>
-                        <!-- A set settled by marks held in other sets reads as done: dimmed,
-                             except in High Contrast where the caption alone says so. -->
-                        <Style TargetType="Grid">
-                            <Style.Triggers>
-                                <MultiDataTrigger>
-                                    <MultiDataTrigger.Conditions>
-                                        <Condition Binding="{Binding IsSettledElsewhere}" Value="True" />
-                                        <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
-                                    </MultiDataTrigger.Conditions>
-                                    <Setter Property="Opacity" Value="0.55" />
-                                </MultiDataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Grid.Style>
-                    <StackPanel>
-                        <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                        <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.Caption}" Text="{Binding SelectionStatus}" />
-                    </StackPanel>
-                </Grid>
+                <app:PhotoThumbnail Member="{Binding}" CornerRadius="8" LoadsWhenInView="True"
+                        Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
             </Button>
         </DataTemplate>
-        <!-- One photo of the open set: thumbnail (opens the viewer), name, the Keep / Remove
-             control near the top so it stays reachable at large text sizes, then path, facts
-             and badges. The selection control's direct parent
-             stays a StackPanel (acceptance tests swap it in place). -->
-        <DataTemplate x:Key="ReviewComparisonTemplate">
-            <Border x:Name="PhotoCard" Margin="2,3" Padding="10" CornerRadius="10" BorderThickness="1"
-                    Background="{DynamicResource Albumen.SurfaceBrush}" BorderBrush="{DynamicResource Albumen.BorderBrush}">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" Width="124" VerticalAlignment="Top">
-                        <Button Width="112" Height="84" VerticalAlignment="Top" Margin="0,0,12,0"
-                                Style="{StaticResource Albumen.ThumbnailButton}"
-                                Click="OnOpenReviewMemberClick"
-                                ToolTip="Show in the Left Viewer"
-                                AutomationProperties.AutomationId="open-review-member"
-                                AutomationProperties.Name="{Binding AutomationName}"
-                                AutomationProperties.ItemStatus="{Binding ItemStatus}"
-                                AutomationProperties.PositionInSet="{Binding PositionInSet}"
-                                AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
-                            <app:PhotoThumbnail x:Name="Thumbnail" Member="{Binding}"
-                                    Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
-                        </Button>
-                    </StackPanel>
-                    <StackPanel Grid.Column="1">
-                        <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
-                            <app:ReviewSelectionCheckBox x:Name="ReviewSelectionCheckBox" MinHeight="34"
-                                    VerticalAlignment="Top"
-                                    Style="{StaticResource Albumen.KeepRemoveToggle}"
-                                    IsChecked="{Binding IsSelected, Mode=OneWay}"
-                                    IsEnabled="{Binding CanSelect}"
-                                    Command="{Binding ToggleSelectionCommand}"
-                                    AutomationProperties.AutomationId="selection-control"
-                                    AutomationProperties.Name="{Binding AutomationName}"
-                                    AutomationProperties.ItemStatus="{Binding ItemStatus}"
-                                    Content="{Binding EligibilityText}" />
+        <!-- One set in the gallery: its label ("Set 2: 3 photos") with the accent line, what is
+             marked in it, then all of its photos in justified rows. A set settled by marks held in
+             other sets reads as done: dimmed, except in High Contrast where the caption alone says
+             so. -->
+        <DataTemplate x:Key="ReviewSetTemplate">
+            <app:ReviewAutomationBorder Margin="0,0,0,18"
+                    Loaded="OnReviewSetLoaded" Unloaded="OnReviewSetUnloaded"
+                    AutomationProperties.AutomationId="review-set"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.ItemStatus="{Binding ItemStatus}"
+                    AutomationProperties.PositionInSet="{Binding PositionInSet}"
+                    AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
+                <app:ReviewAutomationBorder.Style>
+                    <Style TargetType="Border">
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsSettledElsewhere}" Value="True" />
+                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Opacity" Value="0.55" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </app:ReviewAutomationBorder.Style>
+                <StackPanel>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="13" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource Albumen.AccentLine}" Margin="0,2,10,2" />
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.Caption}" Text="{Binding SelectionStatus}" />
                         </StackPanel>
-                        <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True"
-                                 IsTabStop="False" TextWrapping="Wrap" FontSize="12" Margin="0,2,0,0"
-                                 Style="{StaticResource Albumen.PathText}"
-                                 AutomationProperties.Name="{Binding DiscoveredPath}" />
-                        <WrapPanel Margin="0,4,0,0">
-                            <TextBlock Margin="0,0,12,0" Style="{StaticResource Albumen.Caption}" Text="{Binding SizeText}" />
-                            <TextBlock Style="{StaticResource Albumen.Caption}"
-                                       Text="{Binding DimensionsText, ElementName=Thumbnail}" />
-                        </WrapPanel>
-                        <WrapPanel>
-                            <Border Style="{StaticResource Albumen.Badge}">
-                                <Border.Visibility>
-                                    <MultiBinding Converter="{StaticResource EqualValuesToVisibilityConverter}">
-                                        <Binding Path="OccurrenceId" />
-                                        <Binding Path="DataContext.ActiveReviewSuggestion.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                    </MultiBinding>
-                                </Border.Visibility>
-                                <TextBlock TextWrapping="Wrap">
-                                    <Run Text="Suggested best:" />
-                                    <Run Text="{Binding DataContext.ActiveReviewSuggestion.Reason, RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" />
-                                </TextBlock>
-                            </Border>
-                            <Border Style="{StaticResource Albumen.Badge}"
-                                    Visibility="{Binding LooksBlurrier, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Text="{x:Static shell:ScanOccurrenceViewModel.BlurrierText}" TextWrapping="Wrap" />
-                            </Border>
-                            <Border Style="{StaticResource Albumen.Badge}"
-                                    Visibility="{Binding IsAliasPath, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Text="Another path to the same file" TextWrapping="Wrap" />
-                            </Border>
-                        </WrapPanel>
-                    </StackPanel>
-                </Grid>
-            </Border>
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Members}" ItemTemplate="{StaticResource ReviewPhotoTileTemplate}"
+                                  Focusable="False">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <review:JustifiedPanel RowHeight="200" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </StackPanel>
+            </app:ReviewAutomationBorder>
         </DataTemplate>
         <!-- One likely match: thumbnail, name and the set it is in. Opening it shows it in
              that set, where Keep / Remove works as usual; the list itself marks nothing. -->
@@ -1131,11 +1071,11 @@
                     </StackPanel>
                 </Border>
 
+                <!-- The kinds, and beside them the open kind's sets as a gallery of photos. -->
                 <Grid x:Name="ReviewNavigationGrid" Height="300" Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition x:Name="ReviewCategoriesColumn" Width="*" />
-                        <ColumnDefinition x:Name="ReviewGroupsColumn" Width="*" />
-                        <ColumnDefinition x:Name="ReviewComparisonsColumn" Width="*" />
+                        <ColumnDefinition x:Name="ReviewGroupsColumn" Width="2*" />
                     </Grid.ColumnDefinitions>
                     <Border x:Name="ReviewCategoriesPanel" Grid.Column="0" Margin="0,0,4,0" Padding="6" CornerRadius="12"
                             Background="{DynamicResource Albumen.SurfaceBrush}"
@@ -1148,27 +1088,26 @@
                                      AutomationProperties.Name="Review categories" />
                         </DockPanel>
                     </Border>
-                    <Border x:Name="ReviewGroupsPanel" Grid.Column="1" Margin="4,0" Padding="6" CornerRadius="12"
-                            Background="{DynamicResource Albumen.SurfaceBrush}"
-                            BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}">
-                        <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="Sets" Style="{StaticResource Albumen.SectionTitle}" Margin="6,4,6,6" />
-                            <ListBox x:Name="ReviewGroupsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewGroups}"
-                                     Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewGroupTemplate}"
-                                     PreviewKeyDown="OnReviewListPreviewKeyDown"
-                                     AutomationProperties.Name="Groups in selected category" />
-                        </DockPanel>
-                    </Border>
-                    <Border x:Name="ReviewComparisonsPanel" Grid.Column="2" Margin="4,0,0,0" Padding="6" CornerRadius="12"
-                            Background="{DynamicResource Albumen.SurfaceBrush}"
-                            BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}">
-                        <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="Photos in this set" Style="{StaticResource Albumen.SectionTitle}" Margin="6,4,6,6" />
-                            <ListBox x:Name="ReviewComparisonsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewMembers}"
-                                     Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewComparisonTemplate}"
-                                     PreviewKeyDown="OnReviewListPreviewKeyDown"
-                                     AutomationProperties.Name="Comparison paths and Selection controls" />
-                        </DockPanel>
+                    <!-- Photos sit on the dark ground: the gallery has no card around it. -->
+                    <Border x:Name="ReviewGroupsPanel" Grid.Column="1" Margin="12,0,0,0">
+                        <Grid>
+                            <TextBlock Margin="6,10" Text="Choose a kind to see its sets.">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource Albumen.MutedText}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ActiveReviewCategory}" Value="{x:Null}">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <ListBox x:Name="ReviewGalleryList" ItemsSource="{Binding ActiveReviewGroups}"
+                                     Style="{StaticResource ReviewGalleryStyle}" ItemTemplate="{StaticResource ReviewSetTemplate}"
+                                     PreviewMouseWheel="OnGalleryPreviewMouseWheel" PreviewKeyDown="OnGalleryPreviewKeyDown"
+                                     AutomationProperties.Name="Sets in the open kind" />
+                        </Grid>
                     </Border>
                 </Grid>
 
