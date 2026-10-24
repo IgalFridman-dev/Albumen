@@ -7,14 +7,14 @@ namespace Albumen.Scenarios.Tests.Shell;
 public sealed class AppThemeModeTests
 {
     [Fact]
-    public void FluentThemeStaysLightToMatchSystemColorsSurfaces()
+    public void FluentThemeIsDarkToMatchTheAlbumenPalette()
     {
-        // MainWindow and the dialogs paint backgrounds and text with SystemColors
-        // brushes, which do not follow Windows dark mode. A System or Dark Fluent
-        // theme renders white control text on those light surfaces.
+        // MainWindow and the dialogs paint surfaces and text with the Albumen palette
+        // tokens, which are dark (system brushes under High Contrast), so Fluent's dark
+        // controls agree with the window around them.
         var appXaml = XDocument.Load(Path.Combine(FindRepositoryRoot(), "src", "Albumen.App", "App.xaml"));
 
-        Assert.Equal("Light", (string?)appXaml.Root?.Attribute("ThemeMode"));
+        Assert.Equal("Dark", (string?)appXaml.Root?.Attribute("ThemeMode"));
     }
 
     private static string FindRepositoryRoot()
