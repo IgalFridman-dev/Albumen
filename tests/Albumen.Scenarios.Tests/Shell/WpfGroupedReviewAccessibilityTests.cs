@@ -18,7 +18,7 @@ namespace Albumen.Scenarios.Tests.Shell;
 public sealed class WpfGroupedReviewAccessibilityTests
 {
     private static readonly string[] ReviewDetailNames =
-        ["ReviewEvidencePanel", "SelectionSummaryText", "ApproveCleanupButton"];
+        ["ReviewViewersPanel", "SelectionSummaryText", "ApproveCleanupButton"];
 
     [Fact]
     public void PointerAndKeyboardNavigateCompareAndBackWithoutSelectingCleanup()
@@ -76,7 +76,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 Assert.Contains("Identical copies", breadcrumb.Text, StringComparison.Ordinal);
 
                 var viewer = Assert.IsAssignableFrom<FrameworkElement>(
-                    window.FindName("ReviewEvidencePanel"));
+                    window.FindName("LeftViewerPanel"));
                 Assert.Equal($"Left Viewer: {member.FileName}", AutomationProperties.GetName(viewer));
                 Assert.Equal(member.ItemStatus, AutomationProperties.GetItemStatus(viewer));
                 var preview = Assert.Single(Descendants<PreviewStatusControl>(window));
@@ -326,11 +326,11 @@ public sealed class WpfGroupedReviewAccessibilityTests
             {
                 ShowAndDrain(window);
                 var preview = Assert.IsType<PreviewStatusControl>(
-                    window.FindName("ReviewPreviewStatusControl"));
+                    window.FindName("LeftPreviewStatusControl"));
                 preview.Height = 512;
                 ShowAndDrain(window);
 
-                var evidence = NamedElement(window, "ReviewEvidencePanel");
+                var evidence = NamedElement(window, "ReviewViewersPanel");
                 var evidenceScroller = Ancestors(evidence).OfType<ScrollViewer>().FirstOrDefault();
                 Assert.NotNull(evidenceScroller);
                 Assert.True(evidenceScroller.ViewportHeight < evidenceScroller.ExtentHeight);
