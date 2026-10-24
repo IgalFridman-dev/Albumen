@@ -16,7 +16,7 @@ namespace Albumen.Scenarios.Tests.Shell;
 public sealed class LikelyMatchesTests
 {
     [Theory]
-    [InlineData(SemanticState.Idle, false, "Search isn't ready for this Scan. Turn on Look-alikes and scan again to search photos by what they show.")]
+    [InlineData(SemanticState.Idle, false, "Search isn't ready for this Scan. Scan again to search photos by what they show.")]
     [InlineData(SemanticState.Indexing, false, "Getting photos ready for search: 3 of 6 ready.")]
     [InlineData(SemanticState.Ready, true, "Describe what's in a photo, for example “at sea”, and press Enter.")]
     [InlineData(SemanticState.Empty, false, "No photo in this Scan could be prepared for search.")]

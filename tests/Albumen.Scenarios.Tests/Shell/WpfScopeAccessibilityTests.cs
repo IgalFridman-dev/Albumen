@@ -57,8 +57,7 @@ public sealed class WpfScopeAccessibilityTests
                     window.FindName("FolderNameText"));
                 var subfoldersCaption = Assert.IsType<TextBlock>(
                     window.FindName("IncludeSubfoldersCaption"));
-                var lookAlikesCaption = Assert.IsType<TextBlock>(
-                    window.FindName("NearDuplicatesCaption"));
+
                 var card = Assert.IsType<Border>(window.FindName("FolderCard"));
                 var scanFolder = Assert.IsType<Button>(window.FindName("ScanFolderButton"));
                 var details = Assert.IsType<Expander>(window.FindName("FolderDetailsExpander"));
@@ -82,9 +81,8 @@ public sealed class WpfScopeAccessibilityTests
                 Assert.Equal("Include subfolders", AutomationProperties.GetName(recursion));
                 Assert.True(recursion.IsChecked);
                 Assert.Equal("Also check folders inside Photos.", subfoldersCaption.Text);
-                Assert.Equal(
-                    "Bursts and near-identical shots. Identical copies are always found.",
-                    lookAlikesCaption.Text);
+                Assert.Null(window.FindName("NearDuplicatesCheckBox"));
+                Assert.Null(window.FindName("NearDuplicatesCaption"));
                 // The Scan button sits in the card's footer; the check summary waits under Details.
                 Assert.Contains(card, LogicalAncestors(scanFolder));
                 Assert.Contains(details, LogicalAncestors(summary));

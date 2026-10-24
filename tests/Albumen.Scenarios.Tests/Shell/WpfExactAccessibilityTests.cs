@@ -36,24 +36,20 @@ public sealed class WpfExactAccessibilityTests
                 fixture.PublishPhase(WorkflowPhase.ConfirmRules);
                 Drain();
                 var scanFolder = Assert.IsType<Button>(window.FindName("ScanFolderButton"));
-                var near = Assert.IsType<CommandSwitchCheckBox>(window.FindName("NearDuplicatesCheckBox"));
-                var nearCaption = Assert.IsType<TextBlock>(window.FindName("NearDuplicatesCaption"));
+                var subfolders = Assert.IsType<CommandSwitchCheckBox>(window.FindName("IncludeSubfoldersCheckBox"));
                 var guidance = Assert.IsType<TextBlock>(window.FindName("ScanOptionsGuidanceText"));
                 var choose = Assert.IsType<Button>(window.FindName("ChooseAnotherScopeButton"));
                 // Folder and options are one screen: the folder controls stay in view with the options.
-                Assert.True(choose.IsVisible && near.IsVisible && nearCaption.IsVisible && scanFolder.IsVisible);
+                Assert.True(choose.IsVisible && subfolders.IsVisible && scanFolder.IsVisible);
+                // Identical copies and look-alikes are always found; no switch can turn either off.
                 Assert.Null(window.FindName("ExactDuplicatesCheckBox"));
-                // The promise about identical copies lives in the caption, not in a switch nobody can move.
-                Assert.Equal(
-                    "Bursts and near-identical shots. Identical copies are always found.",
-                    nearCaption.Text);
-                Assert.True(near.IsChecked);
-                Assert.True(near.IsTabStop && near.Focusable && near.IsEnabled);
-                Assert.Equal("Look-alikes", AutomationProperties.GetName(near));
-                Assert.Contains("Maybe similar", AutomationProperties.GetHelpText(near), StringComparison.Ordinal);
+                Assert.Null(window.FindName("NearDuplicatesCheckBox"));
+                Assert.Null(window.FindName("NearDuplicatesCaption"));
+                Assert.True(subfolders.IsTabStop && subfolders.Focusable && subfolders.IsEnabled);
+                Assert.True(choose.IsTabStop && choose.Focusable && choose.IsEnabled);
                 // Valid options before any scan: the guidance has nothing to add, so it is hidden.
                 Assert.Equal(Visibility.Collapsed, guidance.Visibility);
-                Assert.Contains("Identical copies are always included", guidance.Text, StringComparison.Ordinal);
+                Assert.Equal("Identical copies and look-alikes are always found. Nothing is marked for you.", guidance.Text);
                 Assert.Equal("Scan 2 photos", scanFolder.Content);
                 Assert.Equal("Scan 2 photos", AutomationProperties.GetName(scanFolder));
                 Assert.Same(fixture.ViewModel.ScanFolderCommand, scanFolder.Command);
@@ -70,38 +66,12 @@ public sealed class WpfExactAccessibilityTests
                 fixture.PublishPhase(WorkflowPhase.ChooseScope);
                 Drain();
                 Assert.True(choose.IsKeyboardFocusWithin);
-                Assert.True(near.IsVisible && scanFolder.IsVisible);
+                Assert.True(subfolders.IsVisible && scanFolder.IsVisible);
             }
             finally { window.Close(); }
         });
     }
 
-    [Fact]
-    public void AutomationToggleOnNearSwitchChangesTheScanOptions()
-    {
-        RunOnSta(() =>
-        {
-            var fixture = new ExactShellFixture();
-            var window = new MainWindow { DataContext = fixture.ViewModel };
-            try
-            {
-                window.Show();
-                fixture.PublishPhase(WorkflowPhase.ChooseScope);
-                Drain();
-                var near = Assert.IsType<CommandSwitchCheckBox>(window.FindName("NearDuplicatesCheckBox"));
-                Assert.True(near.IsChecked);
-                Assert.True(near.IsEnabled);
-                var peer = UIElementAutomationPeer.CreatePeerForElement(near);
-                Assert.NotNull(peer);
-
-                Assert.IsAssignableFrom<IToggleProvider>(peer.GetPattern(PatternInterface.Toggle)).Toggle();
-                Drain();
-
-                Assert.Contains($"options:{NearDuplicateMode.Disabled}", fixture.Workflow.Actions);
-            }
-            finally { window.Close(); }
-        });
-    }
 
     [Fact]
     public void InvalidOptionsExposeLiveGuidanceAndBlockTheScan()
