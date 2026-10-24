@@ -13,7 +13,8 @@ public sealed class WpfLocalFolderPicker(Func<Window?> ownerAccessor)
         OpenFolderDialog dialog = new()
         {
             Multiselect = false,
-            Title = "Choose one local photo folder",
+            // The Windows folder picker lists folders only; the folder card names the photos.
+            Title = "Choose the folder that holds your photos (files aren't listed here)",
             ValidateNames = true,
         };
         var owner = ownerAccessor();

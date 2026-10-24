@@ -55,6 +55,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string selectedPath = string.Empty;
     private string resolvedPath = string.Empty;
     private string supportedCount = string.Empty;
+    private string folderContentsText = string.Empty;
     private string scanFolderText = "Scan folder";
     private string ruleSetStatus = string.Empty;
     private bool includeSubfolders;
@@ -742,6 +743,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         get => scanFolderText;
         private set => SetField(ref scanFolderText, value);
     }
+
+    // The first photos of a ready folder by name, so the user can tell it is the right one.
+    public string FolderContentsText
+    {
+        get => folderContentsText;
+        private set => SetField(ref folderContentsText, value);
+    }
+
+    public bool HasFolderContents => FolderContentsText.Length != 0;
 
     public string RuleSetStatus
     {
@@ -1868,6 +1878,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             1 => "Scan 1 photo",
             int count => $"Scan {count.ToString("N0", CultureInfo.InvariantCulture)} photos",
         };
+        var hadFolderContents = HasFolderContents;
+        FolderContentsText = ProjectFolderContents(snapshot.Preflight?.CompleteCounts);
+        if (hadFolderContents != HasFolderContents) OnPropertyChanged(nameof(HasFolderContents));
         RuleSetStatus = snapshot.RuleSetStatus;
         ScopeSummary = ProjectSummary(snapshot.Preflight);
         BlockingReasons = ProjectBlockingReasons(snapshot.Preflight);
@@ -1904,6 +1917,18 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             ScopeSessionState.Canceled => "The folder wasn't checked. Check it again or choose another folder.",
             _ => throw new InvalidOperationException($"Unknown Scope state: {state}"),
         };
+
+    private static string ProjectFolderContents(ScopeOutcomeCounts? counts)
+    {
+        if (counts is null || counts.SampleSupportedFiles.IsEmpty) return string.Empty;
+        var names = counts.SampleSupportedFiles;
+        var more = counts.Supported - names.Length;
+        if (more > 0)
+            return $"Includes {string.Join(", ", names.AsEnumerable())} and {more.ToString("N0", CultureInfo.InvariantCulture)} more.";
+        return names.Length == 1
+            ? $"Includes {names[0]}."
+            : $"Includes {string.Join(", ", names.Take(names.Length - 1))} and {names[names.Length - 1]}.";
+    }
 
     private static bool ProjectRecursion(ScopeSelection? selection)
     {
