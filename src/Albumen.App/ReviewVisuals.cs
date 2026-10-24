@@ -206,6 +206,19 @@ public sealed class PhotoThumbnail : Border
     }
 }
 
+// One of two styles by a flag: a viewer's Remove button is red while its photo is marked.
+public sealed class BooleanToStyleConverter : IValueConverter
+{
+    public Style? TrueStyle { get; set; }
+    public Style? FalseStyle { get; set; }
+
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+        (value is true ? TrueStyle : FalseStyle) ?? DependencyProperty.UnsetValue;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 // Visible when both bound values are equal; shows the "Suggested best" badge on one card.
 public sealed class EqualValuesToVisibilityConverter : IMultiValueConverter
 {

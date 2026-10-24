@@ -10,6 +10,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Albumen.App.Review;
 using Albumen.App.Shell;
 using Albumen.App.Themes;
 using Albumen.Application.Review;
@@ -49,6 +50,9 @@ public partial class MainWindow : Window
             new RequestBringIntoViewEventHandler(OnReviewListItemBringIntoView), true);
         ActionPageScrollViewer.AddHandler(RequestBringIntoViewEvent,
             new RequestBringIntoViewEventHandler(OnReviewListItemBringIntoView), true);
+        LeftPreviewStatusControl.PreviewImage.SetValue(AutomationProperties.NameProperty, "Photo in the Left Viewer");
+        RightPreviewStatusControl.PreviewImage.SetValue(AutomationProperties.NameProperty, "Photo in the Right Viewer");
+        LinkViewerPanning(LeftPreviewStatusControl.PreviewImageScroller, RightPreviewStatusControl.PreviewImageScroller);
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
         SizeChanged += OnReviewSizeChanged;
@@ -327,8 +331,10 @@ public partial class MainWindow : Window
     {
         if (sender is not Button { DataContext: LikelyMatchItemViewModel match }) return;
         shellViewModel?.OpenLikelyMatchCommand.Execute(match);
-        ReviewEvidencePanel.BringIntoView(new Rect(0, 0, ReviewEvidencePanel.ActualWidth,
-            Math.Min(ReviewEvidencePanel.ActualHeight, 160)));
+        // Show the top of the viewers so the match visibly opens, scrolling the page no
+        // further than that.
+        ReviewViewersPanel.BringIntoView(new Rect(0, 0, ReviewViewersPanel.ActualWidth,
+            Math.Min(ReviewViewersPanel.ActualHeight, 160)));
     }
 
     // Show all clears the search; the prompt keeps focus so the next search starts there.
@@ -350,22 +356,15 @@ public partial class MainWindow : Window
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
         var viewport = eventArgs.NewSize.Height;
         ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.6, 300, 720));
-        // Scrolled to the viewer, the photo fills most of the page instead of a fixed thumbnail.
-        ReviewPreviewStatusControl.FitHeight = Math.Max(240, viewport * 0.8);
+        // Scrolled to the viewers, a photo fills most of the page instead of a fixed thumbnail.
+        LeftPreviewStatusControl.FitHeight = Math.Max(240, viewport * 0.8);
+        RightPreviewStatusControl.FitHeight = LeftPreviewStatusControl.FitHeight;
     }
 
-    // The Right Viewer's photo shares the Left Viewer's size and zoom, and both photos pan together.
-    private void OnComparedPreviewLoaded(object sender, RoutedEventArgs eventArgs)
+    // The two viewers pan together; photos of different widths by the same share of their own
+    // width. A new or re-zoomed photo takes the Left Viewer's position.
+    private static void LinkViewerPanning(ScrollViewer left, ScrollViewer right)
     {
-        if (sender is not PreviewStatusControl compared) return;
-        compared.SetBinding(PreviewStatusControl.ZoomProperty,
-            new Binding(nameof(Slider.Value)) { Source = ReviewZoomSlider });
-        compared.SetBinding(PreviewStatusControl.FitHeightProperty,
-            new Binding(nameof(PreviewStatusControl.FitHeight)) { Source = ReviewPreviewStatusControl });
-        compared.PreviewImage.SetValue(AutomationProperties.NameProperty, "Photo in the Right Viewer");
-        var main = ReviewPreviewStatusControl.PreviewImageScroller;
-        var other = compared.PreviewImageScroller;
-        // Photos of different widths pan by the same share of their own width.
         var syncing = false;
         void Follow(ScrollViewer leader, ScrollViewer follower)
         {
@@ -381,26 +380,129 @@ public partial class MainWindow : Window
                 syncing = false;
             }
         }
-        ScrollChangedEventHandler fromMain = (_, change) =>
+        left.ScrollChanged += (_, change) =>
         {
-            if (change.HorizontalChange != 0 || change.ExtentWidthChange != 0) Follow(main, other);
+            if (change.HorizontalChange != 0 || change.ExtentWidthChange != 0) Follow(left, right);
         };
-        ScrollChangedEventHandler fromOther = (_, change) =>
+        right.ScrollChanged += (_, change) =>
         {
-            if (change.HorizontalChange != 0) Follow(other, main);
+            if (change.HorizontalChange != 0) Follow(right, left);
+            else if (change.ExtentWidthChange != 0) Follow(left, right);
         };
-        main.ScrollChanged += fromMain;
-        other.ScrollChanged += fromOther;
-        compared.Unloaded += OnUnloaded;
-        Follow(main, other);
-
-        void OnUnloaded(object? unloadedSender, RoutedEventArgs unloadedArgs)
-        {
-            compared.Unloaded -= OnUnloaded;
-            main.ScrollChanged -= fromMain;
-            other.ScrollChanged -= fromOther;
-        }
     }
+
+    // Drag and drop between the gallery and the viewers. A photo dragged from a set onto a viewer
+    // is placed there. A viewer's photo dropped on the other viewer swaps the two, dropped on its
+    // own viewer stays, and dropped anywhere else leaves its viewer; Esc cancels.
+    private (UIElement Source, Point Start)? pressed;
+    private bool viewerDropped;
+    private bool viewerDragCanceled;
+
+    private void OnTilePreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs eventArgs)
+    {
+        if (sender is UIElement tile) pressed = (tile, eventArgs.GetPosition(tile));
+    }
+
+    private void OnTileMouseMove(object sender, MouseEventArgs eventArgs)
+    {
+        if (sender is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } tile
+            || !DragStarts(tile, eventArgs) || FindReviewGroupId(tile) is not { } groupId)
+            return;
+        // The button holds the mouse while pressed; the drag takes it over, so no click follows.
+        tile.ReleaseMouseCapture();
+        DragDrop.DoDragDrop(tile, ReviewDragData.Create(member.OccurrenceId, groupId), DragDropEffects.Copy);
+    }
+
+    // A viewer's photo is dragged by the photo itself, not by its button or path.
+    private void OnViewerPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs eventArgs)
+    {
+        pressed = sender is UIElement viewer && ViewerSideOfPanel(viewer) is { } side
+            && IsWithin(eventArgs.OriginalSource as DependencyObject, PreviewOf(side).PreviewImage)
+                ? (viewer, eventArgs.GetPosition(viewer))
+                : null;
+    }
+
+    private void OnViewerPreviewMouseMove(object sender, MouseEventArgs eventArgs)
+    {
+        if (sender is not UIElement viewer || ViewerSideOfPanel(viewer) is not { } side
+            || !DragStarts(viewer, eventArgs) || shellViewModel is not { } viewModel)
+            return;
+        var slot = side == ViewerSide.Left ? viewModel.LeftViewer : viewModel.RightViewer;
+        if (slot is not { Member: { } member, GroupId: { } groupId }) return;
+        viewerDropped = false;
+        viewerDragCanceled = false;
+        DragDrop.DoDragDrop(viewer, ReviewDragData.Create(member.OccurrenceId, groupId, side), DragDropEffects.Move);
+        FinishViewerDrag(side, viewerDropped, viewerDragCanceled);
+    }
+
+    private void OnViewerQueryContinueDrag(object sender, QueryContinueDragEventArgs eventArgs)
+    {
+        if (eventArgs.EscapePressed) viewerDragCanceled = true;
+    }
+
+    // Dragged out of its box and dropped anywhere but a viewer, a photo leaves its viewer and
+    // nothing else changes.
+    internal void FinishViewerDrag(ViewerSide side, bool droppedOnViewer, bool canceled)
+    {
+        if (!droppedOnViewer && !canceled) shellViewModel?.ClearViewerCommand.Execute(side);
+    }
+
+    private bool DragStarts(UIElement source, MouseEventArgs eventArgs)
+    {
+        if (eventArgs.LeftButton != MouseButtonState.Pressed)
+        {
+            pressed = null;
+            return false;
+        }
+        if (pressed is not { } press || !ReferenceEquals(press.Source, source)) return false;
+        var moved = eventArgs.GetPosition(source) - press.Start;
+        if (Math.Abs(moved.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(moved.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return false;
+        pressed = null;
+        return true;
+    }
+
+    // Only Albumen's own photos can be dropped on a viewer. The preview events run before the
+    // path box inside the viewer, which would refuse them as text.
+    private void OnViewerDragOver(object sender, DragEventArgs eventArgs)
+    {
+        eventArgs.Effects = ReviewDragData.TryRead(eventArgs.Data, out _, out _, out var fromViewer)
+            ? fromViewer is null ? DragDropEffects.Copy : DragDropEffects.Move
+            : DragDropEffects.None;
+        eventArgs.Handled = true;
+    }
+
+    private void OnViewerDrop(object sender, DragEventArgs eventArgs)
+    {
+        eventArgs.Handled = true;
+        if (sender is UIElement viewer && ViewerSideOfPanel(viewer) is { } side
+            && TryPlaceFromData(eventArgs.Data, side))
+            viewerDropped = true;
+    }
+
+    internal bool TryPlaceFromData(IDataObject data, ViewerSide side)
+    {
+        if (shellViewModel is not { } viewModel
+            || !ReviewDragData.TryRead(data, out var occurrenceId, out var groupId, out var fromViewer))
+            return false;
+        if (fromViewer is { } source)
+        {
+            if (source != side) viewModel.SwapViewersCommand.Execute(null);
+            return true;
+        }
+        if (viewModel.FindReviewMember(groupId, occurrenceId) is not { } member) return false;
+        viewModel.PlaceInViewerCommand.Execute(new PlaceInViewer(side, groupId, member));
+        return true;
+    }
+
+    private ViewerSide? ViewerSideOfPanel(UIElement element) =>
+        ReferenceEquals(element, LeftViewerPanel) ? ViewerSide.Left
+        : ReferenceEquals(element, RightViewerPanel) ? ViewerSide.Right
+        : null;
+
+    private PreviewStatusControl PreviewOf(ViewerSide side) =>
+        side == ViewerSide.Left ? LeftPreviewStatusControl : RightPreviewStatusControl;
 
     // The selection bar stays under the page; its button brings the approval into view.
     private void OnReviewCleanupClick(object sender, RoutedEventArgs eventArgs)

@@ -228,9 +228,11 @@
             </Setter>
         </Style>
         <!-- One photo of a set: its thumbnail on the dark ground with rounded corners, as wide as
-             its shape needs. A click shows it in the Left Viewer while that viewer is empty. -->
+             its shape needs. A click shows it in the Left Viewer while that viewer is empty; it
+             can be dragged onto either viewer. -->
         <DataTemplate x:Key="ReviewPhotoTileTemplate">
             <Button Style="{StaticResource Albumen.ThumbnailButton}" Click="OnReviewTileClick"
+                    PreviewMouseLeftButtonDown="OnTilePreviewMouseLeftButtonDown" PreviewMouseMove="OnTileMouseMove"
                     AutomationProperties.AutomationId="review-photo"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding ItemStatus}"
@@ -288,6 +290,29 @@
                 </StackPanel>
             </app:ReviewAutomationBorder>
         </DataTemplate>
+        <!-- A viewer box: a drop target with its photo, or a hint while it is empty. -->
+        <Style x:Key="ReviewViewerStyle" TargetType="Border">
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="MinHeight" Value="160" />
+            <Setter Property="AllowDrop" Value="True" />
+            <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style x:Key="ReviewViewerEmptyText" TargetType="TextBlock" BasedOn="{StaticResource Albumen.MutedText}">
+            <Setter Property="Text" Value="{x:Static shell:ReviewViewerSlot.EmptyText}" />
+            <Setter Property="Margin" Value="0,24" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HasPhoto}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- The viewer's Remove button is red while its photo is marked, a grey pill otherwise. -->
+        <app:BooleanToStyleConverter x:Key="RemoveButtonStyleConverter"
+                TrueStyle="{StaticResource Albumen.DangerButton}" FalseStyle="{StaticResource Albumen.Button}" />
         <!-- One likely match: thumbnail, name and the set it is in. Opening it shows it in
              that set, where Keep / Remove works as usual; the list itself marks nothing. -->
         <DataTemplate x:Key="LikelyMatchTemplate">
@@ -1112,49 +1137,78 @@
                 </Grid>
 
                   <StackPanel x:Name="ReviewDetailsPanel" Margin="0,10,0,0">
-                <!-- Viewers: the Left Viewer's photo, and the Right Viewer's beside it, with one
-                     zoom for both. -->
-                <app:ReviewAutomationBorder x:Name="ReviewEvidencePanel" Padding="14" CornerRadius="12"
-                        Background="{DynamicResource Albumen.SurfaceBrush}"
-                        BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}"
-                        AutomationProperties.AutomationId="review-evidence"
-                        AutomationProperties.Name="{Binding LeftViewer.AutomationName}"
-                        AutomationProperties.ItemStatus="{Binding LeftViewer.ItemStatus}">
-                    <StackPanel>
-                        <DockPanel LastChildFill="False">
-                            <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Text="Viewer"
-                                       Style="{StaticResource Albumen.SectionTitle}" />
-                            <WrapPanel DockPanel.Dock="Right">
-                                <TextBlock Text="Zoom" VerticalAlignment="Center" Margin="0,0,6,4" />
-                                <Slider x:Name="ReviewZoomSlider" Width="120" Minimum="1" Maximum="4" Value="1"
-                                        SmallChange="0.25" LargeChange="0.5" VerticalAlignment="Center" Margin="0,0,0,4"
-                                        AutomationProperties.Name="Zoom for the photos in the viewer" />
-                            </WrapPanel>
-                        </DockPanel>
-                        <UniformGrid Rows="1" Margin="0,8,0,0">
-                            <StackPanel Margin="0,0,6,0">
-                                <TextBlock Style="{StaticResource Albumen.Caption}" Margin="0,0,0,4"
-                                           Text="{Binding LeftViewer.Member.FileName}" />
-                                <app:PreviewStatusControl x:Name="ReviewPreviewStatusControl"
-                                        Zoom="{Binding Value, ElementName=ReviewZoomSlider}"
-                                        DataContext="{Binding LeftViewer.Preview}" />
+                <!-- Viewers: two boxes below the sets, each showing one photo large, with one zoom
+                     for both; the two photos pan together. A photo is dragged in from a set (or
+                     placed from its menu). Dragged onto the other viewer, a viewer's photo swaps
+                     with that viewer's; dropped anywhere else, it leaves its viewer. -->
+                <StackPanel x:Name="ReviewViewersPanel">
+                    <DockPanel LastChildFill="False">
+                        <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Text="Viewers"
+                                   Style="{StaticResource Albumen.SectionTitle}" />
+                        <WrapPanel DockPanel.Dock="Right">
+                            <TextBlock Text="Zoom" VerticalAlignment="Center" Margin="0,0,6,4" />
+                            <Slider x:Name="ReviewZoomSlider" Width="120" Minimum="1" Maximum="4" Value="1"
+                                    SmallChange="0.25" LargeChange="0.5" VerticalAlignment="Center" Margin="0,0,0,4"
+                                    AutomationProperties.Name="Zoom for the photos in the viewers" />
+                        </WrapPanel>
+                    </DockPanel>
+                    <UniformGrid Rows="1" Margin="0,8,0,0">
+                        <app:ReviewAutomationBorder x:Name="LeftViewerPanel" Margin="0,0,6,0" Style="{StaticResource ReviewViewerStyle}"
+                                DataContext="{Binding LeftViewer}"
+                                PreviewDragOver="OnViewerDragOver" PreviewDrop="OnViewerDrop"
+                                PreviewMouseLeftButtonDown="OnViewerPreviewMouseLeftButtonDown" PreviewMouseMove="OnViewerPreviewMouseMove"
+                                QueryContinueDrag="OnViewerQueryContinueDrag"
+                                AutomationProperties.AutomationId="review-viewer"
+                                AutomationProperties.Name="{Binding AutomationName}"
+                                AutomationProperties.ItemStatus="{Binding ItemStatus}">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button x:Name="LeftViewerRemoveButton" DockPanel.Dock="Right" Margin="10,0,0,0"
+                                            Content="{Binding RemoveButtonText}" Command="{Binding ToggleRemoveCommand}"
+                                            Style="{Binding IsMarked, Converter={StaticResource RemoveButtonStyleConverter}}"
+                                            Visibility="{Binding HasPhoto, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                            AutomationProperties.Name="{Binding RemoveAutomationName}" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                        <TextBlock Style="{StaticResource Albumen.Caption}" Text="{Binding Member.FileName}" />
+                                    </StackPanel>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource ReviewViewerEmptyText}" />
+                                <Border Visibility="{Binding HasPhoto, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <app:PreviewStatusControl x:Name="LeftPreviewStatusControl" DataContext="{Binding Preview}"
+                                            Zoom="{Binding Value, ElementName=ReviewZoomSlider}" />
+                                </Border>
                             </StackPanel>
-                            <StackPanel Margin="6,0,0,0"
-                                        Visibility="{Binding RightViewer.HasPhoto, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Style="{StaticResource Albumen.Caption}" Margin="0,0,0,4"
-                                           Text="{Binding RightViewer.Member.FileName}" />
-                                <ContentControl x:Name="ComparedPreviewHost" Focusable="False"
-                                                Content="{Binding RightViewer.Preview}">
-                                    <ContentControl.Resources>
-                                        <DataTemplate DataType="{x:Type shell:PreviewItemViewModel}">
-                                            <app:PreviewStatusControl Loaded="OnComparedPreviewLoaded" />
-                                        </DataTemplate>
-                                    </ContentControl.Resources>
-                                </ContentControl>
+                        </app:ReviewAutomationBorder>
+                        <app:ReviewAutomationBorder x:Name="RightViewerPanel" Margin="6,0,0,0" Style="{StaticResource ReviewViewerStyle}"
+                                DataContext="{Binding RightViewer}"
+                                PreviewDragOver="OnViewerDragOver" PreviewDrop="OnViewerDrop"
+                                PreviewMouseLeftButtonDown="OnViewerPreviewMouseLeftButtonDown" PreviewMouseMove="OnViewerPreviewMouseMove"
+                                QueryContinueDrag="OnViewerQueryContinueDrag"
+                                AutomationProperties.AutomationId="review-viewer"
+                                AutomationProperties.Name="{Binding AutomationName}"
+                                AutomationProperties.ItemStatus="{Binding ItemStatus}">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button x:Name="RightViewerRemoveButton" DockPanel.Dock="Right" Margin="10,0,0,0"
+                                            Content="{Binding RemoveButtonText}" Command="{Binding ToggleRemoveCommand}"
+                                            Style="{Binding IsMarked, Converter={StaticResource RemoveButtonStyleConverter}}"
+                                            Visibility="{Binding HasPhoto, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                            AutomationProperties.Name="{Binding RemoveAutomationName}" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                        <TextBlock Style="{StaticResource Albumen.Caption}" Text="{Binding Member.FileName}" />
+                                    </StackPanel>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource ReviewViewerEmptyText}" />
+                                <Border Visibility="{Binding HasPhoto, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <app:PreviewStatusControl x:Name="RightPreviewStatusControl" DataContext="{Binding Preview}"
+                                            Zoom="{Binding Value, ElementName=ReviewZoomSlider}" />
+                                </Border>
                             </StackPanel>
-                        </UniformGrid>
-                    </StackPanel>
-                </app:ReviewAutomationBorder>
+                        </app:ReviewAutomationBorder>
+                    </UniformGrid>
+                </StackPanel>
 
                 <TextBlock x:Name="SelectionSummaryText" Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,10,0,0"
                            AutomationProperties.Name="Selection summary"
