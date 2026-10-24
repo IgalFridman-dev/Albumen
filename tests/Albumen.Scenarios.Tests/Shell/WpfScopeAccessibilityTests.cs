@@ -61,6 +61,7 @@ public sealed class WpfScopeAccessibilityTests
                 var card = Assert.IsType<Border>(window.FindName("FolderCard"));
                 var scanFolder = Assert.IsType<Button>(window.FindName("ScanFolderButton"));
                 var details = Assert.IsType<Expander>(window.FindName("FolderDetailsExpander"));
+                var contents = Assert.IsType<TextBlock>(window.FindName("FolderContentsText"));
 
                 // The prototype's card: name in bold, the path as its caption, one status strip.
                 Assert.Equal("Photos", folderName.Text);
@@ -83,6 +84,11 @@ public sealed class WpfScopeAccessibilityTests
                 Assert.Equal("Also check folders inside Photos.", subfoldersCaption.Text);
                 Assert.Null(window.FindName("NearDuplicatesCheckBox"));
                 Assert.Null(window.FindName("NearDuplicatesCaption"));
+                // The folder's photo names are a plain line under the strip, never a live region;
+                // this folder's check carried no names, so the line stays hidden.
+                Assert.Equal("Photos in this folder", AutomationProperties.GetName(contents));
+                Assert.Equal(AutomationLiveSetting.Off, AutomationProperties.GetLiveSetting(contents));
+                Assert.Equal(Visibility.Collapsed, contents.Visibility);
                 // The Scan button sits in the card's footer; the check summary waits under Details.
                 Assert.Contains(card, LogicalAncestors(scanFolder));
                 Assert.Contains(details, LogicalAncestors(summary));

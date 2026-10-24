@@ -94,6 +94,37 @@ public sealed class WindowsTraversalIntegrationTests
     }
 
     [Fact]
+    public async Task RealFolderNamesItsFirstSixPhotosInEnumerationOrder()
+    {
+        var root = Directory.CreateTempSubdirectory("AlbumenSamples-");
+        try
+        {
+            for (var index = 1; index <= 8; index++)
+            {
+                File.WriteAllText(Path.Combine(root.FullName, $"IMG_{index:0000}.jpg"), "fixture");
+            }
+            File.WriteAllText(Path.Combine(root.FullName, "notes.txt"), "fixture");
+            string[] expected = [.. Directory.EnumerateFiles(root.FullName)
+                .Select(path => Path.GetFileName(path))
+                .Where(name => name.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase))
+                .Take(6)];
+
+            var evidence = await new WindowsLocalScopePreflight().InspectAsync(
+                new ScopeSelection(root.FullName, ScopeRecursion.TopLevelOnly),
+                CancellationToken.None);
+
+            Assert.Equal(ScopeTraversalState.Complete, evidence.Traversal);
+            Assert.Equal(8, evidence.Counts.Supported);
+            Assert.Equal(1, evidence.Counts.UnsupportedExtension);
+            Assert.Equal(expected, evidence.Counts.SampleSupportedFiles);
+        }
+        finally
+        {
+            CleanupAll(() => root.Delete(recursive: true));
+        }
+    }
+
+    [Fact]
     public async Task RealFilesystemHonorsTopLevelRecursionUnicodeAndLongPaths()
     {
         var root = Directory.CreateTempSubdirectory("AlbumenTraversal-");
@@ -122,9 +153,11 @@ public sealed class WindowsTraversalIntegrationTests
                 CancellationToken.None);
 
             Assert.Equal(ScopeTraversalState.Complete, topLevel.Traversal);
-            Assert.Equal(new ScopeOutcomeCounts(1, 0, 0, 0), topLevel.Counts);
+            Assert.Equal(new ScopeOutcomeCounts(1, 0, 0, 0, ["top.jpg"]), topLevel.Counts);
             Assert.Equal(ScopeTraversalState.Complete, recursive.Traversal);
-            Assert.Equal(new ScopeOutcomeCounts(3, 0, 0, 0), recursive.Counts);
+            Assert.Equal(new ScopeOutcomeCounts(3, 0, 0, 0, recursive.Counts.SampleSupportedFiles), recursive.Counts);
+            Assert.Equal(["deep.jpeg", "nested.png", "top.jpg"],
+                recursive.Counts.SampleSupportedFiles.Order(StringComparer.Ordinal));
         }
         finally
         {
@@ -247,7 +280,7 @@ public sealed class WindowsTraversalIntegrationTests
                 CancellationToken.None);
 
             Assert.Equal(ScopeTraversalState.Complete, evidence.Traversal);
-            Assert.Equal(new ScopeOutcomeCounts(1, 0, 0, 0), evidence.Counts);
+            Assert.Equal(new ScopeOutcomeCounts(1, 0, 0, 0, ["inside.jpg"]), evidence.Counts);
             Assert.Equal(1, evidence.Restrictions.EscapingReparseTargets);
             Assert.Equal(2, evidence.Restrictions.DuplicateDirectoryIdentities);
         }
