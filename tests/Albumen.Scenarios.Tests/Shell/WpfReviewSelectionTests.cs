@@ -183,7 +183,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
-            OpenFirstGroupedComparison(fixture.ViewModel);
+            OpenIdenticalCopies(fixture.ViewModel);
             var neutral = new ReviewCommandResult(ReviewCommandOutcome.Neutral, fixture.Workflow.Current.Review);
             fixture.Workflow.NextSelectionResult = neutral;
             fixture.Workflow.NextSelectionResult = neutral;
@@ -260,7 +260,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready(twoGroups: true);
-            OpenFirstGroupedComparison(fixture.ViewModel);
+            OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -271,7 +271,7 @@ public sealed class WpfReviewSelectionTests
                 Assert.Equal(4, members.Items.Count);
                 members.ApplyTemplate();
                 window.UpdateLayout();
-                var focusedMember = fixture.ViewModel.ActiveReviewGroup!.Members[0];
+                var focusedMember = fixture.ViewModel.ReviewCategories[0].Groups[0].Members[0];
                 var focusedContainer = RealizeContainer(members, focusedMember);
                 Assert.Same(focusedMember, focusedContainer.DataContext);
                 var focusedControl = Descendants<ToggleButton>(focusedContainer)
@@ -320,7 +320,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
-            OpenFirstGroupedComparison(fixture.ViewModel);
+            OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -356,14 +356,14 @@ public sealed class WpfReviewSelectionTests
             var workflow = new RecordingReviewWorkflow(
                 scope.Current, ReviewData.CreateLargeMemberSnapshot(memberCount));
             var viewModel = new ShellViewModel(scope, workflow);
-            OpenFirstGroupedComparison(viewModel);
+            OpenIdenticalCopies(viewModel);
             var window = new MainWindow { DataContext = viewModel, Height = 720 };
             try
             {
                 window.Show();
                 Drain();
                 var list = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                var lateMember = viewModel.ActiveReviewGroup!.Members[memberCount - 1];
+                var lateMember = viewModel.ReviewCategories[0].Groups[0].Members[memberCount - 1];
                 var row = RealizeContainer(list, lateMember);
                 var original = Assert.Single(Descendants<ReviewSelectionCheckBox>(row));
                 Assert.True(original.Focus());
@@ -373,8 +373,8 @@ public sealed class WpfReviewSelectionTests
                     workflow.Current.Review, [lateMember.OccurrenceId], 10));
                 Drain();
 
-                Assert.True(viewModel.ActiveReviewMembers!.MaterializedCount < 100,
-                    $"Focus restoration materialized {viewModel.ActiveReviewMembers.MaterializedCount} comparisons.");
+                Assert.True(viewModel.ReviewCategories[0].Groups[0].Members.MaterializedCount < 100,
+                    $"Focus restoration materialized {viewModel.ReviewCategories[0].Groups[0].Members.MaterializedCount} comparisons.");
                 Assert.Equal(lateMember.OccurrenceId,
                     Assert.IsType<ScanOccurrenceViewModel>(
                         Assert.IsType<ReviewSelectionCheckBox>(Keyboard.FocusedElement).DataContext)
@@ -390,7 +390,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
-            OpenFirstGroupedComparison(fixture.ViewModel);
+            OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -405,7 +405,7 @@ public sealed class WpfReviewSelectionTests
                     fixture.Workflow.Current.Review, [1], 10));
                 window.UpdateLayout();
                 var members = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                var fourth = fixture.ViewModel.ActiveReviewGroup!.Members.Single(
+                var fourth = fixture.ViewModel.ReviewCategories[0].Groups[0].Members.Single(
                     member => member.OccurrenceId == 4);
                 _ = RealizeContainer(members, fourth, drain: false);
                 var deliberate = Descendants<ReviewSelectionCheckBox>(window)
@@ -431,7 +431,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
-            OpenFirstGroupedComparison(fixture.ViewModel);
+            OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -465,7 +465,7 @@ public sealed class WpfReviewSelectionTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
-            OpenFirstGroupedComparison(fixture.ViewModel);
+            OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -657,12 +657,12 @@ public sealed class WpfReviewSelectionTests
         Dispatcher.PushFrame(frame);
     }
 
-    internal static void OpenFirstGroupedComparison(ShellViewModel viewModel)
+    // Opens Identical copies, so the gallery shows its sets.
+    internal static void OpenIdenticalCopies(ShellViewModel viewModel)
     {
         var exact = viewModel.ReviewCategories.Single(
             category => category.Category == ReviewCategoryKind.Exact);
         viewModel.OpenReviewCategoryCommand.ExecuteAsync(exact).GetAwaiter().GetResult();
-        viewModel.OpenReviewGroupCommand.ExecuteAsync(exact.Groups[0]).GetAwaiter().GetResult();
     }
 
     internal static void Press(UIElement target, Key key)

@@ -118,7 +118,7 @@ public sealed class WpfReviewFaultTests
                         Assert.Equal(viewModel.ReviewAnnouncement, peer.GetItemStatus());
                         break;
                     case "selection-controls":
-                        WpfReviewSelectionTests.OpenFirstGroupedComparison(viewModel);
+                        WpfReviewSelectionTests.OpenIdenticalCopies(viewModel);
                         window.UpdateLayout();
                         WpfReviewSelectionTests.Drain();
                         var group = Assert.Single(viewModel.ExactGroups);

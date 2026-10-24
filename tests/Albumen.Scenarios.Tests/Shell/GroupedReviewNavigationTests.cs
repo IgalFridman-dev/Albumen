@@ -26,7 +26,7 @@ public sealed class GroupedReviewNavigationTests
     }
 
     [Fact]
-    public async Task CategoryGroupComparisonAndBackNavigationOwnOnlyViewState()
+    public async Task CategoryAndBackNavigationOwnOnlyViewState()
     {
         var fixture = GroupedReviewFixture.Create();
         var sourceScan = fixture.Workflow.Current.Scan;
@@ -35,45 +35,57 @@ public sealed class GroupedReviewNavigationTests
 
         Assert.Equal(ReviewNavigationLevel.Categories, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Equal(["Review"], fixture.ViewModel.ReviewBreadcrumbs);
+        Assert.Null(fixture.ViewModel.ActiveReviewGroups);
+        Assert.False(fixture.ViewModel.ReviewBackCommand.CanExecute(null));
 
         await fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(near);
 
-        Assert.Equal(ReviewNavigationLevel.Groups, fixture.ViewModel.ReviewNavigationLevel);
+        // Opening a kind shows all of its sets: there is no set or photo level below it.
+        Assert.Equal(ReviewNavigationLevel.Gallery, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Same(near, fixture.ViewModel.ActiveReviewCategory);
-        Assert.Null(fixture.ViewModel.ActiveReviewGroup);
+        Assert.Same(near.Groups, fixture.ViewModel.ActiveReviewGroups);
         Assert.Equal(["Review", "Look-alike"], fixture.ViewModel.ReviewBreadcrumbs);
-
+        Assert.True(fixture.ViewModel.ReviewBackCommand.CanExecute(null));
         var group = near.Groups[0];
-        await fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(group);
-
-        Assert.Equal(ReviewNavigationLevel.Comparisons, fixture.ViewModel.ReviewNavigationLevel);
-        Assert.Same(group, fixture.ViewModel.ActiveReviewGroup);
         Assert.StartsWith("Set 1: ", group.Summary, StringComparison.Ordinal);
-        Assert.Equal(["Review", "Look-alike", group.Summary], fixture.ViewModel.ReviewBreadcrumbs);
 
         var member = group.Members[1];
         await fixture.ViewModel.PlaceInViewerCommand.ExecuteAsync(
             new PlaceInViewer(ViewerSide.Left, group.GroupId, member));
 
         Assert.Same(member, fixture.ViewModel.LeftViewer.Member);
-        Assert.Equal(ReviewNavigationLevel.Comparisons, fixture.ViewModel.ReviewNavigationLevel);
-
-        await fixture.ViewModel.ReviewBackCommand.ExecuteAsync();
-
-        Assert.Equal(ReviewNavigationLevel.Groups, fixture.ViewModel.ReviewNavigationLevel);
-        Assert.Same(near, fixture.ViewModel.ActiveReviewCategory);
-        Assert.Null(fixture.ViewModel.ActiveReviewGroup);
-        // The viewers are not a navigation level: going back leaves the photo shown.
-        Assert.Same(member, fixture.ViewModel.LeftViewer.Member);
+        Assert.Equal(ReviewNavigationLevel.Gallery, fixture.ViewModel.ReviewNavigationLevel);
 
         await fixture.ViewModel.ReviewBackCommand.ExecuteAsync();
 
         Assert.Equal(ReviewNavigationLevel.Categories, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Null(fixture.ViewModel.ActiveReviewCategory);
+        Assert.Null(fixture.ViewModel.ActiveReviewGroups);
         Assert.Equal(["Review"], fixture.ViewModel.ReviewBreadcrumbs);
+        // The viewers are not a navigation level: going back leaves the photo shown.
+        Assert.Same(member, fixture.ViewModel.LeftViewer.Member);
         Assert.Same(sourceScan, fixture.Workflow.Current.Scan);
         Assert.Same(sourceReview, fixture.Workflow.Current.Review);
         Assert.Empty(fixture.Workflow.SelectionCommands);
+    }
+
+    [Fact]
+    public async Task AProjectionKeepsTheOpenKindOpenWithItsNewSets()
+    {
+        var scope = new ReviewStaticScope();
+        var workflow = new RecordingReviewWorkflow(scope.Current, ReviewData.CreateSnapshot(twoGroups: true));
+        await using var viewModel = new ShellViewModel(scope, workflow);
+        var exact = viewModel.ReviewCategories[0];
+        await viewModel.OpenReviewCategoryCommand.ExecuteAsync(exact);
+
+        workflow.Publish(ReviewData.WithSelection(workflow.Current.Review, [1], 10));
+
+        Assert.Equal(ReviewNavigationLevel.Gallery, viewModel.ReviewNavigationLevel);
+        Assert.NotSame(exact, viewModel.ActiveReviewCategory);
+        Assert.Equal(ReviewCategoryKind.Exact, viewModel.ActiveReviewCategory?.Category);
+        Assert.Same(viewModel.ReviewCategories[0].Groups, viewModel.ActiveReviewGroups);
+        Assert.True(viewModel.ActiveReviewGroups?[0].Members[0].IsSelected);
+        Assert.Equal(["Review", "Identical copies"], viewModel.ReviewBreadcrumbs);
     }
 
     [Fact]
@@ -114,7 +126,6 @@ public sealed class GroupedReviewNavigationTests
         Assert.Equal([21L, 22L], selectAll.OccurrenceIds);
 
         await fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(fixture.ViewModel.ReviewCategories[1]);
-        await fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(near);
         await fixture.ViewModel.PlaceInViewerCommand.ExecuteAsync(
             new PlaceInViewer(ViewerSide.Left, near.GroupId, markedElsewhere));
 

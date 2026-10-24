@@ -290,7 +290,7 @@ public sealed class ReviewViewersTests
         var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
         await using var viewModel = new ShellViewModel(workflow.Scope, workflow,
             reviewThumbnailSource: thumbnails);
-        var member = (await OpenGroupAsync(viewModel, ReviewCategoryKind.Exact)).Members[0];
+        var member = Set(viewModel, ReviewCategoryKind.Exact).Members[0];
         var loader = Assert.IsType<ReviewThumbnailLoader>(viewModel.ReviewThumbnails);
 
         var firstCard = loader.LoadAsync(member, CancellationToken.None);
@@ -315,7 +315,7 @@ public sealed class ReviewViewersTests
         var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
         await using var viewModel = new ShellViewModel(workflow.Scope, workflow,
             reviewThumbnailSource: thumbnails);
-        var member = (await OpenGroupAsync(viewModel, ReviewCategoryKind.Exact)).Members[0];
+        var member = Set(viewModel, ReviewCategoryKind.Exact).Members[0];
         var loader = Assert.IsType<ReviewThumbnailLoader>(viewModel.ReviewThumbnails);
         using var firstCard = new CancellationTokenSource();
         using var secondCard = new CancellationTokenSource();
@@ -336,17 +336,49 @@ public sealed class ReviewViewersTests
     }
 
     [Fact]
+    public async Task ASetsSuggestionIsComputedOnceFromItsThumbnails()
+    {
+        var thumbnails = new SizedThumbnailSource(new Dictionary<long, (int, int)>
+        {
+            [11] = (1600, 1200),
+            [12] = (4000, 3000),
+        });
+        var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
+        await using var viewModel = new ShellViewModel(workflow.Scope, workflow,
+            reviewThumbnailSource: thumbnails);
+        var near = Set(viewModel, ReviewCategoryKind.Near);
+        var loader = Assert.IsType<ReviewThumbnailLoader>(viewModel.ReviewThumbnails);
+        var changes = 0;
+        near.PropertyChanged += (_, change) =>
+        {
+            if (change.PropertyName == nameof(ReviewGroupViewModel.Suggestion)) changes++;
+        };
+
+        await near.LoadSuggestionAsync(loader, CancellationToken.None);
+        await near.LoadSuggestionAsync(loader, CancellationToken.None);
+
+        Assert.Equal(new SuggestedBest(12, "most pixels"), near.Suggestion);
+        Assert.Equal(1, changes);
+        Assert.Equal(2, thumbnails.Requests);
+        // A hint only: nothing is marked.
+        Assert.Empty(workflow.SelectionCommands);
+        Assert.All(near.Members, member => Assert.False(member.IsSelected));
+    }
+
+    [Fact]
     public async Task IdenticalCopiesNeverLoadThumbnailsForASuggestion()
     {
         var thumbnails = new ControllableReviewPreviewSource(autoComplete: true);
         var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
         await using var viewModel = new ShellViewModel(workflow.Scope, workflow,
             reviewThumbnailSource: thumbnails);
+        var exact = Set(viewModel, ReviewCategoryKind.Exact);
 
-        await OpenGroupAsync(viewModel, ReviewCategoryKind.Exact);
+        await exact.LoadSuggestionAsync(Assert.IsType<ReviewThumbnailLoader>(viewModel.ReviewThumbnails),
+            CancellationToken.None);
 
         Assert.Empty(thumbnails.Requests);
-        Assert.Null(viewModel.ActiveReviewSuggestion);
+        Assert.Null(exact.Suggestion);
     }
 
     [Fact]
@@ -356,14 +388,15 @@ public sealed class ReviewViewersTests
         var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
         await using var viewModel = new ShellViewModel(workflow.Scope, workflow,
             reviewThumbnailSource: thumbnails);
+        var group = Set(viewModel, ReviewCategoryKind.Near);
 
-        var group = await OpenGroupAsync(viewModel, ReviewCategoryKind.Near);
+        await group.LoadSuggestionAsync(Assert.IsType<ReviewThumbnailLoader>(viewModel.ReviewThumbnails),
+            CancellationToken.None);
 
-        // The source answers at once, so the whole suggestion pass has finished here: the
-        // first photo without a pixel size ends it.
+        // The first photo without a pixel size ends the pass.
         var request = Assert.Single(thumbnails.Requests);
         Assert.Equal(group.Members[0].OccurrenceId, request.Occurrence.Token.OccurrenceId);
-        Assert.Null(viewModel.ActiveReviewSuggestion);
+        Assert.Null(group.Suggestion);
     }
 
     private static ReviewGroupViewModel Set(ShellViewModel viewModel, ReviewCategoryKind category) =>
@@ -372,17 +405,6 @@ public sealed class ReviewViewersTests
     private static PlaceInViewer Place(ViewerSide side, ReviewGroupViewModel group, int index,
         bool onlyIfEmpty = false) =>
         new(side, group.GroupId, group.Members[index], onlyIfEmpty);
-
-    private static async Task<ReviewGroupViewModel> OpenGroupAsync(
-        ShellViewModel viewModel,
-        ReviewCategoryKind category)
-    {
-        var row = viewModel.ReviewCategories.Single(item => item.Category == category);
-        await viewModel.OpenReviewCategoryCommand.ExecuteAsync(row);
-        var group = Assert.Single(row.Groups);
-        await viewModel.OpenReviewGroupCommand.ExecuteAsync(group);
-        return group;
-    }
 }
 
 public sealed class SuggestedBestPhotoTests

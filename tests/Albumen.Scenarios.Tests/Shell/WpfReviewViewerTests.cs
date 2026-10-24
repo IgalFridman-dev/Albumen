@@ -20,8 +20,8 @@ public sealed class WpfReviewViewerTests
         {
             var fixture = GroupedWpfFixture.Create();
             var viewModel = fixture.ViewModel;
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(viewModel);
-            var group = Assert.IsType<ReviewGroupViewModel>(viewModel.ActiveReviewGroup);
+            WpfReviewSelectionTests.OpenIdenticalCopies(viewModel);
+            var group = viewModel.ReviewCategories[0].Groups[0];
             Place(viewModel, ViewerSide.Left, group, 0);
             var window = new MainWindow { DataContext = viewModel, Width = 1280, Height = 800 };
             try
@@ -62,7 +62,6 @@ public sealed class WpfReviewViewerTests
             var near = viewModel.ReviewCategories.Single(row => row.Category == ReviewCategoryKind.Near);
             viewModel.OpenReviewCategoryCommand.ExecuteAsync(near).GetAwaiter().GetResult();
             var group = near.Groups[0];
-            viewModel.OpenReviewGroupCommand.ExecuteAsync(group).GetAwaiter().GetResult();
             Place(viewModel, ViewerSide.Left, group, 0);
             Place(viewModel, ViewerSide.Right, group, 1);
             var window = new MainWindow { DataContext = viewModel, Width = 1280, Height = 800 };
@@ -99,7 +98,7 @@ public sealed class WpfReviewViewerTests
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var fixture = GroupedWpfFixture.Create();
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel, Width = 960, Height = 720 };
             try
             {
@@ -121,93 +120,6 @@ public sealed class WpfReviewViewerTests
                     new Rect(new Point(), approval.RenderSize));
                 Assert.True(bounds.Top >= -0.5 && bounds.Top < page.ViewportHeight,
                     $"Approval bounds {bounds} were outside the Review viewport height {page.ViewportHeight}.");
-            }
-            finally
-            {
-                window.Close();
-            }
-        });
-    }
-
-    [Theory]
-    [InlineData(1280, 800)]
-    [InlineData(680, 520)]
-    public void EveryPartOfAPhotoCardFitsInsideThePhotoList(double width, double height)
-    {
-        WpfReviewSelectionTests.RunOnSta(() =>
-        {
-            var fixture = GroupedWpfFixture.Create();
-            var viewModel = fixture.ViewModel;
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(viewModel);
-            var group = Assert.IsType<ReviewGroupViewModel>(viewModel.ActiveReviewGroup);
-            var window = new MainWindow { DataContext = viewModel, Width = width, Height = height };
-            try
-            {
-                ShowAndDrain(window);
-                var list = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                list.ScrollIntoView(group.Members[1]);
-                ShowAndDrain(window);
-                var card = Assert.IsType<ListBoxItem>(list.ItemContainerGenerator.ContainerFromItem(group.Members[1]));
-                // The list scrolls by item, so its own viewport height counts cards, not pixels.
-                var viewport = WpfReviewSelectionTests.Descendants<ScrollContentPresenter>(list).First();
-                var bounds = card.TransformToAncestor(viewport).TransformBounds(
-                    new Rect(new Point(), card.RenderSize));
-                Assert.True(bounds.Top >= -0.5 && bounds.Bottom <= viewport.ActualHeight + 0.5,
-                    $"Card bounds {bounds} fell outside the photo list height {viewport.ActualHeight}.");
-
-                var open = WpfReviewSelectionTests.Descendants<Button>(card).Single(button =>
-                    System.Windows.Automation.AutomationProperties.GetAutomationId(button) == "open-review-member");
-                open.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                ShowAndDrain(window);
-                Assert.Same(group.Members[1], viewModel.LeftViewer.Member);
-                var page = Assert.IsType<ScrollViewer>(window.FindName("ReviewPageScrollViewer"));
-                var viewer = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("ReviewEvidencePanel"));
-                var top = viewer.TransformToAncestor(page).Transform(new Point()).Y;
-                Assert.True(top >= -0.5 && top < page.ViewportHeight - 40,
-                    $"The viewer top {top} was not shown in the Review page height {page.ViewportHeight}.");
-            }
-            finally
-            {
-                window.Close();
-            }
-        });
-    }
-
-    [Fact]
-    public void SuggestedBestMarksTheLargestPhotoWithoutSelectingAnything()
-    {
-        WpfReviewSelectionTests.RunOnSta(() =>
-        {
-            var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
-            var viewModel = new ShellViewModel(workflow.Scope, workflow,
-                reviewPreviewSource: new ControllableReviewPreviewSource(autoComplete: true),
-                reviewThumbnailSource: new SizedThumbnailSource(new Dictionary<long, (int, int)>
-                {
-                    [11] = (1600, 1200),
-                    [12] = (4000, 3000),
-                }));
-            var near = viewModel.ReviewCategories.Single(row => row.Category == ReviewCategoryKind.Near);
-            viewModel.OpenReviewCategoryCommand.ExecuteAsync(near).GetAwaiter().GetResult();
-            viewModel.OpenReviewGroupCommand.ExecuteAsync(near.Groups[0]).GetAwaiter().GetResult();
-            WpfReviewSelectionTests.Drain();
-
-            Assert.Equal(new SuggestedBest(12, "most pixels"), viewModel.ActiveReviewSuggestion);
-            Assert.Empty(workflow.SelectionCommands);
-            Assert.False(near.Groups[0].Members[0].IsSelected);
-            Assert.False(near.Groups[0].Members[1].IsSelected);
-
-            var window = new MainWindow { DataContext = viewModel, Width = 1280, Height = 800 };
-            try
-            {
-                ShowAndDrain(window);
-                var list = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                var badges = WpfReviewSelectionTests.Descendants<TextBlock>(list)
-                    .Where(text => text.IsVisible && text.Text.StartsWith("Suggested best:", StringComparison.Ordinal))
-                    .ToArray();
-                var badge = Assert.Single(badges);
-                Assert.Equal(12L, Assert.IsType<ScanOccurrenceViewModel>(badge.DataContext).OccurrenceId);
-                Assert.Contains("most pixels", badge.Text, StringComparison.Ordinal);
-                Assert.Empty(workflow.SelectionCommands);
             }
             finally
             {
@@ -242,11 +154,14 @@ public sealed class WpfReviewViewerTests
 internal sealed class SizedThumbnailSource(IReadOnlyDictionary<long, (int Width, int Height)> sizes)
     : IReviewPreviewSource
 {
+    public int Requests { get; private set; }
+
     public Task<ReviewPreviewResult> LoadAsync(
         ScanRunContext context,
         ScanFileOccurrence occurrence,
         CancellationToken cancellationToken)
     {
+        Requests++;
         var (width, height) = sizes[occurrence.Token.OccurrenceId];
         var frame = new PreviewFrame(1, 1, width, height, MemoryPool<byte>.Shared.Rent(4));
         return Task.FromResult(ReviewPreviewResult.Success(occurrence.ResolvedPath, frame, 512, null));

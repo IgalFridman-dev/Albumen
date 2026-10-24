@@ -148,7 +148,7 @@ public sealed class WpfApprovalAccessibilityTests
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready(externalSurvivor: true, selected: [1]);
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -637,7 +637,7 @@ public sealed class WpfApprovalAccessibilityTests
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready(selected: [1]);
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             window.Show();
             WpfReviewSelectionTests.Drain();
@@ -668,7 +668,7 @@ public sealed class WpfApprovalAccessibilityTests
             var window = new MainWindow();
             var fixture = ReviewShellFixture.Ready(selected: [1],
                 dialog: new WpfReviewDialogService(() => window));
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             window.DataContext = fixture.ViewModel;
             window.Show();
             WpfReviewSelectionTests.Drain();
@@ -706,7 +706,7 @@ public sealed class WpfApprovalAccessibilityTests
             var window = new MainWindow();
             var fixture = ReviewShellFixture.Ready(selected: [1],
                 dialog: new WpfReviewDialogService(() => window));
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             window.DataContext = fixture.ViewModel;
             window.Show();
             WpfReviewSelectionTests.Drain();

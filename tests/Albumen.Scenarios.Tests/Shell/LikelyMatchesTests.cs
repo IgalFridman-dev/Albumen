@@ -108,15 +108,17 @@ public sealed class LikelyMatchesTests
 
         await fixture.ViewModel.OpenLikelyMatchCommand.ExecuteAsync(Items(fixture)[1]);
 
-        Assert.Equal(ReviewNavigationLevel.Comparisons, fixture.ViewModel.ReviewNavigationLevel);
+        // The match's kind opens with all of its sets, and the photo shows in the Left Viewer.
+        Assert.Equal(ReviewNavigationLevel.Gallery, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Equal(ReviewCategoryKind.Near, fixture.ViewModel.ActiveReviewCategory!.Category);
         Assert.Equal(12, fixture.ViewModel.LeftViewer.Member?.OccurrenceId);
+        Assert.Equal(GroupedReviewData.NearGroupId, fixture.ViewModel.LeftViewer.GroupId);
 
         await fixture.Matches.ShowAllCommand.ExecuteAsync();
 
         Assert.False(fixture.Matches.IsActive);
         Assert.Equal(string.Empty, fixture.Matches.Prompt);
-        Assert.Equal(ReviewNavigationLevel.Groups, fixture.ViewModel.ReviewNavigationLevel);
+        Assert.Equal(ReviewNavigationLevel.Gallery, fixture.ViewModel.ReviewNavigationLevel);
         Assert.Equal(ReviewCategoryKind.Exact, fixture.ViewModel.ActiveReviewCategory!.Category);
         Assert.Empty(fixture.Workflow.SelectionCommands);
         Assert.Same(review, fixture.Workflow.Current.Review);

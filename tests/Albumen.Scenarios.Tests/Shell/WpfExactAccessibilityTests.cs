@@ -126,8 +126,6 @@ public sealed class WpfExactAccessibilityTests
                 Assert.True(VirtualizingPanel.GetIsVirtualizing(groups));
                 Assert.Equal(1000, groups.Items.Count);
                 Assert.Null(groups.ItemContainerGenerator.ContainerFromIndex(999));
-                fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(exact.Groups[0])
-                    .GetAwaiter().GetResult();
                 Drain();
                 window.UpdateLayout();
                 var comparisons = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
@@ -163,7 +161,7 @@ public sealed class WpfExactAccessibilityTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel, FontSize = 24 };
             try
             {
@@ -192,7 +190,7 @@ public sealed class WpfExactAccessibilityTests
         {
             var fixture = new ExactShellFixture();
             fixture.PublishReview(ScanStatus.Complete, memberCount: 2000);
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {

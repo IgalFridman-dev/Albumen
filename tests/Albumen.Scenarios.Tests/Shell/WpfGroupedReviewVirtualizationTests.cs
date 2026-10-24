@@ -63,15 +63,6 @@ public sealed class WpfGroupedReviewVirtualizationTests
                 Assert.Empty(preview.Requests);
 
                 var last = category.Groups[9_999];
-                viewModel.OpenReviewGroupCommand.ExecuteAsync(last).GetAwaiter().GetResult();
-                window.UpdateLayout();
-                WpfReviewSelectionTests.Drain();
-                var comparisons = Assert.IsType<ListBox>(
-                    window.FindName("ReviewComparisonsList"));
-                Assert.True(VirtualizingPanel.GetIsVirtualizing(comparisons));
-                Assert.Equal(2, comparisons.Items.Count);
-                Assert.Empty(preview.Requests);
-
                 viewModel.PlaceInViewerCommand.ExecuteAsync(
                         new PlaceInViewer(ViewerSide.Left, last.GroupId, last.Members[1]))
                     .GetAwaiter().GetResult();

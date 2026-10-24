@@ -60,11 +60,11 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 var member = Assert.IsType<ScanOccurrenceViewModel>(openMember.DataContext);
                 Assert.Equal(member.PositionInSet,
                     AutomationProperties.GetPositionInSet(openMember));
-                Assert.Equal(fixture.ViewModel.ActiveReviewGroup!.MemberCount,
+                Assert.Equal(member.SizeOfSet,
                     AutomationProperties.GetSizeOfSet(openMember));
                 Click(openMember);
 
-                Assert.Equal(ReviewNavigationLevel.Comparisons,
+                Assert.Equal(ReviewNavigationLevel.Gallery,
                     fixture.ViewModel.ReviewNavigationLevel);
                 Assert.Same(member, fixture.ViewModel.LeftViewer.Member);
                 Assert.Empty(fixture.Workflow.SelectionCommands);
@@ -90,7 +90,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
 
                 var back = Assert.IsType<Button>(window.FindName("ReviewBackButton"));
                 Click(back);
-                Assert.Equal(ReviewNavigationLevel.Groups,
+                Assert.Equal(ReviewNavigationLevel.Categories,
                     fixture.ViewModel.ReviewNavigationLevel);
                 Assert.True(groups.IsKeyboardFocusWithin);
                 Click(back);
@@ -112,7 +112,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var fixture = GroupedWpfFixture.Create();
-            OpenFirstComparison(fixture.ViewModel);
+            OpenFirstKind(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel, Width = 960, Height = 720 };
             try
             {
@@ -137,7 +137,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 var command = Assert.Single(fixture.Workflow.SelectionCommands);
                 Assert.Equal(SelectionCommandKind.Toggle, command.Kind);
                 Assert.Equal([1], command.OccurrenceIds);
-                Assert.Equal(ReviewNavigationLevel.Comparisons,
+                Assert.Equal(ReviewNavigationLevel.Gallery,
                     fixture.ViewModel.ReviewNavigationLevel);
                 var current = NamedList(window, "ReviewComparisonsList");
                 Assert.Contains(Descendants<ReviewSelectionCheckBox>(current),
@@ -173,7 +173,6 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 var card = Descendants<Grid>(groupRow).First(grid => Descendants<TextBlock>(grid).Contains(caption));
                 Assert.Equal(SystemParameters.HighContrast ? 1.0 : 0.55, card.Opacity, 2);
 
-                fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(near.Groups[0]).GetAwaiter().GetResult();
                 WpfReviewSelectionTests.Drain();
                 window.UpdateLayout();
                 var comparisons = NamedList(window, "ReviewComparisonsList");
@@ -219,7 +218,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 ReviewCommandOutcome.OverrideRequired,
                 fixture.Workflow.Current.Review,
                 proposal);
-            OpenFirstComparison(fixture.ViewModel);
+            OpenFirstKind(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel };
             try
             {
@@ -315,7 +314,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var fixture = GroupedWpfFixture.Create();
-            OpenFirstComparison(fixture.ViewModel);
+            OpenFirstKind(fixture.ViewModel);
             var window = new MainWindow
             {
                 DataContext = fixture.ViewModel,
@@ -361,7 +360,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var fixture = GroupedWpfFixture.Create();
-            OpenFirstComparison(fixture.ViewModel);
+            OpenFirstKind(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel, FontSize = fontSize };
             if (!double.IsNaN(width)) window.Width = width;
             if (!double.IsNaN(height)) window.Height = height;
@@ -521,11 +520,10 @@ public sealed class WpfGroupedReviewAccessibilityTests
         element.UpdateLayout();
     }
 
-    private static void OpenFirstComparison(ShellViewModel viewModel)
+    private static void OpenFirstKind(ShellViewModel viewModel)
     {
         var category = viewModel.ReviewCategories[0];
         viewModel.OpenReviewCategoryCommand.ExecuteAsync(category).GetAwaiter().GetResult();
-        viewModel.OpenReviewGroupCommand.ExecuteAsync(category.Groups[0]).GetAwaiter().GetResult();
     }
 
     private static void ShowAndDrain(Window window)

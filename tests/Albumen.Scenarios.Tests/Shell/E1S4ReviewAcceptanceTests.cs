@@ -27,7 +27,7 @@ public sealed class E1S4ReviewAcceptanceTests
             var window = new MainWindow();
             var fixture = ReviewShellFixture.Ready(
                 dialog: new WpfReviewDialogService(() => window));
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             window.DataContext = fixture.ViewModel;
             try
             {
@@ -74,7 +74,7 @@ public sealed class E1S4ReviewAcceptanceTests
                 window.UpdateLayout();
                 WpfReviewSelectionTests.Drain();
                 var occurrences = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                var fourth = fixture.ViewModel.ActiveReviewGroup!.Members
+                var fourth = fixture.ViewModel.ReviewCategories[0].Groups[0].Members
                     .Single(member => member.OccurrenceId == 4);
                 occurrences.ScrollIntoView(fourth);
                 window.UpdateLayout();
