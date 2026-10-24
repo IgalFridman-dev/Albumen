@@ -90,7 +90,7 @@ public sealed class E2S5OutcomePresentationTests
         return new(new(pin, id, 1, 1), path, path, key,
             new(ScanStageState.Succeeded, ScanReason.None),
             new(ScanStageState.Succeeded, ScanReason.None),
-            new(key, 10, new string((char)('A' + id), 64)), new(10, 1, true));
+            new(key, 10, new string("0123456789ABCDEF"[(int)id % 16], 64)), new(10, 1, true));
     }
 
     private static ScanFileOccurrence NotApplicable(
