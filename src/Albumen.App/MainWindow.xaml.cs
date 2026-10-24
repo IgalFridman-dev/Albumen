@@ -62,10 +62,11 @@ public partial class MainWindow : Window
 
     private void ApplyPalette() => AlbumenPalette.Apply(palette, SystemParameters.HighContrast);
 
-    // Raised on the thread that saw the setting change, so the window re-reads it on its own.
+    // Raised on the thread that saw the setting change, so the window re-reads it on its own. Every
+    // change re-applies: the High Contrast palette holds the system brushes of the moment, so a
+    // theme change under High Contrast (Black to White) must refresh them too.
     private void OnSystemParametersChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
-        if (eventArgs.PropertyName != nameof(SystemParameters.HighContrast)) return;
         Dispatcher.InvokeAsync(() =>
         {
             if (!isClosed) ApplyPalette();
