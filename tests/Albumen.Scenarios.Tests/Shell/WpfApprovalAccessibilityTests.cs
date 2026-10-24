@@ -168,7 +168,7 @@ public sealed class WpfApprovalAccessibilityTests
                 Assert.Contains("path is unknown to this Scan", groupStatus, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("Estimated recovery", groupStatus, StringComparison.OrdinalIgnoreCase);
 
-                var selection = FindPeer(root, "selection-control");
+                var selection = FindPeer(root, "review-photo");
                 Assert.StartsWith("Marked for removal;", selection.GetItemStatus(), StringComparison.Ordinal);
                 Assert.StartsWith("Marked for removal:", selection.GetName(), StringComparison.Ordinal);
 
@@ -641,8 +641,7 @@ public sealed class WpfApprovalAccessibilityTests
             var window = new MainWindow { DataContext = fixture.ViewModel };
             window.Show();
             WpfReviewSelectionTests.Drain();
-            var focusTarget = WpfReviewSelectionTests.Descendants<ToggleButton>(window)
-                .First(control => AutomationProperties.GetAutomationId(control) == "selection-control");
+            var focusTarget = ReviewTiles.Tile(window, 1);
 
             var heading = Assert.IsType<TextBlock>(window.FindName("ReviewHeading"));
             Assert.True(heading.Focus());
@@ -675,8 +674,7 @@ public sealed class WpfApprovalAccessibilityTests
             var before = fixture.Workflow.Current.Review;
             fixture.Workflow.NextSelectionResult = new(ReviewCommandOutcome.OverrideRequired, before,
                 ReviewData.Proposal(before));
-            var selection = WpfReviewSelectionTests.Descendants<ToggleButton>(window)
-                .First(control => AutomationProperties.GetAutomationId(control) == "selection-control");
+            var selection = ReviewTiles.Tile(window, 1);
             Assert.True(selection.Focus());
             var commandCompleted = false;
 
@@ -684,7 +682,7 @@ public sealed class WpfApprovalAccessibilityTests
                 _ => window.Close(),
                 () =>
                 {
-                    Assert.IsType<AsyncCommand>(selection.Command).ExecuteAsync().GetAwaiter().GetResult();
+                    Assert.IsType<AsyncCommand>(selection.Member?.ToggleSelectionCommand).ExecuteAsync().GetAwaiter().GetResult();
                     commandCompleted = true;
                 });
 
@@ -713,8 +711,7 @@ public sealed class WpfApprovalAccessibilityTests
             var before = fixture.Workflow.Current.Review;
             fixture.Workflow.NextSelectionResult = new(ReviewCommandOutcome.OverrideRequired, before,
                 ReviewData.Proposal(before));
-            var selection = WpfReviewSelectionTests.Descendants<ToggleButton>(window)
-                .First(control => AutomationProperties.GetAutomationId(control) == "selection-control");
+            var selection = ReviewTiles.Tile(window, 1);
             Assert.True(selection.Focus());
             var commandCompleted = false;
             try
@@ -723,7 +720,7 @@ public sealed class WpfApprovalAccessibilityTests
                     _ => window.OnApplicationExit(window, EventArgs.Empty),
                     () =>
                     {
-                        Assert.IsType<AsyncCommand>(selection.Command).ExecuteAsync().GetAwaiter().GetResult();
+                        Assert.IsType<AsyncCommand>(selection.Member?.ToggleSelectionCommand).ExecuteAsync().GetAwaiter().GetResult();
                         commandCompleted = true;
                     });
 

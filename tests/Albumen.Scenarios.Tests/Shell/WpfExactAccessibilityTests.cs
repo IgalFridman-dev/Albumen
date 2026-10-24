@@ -157,16 +157,17 @@ public sealed class WpfExactAccessibilityTests
                 window.Show();
                 Drain();
                 window.UpdateLayout();
-                var comparisons = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                Assert.True(VirtualizingPanel.GetIsVirtualizing(comparisons));
-                Assert.All(Descendants<TextBox>(comparisons), path =>
-                {
-                    Assert.True(path.IsReadOnly);
-                    Assert.Equal(TextWrapping.Wrap, path.TextWrapping);
-                    Assert.False(path.IsTabStop);
-                });
-                Assert.All(Descendants<TextBlock>(comparisons), metadata => Assert.False(metadata.Focusable));
-                Assert.Contains("照片-very-long-name", fixture.ViewModel.ExactGroups[0].Members[0].DiscoveredPath);
+                var gallery = Assert.IsType<ListBox>(window.FindName("ReviewGalleryList"));
+                Assert.True(VirtualizingPanel.GetIsVirtualizing(gallery));
+                Assert.Empty(Descendants<TextBox>(gallery));
+                Assert.All(Descendants<TextBlock>(gallery), metadata => Assert.False(metadata.Focusable));
+                // A photo's path is in its hover facts: selectable text that wraps and takes no tab stop.
+                var tile = ReviewTiles.Tile(window, 1);
+                ReviewTiles.Facts(tile, out var path);
+                Assert.True(path.IsReadOnly);
+                Assert.Equal(TextWrapping.Wrap, path.TextWrapping);
+                Assert.False(path.IsTabStop);
+                Assert.Contains("照片-very-long-name", path.Text, StringComparison.Ordinal);
             }
             finally { window.Close(); }
         });

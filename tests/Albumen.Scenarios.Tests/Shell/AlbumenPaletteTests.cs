@@ -23,7 +23,6 @@ public sealed class AlbumenPaletteTests
         "Albumen.HighContrastSwitchTemplate",
         "Albumen.HighContrastStepTemplate",
         "Albumen.HighContrastCardTemplate",
-        "Albumen.HighContrastKeepRemoveTemplate",
         "Albumen.HighContrastTopBarItemTemplate",
     ];
 

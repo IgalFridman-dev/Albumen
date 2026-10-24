@@ -1,5 +1,8 @@
+using System.Collections.Immutable;
 using Albumen.App.Shell;
+using Albumen.Application.Review;
 using Albumen.Domain.Review;
+using Albumen.Domain.Scan;
 using Albumen.Infrastructure.Windows.Preview;
 using Xunit;
 
@@ -397,6 +400,60 @@ public sealed class ReviewViewersTests
         var request = Assert.Single(thumbnails.Requests);
         Assert.Equal(group.Members[0].OccurrenceId, request.Occurrence.Token.OccurrenceId);
         Assert.Null(group.Suggestion);
+    }
+
+    // The facts shown on hover over a tile: why the photo is in its set, from the set's evidence.
+    [Fact]
+    public void APhotosFactsSayWhyItIsInItsSet()
+    {
+        var exact = FactsSet(CandidateCategory.Exact, ReviewCategoryKind.Exact, []);
+        Assert.Equal("The files are identical, byte for byte.", exact.Members[0].KindLine);
+        Assert.Equal(string.Empty, exact.Members[0].UncertaintyLine);
+
+        var near = FactsSet(CandidateCategory.NearDuplicate, ReviewCategoryKind.Near, [Edge(3, 7)]);
+        Assert.Equal("Picture difference 3, color difference 7 (lower is closer)", near.Members[0].KindLine);
+        Assert.Equal(near.Members[0].KindLine, near.Members[1].KindLine);
+        Assert.Equal(string.Empty, near.Members[0].UncertaintyLine);
+
+        var maybe = FactsSet(CandidateCategory.Uncertain, ReviewCategoryKind.Uncertain, [Edge(20, 30) with { Cosine = 0.91f }]);
+        Assert.Equal("Similar content: matched by what the photos show, not by their pixels.", maybe.Members[0].KindLine);
+        Assert.Equal("A close call. Check these photos yourself.", maybe.Members[0].UncertaintyLine);
+
+        // A set with no evidence for the photo says nothing rather than "Unavailable".
+        var unrelated = FactsSet(CandidateCategory.NearDuplicate, ReviewCategoryKind.Near, []);
+        Assert.Equal(string.Empty, unrelated.Members[0].KindLine);
+        Assert.Equal("Albumen doesn't mark photos for you. You choose what to remove.",
+            ScanOccurrenceViewModel.RecommendationText);
+    }
+
+    private static readonly ScanPin FactsPin = new(Guid.Parse("15000000-0000-0000-0000-000000000001"), 1, 3, 5);
+
+    private static ReviewGroupViewModel FactsSet(CandidateCategory category, ReviewCategoryKind kind,
+        ImmutableArray<NearDuplicateEvidence> similarity)
+    {
+        ImmutableArray<ScanFileOccurrence> photos = [Photo(1), Photo(2)];
+        var candidate = new CandidateGroup(Guid.Parse("35000000-0000-0000-0000-000000000005"), 4, FactsPin,
+            category, photos, [], category == CandidateCategory.Uncertain, null,
+            new(1024, RecoveryUnavailableReason.None)) { Similarity = similarity };
+        var snapshot = new ReviewGroupSnapshot(candidate,
+            photos.Select(photo => new ReviewMemberSnapshot(
+                photo, ReviewEligibilityState.Eligible, ReviewUnavailableReason.None, false)).ToImmutableArray(),
+            [], new(0, SelectionRecoveryUnavailableReason.None), false, null);
+        return new ReviewGroupViewModel(snapshot, kind, 1, 1, true, (_, _) => Task.CompletedTask);
+    }
+
+    private static NearDuplicateEvidence Edge(int picture, int color) =>
+        new(new(FactsPin, 1, 2, 3), new(FactsPin, 2, 2, 3), picture, color, NearRelationshipKind.Near);
+
+    private static ScanFileOccurrence Photo(long id)
+    {
+        var key = new PhysicalFileKey(7, new(0, checked((ulong)id)));
+        var path = $@"C:\Photos\{id}.jpg";
+        return new(new(FactsPin, id, 2, 3), path, path, key,
+            new(ScanStageState.Succeeded, ScanReason.None),
+            new(ScanStageState.Succeeded, ScanReason.None),
+            new(key, 512, new string('A', 64)),
+            new(512, 1, true));
     }
 
     private static ReviewGroupViewModel Set(ShellViewModel viewModel, ReviewCategoryKind category) =>

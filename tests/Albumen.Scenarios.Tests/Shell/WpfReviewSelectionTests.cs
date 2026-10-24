@@ -178,124 +178,6 @@ public sealed class WpfReviewSelectionTests
     }
 
     [Fact]
-    public void PointerSpaceAndAutomationActivationShareTheSelectionControlCommand()
-    {
-        RunOnSta(() =>
-        {
-            var fixture = ReviewShellFixture.Ready();
-            OpenIdenticalCopies(fixture.ViewModel);
-            var neutral = new ReviewCommandResult(ReviewCommandOutcome.Neutral, fixture.Workflow.Current.Review);
-            fixture.Workflow.NextSelectionResult = neutral;
-            fixture.Workflow.NextSelectionResult = neutral;
-            fixture.Workflow.NextSelectionResult = neutral;
-            var projectedWindow = new MainWindow { DataContext = fixture.ViewModel };
-            var neutralFocus = new Button { Content = "Neutral focus" };
-            var control = new ReviewSelectionInputProbe
-            {
-                Command = fixture.ViewModel.ExactGroups[0].Members[0].ToggleSelectionCommand,
-                Content = "Selection input probe",
-            };
-            var panel = new StackPanel();
-            panel.Children.Add(neutralFocus);
-            panel.Children.Add(control);
-            var inputWindow = new Window { Content = panel };
-            try
-            {
-                projectedWindow.Show();
-                Drain();
-                var projectedControl = Descendants<ToggleButton>(projectedWindow)
-                    .First(toggle => AutomationProperties.GetAutomationId(toggle) == "selection-control");
-                Assert.IsType<ReviewSelectionCheckBox>(projectedControl);
-                var command = Assert.IsType<AsyncCommand>(control.Command);
-                projectedWindow.Close();
-
-                inputWindow.Show();
-                inputWindow.Activate();
-                Assert.True(neutralFocus.Focus());
-                Assert.True(neutralFocus.IsKeyboardFocused);
-                Assert.True(control.Focus());
-                Assert.True(control.IsKeyboardFocused);
-
-                control.ReleasePointer();
-                Drain();
-                Assert.Single(fixture.Workflow.SelectionCommands);
-                Assert.False(control.IsChecked);
-                Assert.True(control.IsKeyboardFocused);
-                Assert.True(control.IsEnabled);
-                Assert.True(control.Command.CanExecute(null));
-
-                control.PressSpace();
-                Drain();
-                Assert.Equal(2, fixture.Workflow.SelectionCommands.Count);
-                Assert.False(control.IsChecked);
-                Assert.True(control.IsKeyboardFocused);
-                Assert.True(control.IsEnabled);
-                Assert.True(control.Command.CanExecute(null));
-
-                var peer = UIElementAutomationPeer.CreatePeerForElement(control);
-                Assert.NotNull(peer);
-                Assert.IsAssignableFrom<IToggleProvider>(peer.GetPattern(PatternInterface.Toggle)).Toggle();
-                Drain();
-
-                Assert.Equal(3, fixture.Workflow.SelectionCommands.Count);
-                Assert.All(fixture.Workflow.SelectionCommands, sent =>
-                    AssertSelection(sent, fixture.ViewModel.ExactGroups[0], SelectionCommandKind.Toggle, [1]));
-                Assert.Same(command, control.Command);
-                Assert.False(control.IsChecked);
-                Assert.True(control.IsKeyboardFocused);
-                Assert.True(control.IsEnabled);
-                Assert.True(control.Command.CanExecute(null));
-            }
-            finally
-            {
-                if (projectedWindow.IsVisible) projectedWindow.Close();
-                if (inputWindow.IsVisible) inputWindow.Close();
-            }
-        });
-    }
-
-    [Fact]
-    public void RoutedCtrlASelectsOnlyTheGroupContainingKeyboardFocus()
-    {
-        RunOnSta(() =>
-        {
-            var fixture = ReviewShellFixture.Ready(twoGroups: true);
-            OpenIdenticalCopies(fixture.ViewModel);
-            var window = new MainWindow { DataContext = fixture.ViewModel };
-            try
-            {
-                window.Show();
-                Drain();
-                var members = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                Assert.True(members.ActualHeight > 0);
-                Assert.Equal(4, members.Items.Count);
-                members.ApplyTemplate();
-                window.UpdateLayout();
-                var focusedMember = fixture.ViewModel.ReviewCategories[0].Groups[0].Members[0];
-                var focusedContainer = RealizeContainer(members, focusedMember);
-                Assert.Same(focusedMember, focusedContainer.DataContext);
-                var focusedControl = Descendants<ToggleButton>(focusedContainer)
-                    .First(control => AutomationProperties.GetAutomationId(control) == "selection-control");
-                focusedControl.BringIntoView();
-                Drain();
-                Assert.True(focusedControl.Focus());
-                Keyboard.Focus(focusedControl);
-                Assert.True(focusedControl.IsKeyboardFocused);
-                var selectionRevision = fixture.ViewModel.ExactGroups[0].SelectionRevision;
-
-                ApplicationCommands.SelectAll.Execute(null, focusedControl);
-                Drain();
-
-                var sent = Assert.Single(fixture.Workflow.SelectionCommands);
-                AssertSelection(sent, fixture.ViewModel.ExactGroups[0], selectionRevision,
-                    SelectionCommandKind.ReplaceFocusedGroup, [1, 4]);
-                Assert.DoesNotContain(11, sent.OccurrenceIds);
-            }
-            finally { window.Close(); }
-        });
-    }
-
-    [Fact]
     public async Task DelayedOlderCommandResultCannotReplaceTheNewerPublishedReview()
     {
         var fixture = ReviewShellFixture.Ready();
@@ -314,71 +196,146 @@ public sealed class WpfReviewSelectionTests
         Assert.Equal([4], group.SelectedOccurrenceIds.Order().ToArray());
     }
 
+    // The tile's menu, UI Automation's Toggle and the viewer's Remove button send one Toggle
+    // each through the same set command; Space on the tile places it, never marks it.
     [Fact]
-    public void SpaceCommitRestoresFocusToTheReplacementControlForTheSameOccurrence()
+    public void MenuKeyboardAndAutomationActivationShareTheToggleCommand()
     {
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
             OpenIdenticalCopies(fixture.ViewModel);
-            var window = new MainWindow { DataContext = fixture.ViewModel };
+            var neutral = new ReviewCommandResult(ReviewCommandOutcome.Neutral, fixture.Workflow.Current.Review);
+            fixture.Workflow.NextSelectionResult = neutral;
+            fixture.Workflow.NextSelectionResult = neutral;
+            fixture.Workflow.NextSelectionResult = neutral;
+            var window = ReviewTiles.Show(fixture.ViewModel);
             try
             {
-                window.Show();
-                Drain();
-                var original = Descendants<ReviewSelectionCheckBox>(window)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
-                Assert.True(original.Focus());
-                Keyboard.Focus(original);
-                Assert.True(original.IsKeyboardFocused);
+                var tile = ReviewTiles.Tile(window, 1);
+                var command = Assert.IsType<AsyncCommand>(tile.Member!.ToggleSelectionCommand);
 
-                Press(original, Key.Space);
-                Drain();
+                ReviewTiles.Click(ReviewTiles.RemoveItem(tile));
+                Assert.Single(fixture.Workflow.SelectionCommands);
+                Assert.True(tile.IsKeyboardFocused);
 
-                var replacement = Descendants<ReviewSelectionCheckBox>(window)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
-                Assert.NotSame(original, replacement);
-                Assert.True(replacement.IsKeyboardFocused);
-                Assert.True(replacement.IsEnabled);
-                Assert.True(Assert.IsType<AsyncCommand>(replacement.Command).CanExecute(null));
+                ReviewTiles.Toggle(tile);
+                Assert.Equal(2, fixture.Workflow.SelectionCommands.Count);
+                Assert.True(tile.IsKeyboardFocused);
+
+                Press(tile, Key.Space);
+                Drain();
+                Assert.Equal(1, fixture.ViewModel.LeftViewer.Member?.OccurrenceId);
+                Assert.Equal(2, fixture.Workflow.SelectionCommands.Count);
+
+                var viewerButton = Assert.IsType<Button>(window.FindName("LeftViewerRemoveButton"));
+                ReviewTiles.Focus(viewerButton);
+                ReviewTiles.Invoke(viewerButton);
+
+                Assert.Equal(3, fixture.Workflow.SelectionCommands.Count);
+                Assert.All(fixture.Workflow.SelectionCommands, sent =>
+                    AssertSelection(sent, fixture.ViewModel.ExactGroups[0], SelectionCommandKind.Toggle, [1]));
+                Assert.Same(command, tile.Member!.ToggleSelectionCommand);
+                Assert.True(command.CanExecute(null));
             }
             finally { window.Close(); }
         });
     }
 
     [Fact]
+    public void RoutedCtrlASelectsOnlyTheGroupContainingKeyboardFocus()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = ReviewShellFixture.Ready(twoGroups: true);
+            OpenIdenticalCopies(fixture.ViewModel);
+            var window = ReviewTiles.Show(fixture.ViewModel, 960, 720);
+            try
+            {
+                var gallery = Assert.IsType<ListBox>(window.FindName("ReviewGalleryList"));
+                Assert.Equal(2, gallery.Items.Count);
+                var focusedTile = ReviewTiles.Tile(window, 1);
+                ReviewTiles.Focus(focusedTile);
+                var selectionRevision = fixture.ViewModel.ExactGroups[0].SelectionRevision;
+
+                ApplicationCommands.SelectAll.Execute(null, focusedTile);
+                Drain();
+
+                var sent = Assert.Single(fixture.Workflow.SelectionCommands);
+                AssertSelection(sent, fixture.ViewModel.ExactGroups[0], selectionRevision,
+                    SelectionCommandKind.ReplaceFocusedGroup, [1, 4]);
+                Assert.DoesNotContain(11, sent.OccurrenceIds);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
+    public void MenuCommitRestoresFocusToTheReplacementControlForTheSameOccurrence()
+    {
+        RunOnSta(() =>
+        {
+            var fixture = ReviewShellFixture.Ready();
+            OpenIdenticalCopies(fixture.ViewModel);
+            var window = ReviewTiles.Show(fixture.ViewModel, 960, 720);
+            try
+            {
+                var original = ReviewTiles.Tile(window, 1);
+                ReviewTiles.Focus(original);
+
+                ReviewTiles.Click(ReviewTiles.RemoveItem(original));
+                Drain();
+
+                var replacement = ReviewTiles.Tile(window, 1);
+                Assert.NotSame(original, replacement);
+                Assert.True(replacement.IsKeyboardFocused);
+                Assert.True(replacement.IsEnabled);
+                Assert.True(Assert.IsType<AsyncCommand>(replacement.Member!.ToggleSelectionCommand).CanExecute(null));
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    // The gallery shows a set's photos whole, so the late photo here is in the last of 10,000
+    // sets: giving focus back to it realizes only the sets around it.
+    [Fact]
     public void LateMemberFocusRestorationDoesNotMaterializeAllPrecedingComparisons()
     {
         RunOnSta(() =>
         {
-            const int memberCount = 10_000;
+            const int setCount = 10_000;
             var scope = new ReviewStaticScope();
-            var workflow = new RecordingReviewWorkflow(
-                scope.Current, ReviewData.CreateLargeMemberSnapshot(memberCount));
+            var review = GroupedReviewData.LargeSnapshot(setCount)(scope.Current).Review;
+            var workflow = new RecordingReviewWorkflow(scope.Current, review);
             var viewModel = new ShellViewModel(scope, workflow);
             OpenIdenticalCopies(viewModel);
-            var window = new MainWindow { DataContext = viewModel, Height = 720 };
+            var window = ReviewTiles.Show(viewModel, 960, 720);
             try
             {
-                window.Show();
-                Drain();
-                var list = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                var lateMember = viewModel.ReviewCategories[0].Groups[0].Members[memberCount - 1];
-                var row = RealizeContainer(list, lateMember);
-                var original = Assert.Single(Descendants<ReviewSelectionCheckBox>(row));
-                Assert.True(original.Focus());
-                Keyboard.Focus(original);
+                var gallery = Assert.IsType<ListBox>(window.FindName("ReviewGalleryList"));
+                var lateSet = RealizeContainer(gallery, viewModel.ActiveReviewGroups![setCount - 1]);
+                var original = Descendants<ReviewPhotoTile>(lateSet).First();
+                var late = original.Member!.OccurrenceId;
+                ReviewTiles.Focus(original);
 
-                workflow.Publish(ReviewData.WithSelection(
-                    workflow.Current.Review, [lateMember.OccurrenceId], 10));
+                var marked = review.Groups[setCount - 1];
+                workflow.Publish(review with
+                {
+                    SelectionRevision = 10,
+                    Groups = review.Groups.SetItem(setCount - 1, marked with
+                    {
+                        SelectedOccurrenceIds = [late],
+                        Members = [.. marked.Members.Select(member => member with
+                            { Selected = member.Occurrence.Token.OccurrenceId == late })],
+                    }),
+                });
                 Drain();
 
-                Assert.True(viewModel.ReviewCategories[0].Groups[0].Members.MaterializedCount < 100,
-                    $"Focus restoration materialized {viewModel.ReviewCategories[0].Groups[0].Members.MaterializedCount} comparisons.");
-                Assert.Equal(lateMember.OccurrenceId,
-                    Assert.IsType<ScanOccurrenceViewModel>(
-                        Assert.IsType<ReviewSelectionCheckBox>(Keyboard.FocusedElement).DataContext)
-                        .OccurrenceId);
+                Assert.True(viewModel.ActiveReviewGroups!.MaterializedCount < 200,
+                    $"Focus restoration materialized {viewModel.ActiveReviewGroups.MaterializedCount} sets.");
+                var focused = Assert.IsType<ReviewPhotoTile>(Keyboard.FocusedElement);
+                Assert.Equal(late, focused.Member?.OccurrenceId);
+                Assert.NotSame(original, focused);
             }
             finally { window.Close(); }
         });
@@ -391,35 +348,21 @@ public sealed class WpfReviewSelectionTests
         {
             var fixture = ReviewShellFixture.Ready();
             OpenIdenticalCopies(fixture.ViewModel);
-            var window = new MainWindow { DataContext = fixture.ViewModel };
+            var window = ReviewTiles.Show(fixture.ViewModel, 960, 720);
             try
             {
-                window.Show();
-                Drain();
-                var first = Descendants<ReviewSelectionCheckBox>(window)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
-                Assert.True(first.Focus());
-                Keyboard.Focus(first);
+                ReviewTiles.Focus(ReviewTiles.Tile(window, 1));
 
                 fixture.Workflow.Publish(ReviewData.WithSelection(
                     fixture.Workflow.Current.Review, [1], 10));
                 window.UpdateLayout();
-                var members = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                var fourth = fixture.ViewModel.ReviewCategories[0].Groups[0].Members.Single(
-                    member => member.OccurrenceId == 4);
-                _ = RealizeContainer(members, fourth, drain: false);
-                var deliberate = Descendants<ReviewSelectionCheckBox>(window)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 4 });
-                Assert.True(deliberate.Focus());
-                Keyboard.Focus(deliberate);
-                Assert.True(deliberate.IsKeyboardFocused);
+                var deliberate = ReviewTiles.Tile(window, 4);
+                ReviewTiles.Focus(deliberate);
 
                 Drain();
 
                 Assert.True(deliberate.IsKeyboardFocused);
-                Assert.Equal(4, Assert.IsType<ScanOccurrenceViewModel>(
-                    Assert.IsAssignableFrom<ReviewSelectionCheckBox>(Keyboard.FocusedElement)
-                        .DataContext).OccurrenceId);
+                Assert.Equal(4, Assert.IsType<ReviewPhotoTile>(Keyboard.FocusedElement).Member?.OccurrenceId);
             }
             finally { window.Close(); }
         });
@@ -432,23 +375,15 @@ public sealed class WpfReviewSelectionTests
         {
             var fixture = ReviewShellFixture.Ready();
             OpenIdenticalCopies(fixture.ViewModel);
-            var window = new MainWindow { DataContext = fixture.ViewModel };
+            var window = ReviewTiles.Show(fixture.ViewModel, 960, 720);
             try
             {
-                window.Show();
-                Drain();
-                var original = Descendants<ReviewSelectionCheckBox>(window)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
-                Assert.True(original.Focus());
-                Keyboard.Focus(original);
-                Assert.True(original.IsKeyboardFocused);
+                ReviewTiles.Focus(ReviewTiles.Tile(window, 1));
 
                 fixture.Workflow.Publish(ReviewData.WithSelection(
                     fixture.Workflow.Current.Review, [1], 10));
                 var deliberate = Assert.IsType<TextBlock>(window.FindName("ReviewHeading"));
-                Assert.True(deliberate.Focus());
-                Keyboard.Focus(deliberate);
-                Assert.True(deliberate.IsKeyboardFocused);
+                ReviewTiles.Focus(deliberate);
 
                 Drain();
 
@@ -466,15 +401,11 @@ public sealed class WpfReviewSelectionTests
         {
             var fixture = ReviewShellFixture.Ready();
             OpenIdenticalCopies(fixture.ViewModel);
-            var window = new MainWindow { DataContext = fixture.ViewModel };
+            var window = ReviewTiles.Show(fixture.ViewModel, 960, 720);
             try
             {
-                window.Show();
-                Drain();
-                var original = Descendants<ReviewSelectionCheckBox>(window)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
-                Assert.True(original.Focus());
-                Keyboard.Focus(original);
+                var original = ReviewTiles.Tile(window, 1);
+                ReviewTiles.Focus(original);
 
                 var current = fixture.Workflow.Current.Review;
                 var replacement = current with
@@ -485,10 +416,9 @@ public sealed class WpfReviewSelectionTests
                 fixture.Workflow.Publish(replacement);
                 Drain();
 
-                var replacementControl = Descendants<ReviewSelectionCheckBox>(window)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
-                Assert.NotSame(original, replacementControl);
-                Assert.False(replacementControl.IsKeyboardFocused);
+                var replacementTile = ReviewTiles.Tile(window, 1);
+                Assert.NotSame(original, replacementTile);
+                Assert.False(replacementTile.IsKeyboardFocused);
             }
             finally { window.Close(); }
         });
@@ -703,31 +633,6 @@ public sealed class WpfReviewSelectionTests
     }
 }
 
-internal sealed class ReviewSelectionInputProbe : ReviewSelectionCheckBox
-{
-    public void ReleasePointer() => OnClick();
-
-    public void PressSpace()
-    {
-        var source = PresentationSource.FromVisual(this);
-        Assert.NotNull(source);
-        var down = new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, Key.Space)
-        {
-            RoutedEvent = Keyboard.KeyDownEvent,
-            Source = this,
-        };
-        Assert.Same(this, down.OriginalSource);
-        OnKeyDown(down);
-        var up = new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, Key.Space)
-        {
-            RoutedEvent = Keyboard.KeyUpEvent,
-            Source = this,
-        };
-        Assert.Same(this, up.OriginalSource);
-        OnKeyUp(up);
-    }
-}
-
 internal sealed class ReviewShellFixture
 {
     private ReviewShellFixture(bool twoGroups, bool externalSurvivor, ImmutableArray<long> selected,
@@ -865,10 +770,12 @@ internal sealed class RecordingReviewDialogService : IReviewDialogService
 {
     public SurvivorOverrideDialogResult Result { get; set; } = SurvivorOverrideDialogResult.Cancel;
     public List<OverrideProposalToken> Proposals { get; } = [];
+    public List<IInputElement> InvokingFocus { get; } = [];
     public Task<SurvivorOverrideDialogResult> ShowSurvivorOverrideAsync(OverrideProposalToken proposal,
         IInputElement invokingFocus, CancellationToken cancellationToken)
     {
         Proposals.Add(proposal);
+        InvokingFocus.Add(invokingFocus);
         return Task.FromResult(Result);
     }
 }

@@ -1,7 +1,5 @@
 using System.Windows;
 using System.Windows.Automation;
-using System.Windows.Automation.Peers;
-using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -46,23 +44,18 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 Assert.Equal(1, AutomationProperties.GetPositionInSet(openCategory));
                 Assert.Equal(4, AutomationProperties.GetSizeOfSet(openCategory));
                 Click(openCategory);
+                Assert.Equal(ReviewNavigationLevel.Gallery,
+                    fixture.ViewModel.ReviewNavigationLevel);
+                Assert.True(NamedList(window, "ReviewGalleryList").IsVisible);
 
-                var groups = NamedList(window, "ReviewGroupsList");
-                var groupRow = Realize(groups, groups.Items[0]);
-                groupRow.Focus();
-                Keyboard.Focus(groupRow);
-                WpfReviewSelectionTests.Press(groupRow, Key.Enter);
+                // Enter on a photo shows it in the empty Left Viewer and marks nothing.
+                var tile = ReviewTiles.Tile(window, 1);
+                var member = Assert.IsType<ScanOccurrenceViewModel>(tile.Member);
+                Assert.Equal(member.PositionInSet, AutomationProperties.GetPositionInSet(tile));
+                Assert.Equal(member.SizeOfSet, AutomationProperties.GetSizeOfSet(tile));
+                ReviewTiles.Focus(tile);
+                WpfReviewSelectionTests.Press(tile, Key.Enter);
                 WpfReviewSelectionTests.Drain();
-
-                var comparisons = NamedList(window, "ReviewComparisonsList");
-                var openMember = Descendants<Button>(comparisons).First(button =>
-                    AutomationProperties.GetAutomationId(button) == "open-review-member");
-                var member = Assert.IsType<ScanOccurrenceViewModel>(openMember.DataContext);
-                Assert.Equal(member.PositionInSet,
-                    AutomationProperties.GetPositionInSet(openMember));
-                Assert.Equal(member.SizeOfSet,
-                    AutomationProperties.GetSizeOfSet(openMember));
-                Click(openMember);
 
                 Assert.Equal(ReviewNavigationLevel.Gallery,
                     fixture.ViewModel.ReviewNavigationLevel);
@@ -79,7 +72,7 @@ public sealed class WpfGroupedReviewAccessibilityTests
                     window.FindName("LeftViewerPanel"));
                 Assert.Equal($"Left Viewer: {member.FileName}", AutomationProperties.GetName(viewer));
                 Assert.Equal(member.ItemStatus, AutomationProperties.GetItemStatus(viewer));
-                var preview = Assert.Single(Descendants<PreviewStatusControl>(window));
+                var preview = Assert.IsType<PreviewStatusControl>(window.FindName("LeftPreviewStatusControl"));
                 Assert.True(preview.IsVisible);
                 Assert.Same(fixture.ViewModel.LeftViewer.Preview, preview.DataContext);
                 Assert.Contains("Unavailable",
@@ -92,11 +85,8 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 Click(back);
                 Assert.Equal(ReviewNavigationLevel.Categories,
                     fixture.ViewModel.ReviewNavigationLevel);
-                Assert.True(groups.IsKeyboardFocusWithin);
-                Click(back);
-                Assert.Equal(ReviewNavigationLevel.Categories,
-                    fixture.ViewModel.ReviewNavigationLevel);
                 Assert.True(categories.IsKeyboardFocusWithin);
+                Assert.False(back.IsEnabled);
                 Assert.Empty(fixture.Workflow.SelectionCommands);
             }
             finally
@@ -117,33 +107,28 @@ public sealed class WpfGroupedReviewAccessibilityTests
             try
             {
                 ShowAndDrain(window);
-                var comparisons = NamedList(window, "ReviewComparisonsList");
-                var row = Realize(comparisons, comparisons.Items[0]);
-                row.IsSelected = true;
+                var tile = ReviewTiles.Tile(window, 1);
+                ReviewTiles.Focus(tile);
                 WpfReviewSelectionTests.Drain();
                 Assert.Empty(fixture.Workflow.SelectionCommands);
 
-                var selection = Assert.Single(Descendants<ReviewSelectionCheckBox>(row));
-                Assert.StartsWith("Kept:", AutomationProperties.GetName(selection),
+                Assert.StartsWith("Kept:", AutomationProperties.GetName(tile),
                     StringComparison.OrdinalIgnoreCase);
-                Assert.StartsWith("Kept;", AutomationProperties.GetItemStatus(selection),
+                Assert.StartsWith("Kept;", AutomationProperties.GetItemStatus(tile),
                     StringComparison.Ordinal);
-                selection.Focus();
-                Keyboard.Focus(selection);
-                Toggle(selection);
-                WpfReviewSelectionTests.Drain();
-                window.UpdateLayout();
+                Assert.Equal(ToggleState.Off, ReviewTiles.ToggleStateOf(tile));
+                ReviewTiles.Toggle(tile);
+                ShowAndDrain(window);
 
                 var command = Assert.Single(fixture.Workflow.SelectionCommands);
                 Assert.Equal(SelectionCommandKind.Toggle, command.Kind);
                 Assert.Equal([1], command.OccurrenceIds);
                 Assert.Equal(ReviewNavigationLevel.Gallery,
                     fixture.ViewModel.ReviewNavigationLevel);
-                var current = NamedList(window, "ReviewComparisonsList");
-                Assert.Contains(Descendants<ReviewSelectionCheckBox>(current),
-                    control => control.IsKeyboardFocusWithin
-                        && control.DataContext is ScanOccurrenceViewModel member
-                        && member.OccurrenceId == 1);
+                var current = ReviewTiles.Tile(window, 1);
+                Assert.True(current.IsKeyboardFocused);
+                Assert.Equal(ToggleState.On, ReviewTiles.ToggleStateOf(current));
+                Assert.Null(fixture.ViewModel.LeftViewer.Member);
             }
             finally
             {
@@ -165,34 +150,35 @@ public sealed class WpfGroupedReviewAccessibilityTests
             try
             {
                 ShowAndDrain(window);
-                var groups = NamedList(window, "ReviewGroupsList");
-                var groupRow = Realize(groups, groups.Items[0]);
-                var caption = Descendants<TextBlock>(groupRow).Single(text =>
+                var gallery = NamedList(window, "ReviewGalleryList");
+                var setRow = Realize(gallery, gallery.Items[0]);
+                var caption = Descendants<TextBlock>(setRow).Single(text =>
                     text.Text == "Nothing left to decide: 1 marked elsewhere");
                 Assert.True(caption.IsVisible);
-                var card = Descendants<Grid>(groupRow).First(grid => Descendants<TextBlock>(grid).Contains(caption));
-                Assert.Equal(SystemParameters.HighContrast ? 1.0 : 0.55, card.Opacity, 2);
+                var set = Descendants<ReviewAutomationBorder>(setRow).First(border =>
+                    AutomationProperties.GetAutomationId(border) == "review-set");
+                Assert.Equal(SystemParameters.HighContrast ? 1.0 : 0.55, set.Opacity, 2);
 
-                WpfReviewSelectionTests.Drain();
-                window.UpdateLayout();
-                var comparisons = NamedList(window, "ReviewComparisonsList");
-                var row = Realize(comparisons, comparisons.Items[0]);
-                var selection = Assert.Single(Descendants<ReviewSelectionCheckBox>(row));
-                Assert.False(selection.IsEnabled);
-                Assert.True(selection.IsChecked);
-                Assert.Equal("Marked for removal in Identical copies set 1", selection.Content);
-                Assert.StartsWith("Marked for removal:", AutomationProperties.GetName(selection),
+                // The photo marked in its Identical-copies set shows that mark here and can't be
+                // changed here: its Toggle is on and refuses, its menu item is disabled.
+                var marked = ReviewTiles.Tile(window, 1);
+                Assert.Equal(ToggleState.On, ReviewTiles.ToggleStateOf(marked));
+                var unmark = ReviewTiles.RemoveItem(marked);
+                Assert.Equal("Unmark for removal", unmark.Header);
+                Assert.False(unmark.IsEnabled);
+                Assert.Contains(Descendants<TextBlock>(marked), text =>
+                    text.IsVisible && text.Text == "Marked in Identical copies set 1");
+                Assert.StartsWith("Marked for removal:", AutomationProperties.GetName(marked),
                     StringComparison.Ordinal);
                 Assert.StartsWith("Marked for removal in Identical copies set 1;",
-                    AutomationProperties.GetItemStatus(selection), StringComparison.Ordinal);
-                var kept = Assert.Single(Descendants<ReviewSelectionCheckBox>(
-                    Realize(comparisons, comparisons.Items[1])));
-                Assert.True(kept.IsEnabled);
-                Assert.Equal("Kept", kept.Content);
+                    AutomationProperties.GetItemStatus(marked), StringComparison.Ordinal);
+                Assert.Throws<ElementNotEnabledException>(() => ReviewTiles.Toggle(marked));
+                var kept = ReviewTiles.Tile(window, 12);
+                Assert.Equal(ToggleState.Off, ReviewTiles.ToggleStateOf(kept));
+                Assert.Equal("Remove", ReviewTiles.RemoveItem(kept).Header);
+                Assert.True(ReviewTiles.RemoveItem(kept).IsEnabled);
 
-                var openMember = Descendants<Button>(row).First(button =>
-                    AutomationProperties.GetAutomationId(button) == "open-review-member");
-                Click(openMember);
+                ReviewTiles.Invoke(marked);
                 Assert.Equal(1, fixture.ViewModel.LeftViewer.Member?.OccurrenceId);
                 Assert.Empty(fixture.Workflow.SelectionCommands);
             }
@@ -223,16 +209,14 @@ public sealed class WpfGroupedReviewAccessibilityTests
             try
             {
                 ShowAndDrain(window);
-                var selection = Descendants<ReviewSelectionCheckBox>(
-                    NamedList(window, "ReviewComparisonsList")).First();
-                selection.Focus();
-                Keyboard.Focus(selection);
-                Toggle(selection);
-                WpfReviewSelectionTests.Drain();
+                var tile = ReviewTiles.Tile(window, 1);
+                ReviewTiles.Click(ReviewTiles.RemoveItem(tile));
+                ShowAndDrain(window);
 
                 Assert.Equal([proposal], dialog.Proposals);
+                Assert.Same(tile, Assert.Single(dialog.InvokingFocus));
                 Assert.Single(fixture.Workflow.Affirmations);
-                Assert.True(selection.IsKeyboardFocusWithin);
+                Assert.True(ReviewTiles.Tile(window, 1).IsKeyboardFocused);
             }
             finally
             {
@@ -325,10 +309,12 @@ public sealed class WpfGroupedReviewAccessibilityTests
             try
             {
                 ShowAndDrain(window);
+                ReviewTiles.Invoke(ReviewTiles.Tile(window, 1));
                 var preview = Assert.IsType<PreviewStatusControl>(
                     window.FindName("LeftPreviewStatusControl"));
                 preview.Height = 512;
                 ShowAndDrain(window);
+                Assert.True(preview.IsVisible);
 
                 var evidence = NamedElement(window, "ReviewViewersPanel");
                 var evidenceScroller = Ancestors(evidence).OfType<ScrollViewer>().FirstOrDefault();
@@ -373,10 +359,10 @@ public sealed class WpfGroupedReviewAccessibilityTests
                 Assert.True(navigation.ActualHeight <= page.ViewportHeight,
                     $"Navigation height {navigation.ActualHeight} exceeded page viewport {page.ViewportHeight}.");
 
-                var comparisons = NamedList(window, "ReviewComparisonsList");
-                Assert.True(comparisons.IsVisible);
-                var selection = Descendants<ReviewSelectionCheckBox>(
-                    Realize(comparisons, comparisons.Items[0])).Single();
+                var gallery = NamedList(window, "ReviewGalleryList");
+                Assert.True(gallery.IsVisible);
+                Realize(gallery, gallery.Items[0]);
+                var selection = ReviewTiles.Tile(gallery, 1);
                 selection.BringIntoView();
                 ShowAndDrain(window);
                 AssertInsideViewport(page, selection);
@@ -551,15 +537,6 @@ public sealed class WpfGroupedReviewAccessibilityTests
     private static void Click(Button button)
     {
         button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        WpfReviewSelectionTests.Drain();
-    }
-
-    private static void Toggle(ReviewSelectionCheckBox selection)
-    {
-        var peer = UIElementAutomationPeer.FromElement(selection)
-            ?? UIElementAutomationPeer.CreatePeerForElement(selection);
-        Assert.IsAssignableFrom<IToggleProvider>(
-            peer.GetPattern(PatternInterface.Toggle)).Toggle();
         WpfReviewSelectionTests.Drain();
     }
 
