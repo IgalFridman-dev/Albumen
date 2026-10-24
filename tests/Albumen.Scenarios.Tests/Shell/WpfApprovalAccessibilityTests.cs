@@ -157,7 +157,7 @@ public sealed class WpfApprovalAccessibilityTests
                 window.UpdateLayout();
                 var root = UIElementAutomationPeer.CreatePeerForElement(window);
                 Assert.NotNull(root);
-                var group = FindPeer(root, "open-review-group");
+                var group = FindPeer(root, "review-set");
                 var groupName = group.GetName();
                 var groupStatus = group.GetItemStatus();
                 Assert.Contains("Identical copies set 1 of 1", groupName, StringComparison.Ordinal);

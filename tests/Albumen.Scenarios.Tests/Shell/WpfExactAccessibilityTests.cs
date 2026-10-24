@@ -107,7 +107,7 @@ public sealed class WpfExactAccessibilityTests
     }
 
     [Fact]
-    public void LargeReviewActuallyVirtualizesAndExposesSelectableWrappingReadOnlyPaths()
+    public void LargeReviewActuallyVirtualizesItsSetsAndRemovesNothingByItself()
     {
         RunOnSta(() =>
         {
@@ -122,25 +122,14 @@ public sealed class WpfExactAccessibilityTests
                 window.Show();
                 Drain();
                 window.UpdateLayout();
-                var groups = Assert.IsType<ListBox>(window.FindName("ReviewGroupsList"));
-                Assert.True(VirtualizingPanel.GetIsVirtualizing(groups));
-                Assert.Equal(1000, groups.Items.Count);
-                Assert.Null(groups.ItemContainerGenerator.ContainerFromIndex(999));
-                Drain();
-                window.UpdateLayout();
-                var comparisons = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                var paths = Descendants<TextBox>(comparisons).ToArray();
-                Assert.NotEmpty(paths);
-                Assert.All(paths, path =>
-                {
-                    Assert.True(path.IsReadOnly);
-                    Assert.Equal(TextWrapping.Wrap, path.TextWrapping);
-                    Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(path)));
-                });
-                var selectionControls = Descendants<ToggleButton>(comparisons)
-                    .Where(control => AutomationProperties.GetAutomationId(control) == "selection-control").ToArray();
-                Assert.NotEmpty(selectionControls);
-                Assert.All(selectionControls, control => Assert.True(control.IsTabStop));
+                var gallery = Assert.IsType<ListBox>(window.FindName("ReviewGalleryList"));
+                Assert.True(VirtualizingPanel.GetIsVirtualizing(gallery));
+                Assert.Equal(1000, gallery.Items.Count);
+                Assert.Null(gallery.ItemContainerGenerator.ContainerFromIndex(999));
+                var tiles = Descendants<Button>(gallery)
+                    .Where(tile => AutomationProperties.GetAutomationId(tile) == "review-photo").ToArray();
+                Assert.NotEmpty(tiles);
+                Assert.All(tiles, tile => Assert.True(tile.IsTabStop && tile.Focusable));
                 Assert.DoesNotContain(Descendants<Button>(window), button => button.IsEnabled &&
                     (button.Content?.ToString()?.Contains("Remove", StringComparison.OrdinalIgnoreCase) == true ||
                      button.Name == "ApproveCleanupButton"));
@@ -183,29 +172,42 @@ public sealed class WpfExactAccessibilityTests
         });
     }
 
+    // A set shows all of its photos, so a 2,000-photo set realizes 2,000 tiles; only the rows in
+    // view (and one either side) decode their thumbnails until the gallery scrolls.
     [Fact]
-    public void OneLargeExactGroupKeepsItsMemberViewportVirtualized()
+    public void OneLargeExactGroupKeepsThumbnailLoadsToTheVisibleRows()
     {
-        RunOnSta(() =>
+        WpfReviewSelectionTests.RunOnSta(() =>
         {
-            var fixture = new ExactShellFixture();
-            fixture.PublishReview(ScanStatus.Complete, memberCount: 2000);
-            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
-            var window = new MainWindow { DataContext = fixture.ViewModel };
+            var scope = new ReviewStaticScope();
+            var workflow = new RecordingReviewWorkflow(scope.Current, ReviewData.CreateLargeMemberSnapshot(2000));
+            var thumbnails = new ControllableReviewPreviewSource(autoComplete: true);
+            var viewModel = new ShellViewModel(scope, workflow, reviewThumbnailSource: thumbnails);
+            WpfReviewSelectionTests.OpenIdenticalCopies(viewModel);
+            var window = new MainWindow { DataContext = viewModel };
             try
             {
                 window.Show();
-                Drain();
+                WpfReviewSelectionTests.Drain();
                 window.UpdateLayout();
-                var members = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                Assert.Equal(2000, members.Items.Count);
-                Assert.True(VirtualizingPanel.GetIsVirtualizing(members));
-                Assert.Null(members.ItemContainerGenerator.ContainerFromIndex(1999));
-                members.ScrollIntoView(members.Items[1999]);
-                Drain();
+                WpfReviewSelectionTests.Drain();
+                var gallery = Assert.IsType<ListBox>(window.FindName("ReviewGalleryList"));
+                Assert.Single(gallery.Items.Cast<object>());
+                var tiles = Descendants<Button>(gallery)
+                    .Where(tile => AutomationProperties.GetAutomationId(tile) == "review-photo").ToArray();
+                Assert.Equal(2000, tiles.Length);
+                Assert.NotEmpty(thumbnails.Requests);
+                Assert.True(thumbnails.Requests.Count < 40,
+                    $"The first rows asked for {thumbnails.Requests.Count} thumbnails.");
+                Assert.DoesNotContain(thumbnails.Requests, request => request.Occurrence.Token.OccurrenceId == 2000);
+
+                var scroller = Descendants<ScrollViewer>(gallery).First();
+                scroller.ScrollToEnd();
+                WpfReviewSelectionTests.Drain();
                 window.UpdateLayout();
-                Assert.NotNull(members.ItemContainerGenerator.ContainerFromIndex(1999));
-                Assert.True(Descendants<ListBoxItem>(members).Count() < 100);
+                WpfReviewSelectionTests.Drain();
+
+                Assert.Contains(thumbnails.Requests, request => request.Occurrence.Token.OccurrenceId == 2000);
             }
             finally { window.Close(); }
         });
