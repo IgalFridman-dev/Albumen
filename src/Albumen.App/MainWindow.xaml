@@ -200,7 +200,6 @@
                                     </Condition>
                                 </MultiDataTrigger.Conditions>
                                 <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
-                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                             </MultiDataTrigger>
                             <MultiDataTrigger>
                                 <MultiDataTrigger.Conditions>
@@ -214,6 +213,7 @@
                                     </Condition>
                                     <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
                                 </MultiDataTrigger.Conditions>
+                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                                 <Setter Property="BorderThickness" Value="2" />
                             </MultiDataTrigger>
                         </Style.Triggers>
@@ -221,11 +221,18 @@
                 </Button.Style>
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="13" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Border Style="{StaticResource Albumen.KindMark}" Margin="0,2,10,2" />
+                    <Border Style="{StaticResource Albumen.AccentLine}" Margin="0,2,10,2">
+                        <Border.Visibility>
+                            <MultiBinding Converter="{StaticResource EqualValuesToVisibilityConverter}">
+                                <Binding Path="Category" />
+                                <Binding Path="DataContext.ActiveReviewCategory.Category" RelativeSource="{RelativeSource AncestorType=Window}" />
+                            </MultiBinding>
+                        </Border.Visibility>
+                    </Border>
                     <StackPanel Grid.Column="1">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
                         <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.Caption}" Text="{Binding Description}" />
@@ -292,12 +299,7 @@
                             </Style.Triggers>
                         </Style>
                     </Grid.Style>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border Style="{StaticResource Albumen.KindMark}" Margin="0,2,10,2" />
-                    <StackPanel Grid.Column="1">
+                    <StackPanel>
                         <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextWrapping="Wrap" />
                         <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.Caption}" Text="{Binding SelectionStatus}" />
                     </StackPanel>
@@ -575,13 +577,13 @@
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsCurrent}" Value="True">
                                                 <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
-                                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                                             </DataTrigger>
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
                                                     <Condition Binding="{Binding IsCurrent}" Value="True" />
                                                     <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
                                                 </MultiDataTrigger.Conditions>
+                                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                                                 <Setter Property="BorderThickness" Value="2" />
                                             </MultiDataTrigger>
                                         </Style.Triggers>
@@ -589,10 +591,24 @@
                                 </Button.Style>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="11" />
                                         <ColumnDefinition Width="36" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Width="26" Height="26" CornerRadius="13" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                    <!-- Hidden, not collapsed, so every step's number lines up. -->
+                                    <Border Margin="0,4,8,4">
+                                        <Border.Style>
+                                            <Style TargetType="Border" BasedOn="{StaticResource Albumen.AccentLine}">
+                                                <Setter Property="Visibility" Value="Hidden" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                    </Border>
+                                    <Border Grid.Column="1" Width="26" Height="26" CornerRadius="13" HorizontalAlignment="Left" VerticalAlignment="Center">
                                         <Border.Style>
                                             <Style TargetType="Border">
                                                 <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
@@ -615,7 +631,7 @@
                                         <TextBlock FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
                                                    Text="{Binding StepNumber}" />
                                     </Border>
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
                                         <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding DisplayName}" />
                                         <TextBlock Text="{Binding AvailabilityLabel}">
                                             <TextBlock.Style>
