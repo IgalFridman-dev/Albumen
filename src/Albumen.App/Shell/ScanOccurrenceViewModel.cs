@@ -159,10 +159,10 @@ public sealed class ScanOccurrenceViewModel
                 "Failed",
                 "Check file access and health, then start a fresh Scan."),
             ScanStageState.Pending or ScanStageState.Running => (
-                "Outstanding",
+                "Not finished",
                 "Wait for this Scan to finish, or cancel it and start a fresh Scan."),
             _ => (
-                "Analyzed acceptable",
+                "Unique photo",
                 "No duplicate candidate was found. Keep it, or scan again after the file changes."),
         };
     }

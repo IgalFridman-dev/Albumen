@@ -1503,24 +1503,21 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private static ImmutableArray<ScanOutcomeSummaryItemViewModel> ProjectOutcomeSummaries(
         Albumen.Application.Scan.ScanSnapshot scan)
     {
-        var uncertainIds = scan.Groups.Where(group => group.Uncertain)
-            .SelectMany(group => group.Members)
-            .Select(member => member.Token.OccurrenceId)
-            .ToHashSet();
-        var candidateIds = scan.Groups.Where(group => !group.Uncertain)
-            .SelectMany(group => group.Members)
-            .Select(member => member.Token.OccurrenceId)
-            .Where(id => !uncertainIds.Contains(id))
-            .ToHashSet();
-        var acceptable = scan.Occurrences.LongCount(row =>
+        // Each photo is counted once, in the first of: Maybe similar, identical, look-alike.
+        var uncertainIds = MemberIds(scan, ReviewCategoryKind.Uncertain, []);
+        var identicalIds = MemberIds(scan, ReviewCategoryKind.Exact, uncertainIds);
+        var lookAlikeIds = MemberIds(scan, ReviewCategoryKind.Near, [.. uncertainIds, .. identicalIds]);
+        var unique = scan.Occurrences.LongCount(row =>
             row.Exact.State == ScanStageState.Succeeded
             && !IsCouldNotAnalyze(row)
-            && !candidateIds.Contains(row.Token.OccurrenceId)
+            && !identicalIds.Contains(row.Token.OccurrenceId)
+            && !lookAlikeIds.Contains(row.Token.OccurrenceId)
             && !uncertainIds.Contains(row.Token.OccurrenceId));
         return
         [
-            new("Candidate", candidateIds.Count, "Review the group and choose manually."),
-            new("Analyzed acceptable", acceptable,
+            new("In identical sets", identicalIds.Count, "Review the set and choose manually."),
+            new("In look-alike sets", lookAlikeIds.Count, "Review the set and choose manually."),
+            new("Unique photos", unique,
                 "No duplicate candidate was found. Keep it, or scan again after the file changes."),
             new("Uncertain", uncertainIds.Count,
                 "Review it before selecting; Albumen could not classify it confidently."),
@@ -1530,10 +1527,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 "Start a fresh Scan to analyze this file."),
             new("Failed", scan.Counts.Failed,
                 "Check file access and health, then start a fresh Scan."),
-            new("Outstanding", scan.Counts.Outstanding,
-                "Wait for this Scan to finish, or cancel it and start a fresh Scan."),
         ];
     }
+
+    private static HashSet<long> MemberIds(
+        Albumen.Application.Scan.ScanSnapshot scan, ReviewCategoryKind category, HashSet<long> counted) =>
+        scan.Groups.Where(group => InCategory(group, category))
+            .SelectMany(group => group.Members)
+            .Select(member => member.Token.OccurrenceId)
+            .Where(id => !counted.Contains(id))
+            .ToHashSet();
 
     private void ProjectAction(ActionSnapshot? previous, ReviewSnapshot? previousReview, AlbumenSnapshot snapshot)
     {
