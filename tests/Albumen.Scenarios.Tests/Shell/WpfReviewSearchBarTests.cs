@@ -441,6 +441,40 @@ public sealed class WpfReviewSearchBarTests
         });
     }
 
+    // Keyboard focus that comes back to the box with the window (Alt+Tab back, a closed dialog) did
+    // not move into it from anywhere, so the prompt and its caret stay as they were and the next key
+    // types on instead of replacing the prompt.
+    [Fact]
+    public void FocusComingBackWithTheWindowLeavesThePromptAndItsCaret()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new SearchFixture();
+            var window = ReviewTiles.Show(fixture.ViewModel);
+            try
+            {
+                var box = PromptBox(window);
+                box.Text = "at sea";
+                Search(fixture, window, box);
+                box.Select(3, 0);
+
+                // The window lost its activation and got it back: focus returns from no element.
+                Keyboard.ClearFocus();
+                Assert.False(box.IsKeyboardFocused);
+                Keyboard.Focus(box);
+
+                Assert.True(box.IsKeyboardFocused);
+                Assert.Equal(0, box.SelectionLength);
+                Assert.Equal(3, box.CaretIndex);
+                Assert.Empty(fixture.Workflow.SelectionCommands);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     // The filter replaced the 1.1 strip of results: a search shows its matches in the kinds.
     [Fact]
     public void NoResultStripIsShownUnderTheBar()
