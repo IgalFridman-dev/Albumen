@@ -5,10 +5,10 @@
         AutomationProperties.ItemStatus="{Binding StatusText}">
     <StackPanel>
         <!-- MainWindow sizes the preview from the Review page viewport and the zoom
-             slider. The scroller keeps the height a fitted photo takes; a zoomed photo
-             scrolls both ways inside it, with both scroll bars. -->
+             slider. The scroller keeps the height a fitted photo takes (UpdateImageBounds
+             sets its MaxHeight to FitHeight on its first layout and on every change); a
+             zoomed photo scrolls both ways inside it, with both scroll bars. -->
         <ScrollViewer x:Name="PreviewImageScroller"
-                      MaxHeight="512"
                       HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Disabled"
                       Focusable="False"
