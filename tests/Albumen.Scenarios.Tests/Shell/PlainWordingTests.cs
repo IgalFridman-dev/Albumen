@@ -23,6 +23,8 @@ public sealed class PlainWordingTests
     [InlineData(ReviewCategoryKind.Near, "The same photo resized, recompressed or lightly edited.")]
     [InlineData(ReviewCategoryKind.Uncertain, "Photos that look close.")]
     [InlineData(ReviewCategoryKind.CouldNotAnalyze, "Unsupported files.")]
+    // Igal, 2026-10-25: "Matching photos…" alone didn't say matching what.
+    [InlineData(ReviewCategoryKind.OtherMatches, "Photos that match the search but aren't in any set.")]
     public void CategoriesUseShortDescriptions(ReviewCategoryKind category, string description)
     {
         var row = new ReviewCategoryViewModel(category, ReviewCategoryNames.For(category), 0, 1, 4,
