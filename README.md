@@ -17,18 +17,21 @@ local folder for byte-identical and conservatively near-identical JPEG/PNG image
 review, and moves only the files you explicitly approve to the Recycle Bin. Since 1.1 an on-device
 SigLIP 2 image model also finds photos of the same moment that the hash misses and lets you search the
 scan by a short description, and a classical sharpness measure points out the sharpest photo of a set.
-It works fully offline, never deletes permanently, and keeps a durable record of every action it takes.
+In 1.1.5 the app is dark, Review shows each kind's sets as a photo gallery with two viewers, and the
+search filters Review instead of listing its matches apart. It works fully offline, never deletes
+permanently, and keeps a durable record of every action it takes.
 
 | 1. Choose a folder | 2. Approve exactly what goes | 3. See every outcome |
 |---|---|---|
 | ![Folder screen with a demo folder ready to scan and the scan options](docs/images/choose-folder.png) | ![Approval asking to move one photo to the Recycle Bin, with its path and what the cleanup covers](docs/images/approve-cleanup.png) | ![Cleanup finished with one photo moved to the Recycle Bin](docs/images/cleanup-results.png) |
-| Preflight checks the folder is local and readable, and the scan options sit on the same screen. | Nothing moves until you approve. The approval lists every photo and where it goes. | Each photo is sent on its own, and its result is kept in History. |
+| Preflight checks the folder is local and readable and names the first photos in it; identical copies and look-alikes are always found. | Nothing moves until you approve. The approval lists every photo and where it goes. | Each photo is sent on its own, and its result is kept in History. |
 
 ### New in 1.1: find photos by what they show
 
-An on-device image model (SigLIP 2) reads every photo during the scan. Type a few words on Review and
-Albumen lists this scan's photos that fit them, most likely first, each with its set. Nothing leaves
-the PC, and the list marks nothing for removal.
+An on-device image model (SigLIP 2) reads every photo during the scan. Type a few words in the search
+bar at the top of Review and, from 1.1.5, every kind narrows to the sets that hold a matching photo,
+best match first, with the matches labelled; matching photos in no set are listed under Other matches.
+Nothing leaves the PC, and searching marks nothing for removal and keeps every mark.
 
 ![Review right after a scan: the search box above the kinds of duplicates found, with 8 Maybe similar sets](docs/images/review-search.png)
 
@@ -66,11 +69,11 @@ Deleting someone's photos is a one-way door, so Albumen is designed around one q
 | **Exact duplicates** | Streaming SHA-256 over file bytes; hard links are recognized as aliases of the same file, not as copies. |
 | **Near duplicates** | Managed dHash plus a color signature with conservative thresholds; borderline pairs are left ungrouped. |
 | **Maybe similar** | SigLIP 2 photo vectors (ONNX Runtime, on the CPU) join photos whose cosine is high but whose hash differs, such as a burst where the subject moved. These sets are never pre-marked. |
-| **Text search** | "Find photos by what they show" ranks the scan's photos against a short prompt by brute-force cosine over the stored vectors: no vector database. It only lists photos; it marks nothing. |
+| **Text search** | "Find photos by what they show" ranks the scan's photos against a short prompt by brute-force cosine over the stored vectors: no vector database. It filters Review to the sets with a match; it marks nothing. |
 | **Sharpest photo** | A tiled variance-of-Laplacian measure on the decoded photo; "sharpest" is the first reason on a set's suggested best photo. |
 | **Guided workflow** | Four steps (Choose folder → Scan → Review → Clean up), each unlocked only when the previous one is valid. The folder and the scan options share one screen. |
 | **Safe scope** | Preflight rejects network shares, cloud-only placeholders and protected system folders before scanning. |
-| **Review** | Exact and Near categories, virtualized groups, bounded previews, keyboard navigation and a suggested survivor you can override. |
+| **Review** | Each kind's sets as a virtualized photo gallery with facts on hover, Left and Right viewers with one zoom, Remove by right-click or a viewer button, keyboard navigation and a suggested survivor you can override. |
 | **History** | Every cleanup's per-photo outcome survives relaunch and can be checked again read-only later. |
 | **Crash-safe scans** | Scan state is checkpointed in SQLite with reconciled accounting; an interrupted scan is closed safely and restarted fresh. |
 
@@ -99,7 +102,7 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 
 | Area | Technology |
 |---|---|
-| UI | WPF with the Fluent theme, MVVM, UI Automation for keyboard and screen reader support |
+| UI | WPF with the Fluent theme in dark mode (system colours under High Contrast), MVVM, UI Automation for keyboard and screen reader support |
 | Imaging | Windows Imaging Component (WIC) for orientation-aware decoding and bounded previews |
 | Image model | SigLIP 2 base patch16-224 exported to ONNX, run by `Microsoft.ML.OnnxRuntime` (CPU); SentencePiece tokenizer from `Microsoft.ML.Tokenizers`; files pinned by SHA-256 in `models/manifest.json` |
 | File system | Win32 traversal and identity APIs, `IFileOperation` for Recycle Bin moves |
@@ -179,14 +182,18 @@ Raw observations, not benchmarks or promises. The verification VM has 2 CPUs and
 - Near-duplicate quality was validated on a small labeled corpus. Human review is always required.
 - The Maybe-similar cosine threshold (0.92) and the blur thresholds are provisional: they have not
   yet been measured on a labelled set of real photos.
+- As a filter, a weak search match hides the rest of Review. The search cut-off is still 1.1's, set on
+  65 of the owner's photos; the labelled corpus has not measured it yet.
+- Albumen is dark only; a light mode is not scheduled.
 - Text search misses small objects in the frame (the model sees the photo at 224 px), and every scan
   recomputes the photo vectors; nothing is reused across scans.
 - A first scan of 300 images took 12.1 s on a 2-CPU, 4 GiB VM. That is an observation, not a benchmark.
 
 ## Roadmap
 
-- **1.2:** accessibility pass, dark mode, search as a Review filter, and reuse of computed signatures
-  and vectors across scans.
+- **1.1.5 (in progress):** dark app, Review as a photo gallery with two viewers, search as a Review
+  filter.
+- **1.2:** accessibility pass and reuse of computed signatures and vectors across scans.
 
 Deferred work is tracked in [`docs/backlog/post-mvp.md`](docs/backlog/post-mvp.md).
 
