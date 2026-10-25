@@ -688,6 +688,9 @@
          row, whatever the window puts in the TabControl's Tag (the photo search bar). -->
     <Style x:Key="Albumen.TopBar" TargetType="TabControl">
         <Setter Property="Background" Value="Transparent" />
+        <!-- Every page lives in this control's content, and text that has no brush of its own
+             inherits from here; without this the Golden VM showed it black on the dark ground. -->
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="ItemContainerStyle" Value="{StaticResource Albumen.TopBarItem}" />
         <Setter Property="Template">
             <Setter.Value>
