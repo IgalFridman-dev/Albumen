@@ -29,4 +29,10 @@ public interface IVisionLanguageEncoder
     EmbeddingResult EncodeImage(EncoderProfile profile, EncoderImage image);
 
     EmbeddingResult EncodeText(EncoderProfile profile, string prompt);
+
+    /// <summary>
+    /// Opens the text model without encoding anything, so the first prompt does not wait for it.
+    /// Returns the failure <see cref="EncodeText"/> would return, or null.
+    /// </summary>
+    EncoderFailure? PrepareText(EncoderProfile profile);
 }

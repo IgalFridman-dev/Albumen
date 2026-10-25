@@ -73,6 +73,13 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
         return Run(text.Value, TokenInput, new DenseTensor<long>(ids, [1, profile.MaxTokens]), profile.Dimension);
     }
 
+    /// <summary>Verifies and opens the text tower and its tokenizer, as the first prompt would.</summary>
+    public EncoderFailure? PrepareText(EncoderProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return Prepare(profile, text)?.Failure;
+    }
+
     public void Dispose()
     {
         if (vision.IsValueCreated)
