@@ -270,6 +270,7 @@
          keyboard behavior stay those of a CheckBox. -->
     <Style x:Key="Albumen.SwitchCheckBox" TargetType="CheckBox">
         <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Template">
@@ -450,6 +451,7 @@
          ground; only hover draws a border, and High Contrast an outline. -->
     <Style x:Key="Albumen.ThumbnailButton" TargetType="Button">
         <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
         <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="BorderThickness" Value="1" />
@@ -555,10 +557,11 @@
             </Trigger>
         </ControlTemplate.Triggers>
     </ControlTemplate>
-    <!-- A tab's content inherits the tab's text properties, so the header is styled on its
-         presenter, never on the TabItem itself. -->
+    <!-- A tab's content inherits the tab's text properties: the TabItem carries the page's text
+         brush, and the header's own weight and colour are set on its presenter. -->
     <Style x:Key="Albumen.TopBarItem" TargetType="TabItem">
         <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="Padding" Value="14,4" />
         <Setter Property="Template">
             <Setter.Value>
