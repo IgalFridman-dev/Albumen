@@ -403,6 +403,44 @@ public sealed class WpfReviewSearchBarTests
         });
     }
 
+    // Enter leaves the focus in the box, so the first click after a search selects the prompt too;
+    // once the prompt is typed into again, a click places the caret.
+    [Fact]
+    public void TheFirstClickAfterASearchSelectsThePromptThoughTheBoxKeptFocus()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new SearchFixture();
+            var window = ReviewTiles.Show(fixture.ViewModel);
+            try
+            {
+                var box = PromptBox(window);
+                box.Text = "at sea";
+                Search(fixture, window, box);
+                Assert.True(box.IsKeyboardFocused);
+                box.Select(box.Text.Length, 0);
+
+                var afterSearch = PressLeftButton(box);
+
+                Assert.True(afterSearch.Handled);
+                Assert.Equal("at sea", box.SelectedText);
+                box.Select(box.Text.Length, 0);
+                Assert.False(PressLeftButton(box).Handled);
+
+                Search(fixture, window, box);
+                box.AppendText("s");
+
+                Assert.False(PressLeftButton(box).Handled);
+                Assert.Equal(0, box.SelectionLength);
+                Assert.Empty(fixture.Workflow.SelectionCommands);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     // The filter replaced the 1.1 strip of results: a search shows its matches in the kinds.
     [Fact]
     public void NoResultStripIsShownUnderTheBar()
