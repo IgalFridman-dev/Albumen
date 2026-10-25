@@ -610,6 +610,9 @@
 
     <!-- The bar's text box: only the text and its caret; the bar draws the field around it. -->
     <Style x:Key="Albumen.SearchBox" TargetType="TextBox">
+        <!-- The Fluent TextBox style would otherwise impose MinHeight 32 and grow the 32 px bar. -->
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Padding" Value="2,0" />
