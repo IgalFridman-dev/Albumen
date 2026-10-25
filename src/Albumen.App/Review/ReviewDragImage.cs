@@ -69,10 +69,12 @@ internal sealed class ReviewDragImage : Adorner
 // the system's drag loop holds the mouse.
 internal static class NativeMethods
 {
+#pragma warning disable SYSLIB1054 // LibraryImport's stub for the out struct needs unsafe code, which Albumen.App does not enable.
     [DllImport("user32.dll", ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetCursorPos(out CursorPoint point);
+#pragma warning restore SYSLIB1054
 }
 
 // Win32 POINT, in physical screen pixels.
