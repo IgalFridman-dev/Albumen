@@ -103,6 +103,66 @@ public sealed class WpfReviewViewerTests
         });
     }
 
+    // Igal, 2026-10-25: a zoomed photo shows both scroll bars inside its viewer, so every part of
+    // it can be reached; at 1 it fits with none. The two viewers pan together both ways.
+    [Fact]
+    public void AZoomedPhotoScrollsBothWaysInsideItsViewerAndTheOtherFollows()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var workflow = new GroupedReviewWorkflow(includeSecondFailure: false);
+            var viewModel = new ShellViewModel(workflow.Scope, workflow,
+                reviewPreviewSource: new SizedPreviewSource(40, 30));
+            var near = viewModel.ReviewCategories.Single(row => row.Category == ReviewCategoryKind.Near);
+            viewModel.OpenReviewCategoryCommand.ExecuteAsync(near).GetAwaiter().GetResult();
+            var group = near.Groups[0];
+            Place(viewModel, ViewerSide.Left, group, 0);
+            Place(viewModel, ViewerSide.Right, group, 1);
+            var window = new MainWindow { DataContext = viewModel, Width = 1280, Height = 800 };
+            try
+            {
+                ShowAndDrain(window);
+                var leftControl = Named<PreviewStatusControl>(window, "LeftPreviewStatusControl");
+                var left = leftControl.PreviewImageScroller;
+                var right = Named<PreviewStatusControl>(window, "RightPreviewStatusControl").PreviewImageScroller;
+                var zoom = Named<Slider>(window, "ReviewZoomSlider");
+                Assert.Equal(Visibility.Collapsed, left.ComputedHorizontalScrollBarVisibility);
+                Assert.Equal(Visibility.Collapsed, left.ComputedVerticalScrollBarVisibility);
+
+                zoom.Value = 3;
+                ShowAndDrain(window);
+
+                foreach (var scroller in new[] { left, right })
+                {
+                    Assert.Equal(Visibility.Visible, scroller.ComputedHorizontalScrollBarVisibility);
+                    Assert.Equal(Visibility.Visible, scroller.ComputedVerticalScrollBarVisibility);
+                    Assert.True(scroller.ScrollableWidth > 0 && scroller.ScrollableHeight > 0,
+                        $"The zoomed photo did not scroll both ways: {scroller.ScrollableWidth} by {scroller.ScrollableHeight}.");
+                    // The box keeps the height a photo fits in; the photo scrolls inside it.
+                    Assert.True(scroller.ActualHeight <= leftControl.FitHeight + 0.5,
+                        $"The viewer grew to {scroller.ActualHeight} past its {leftControl.FitHeight}.");
+                }
+
+                left.ScrollToVerticalOffset(left.ScrollableHeight / 2);
+                ShowAndDrain(window);
+                Assert.Equal(right.ScrollableHeight / 2, right.VerticalOffset, 1.0);
+
+                right.ScrollToVerticalOffset(right.ScrollableHeight);
+                ShowAndDrain(window);
+                Assert.Equal(left.ScrollableHeight, left.VerticalOffset, 1.0);
+
+                zoom.Value = 1;
+                ShowAndDrain(window);
+                Assert.Equal(Visibility.Collapsed, left.ComputedVerticalScrollBarVisibility);
+                Assert.Equal(0, left.ScrollableHeight, 0.5);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     [Fact]
     public void AnEmptyViewerSaysAPhotoCanBeDraggedIntoIt()
     {
