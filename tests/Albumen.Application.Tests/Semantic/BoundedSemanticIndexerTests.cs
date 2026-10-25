@@ -169,7 +169,8 @@ public sealed class BoundedSemanticIndexerTests
     }
 
     // The b9e6761 walkthrough: the first search waited while the text model opened. Once the
-    // Scan's photos are indexed, the indexer asks the encoder to open it, once and in the background.
+    // Scan's photos are indexed, the indexer asks the encoder to open it, once and in the background,
+    // under the profile the photos were embedded with (loaded once for both).
     [Fact]
     public async Task AReadyIndexOpensTheTextModelOnceAfterTheLastPhoto()
     {
@@ -184,6 +185,7 @@ public sealed class BoundedSemanticIndexerTests
         Assert.Equal(3, encodedBefore);
         await Task.Delay(200, TestContext.Current.CancellationToken);
         Assert.Equal(1, fixture.Encoder.TextPreparations);
+        Assert.Equal(1, fixture.Encoder.ProfileLoads);
     }
 
     // Opening the text model is only a head start for the search: its failure, returned or thrown,
@@ -269,8 +271,10 @@ internal sealed class FakeEncoder : IVisionLanguageEncoder
     private int maximumLive;
     private int encoded;
     private int textPreparations;
+    private int profileLoads;
 
     public EncoderFailure? LoadFailure { get; set; }
+    public int ProfileLoads => Volatile.Read(ref profileLoads);
     public ConcurrentDictionary<long, EncoderFailure> Failures { get; } = new();
     public Func<long, Task> Gate { get; set; } = _ => Task.CompletedTask;
     public int Live => Volatile.Read(ref live);
@@ -283,8 +287,11 @@ internal sealed class FakeEncoder : IVisionLanguageEncoder
     public EncoderFailure? TextFailure { get; set; }
     public Exception? TextFault { get; set; }
 
-    public EncoderProfileResult LoadProfile() =>
-        LoadFailure is null ? new(IndexerFixture.Profile, null) : new(null, LoadFailure);
+    public EncoderProfileResult LoadProfile()
+    {
+        Interlocked.Increment(ref profileLoads);
+        return LoadFailure is null ? new(IndexerFixture.Profile, null) : new(null, LoadFailure);
+    }
 
     public EncoderFailure? PrepareText(EncoderProfile profile)
     {
