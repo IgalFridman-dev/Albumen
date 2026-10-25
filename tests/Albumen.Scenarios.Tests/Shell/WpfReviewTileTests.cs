@@ -354,8 +354,10 @@ internal static class ReviewTiles
     internal static MenuItem PlaceItem(ReviewPhotoTile tile, ViewerSide side) =>
         Assert.Single(Items(tile), item => Equals(item.Header, $"Place in {side} Viewer"));
 
-    // Opens the focused tile's menu as the Menu key or Shift+F10 would, with "Remove" focused,
-    // so a key pressed on the returned item goes through the open menu.
+    // Opens the focused tile's menu as the Menu key or Shift+F10 would and returns its "Remove",
+    // so a key pressed on it goes through the open menu. The menu's popup takes keyboard focus
+    // only while the window is in the foreground, which parallel WPF tests can take away, so the
+    // item is checked to be usable rather than focused.
     internal static MenuItem OpenMenuAtRemove(ReviewPhotoTile tile)
     {
         var menu = Assert.IsType<ContextMenu>(tile.ContextMenu);
@@ -364,7 +366,7 @@ internal static class ReviewTiles
         WpfReviewSelectionTests.Drain();
         Assert.True(menu.IsOpen);
         var remove = RemoveItem(tile);
-        Focus(remove);
+        Assert.True(remove.IsEnabled && remove.IsVisible);
         return remove;
     }
 
