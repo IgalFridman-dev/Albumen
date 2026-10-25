@@ -60,6 +60,7 @@ public partial class MainWindow : Window
         Closed += OnClosed;
         AddHandler(Keyboard.GotKeyboardFocusEvent,
             new KeyboardFocusChangedEventHandler(OnReviewKeyboardFocusChanged), true);
+        AddHandler(DragDrop.GiveFeedbackEvent, new GiveFeedbackEventHandler(OnDragGiveFeedback), true);
         if (System.Windows.Application.Current is { } application)
             application.Exit += OnApplicationExit;
     }
@@ -413,7 +414,15 @@ public partial class MainWindow : Window
             return;
         // The button holds the mouse while pressed; the drag takes it over, so no click follows.
         tile.ReleaseMouseCapture();
-        DragDrop.DoDragDrop(tile, ReviewDragData.Create(member.OccurrenceId, groupId), DragDropEffects.Copy);
+        ShowDragImage(tile);
+        try
+        {
+            DragDrop.DoDragDrop(tile, ReviewDragData.Create(member.OccurrenceId, groupId), DragDropEffects.Copy);
+        }
+        finally
+        {
+            HideDragImage();
+        }
     }
 
     // A viewer's photo is dragged by the photo itself, not by its button or path.
@@ -434,7 +443,15 @@ public partial class MainWindow : Window
         if (slot is not { Member: { } member, GroupId: { } groupId }) return;
         viewerDropped = false;
         viewerDragCanceled = false;
-        DragDrop.DoDragDrop(viewer, ReviewDragData.Create(member.OccurrenceId, groupId, side), DragDropEffects.Move);
+        ShowDragImage(viewer);
+        try
+        {
+            DragDrop.DoDragDrop(viewer, ReviewDragData.Create(member.OccurrenceId, groupId, side), DragDropEffects.Move);
+        }
+        finally
+        {
+            HideDragImage();
+        }
         FinishViewerDrag(side, viewerDropped, viewerDragCanceled);
     }
 
@@ -448,6 +465,46 @@ public partial class MainWindow : Window
     internal void FinishViewerDrag(ViewerSide side, bool droppedOnViewer, bool canceled)
     {
         if (!droppedOnViewer && !canceled) shellViewModel?.ClearViewerCommand.Execute(side);
+    }
+
+    // While a photo is dragged, its own small picture follows the pointer: the tile's decoded
+    // thumbnail, or the photo the viewer shows. A photo with no picture yet drags without one.
+    private ReviewDragImage? dragImage;
+
+    internal ReviewDragImage? ShowDragImage(UIElement source)
+    {
+        HideDragImage();
+        var picture = source is ReviewPhotoTile tile
+            ? Descendants<PhotoThumbnail>(tile).FirstOrDefault()?.Image
+            : ViewerSideOfPanel(source) is { } side ? PreviewOf(side).PreviewImage.Source : null;
+        if (picture is null || Content is not UIElement root || System.Windows.Documents.AdornerLayer.GetAdornerLayer(root) is not { } layer)
+            return null;
+        dragImage = new ReviewDragImage(root, picture);
+        layer.Add(dragImage);
+        FollowPointer();
+        return dragImage;
+    }
+
+    internal void MoveDragImage(Point screenPoint)
+    {
+        if (dragImage is { AdornedElement: { } root } shown && PresentationSource.FromVisual(root) is not null)
+            shown.MoveTo(root.PointFromScreen(screenPoint));
+    }
+
+    internal void HideDragImage()
+    {
+        if (dragImage is not { } shown) return;
+        dragImage = null;
+        System.Windows.Documents.AdornerLayer.GetAdornerLayer(shown.AdornedElement)?.Remove(shown);
+    }
+
+    // The drag source hears GiveFeedback each time the pointer moves during the drag.
+    private void OnDragGiveFeedback(object sender, GiveFeedbackEventArgs eventArgs) => FollowPointer();
+
+    private void FollowPointer()
+    {
+        if (dragImage is not null && NativeMethods.GetCursorPos(out var cursor))
+            MoveDragImage(new Point(cursor.X, cursor.Y));
     }
 
     private bool DragStarts(UIElement source, MouseEventArgs eventArgs)

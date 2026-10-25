@@ -96,6 +96,9 @@ public sealed class PhotoThumbnail : Border
 
     public string DimensionsText => (string)GetValue(DimensionsTextProperty);
 
+    // The decoded thumbnail once it has loaded; a dragged tile shows it at the pointer.
+    public ImageSource? Image => image.Source;
+
     private static void OnSourceChanged(DependencyObject target, DependencyPropertyChangedEventArgs eventArgs) =>
         ((PhotoThumbnail)target).Reload();
 
