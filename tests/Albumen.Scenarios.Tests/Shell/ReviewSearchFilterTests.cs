@@ -363,6 +363,44 @@ public sealed class ReviewSearchFilterTests
     }
 
     [Fact]
+    public async Task AnOtherMatchOpensInAViewerWithoutRemove()
+    {
+        var fixture = new SearchFixture();
+        await fixture.SearchAsync("at sea");
+        var other = Category(fixture, ReviewCategoryKind.OtherMatches);
+        await fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(other);
+        var set = Assert.Single(other.Groups);
+        var photo = Assert.Single(set.Members);
+        Assert.Equal(ScanOccurrenceViewModel.NotInAnySetText, photo.EligibilityText);
+        Assert.StartsWith("Not in any set: nothing to decide; ", photo.ItemStatus, StringComparison.Ordinal);
+        Assert.Null(photo.ToggleSelectionCommand);
+        Assert.False(photo.CanSelect);
+        Assert.True(photo.MatchesSearch);
+
+        // A click shows it in the empty Left Viewer, read-only: no Remove, nothing to mark.
+        await fixture.ViewModel.PlaceInViewerCommand.ExecuteAsync(
+            new PlaceInViewer(ViewerSide.Left, set.GroupId, photo, OnlyIfEmpty: true));
+
+        var viewer = fixture.ViewModel.LeftViewer;
+        Assert.Equal(50, viewer.Member?.OccurrenceId);
+        Assert.True(viewer.IsReadOnly);
+        Assert.False(viewer.HasRemove);
+        Assert.False(viewer.CanRemove);
+        Assert.False(viewer.ToggleRemoveCommand.CanExecute(null));
+        Assert.Equal(ScanOccurrenceViewModel.NotInAnySetText, viewer.ReadOnlyText);
+        Assert.StartsWith(ScanOccurrenceViewModel.NotInAnySetText, viewer.ItemStatus, StringComparison.Ordinal);
+        await viewer.ToggleRemoveCommand.ExecuteAsync();
+        Assert.Empty(fixture.Workflow.SelectionCommands);
+
+        // It stays in its viewer across projections while the search lists it, and leaves with
+        // the search, since Review then lists it nowhere.
+        fixture.Mark(GroupedReviewData.UncertainGroupId, 21);
+        Assert.Equal(50, fixture.ViewModel.LeftViewer.Member?.OccurrenceId);
+        await fixture.Search.ShowAllCommand.ExecuteAsync();
+        Assert.False(fixture.ViewModel.LeftViewer.HasPhoto);
+    }
+
+    [Fact]
     public async Task NoMatchSaysSoAndLeavesTheClearButton()
     {
         var fixture = new SearchFixture();

@@ -269,6 +269,48 @@ public sealed class WpfReviewTileTests
         });
     }
 
+    // PM-022: a search's match in no open set is a tile that does something when clicked: it
+    // opens read-only in a viewer, and its menu only places it.
+    [Fact]
+    public void AnOtherMatchTileHasNoToggleAndOnlyPlaceItems()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new SearchFixture();
+            var search = fixture.SearchAsync("at sea");
+            WpfActionAccessibilityTests.PumpUntil(() => search.IsCompleted);
+            var other = fixture.ViewModel.ReviewCategories.Single(category => category.Category == ReviewCategoryKind.OtherMatches);
+            fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(other).GetAwaiter().GetResult();
+            var window = ReviewTiles.Show(fixture.ViewModel);
+            try
+            {
+                var tile = ReviewTiles.Tile(window, 50);
+                var menu = Assert.IsType<ContextMenu>(tile.ContextMenu);
+                Assert.Equal(["Place in Left Viewer", "Place in Right Viewer"],
+                    menu.Items.OfType<MenuItem>().Select(item => (string)item.Header).ToArray());
+                Assert.Empty(menu.Items.OfType<Separator>());
+                var peer = UIElementAutomationPeer.FromElement(tile) ?? UIElementAutomationPeer.CreatePeerForElement(tile);
+                Assert.Null(peer.GetPattern(PatternInterface.Toggle));
+                Assert.StartsWith(ScanOccurrenceViewModel.NotInAnySetText, AutomationProperties.GetItemStatus(tile),
+                    StringComparison.Ordinal);
+                Assert.Contains(VisibleTexts(tile), text => text == "Matches");
+
+                ReviewTiles.Invoke(tile);
+                ReviewTiles.ShowAndDrain(window);
+
+                Assert.Equal(50, fixture.ViewModel.LeftViewer.Member?.OccurrenceId);
+                Assert.False(Assert.IsType<Button>(window.FindName("LeftViewerRemoveButton")).IsVisible);
+                Assert.Contains(VisibleTexts(Assert.IsAssignableFrom<DependencyObject>(window.FindName("LeftViewerPanel"))),
+                    text => text == ScanOccurrenceViewModel.NotInAnySetText);
+                Assert.Empty(fixture.Workflow.SelectionCommands);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     private static void AssertShownIn(ReviewPhotoTile tile, string viewer)
     {
         Assert.Equal(viewer, tile.ShownIn);
