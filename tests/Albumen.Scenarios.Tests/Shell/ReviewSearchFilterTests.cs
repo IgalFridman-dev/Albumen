@@ -341,6 +341,39 @@ public sealed class ReviewSearchFilterTests
         Assert.Equal(1, Category(fixture, ReviewCategoryKind.Exact).GroupCount);
     }
 
+    // A search that leaves the open kind without a set while another kind has matches says so in
+    // the gallery, instead of leaving it blank.
+    [Fact]
+    public async Task AnOpenKindWithoutAMatchSaysOtherKindsHaveMatches()
+    {
+        var fixture = new SearchFixture();
+        await fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(Category(fixture, ReviewCategoryKind.Exact));
+        Assert.False(fixture.ViewModel.HasReviewKindEmpty);
+
+        await fixture.SearchAsync("lone");
+
+        Assert.Equal(ReviewCategoryKind.Exact, fixture.ViewModel.ActiveReviewCategory?.Category);
+        Assert.Equal(0, fixture.ViewModel.ActiveReviewCategory?.GroupCount);
+        Assert.Equal("No photos in Identical copies match “lone”. Other kinds have matches.",
+            fixture.ViewModel.ReviewKindEmptyText);
+        Assert.True(fixture.ViewModel.HasReviewKindEmpty);
+        Assert.False(fixture.ViewModel.HasReviewSearchEmpty);
+
+        await fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(Category(fixture, ReviewCategoryKind.OtherMatches));
+        Assert.False(fixture.ViewModel.HasReviewKindEmpty);
+
+        // Nothing matches anywhere: the no-match line above the gallery says so instead.
+        await fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(Category(fixture, ReviewCategoryKind.Exact));
+        await fixture.SearchAsync("nothing");
+        Assert.False(fixture.ViewModel.HasReviewKindEmpty);
+        Assert.True(fixture.ViewModel.HasReviewSearchEmpty);
+
+        await fixture.Search.ShowAllCommand.ExecuteAsync();
+
+        Assert.Equal(string.Empty, fixture.ViewModel.ReviewKindEmptyText);
+        Assert.Empty(fixture.Workflow.SelectionCommands);
+    }
+
     [Fact]
     public async Task WhenSearchCannotRunReviewStaysUnfilteredAndTheBarSaysWhy()
     {

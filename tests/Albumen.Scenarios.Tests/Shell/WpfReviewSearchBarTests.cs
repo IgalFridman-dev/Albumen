@@ -298,10 +298,15 @@ public sealed class WpfReviewSearchBarTests
                 Assert.Equal("It is hidden by the search.", hidden.Text);
                 Assert.EndsWith(" · 1 hidden by the search",
                     Assert.IsType<TextBlock>(window.FindName("ReviewSelectionBarText")).Text, StringComparison.Ordinal);
+                // The open kind has no set with a match, but Other matches has one.
+                var kindEmpty = Assert.IsType<TextBlock>(window.FindName("ReviewKindEmptyText"));
+                Assert.True(kindEmpty.IsVisible);
+                Assert.Equal("No photos in Identical copies match “lone”. Other kinds have matches.", kindEmpty.Text);
 
                 box.Text = "nothing";
                 Search(fixture, window, box);
 
+                Assert.False(kindEmpty.IsVisible);
                 var empty = Assert.IsType<TextBlock>(window.FindName("ReviewSearchEmptyText"));
                 Assert.True(empty.IsVisible);
                 Assert.Equal("No photos match “nothing”", empty.Text);
