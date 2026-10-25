@@ -11,9 +11,9 @@ using Xunit;
 
 namespace Albumen.Scenarios.Tests.Shell;
 
-// E4-S4 and 1.1.5 (PM-019): the photo search is a projection. It narrows Review to the sets with a
-// match, shows each set whole and best match first, lists matching photos in no set as Other
-// matches, and never changes a set, a mark or a cleanup.
+// E4-S4 and 1.1.5 (PM-019, PM-022): the photo search is a projection. It narrows Review to the sets
+// with a match, shows each set whole and best match first, lists matching photos in no set as
+// Other matches, and never changes a set, a mark or a cleanup.
 public sealed class ReviewSearchFilterTests
 {
     [Theory]
@@ -52,19 +52,23 @@ public sealed class ReviewSearchFilterTests
     }
 
     [Fact]
-    public async Task APromptListsTheScansPhotosByRankWithTheSetEachIsIn()
+    public async Task APromptSaysHowManyPhotosOfTheScanMatch()
     {
         var fixture = new SearchFixture();
 
         await fixture.SearchAsync("  at   sea ");
 
         Assert.True(fixture.Search.IsActive);
+        Assert.Equal("at sea", fixture.Search.Filter?.Prompt);
         Assert.Equal("5 likely matches in this Scan for “at sea”, most likely first", fixture.Search.StatusText);
-        Assert.Equal([1L, 12L, 21L, 22L, 50L], Ids(fixture));
-        Assert.Equal(["Identical copies set 1", "Look-alike set 1", "Maybe similar set 1", "Maybe similar set 1",
-            "Not in any set: nothing to decide"], Items(fixture).Select(item => item.Context));
-        Assert.False(Items(fixture)[4].CanOpen);
-        Assert.Equal("Likely match 2 of 5: 12.jpg; Look-alike set 1", Items(fixture)[1].AutomationName);
+
+        // After a cleanup the moved photo leaves every set but stays in the Scan: it is not counted.
+        fixture.Publish(group => group with
+        {
+            Members = [.. group.Members.Where(member => member.Occurrence.Token.OccurrenceId != 12)],
+        });
+
+        Assert.Equal("4 likely matches in this Scan for “at sea”, most likely first", fixture.Search.StatusText);
     }
 
     [Fact]
@@ -75,7 +79,6 @@ public sealed class ReviewSearchFilterTests
         await fixture.SearchAsync("nothing");
 
         Assert.True(fixture.Search.IsActive);
-        Assert.False(fixture.Search.HasResults);
         Assert.Equal("No likely matches in this Scan for “nothing”. Try other words.", fixture.Search.StatusText);
     }
 
@@ -92,45 +95,7 @@ public sealed class ReviewSearchFilterTests
     }
 
     [Fact]
-    public async Task MarksTheListDoesNotShowAreCountedAndKept()
-    {
-        var fixture = new SearchFixture();
-
-        await fixture.SearchAsync("lone");
-
-        Assert.Equal([50L], Ids(fixture));
-        Assert.Equal("1 photo marked for removal isn't in this list. Cleanup still includes it.",
-            fixture.Search.SelectionOutsideText);
-    }
-
-    [Fact]
-    public async Task OpeningAMatchShowsItInItsSetAndShowAllReturnsToWhereReviewWas()
-    {
-        var fixture = new SearchFixture();
-        var review = fixture.Workflow.Current.Review;
-        await fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(fixture.ViewModel.ReviewCategories[0]);
-        await fixture.SearchAsync("at sea");
-
-        await fixture.ViewModel.OpenLikelyMatchCommand.ExecuteAsync(Items(fixture)[1]);
-
-        // The match's kind opens with all of its sets, and the photo shows in the Left Viewer.
-        Assert.Equal(ReviewNavigationLevel.Gallery, fixture.ViewModel.ReviewNavigationLevel);
-        Assert.Equal(ReviewCategoryKind.Near, fixture.ViewModel.ActiveReviewCategory!.Category);
-        Assert.Equal(12, fixture.ViewModel.LeftViewer.Member?.OccurrenceId);
-        Assert.Equal(GroupedReviewData.NearGroupId, fixture.ViewModel.LeftViewer.GroupId);
-
-        await fixture.Search.ShowAllCommand.ExecuteAsync();
-
-        Assert.False(fixture.Search.IsActive);
-        Assert.Equal(string.Empty, fixture.Search.Prompt);
-        Assert.Equal(ReviewNavigationLevel.Gallery, fixture.ViewModel.ReviewNavigationLevel);
-        Assert.Equal(ReviewCategoryKind.Exact, fixture.ViewModel.ActiveReviewCategory!.Category);
-        Assert.Empty(fixture.Workflow.SelectionCommands);
-        Assert.Same(review, fixture.Workflow.Current.Review);
-    }
-
-    [Fact]
-    public async Task AnEmptyPromptClearsTheList()
+    public async Task AnEmptyPromptClearsTheFilter()
     {
         var fixture = new SearchFixture();
         await fixture.SearchAsync("at sea");
@@ -138,51 +103,9 @@ public sealed class ReviewSearchFilterTests
         await fixture.SearchAsync("   ");
 
         Assert.False(fixture.Search.IsActive);
-        Assert.False(fixture.Search.HasResults);
-    }
-
-    [Fact]
-    public async Task AMarkChangedElsewhereKeepsTheListAndUpdatesTheCount()
-    {
-        var fixture = new SearchFixture();
-        await fixture.SearchAsync("lone");
-        var results = fixture.Search.Results;
-
-        fixture.Workflow.Publish(fixture.Workflow.Current with
-        {
-            Review = fixture.Workflow.Current.Review with
-            {
-                Groups = [.. fixture.Workflow.Current.Review.Groups.Select(group => group with
-                {
-                    Members = [.. group.Members.Select(member => member with { Selected = false, SelectedInGroup = null })],
-                    SelectedOccurrenceIds = [],
-                })],
-            },
-        });
-
-        Assert.Same(results, fixture.Search.Results);
-        Assert.False(fixture.Search.HasSelectionOutside);
-    }
-
-    [Fact]
-    public async Task PhotosThatLeftReviewAreNotListed()
-    {
-        var fixture = new SearchFixture();
-        await fixture.SearchAsync("at sea");
-
-        // After a cleanup the moved photo leaves every set but stays in the Scan.
-        fixture.Workflow.Publish(fixture.Workflow.Current with
-        {
-            Review = fixture.Workflow.Current.Review with
-            {
-                Groups = [.. fixture.Workflow.Current.Review.Groups.Select(group => group with
-                {
-                    Members = [.. group.Members.Where(member => member.Occurrence.Token.OccurrenceId != 12)],
-                })],
-            },
-        });
-
-        Assert.Equal([1L, 21L, 22L, 50L], Ids(fixture));
+        Assert.Null(fixture.Search.Filter);
+        Assert.Equal(4, fixture.ViewModel.ReviewCategories.Length);
+        Assert.Empty(fixture.Workflow.SelectionCommands);
     }
 
     [Fact]
@@ -489,12 +412,15 @@ public sealed class ReviewSearchFilterTests
     public async Task TheWordsMakeNoCompletenessClassificationOrRemovalClaims()
     {
         var fixture = new SearchFixture();
-        var texts = new List<string> { fixture.Search.StatusText, fixture.Search.ScopeText, ReviewSearchViewModel.PromptHelpText };
+        var texts = new List<string> { fixture.Search.StatusText, fixture.Search.ScopeText, ReviewSearchViewModel.PromptHelpText,
+            fixture.Search.PlaceholderText };
         await fixture.SearchAsync("at sea");
-        texts.AddRange([fixture.Search.StatusText, .. Items(fixture).Select(item => item.Context)]);
+        var other = Category(fixture, ReviewCategoryKind.OtherMatches);
+        texts.AddRange([fixture.Search.StatusText, other.Description, other.CountText,
+            Category(fixture, ReviewCategoryKind.Exact).CountText, ScanOccurrenceViewModel.NotInAnySetText]);
         await fixture.SearchAsync("lone");
-        texts.AddRange([fixture.Search.StatusText, fixture.Search.SelectionOutsideText,
-            fixture.ViewModel.ApprovalHiddenMarkedText, fixture.ViewModel.ReviewSelectionBarText]);
+        texts.AddRange([fixture.Search.StatusText, fixture.ViewModel.ApprovalHiddenMarkedText,
+            fixture.ViewModel.ReviewSelectionBarText]);
         await fixture.SearchAsync("nothing");
         texts.Add(fixture.ViewModel.ReviewSearchEmptyText);
 
@@ -507,11 +433,6 @@ public sealed class ReviewSearchFilterTests
 
     private static readonly string[] BannedWords =
         ["vector", "embedding", "all matches", "every match", "category", "confidence", "will be removed", "delete"];
-
-    private static ImmutableArray<LikelyMatchItemViewModel> Items(SearchFixture fixture) =>
-        [.. Enumerable.Range(0, fixture.Search.Results.Count).Select(index => fixture.Search.Results[index])];
-
-    private static IEnumerable<long> Ids(SearchFixture fixture) => Items(fixture).Select(item => item.Photo.OccurrenceId);
 
     private static ReviewCategoryViewModel Category(SearchFixture fixture, ReviewCategoryKind kind) =>
         fixture.ViewModel.ReviewCategories.Single(category => category.Category == kind);

@@ -3,6 +3,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Albumen.App.Shell;
 using Albumen.Application.Semantic;
 using Albumen.Domain.Workflow;
 using Xunit;
@@ -309,6 +310,37 @@ public sealed class WpfReviewSearchBarTests
 
                 Assert.True(fixture.Search.IsActive);
                 Assert.True(box.IsKeyboardFocused);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    // The filter replaced the 1.1 strip of results: a search shows its matches in the kinds.
+    [Fact]
+    public void NoResultStripIsShownUnderTheBar()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new SearchFixture();
+            var window = ReviewTiles.Show(fixture.ViewModel);
+            try
+            {
+                var box = PromptBox(window);
+                box.Text = "at sea";
+                Search(fixture, window, box);
+
+                Assert.True(fixture.Search.IsActive);
+                Assert.Null(window.FindName("LikelyMatchesList"));
+                Assert.DoesNotContain(WpfReviewSelectionTests.Descendants<Button>(window),
+                    button => AutomationProperties.GetAutomationId(button) == "open-likely-match");
+                Assert.DoesNotContain(WpfReviewSelectionTests.Descendants<ListBox>(window),
+                    list => AutomationProperties.GetName(list) == "Likely matches in this Scan");
+                Assert.DoesNotContain(VisibleTexts(window), text => text.Contains("isn't in this list", StringComparison.Ordinal)
+                    || text.Contains("aren't in this list", StringComparison.Ordinal));
+                Assert.Contains(fixture.ViewModel.ReviewCategories, category => category.Category == ReviewCategoryKind.OtherMatches);
             }
             finally
             {
