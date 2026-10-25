@@ -40,11 +40,16 @@ public sealed class E1S4ReviewAcceptanceTests
                 Assert.Empty(fixture.Workflow.Affirmations);
                 Assert.Empty(fixture.Workflow.Approvals);
 
-                // UI Automation: the tile's Toggle pattern unmarks it again.
+                // UI Automation: the tile's Toggle pattern unmarks it, and marks it again so the
+                // approval below has a photo to move.
                 var marked = ReviewTiles.Tile(window, 1);
                 var automationCommand = Assert.IsType<AsyncCommand>(marked.Member?.ToggleSelectionCommand);
                 RunTrackedCommand(automationCommand, () => ReviewTiles.Toggle(marked));
                 Assert.Empty(fixture.Workflow.Current.Review.Groups[0].SelectedOccurrenceIds);
+                var unmarked = ReviewTiles.Tile(window, 1);
+                var remarkCommand = Assert.IsType<AsyncCommand>(unmarked.Member?.ToggleSelectionCommand);
+                RunTrackedCommand(remarkCommand, () => ReviewTiles.Toggle(unmarked));
+                Assert.Equal([1L], fixture.Workflow.Current.Review.Groups[0].SelectedOccurrenceIds.Order());
                 Assert.Empty(fixture.Workflow.Affirmations);
                 Assert.Empty(fixture.Workflow.Approvals);
 
@@ -107,6 +112,11 @@ public sealed class E1S4ReviewAcceptanceTests
                     {
                         Assert.Equal(SelectionCommandKind.Toggle, automation.Kind);
                         Assert.Equal([1L], automation.OccurrenceIds);
+                    },
+                    remark =>
+                    {
+                        Assert.Equal(SelectionCommandKind.Toggle, remark.Kind);
+                        Assert.Equal([1L], remark.OccurrenceIds);
                     },
                     keyboard =>
                     {
