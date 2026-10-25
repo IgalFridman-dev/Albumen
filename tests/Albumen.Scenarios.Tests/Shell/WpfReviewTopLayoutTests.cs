@@ -7,13 +7,13 @@ using Xunit;
 namespace Albumen.Scenarios.Tests.Shell;
 
 // Igal, 2026-10-25: from the top, Review reads the Back button on the left on a row of its own,
-// then the row of the tabs with the search bar, then the Scan's "Scan complete…" line, then the
-// "Pick a kind…" hint right under it, with no large gap between them.
+// then the row of the tabs with the search bar, then the Scan's "Scan complete…" line, then how
+// many sets there are to review, then the "Pick a kind…" hint, with no large gap between them.
 [Collection("WPF UI Automation")]
 public sealed class WpfReviewTopLayoutTests
 {
     [Fact]
-    public void BackSitsOnItsOwnRowAboveTheSearchRowThenTheCoverageLineAndTheHint()
+    public void BackSitsOnItsOwnRowAboveTheSearchRowThenTheCoverageTheSetsToReviewAndTheHint()
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
@@ -38,19 +38,26 @@ public sealed class WpfReviewTopLayoutTests
                 Assert.Equal(Bounds(strip, root).Left, Bounds(back, root).Left, 1.0);
                 Assert.True(IsWithin(bar, headerRow));
 
-                // The page opens with the coverage line right under the tab row, and the hint
-                // right under that: no title or summary between them.
+                // The page opens with the coverage line right under the tab row, the sets to review
+                // right under that and the hint right under them: no title between them, and the
+                // count is on the page, not folded into the Scan summary.
                 var page = Named<ScrollViewer>(window, "ReviewPageScrollViewer");
                 var coverage = Named<TextBlock>(window, "ReviewHeading");
+                var sets = Named<TextBlock>(window, "ReviewResultsSummaryText");
                 var hint = Named<TextBlock>(window, "ReviewHintText");
                 Assert.Equal(fixture.ViewModel.CoverageStatus, coverage.Text);
+                Assert.Equal(fixture.ViewModel.ReviewResultsSummary, sets.Text);
+                Assert.Contains("to review", sets.Text, StringComparison.Ordinal);
                 Assert.StartsWith("Pick a kind to see its sets.", hint.Text, StringComparison.Ordinal);
+                Assert.True(sets.IsVisible);
+                Assert.False(IsWithin(sets, Named<Expander>(window, "ReviewScanSummaryExpander")));
                 var first = WpfReviewSelectionTests.Descendants<TextBlock>(page)
                     .Where(text => text.IsVisible && text.ActualHeight > 0)
                     .MinBy(text => Bounds(text, root).Top);
                 Assert.Same(coverage, first);
                 Assert.InRange(Bounds(coverage, root).Top - Bounds(headerRow, root).Bottom, 0, 24);
-                Assert.InRange(Bounds(hint, root).Top - Bounds(coverage, root).Bottom, 0, 8);
+                Assert.InRange(Bounds(sets, root).Top - Bounds(coverage, root).Bottom, 0, 8);
+                Assert.InRange(Bounds(hint, root).Top - Bounds(sets, root).Bottom, 0, 8);
             }
             finally
             {
