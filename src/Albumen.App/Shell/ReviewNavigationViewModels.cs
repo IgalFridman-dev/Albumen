@@ -229,8 +229,10 @@ public sealed class ReviewGroupViewModel : INotifyPropertyChanged
         PositionInSet = positionInSet;
         SizeOfSet = sizeOfSet;
         memberIndexes = new Dictionary<long, int> { [occurrence.Token.OccurrenceId] = 0 };
-        Members = new(1, _ => new ScanOccurrenceViewModel(occurrence,
-            positionInSet: 1, sizeOfSet: 1) { MatchesSearch = matchesSearch });
+        // An other match opens read-only: it is in no set, so there is nothing to decide.
+        Members = new(1, _ => category == ReviewCategoryKind.OtherMatches
+            ? ScanOccurrenceViewModel.InNoSet(occurrence)
+            : new ScanOccurrenceViewModel(occurrence, positionInSet: 1, sizeOfSet: 1) { MatchesSearch = matchesSearch });
         MemberCount = 1;
         var fileName = Path.GetFileName(occurrence.DiscoveredPath.TrimEnd('\\', '/')) is { Length: > 0 } name
             ? name : occurrence.DiscoveredPath;

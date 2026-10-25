@@ -59,6 +59,17 @@ public sealed class ScanOccurrenceViewModel
             + (looksBlurrier ? $"; {BlurrierText}" : string.Empty);
     }
 
+    // A search's match that is in no open set: it opens read-only, with nothing to decide here.
+    internal static ScanOccurrenceViewModel InNoSet(ScanFileOccurrence occurrence) => new(occurrence, NotInAnySetText);
+
+    private ScanOccurrenceViewModel(ScanFileOccurrence occurrence, string eligibilityText)
+        : this(occurrence, false, null, false, 1, 1)
+    {
+        MatchesSearch = true;
+        EligibilityText = eligibilityText;
+        ItemStatus = $"{eligibilityText}; {ItemStatus}";
+    }
+
     private ScanOccurrenceViewModel(
         ScanFileOccurrence occurrence,
         bool isAlias,
@@ -107,6 +118,7 @@ public sealed class ScanOccurrenceViewModel
     public const string BlurrierText = "Blurrier than the sharpest photo in this set";
     // No Keeper advice (E3-S5): the "Suggested best" badge is a hint, never a choice.
     public const string RecommendationText = "Albumen doesn't mark photos for you. You choose what to remove.";
+    public const string NotInAnySetText = "Not in any set: nothing to decide";
     // Why the photo is in its set, for the facts shown on hover: "The files are identical, byte
     // for byte." or the picture and color difference; empty when the set holds no evidence for it.
     public string KindLine { get; } = string.Empty;

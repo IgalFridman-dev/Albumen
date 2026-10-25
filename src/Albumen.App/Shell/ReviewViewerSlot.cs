@@ -26,8 +26,8 @@ public sealed class ReviewViewerSlot : INotifyPropertyChanged
     private static readonly string[] ShownProperties =
     [
         nameof(Member), nameof(GroupId), nameof(Preview), nameof(HasPhoto), nameof(IsMarked),
-        nameof(CanRemove), nameof(RemoveButtonText), nameof(RemoveAutomationName),
-        nameof(AutomationName), nameof(ItemStatus),
+        nameof(CanRemove), nameof(IsReadOnly), nameof(HasRemove), nameof(ReadOnlyText),
+        nameof(RemoveButtonText), nameof(RemoveAutomationName), nameof(AutomationName), nameof(ItemStatus),
     ];
     private CancellationTokenSource? loading;
     private long loadRequest;
@@ -54,6 +54,11 @@ public sealed class ReviewViewerSlot : INotifyPropertyChanged
     public bool HasPhoto => Member is not null;
     public bool IsMarked => Member?.IsSelected is true;
     public bool CanRemove => Member?.CanSelect is true;
+    // A photo in no set (a search's other match or a Couldn't-check file) has nothing to mark:
+    // it shows without a Remove button, with the reason under its name.
+    public bool IsReadOnly => Member is { ToggleSelectionCommand: null };
+    public bool HasRemove => HasPhoto && !IsReadOnly;
+    public string ReadOnlyText => Member is { ToggleSelectionCommand: null } member ? member.EligibilityText : string.Empty;
     public string RemoveButtonText => IsMarked ? "Unmark this photo" : "Remove this photo";
     public string RemoveAutomationName => $"{(IsMarked ? "Unmark" : "Remove")} the photo in the {Title}";
     public AsyncCommand ToggleRemoveCommand { get; }

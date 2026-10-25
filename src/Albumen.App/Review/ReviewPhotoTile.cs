@@ -12,7 +12,8 @@ namespace Albumen.App.Review;
 // One photo of a set in the gallery. A click, Enter or Space shows it in the Left Viewer while
 // that viewer is empty. Its menu (right-click, the Menu key or Shift+F10) marks or unmarks it and
 // places it in either viewer, and UI Automation's Toggle marks it. Marking always runs the set's
-// own selection command, so the survivor rule and the override dialog are exactly the set's.
+// own selection command, so the survivor rule and the override dialog are exactly the set's. A
+// photo in no set has nothing to mark: its menu only places it.
 public sealed class ReviewPhotoTile : Button
 {
     public static readonly DependencyProperty MemberProperty = DependencyProperty.Register(
@@ -38,7 +39,9 @@ public sealed class ReviewPhotoTile : Button
     public static readonly DependencyProperty DimensionsTextProperty = DependencyProperty.Register(
         nameof(DimensionsText), typeof(string), typeof(ReviewPhotoTile), new PropertyMetadata(string.Empty));
 
+    private readonly ContextMenu menu = new();
     private readonly MenuItem removeItem = new();
+    private readonly Separator removeSeparator = new();
     private readonly ToolTip facts = new();
 
     public ReviewPhotoTile()
@@ -49,7 +52,11 @@ public sealed class ReviewPhotoTile : Button
         placeLeft.Click += (_, _) => Place(ViewerSide.Left, onlyIfEmpty: false);
         var placeRight = new MenuItem { Header = "Place in Right Viewer" };
         placeRight.Click += (_, _) => Place(ViewerSide.Right, onlyIfEmpty: false);
-        ContextMenu = new ContextMenu { Items = { removeItem, new Separator(), placeLeft, placeRight } };
+        menu.Items.Add(removeItem);
+        menu.Items.Add(removeSeparator);
+        menu.Items.Add(placeLeft);
+        menu.Items.Add(placeRight);
+        ContextMenu = menu;
         ToolTip = facts;
         UpdateMenu();
     }
@@ -117,6 +124,20 @@ public sealed class ReviewPhotoTile : Button
         var member = Member;
         removeItem.Header = member?.IsSelected is true ? "Unmark for removal" : "Remove";
         removeItem.IsEnabled = member?.CanSelect is true;
+        var marks = member is not { ToggleSelectionCommand: null };
+        if (marks != menu.Items.Contains(removeItem))
+        {
+            if (marks)
+            {
+                menu.Items.Insert(0, removeSeparator);
+                menu.Items.Insert(0, removeItem);
+            }
+            else
+            {
+                menu.Items.Remove(removeItem);
+                menu.Items.Remove(removeSeparator);
+            }
+        }
         facts.Content = member;
     }
 

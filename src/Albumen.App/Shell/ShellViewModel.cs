@@ -1172,8 +1172,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         for (var index = 0; index < other.Length; index++) indexes[other[index].Token.OccurrenceId] = index;
         return new(ReviewCategoryKind.OtherMatches, ReviewCategoryNames.For(ReviewCategoryKind.OtherMatches), other.Length,
             positionInSet, sizeOfSet,
-            index => new ReviewGroupViewModel(other[index], index + 1, other.Length, ReviewCategoryKind.OtherMatches,
-                matchesSearch: true),
+            index => new ReviewGroupViewModel(other[index], index + 1, other.Length, ReviewCategoryKind.OtherMatches),
             _ => null,
             occurrenceId => indexes.TryGetValue(occurrenceId, out var index) ? index : null,
             totalGroupCount: other.Length);
