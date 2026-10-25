@@ -11,6 +11,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Albumen.App;
+using Albumen.App.Review;
 using Albumen.App.Shell;
 using Albumen.Application.Review;
 using Albumen.Application.Scan;
