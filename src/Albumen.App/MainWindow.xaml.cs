@@ -60,7 +60,13 @@ public partial class MainWindow : Window
         Closed += OnClosed;
         AddHandler(Keyboard.GotKeyboardFocusEvent,
             new KeyboardFocusChangedEventHandler(OnReviewKeyboardFocusChanged), true);
-        AddHandler(DragDrop.GiveFeedbackEvent, new GiveFeedbackEventHandler(OnDragGiveFeedback), true);
+        // A drag's preview reaches the window before any viewer, so the dragged photo's picture
+        // follows every move; a drag that nothing below took is refused.
+        AddHandler(DragDrop.PreviewDragEnterEvent, new DragEventHandler(OnWindowPreviewDrag), true);
+        AddHandler(DragDrop.PreviewDragOverEvent, new DragEventHandler(OnWindowPreviewDrag), true);
+        AddHandler(DragDrop.DragEnterEvent, new DragEventHandler(OnWindowDragNotTaken));
+        AddHandler(DragDrop.DragOverEvent, new DragEventHandler(OnWindowDragNotTaken));
+        AddHandler(DragDrop.DropEvent, new DragEventHandler(OnWindowDragNotTaken));
         if (System.Windows.Application.Current is { } application)
             application.Exit += OnApplicationExit;
     }
@@ -495,14 +501,10 @@ public partial class MainWindow : Window
             return null;
         dragImage = new ReviewDragImage(root, picture);
         layer.Add(dragImage);
-        FollowPointer();
+        // The press that starts the drag is still WPF's to track; once the system's drag loop holds
+        // the mouse, the drag events over the window move the picture.
+        dragImage.MoveTo(Mouse.GetPosition(root));
         return dragImage;
-    }
-
-    internal void MoveDragImage(Point screenPoint)
-    {
-        if (dragImage is { AdornedElement: { } root } shown && PresentationSource.FromVisual(root) is not null)
-            shown.MoveTo(root.PointFromScreen(screenPoint));
     }
 
     internal void HideDragImage()
@@ -512,13 +514,21 @@ public partial class MainWindow : Window
         System.Windows.Documents.AdornerLayer.GetAdornerLayer(shown.AdornedElement)?.Remove(shown);
     }
 
-    // The drag source hears GiveFeedback each time the pointer moves during the drag.
-    private void OnDragGiveFeedback(object sender, GiveFeedbackEventArgs eventArgs) => FollowPointer();
-
-    private void FollowPointer()
+    // Every element of the window allows drops (the root sets it) so that WPF raises a drag event
+    // over each; the preview comes to the window first, and the viewers still decide their drops.
+    // Outside the window no drag event comes, so the picture waits where the pointer left; it is
+    // clipped at the window's edge anyway.
+    private void OnWindowPreviewDrag(object sender, DragEventArgs eventArgs)
     {
-        if (dragImage is not null && NativeMethods.GetCursorPos(out var cursor))
-            MoveDragImage(new Point(cursor.X, cursor.Y));
+        if (dragImage is { AdornedElement: { } root } shown) shown.MoveTo(eventArgs.GetPosition(root));
+    }
+
+    // A drag that no viewer (or text box) took is refused, so the root accepts no drop of its own
+    // and the pointer shows that a drop there does nothing.
+    private static void OnWindowDragNotTaken(object sender, DragEventArgs eventArgs)
+    {
+        eventArgs.Effects = DragDropEffects.None;
+        eventArgs.Handled = true;
     }
 
     private bool DragStarts(UIElement source, MouseEventArgs eventArgs)
@@ -538,7 +548,8 @@ public partial class MainWindow : Window
     }
 
     // Only Albumen's own photos can be dropped on a viewer. The preview events run before the
-    // path box inside the viewer, which would refuse them as text.
+    // path box inside the viewer, which would refuse them as text. Entering the viewer, or a part
+    // of it, decides the same way, since the window refuses a drag that no one took.
     private void OnViewerDragOver(object sender, DragEventArgs eventArgs)
     {
         eventArgs.Effects = ReviewDragData.TryRead(eventArgs.Data, out _, out _, out var fromViewer)

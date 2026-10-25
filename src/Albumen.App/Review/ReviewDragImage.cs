@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -63,25 +62,4 @@ internal sealed class ReviewDragImage : Adorner
         frame.Arrange(new Rect(Position, PictureSize));
         return finalSize;
     }
-}
-
-// The pointer's place on screen while a drag runs: WPF's own mouse position stops updating once
-// the system's drag loop holds the mouse.
-internal static class NativeMethods
-{
-#pragma warning disable SYSLIB1054 // LibraryImport's stub for the out struct needs unsafe code, which Albumen.App does not enable.
-    [DllImport("user32.dll", ExactSpelling = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool GetCursorPos(out CursorPoint point);
-#pragma warning restore SYSLIB1054
-}
-
-// Win32 POINT, in physical screen pixels.
-[StructLayout(LayoutKind.Sequential)]
-internal readonly struct CursorPoint(int x, int y)
-{
-    public int X { get; } = x;
-
-    public int Y { get; } = y;
 }

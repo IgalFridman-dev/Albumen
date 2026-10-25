@@ -431,7 +431,10 @@
         </ResourceDictionary>
     </Window.Resources>
 
-    <Grid>
+    <!-- AllowDrop is inherited, so WPF raises a drag event over every element and the dragged
+         photo's picture can follow the pointer; the window refuses any drag the viewers did not
+         take, so the root itself accepts nothing. -->
+    <Grid AllowDrop="True">
     <Grid Margin="24,16,24,16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -1326,7 +1329,7 @@
                     <UniformGrid Rows="1" Margin="0,8,0,0">
                         <app:ReviewAutomationBorder x:Name="LeftViewerPanel" Margin="0,0,6,0" Style="{StaticResource ReviewViewerStyle}"
                                 DataContext="{Binding LeftViewer}"
-                                PreviewDragOver="OnViewerDragOver" PreviewDrop="OnViewerDrop"
+                                PreviewDragEnter="OnViewerDragOver" PreviewDragOver="OnViewerDragOver" PreviewDrop="OnViewerDrop"
                                 PreviewMouseLeftButtonDown="OnViewerPreviewMouseLeftButtonDown" PreviewMouseMove="OnViewerPreviewMouseMove"
                                 QueryContinueDrag="OnViewerQueryContinueDrag"
                                 AutomationProperties.AutomationId="review-viewer"
@@ -1355,7 +1358,7 @@
                         </app:ReviewAutomationBorder>
                         <app:ReviewAutomationBorder x:Name="RightViewerPanel" Margin="6,0,0,0" Style="{StaticResource ReviewViewerStyle}"
                                 DataContext="{Binding RightViewer}"
-                                PreviewDragOver="OnViewerDragOver" PreviewDrop="OnViewerDrop"
+                                PreviewDragEnter="OnViewerDragOver" PreviewDragOver="OnViewerDragOver" PreviewDrop="OnViewerDrop"
                                 PreviewMouseLeftButtonDown="OnViewerPreviewMouseLeftButtonDown" PreviewMouseMove="OnViewerPreviewMouseMove"
                                 QueryContinueDrag="OnViewerQueryContinueDrag"
                                 AutomationProperties.AutomationId="review-viewer"
