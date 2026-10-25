@@ -74,27 +74,27 @@ public sealed class AlbumenPaletteTests
         });
     }
 
-    // Tuned after the b9e6761 walkthrough (Igal, 2026-10-25): the grounds, fields and fills sit a
-    // step lighter, the step rail has its own navy panel, and the text, accent and accent-line
-    // tokens are exactly as they were.
+    // Tuned after the b9e6761 and e363606 walkthroughs (Igal, 2026-10-25): the window takes the
+    // lighter grey the cards had, the cards, fields and fills sit a step above it, the step rail
+    // has its own navy panel, and the text, accent and accent-line tokens are exactly as they were.
     [Fact]
-    public void TheDarkTonesSitAStepLighterAndTheTextAndAccentStay()
+    public void TheWindowIsTheLighterGreyAndTheTextAndAccentStay()
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var dark = new ResourceDictionary();
             AlbumenPalette.Apply(dark, highContrast: false);
 
-            Assert.Equal("#FF121212", ColorOf(dark, "Albumen.WindowBrush"));
-            Assert.Equal("#FF1E1E1E", ColorOf(dark, "Albumen.SurfaceBrush"));
-            Assert.Equal("#FF262626", ColorOf(dark, "Albumen.FieldBrush"));
-            Assert.Equal("#FF2D2D2D", ColorOf(dark, "Albumen.SubtleFillBrush"));
-            Assert.Equal("#FF353535", ColorOf(dark, "Albumen.HoverBrush"));
-            Assert.Equal("#FF3E3E3E", ColorOf(dark, "Albumen.PressedBrush"));
-            Assert.Equal("#FF3E3E3E", ColorOf(dark, "Albumen.PillBrush"));
-            Assert.Equal("#FF4B4B4B", ColorOf(dark, "Albumen.PillHoverBrush"));
-            Assert.Equal("#FF313131", ColorOf(dark, "Albumen.BorderBrush"));
-            Assert.Equal("#FF414141", ColorOf(dark, "Albumen.BorderStrongBrush"));
+            Assert.Equal("#FF1E1E1E", ColorOf(dark, "Albumen.WindowBrush"));
+            Assert.Equal("#FF262626", ColorOf(dark, "Albumen.SurfaceBrush"));
+            Assert.Equal("#FF2D2D2D", ColorOf(dark, "Albumen.FieldBrush"));
+            Assert.Equal("#FF353535", ColorOf(dark, "Albumen.SubtleFillBrush"));
+            Assert.Equal("#FF3E3E3E", ColorOf(dark, "Albumen.HoverBrush"));
+            Assert.Equal("#FF464646", ColorOf(dark, "Albumen.PressedBrush"));
+            Assert.Equal("#FF464646", ColorOf(dark, "Albumen.PillBrush"));
+            Assert.Equal("#FF525252", ColorOf(dark, "Albumen.PillHoverBrush"));
+            Assert.Equal("#FF383838", ColorOf(dark, "Albumen.BorderBrush"));
+            Assert.Equal("#FF484848", ColorOf(dark, "Albumen.BorderStrongBrush"));
             Assert.Equal("#FF141821", ColorOf(dark, "Albumen.RailBrush"));
 
             Assert.Equal("#FFDEDEDE", ColorOf(dark, "Albumen.TextBrush"));
