@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
@@ -310,7 +311,10 @@ public sealed class WpfReviewViewerTests
     // Igal, 2026-10-25: while a photo is dragged, a small picture of it follows the pointer: the
     // tile's own thumbnail, or the photo a viewer shows. It takes no hit test, so the viewer under
     // the pointer still gets the drop. DoDragDrop itself cannot run under the test harness, so the
-    // picture's start, move and end are driven directly.
+    // picture's start and end are driven directly, and each move is the drag event WPF raises over
+    // the element under the pointer. The window's root allows drops so that every element gets
+    // one; the picture follows all of them, a viewer still takes its own drop, and a drag that no
+    // viewer takes is refused, so a drop anywhere else does nothing.
     [Fact]
     public void ADraggedPhotoShowsItsOwnPictureAtThePointer()
     {
@@ -341,25 +345,53 @@ public sealed class WpfReviewViewerTests
                 Assert.Contains(picture, layer.GetAdorners(root) ?? []);
                 Assert.InRange(Math.Max(picture.PictureSize.Width, picture.PictureSize.Height), 1, ReviewDragImage.Edge + 0.5);
 
-                window.MoveDragImage(root.PointToScreen(new Point(200, 150)));
+                // Over the gallery the picture follows the pointer, and the drag is refused there.
+                var group = viewModel.ReviewCategories[0].Groups[0];
+                var fromTile = ReviewDragData.Create(1, group.GroupId);
+                Assert.True(root.AllowDrop);
+                Assert.True(tile.AllowDrop);
+                var overTile = RaiseDrag(tile, DragDrop.PreviewDragOverEvent, DragDrop.DragOverEvent,
+                    fromTile, DragDropEffects.Copy, new Point(5, 6));
                 window.UpdateLayout();
-                Assert.Equal(200 + ReviewDragImage.Offset.X, picture.Position.X, 1.0);
-                Assert.Equal(150 + ReviewDragImage.Offset.Y, picture.Position.Y, 1.0);
+                AssertAtPointer(picture, tile.TranslatePoint(new Point(5, 6), root));
+                Assert.Equal(DragDropEffects.None, overTile.Effects);
+
+                // Entering a viewer, and moving over it, the viewer takes the photo and the picture
+                // still follows; nothing is placed until the drop.
+                var rightViewer = Named<UIElement>(window, "RightViewerPanel");
+                var intoViewer = RaiseDrag(rightViewer, DragDrop.PreviewDragEnterEvent, DragDrop.DragEnterEvent,
+                    fromTile, DragDropEffects.Copy, new Point(20, 30));
+                window.UpdateLayout();
+                AssertAtPointer(picture, rightViewer.TranslatePoint(new Point(20, 30), root));
+                Assert.Equal(DragDropEffects.Copy, intoViewer.Effects);
+                var overViewer = RaiseDrag(rightViewer, DragDrop.PreviewDragOverEvent, DragDrop.DragOverEvent,
+                    fromTile, DragDropEffects.Copy, new Point(40, 35));
+                window.UpdateLayout();
+                AssertAtPointer(picture, rightViewer.TranslatePoint(new Point(40, 35), root));
+                Assert.Equal(DragDropEffects.Copy, overViewer.Effects);
+                Assert.False(viewModel.RightViewer.HasPhoto);
 
                 window.HideDragImage();
                 Assert.Null(layer.GetAdorners(root));
 
                 // A viewer's photo is dragged with the photo that viewer shows.
-                Place(viewModel, ViewerSide.Left, viewModel.ReviewCategories[0].Groups[0], 1);
+                Place(viewModel, ViewerSide.Left, group, 1);
                 ShowAndDrain(window);
                 var shown = Named<PreviewStatusControl>(window, "LeftPreviewStatusControl").PreviewImage.Source;
                 Assert.NotNull(shown);
                 var dragged = Assert.IsType<ReviewDragImage>(window.ShowDragImage(Named<UIElement>(window, "LeftViewerPanel")));
                 Assert.Same(shown, dragged.Picture);
 
+                // Dropped on the gallery, nothing takes it: the viewer lets it go only when the drag
+                // ends (FinishViewerDrag), and nothing else changes.
+                var dropOnGallery = RaiseDrag(tile, DragDrop.PreviewDropEvent, DragDrop.DropEvent,
+                    ReviewDragData.Create(2, group.GroupId, ViewerSide.Left), DragDropEffects.Move, new Point(5, 6));
+                Assert.Equal(DragDropEffects.None, dropOnGallery.Effects);
+
                 window.HideDragImage();
                 Assert.Null(layer.GetAdorners(root));
                 Assert.Equal(2, viewModel.LeftViewer.Member?.OccurrenceId);
+                Assert.False(viewModel.RightViewer.HasPhoto);
                 Assert.Empty(workflow.SelectionCommands);
             }
             finally
@@ -489,6 +521,31 @@ public sealed class WpfReviewViewerTests
                 window.Close();
             }
         });
+    }
+
+    // WPF makes a drag's event arguments only inside DoDragDrop. This raises what its drop target
+    // raises over the element under the pointer: the preview event, then, only if no handler took
+    // the preview, the bubbling one, with the same arguments; the effects are what the drag shows.
+    private static DragEventArgs RaiseDrag(UIElement target, RoutedEvent preview, RoutedEvent bubble,
+        IDataObject data, DragDropEffects allowed, Point pointInTarget)
+    {
+        var constructor = typeof(DragEventArgs).GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic, binder: null,
+            [typeof(IDataObject), typeof(DragDropKeyStates), typeof(DragDropEffects), typeof(DependencyObject), typeof(Point)],
+            modifiers: null);
+        Assert.NotNull(constructor);
+        var drag = Assert.IsType<DragEventArgs>(constructor.Invoke([data, DragDropKeyStates.LeftMouseButton, allowed, target, pointInTarget]));
+        drag.RoutedEvent = preview;
+        target.RaiseEvent(drag);
+        if (drag.Handled) return drag;
+        drag.RoutedEvent = bubble;
+        target.RaiseEvent(drag);
+        return drag;
+    }
+
+    private static void AssertAtPointer(ReviewDragImage picture, Point pointerInRoot)
+    {
+        Assert.Equal(pointerInRoot.X + ReviewDragImage.Offset.X, picture.Position.X, 1.0);
+        Assert.Equal(pointerInRoot.Y + ReviewDragImage.Offset.Y, picture.Position.Y, 1.0);
     }
 
     private static void Place(ShellViewModel viewModel, ViewerSide side, ReviewGroupViewModel group, int index) =>
