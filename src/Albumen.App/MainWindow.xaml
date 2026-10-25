@@ -428,25 +428,6 @@
         <!-- The viewer's Remove button is red while its photo is marked, a grey pill otherwise. -->
         <app:BooleanToStyleConverter x:Key="RemoveButtonStyleConverter"
                 TrueStyle="{StaticResource Albumen.DangerButton}" FalseStyle="{StaticResource Albumen.Button}" />
-        <!-- One likely match: thumbnail, name and the set it is in. Opening it shows it in
-             that set and in the Left Viewer; the list itself marks nothing. -->
-        <DataTemplate x:Key="LikelyMatchTemplate">
-            <Button Width="156" Margin="2,3" Padding="6" Click="OnOpenLikelyMatchClick"
-                    IsEnabled="{Binding CanOpen}"
-                    Style="{StaticResource Albumen.CardButton}"
-                    ToolTip="Open in its set"
-                    AutomationProperties.AutomationId="open-likely-match"
-                    AutomationProperties.Name="{Binding AutomationName}"
-                    AutomationProperties.PositionInSet="{Binding Photo.PositionInSet}"
-                    AutomationProperties.SizeOfSet="{Binding Photo.SizeOfSet}">
-                <StackPanel>
-                    <app:PhotoThumbnail Width="140" Height="105" Member="{Binding Photo}"
-                            Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
-                    <TextBlock Margin="0,6,0,0" Text="{Binding Photo.FileName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.Caption}" Text="{Binding Context}" TextWrapping="Wrap" />
-                </StackPanel>
-            </Button>
-        </DataTemplate>
         </ResourceDictionary>
     </Window.Resources>
 
@@ -1239,28 +1220,6 @@
                                           AutomationProperties.Name="Scan outcome categories" />
                         </StackPanel>
                     </Expander>
-                </StackPanel>
-
-                <!-- The 1.1 list of likely matches, filled by the search bar. It is a list of its own
-                     and changes nothing in the kinds and sets below. -->
-                <StackPanel DataContext="{Binding ReviewSearch}">
-                    <TextBlock Margin="0,10,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding SelectionOutsideText}" TextWrapping="Wrap"
-                               Visibility="{Binding HasSelectionOutside, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <ListBox x:Name="LikelyMatchesList" Margin="0,8,0,0" ItemsSource="{Binding Results}"
-                             PreviewMouseWheel="OnReviewListPreviewMouseWheel" PreviewKeyDown="OnReviewListPreviewKeyDown"
-                             ItemTemplate="{StaticResource LikelyMatchTemplate}"
-                             ScrollViewer.CanContentScroll="True"
-                             ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                             VirtualizingPanel.ScrollUnit="Item"
-                             Visibility="{Binding HasResults, Converter={StaticResource BooleanToVisibilityConverter}}"
-                             AutomationProperties.Name="Likely matches in this Scan">
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <VirtualizingStackPanel Orientation="Horizontal" />
-                            </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
-                    </ListBox>
                 </StackPanel>
 
                 <!-- A search that matched nothing in Review says so, with the way back. -->

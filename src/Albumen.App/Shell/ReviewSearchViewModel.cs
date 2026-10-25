@@ -11,9 +11,9 @@ using Albumen.Domain.Scan;
 namespace Albumen.App.Shell;
 
 /// <summary>
-/// Review's photo search: the search bar's prompt and the filter its result puts on Review, plus
-/// the 1.1 ranked list. Ephemeral and read-only: the ranking comes from
-/// <see cref="LikelyMatchesQuery"/>, and nothing here changes a set, a mark or a cleanup.
+/// Review's photo search: the search bar's prompt and the filter its result puts on Review.
+/// Ephemeral and read-only: the ranking comes from <see cref="LikelyMatchesQuery"/>, and nothing
+/// here changes a set, a mark or a cleanup.
 /// </summary>
 public sealed class ReviewSearchViewModel : INotifyPropertyChanged
 {
@@ -23,10 +23,7 @@ public sealed class ReviewSearchViewModel : INotifyPropertyChanged
     private LikelyMatchesResult? result;
     private bool searching;
     private long request;
-    private ImmutableDictionary<long, PhotoSet> sets = ImmutableDictionary<long, PhotoSet>.Empty;
-    private ImmutableHashSet<long> selected = [];
-    private ImmutableHashSet<long> grouped = [];
-    private ImmutableArray<LikelyMatch> shown = [];
+    private int shownCount;
 
     public ReviewSearchViewModel(LikelyMatchesQuery? query)
     {
@@ -38,13 +35,9 @@ public sealed class ReviewSearchViewModel : INotifyPropertyChanged
             Clear();
             return Task.CompletedTask;
         }, canExecute: () => IsActive || prompt.Length != 0);
-        Results = new(0, _ => throw new InvalidOperationException());
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
-
-    /// <summary>Raised by Show all, so Review can restore the kind and set open before the search.</summary>
-    internal event Action? Cleared;
 
     /// <summary>Raised when a search or Show all changes <see cref="Filter"/>, so Review is projected again.</summary>
     internal event Action? FilterChanged;
@@ -73,10 +66,8 @@ public sealed class ReviewSearchViewModel : INotifyPropertyChanged
 
     public bool CanSearch => query is not null && Index.State == SemanticState.Ready;
 
-    /// <summary>True while a ranked list replaces the hint: results or no results.</summary>
+    /// <summary>True while a search filters Review, whether or not it matched anything.</summary>
     public bool IsActive => result?.Outcome is LikelyMatchesOutcome.Matches or LikelyMatchesOutcome.NoMatches;
-
-    public bool HasResults => !shown.IsEmpty;
 
     /// <summary>Inside the empty bar: the invitation to search, or why search can't run.</summary>
     public string PlaceholderText => CanSearch ? "Find photos by what they show" : StatusText;
@@ -85,8 +76,6 @@ public sealed class ReviewSearchViewModel : INotifyPropertyChanged
     public bool HasStatus => StatusText != IdleText;
 
     private const string IdleText = "Describe what's in a photo, for example “at sea”, and press Enter.";
-
-    public LazyReviewCollection<LikelyMatchItemViewModel> Results { get; private set; }
 
     public string StatusText
     {
@@ -117,25 +106,6 @@ public sealed class ReviewSearchViewModel : INotifyPropertyChanged
             : $"Searches only the {Count(index.Indexed)} photos in this Scan."
         : string.Empty;
 
-    /// <summary>Marks for removal that the list does not show; the cleanup still includes them.</summary>
-    public string SelectionOutsideText
-    {
-        get
-        {
-            if (!IsActive || selected.IsEmpty) return string.Empty;
-            var visible = shown.Select(match => match.OccurrenceId).ToHashSet();
-            var outside = selected.Count(id => !visible.Contains(id));
-            return outside switch
-            {
-                0 => string.Empty,
-                1 => "1 photo marked for removal isn't in this list. Cleanup still includes it.",
-                _ => $"{Count(outside)} photos marked for removal aren't in this list. Cleanup still includes them.",
-            };
-        }
-    }
-
-    public bool HasSelectionOutside => SelectionOutsideText.Length != 0;
-
     private string ReadyText
     {
         get
@@ -143,10 +113,10 @@ public sealed class ReviewSearchViewModel : INotifyPropertyChanged
             if (searching) return "Searching…";
             return result switch
             {
-                { Outcome: LikelyMatchesOutcome.Matches } when shown.Length == 1 =>
+                { Outcome: LikelyMatchesOutcome.Matches } when shownCount == 1 =>
                     $"1 likely match in this Scan for “{result.Prompt}”",
-                { Outcome: LikelyMatchesOutcome.Matches } when shown.Length > 1 =>
-                    $"{Count(shown.Length)} likely matches in this Scan for “{result.Prompt}”, most likely first",
+                { Outcome: LikelyMatchesOutcome.Matches } when shownCount > 1 =>
+                    $"{Count(shownCount)} likely matches in this Scan for “{result.Prompt}”, most likely first",
                 { Outcome: LikelyMatchesOutcome.Matches or LikelyMatchesOutcome.NoMatches } =>
                     $"No likely matches in this Scan for “{result.Prompt}”. Try other words.",
                 { Outcome: LikelyMatchesOutcome.TooLong } =>
@@ -210,9 +180,7 @@ public sealed class ReviewSearchViewModel : INotifyPropertyChanged
         SetResult(null);
         Prompt = string.Empty;
         Project();
-        if (!wasActive) return;
-        FilterChanged?.Invoke();
-        Cleared?.Invoke();
+        if (wasActive) FilterChanged?.Invoke();
     }
 
     // Only a search that ran filters Review; one that could not run leaves it unfiltered.
@@ -224,72 +192,30 @@ public sealed class ReviewSearchViewModel : INotifyPropertyChanged
             : null;
     }
 
-    // Photos that left Review (moved to the Recycle Bin, or in a set closed after a cleanup) are
-    // not listed: only photos still in an open set, or never in any set, are.
+    // The matches Review still shows somewhere, for the status line: a photo a cleanup moved to the
+    // Recycle Bin has left every set and is not counted.
     private void Project()
     {
-        if (!IsActive || result is null || snapshot is not { } current)
-        {
-            shown = [];
-            Results = new(0, _ => throw new InvalidOperationException());
-            Changed();
-            return;
-        }
-        var previousSets = sets;
-        (sets, selected, grouped) = ProjectSets(current);
-        var rows = current.Scan.Occurrences.ToDictionary(row => row.Token.OccurrenceId);
-        var visible = result.Matches.Where(match => rows.ContainsKey(match.OccurrenceId)
-                && (sets.ContainsKey(match.OccurrenceId) || !grouped.Contains(match.OccurrenceId)))
-            .ToImmutableArray();
-        // A mark changed elsewhere in Review keeps the list as it is, so its scroll position stays.
-        var unchanged = Results.Count == visible.Length && visible.SequenceEqual(shown)
-            && visible.All(match => Equals(previousSets.GetValueOrDefault(match.OccurrenceId),
-                sets.GetValueOrDefault(match.OccurrenceId)));
-        shown = visible;
-        if (!unchanged)
-        {
-            var listed = sets;
-            Results = new(visible.Length, index =>
-            {
-                var match = visible[index];
-                return new(new ScanOccurrenceViewModel(rows[match.OccurrenceId], positionInSet: index + 1,
-                    sizeOfSet: visible.Length), listed.GetValueOrDefault(match.OccurrenceId));
-            });
-        }
+        shownCount = result is { Outcome: LikelyMatchesOutcome.Matches } found && snapshot is { } current
+            ? CountInReview(found, current)
+            : 0;
         Changed();
     }
 
-    // Each photo's first open set, in the order Review lists them; the photos marked for removal;
-    // and every photo the Scan put in a set.
-    private static (ImmutableDictionary<long, PhotoSet>, ImmutableHashSet<long>, ImmutableHashSet<long>) ProjectSets(
-        AlbumenSnapshot current)
+    private static int CountInReview(LikelyMatchesResult found, AlbumenSnapshot current)
     {
-        var sets = ImmutableDictionary.CreateBuilder<long, PhotoSet>();
-        var selected = ImmutableHashSet.CreateBuilder<long>();
-        foreach (var category in new[] { ReviewCategoryKind.Exact, ReviewCategoryKind.Near, ReviewCategoryKind.Uncertain })
-        {
-            var position = 0;
-            foreach (var group in current.Review.Groups.Where(group => !group.Closed && ShellViewModel.InCategory(group.Candidate, category)))
-            {
-                var set = new PhotoSet(category, group.Candidate.GroupId,
-                    $"{ReviewCategoryNames.For(category)} set {(++position).ToString(CultureInfo.InvariantCulture)}");
-                foreach (var member in group.Members)
-                {
-                    sets.TryAdd(member.Occurrence.Token.OccurrenceId, set);
-                    if (member.Selected) selected.Add(member.Occurrence.Token.OccurrenceId);
-                }
-            }
-        }
+        if (current.Review.Pin is null) return found.Matches.Length;
+        var reviewed = current.Review.Groups.SelectMany(group => group.Members)
+            .Select(member => member.Occurrence.Token.OccurrenceId).ToHashSet();
         var grouped = current.Scan.Groups.SelectMany(group => group.Members)
-            .Select(member => member.Token.OccurrenceId).ToImmutableHashSet();
-        return (sets.ToImmutable(), selected.ToImmutable(), grouped);
+            .Select(member => member.Token.OccurrenceId).ToHashSet();
+        return found.Matches.Count(match => reviewed.Contains(match.OccurrenceId) || !grouped.Contains(match.OccurrenceId));
     }
 
     private void Changed()
     {
-        foreach (var name in new[] { nameof(CanSearch), nameof(IsActive), nameof(HasResults), nameof(Results),
-            nameof(StatusText), nameof(PlaceholderText), nameof(HasStatus), nameof(ScopeText),
-            nameof(SelectionOutsideText), nameof(HasSelectionOutside) })
+        foreach (var name in new[] { nameof(CanSearch), nameof(IsActive), nameof(StatusText),
+            nameof(PlaceholderText), nameof(HasStatus), nameof(ScopeText) })
             OnPropertyChanged(name);
         SearchCommand.NotifyCanExecuteChanged();
         ShowAllCommand.NotifyCanExecuteChanged();
@@ -321,17 +247,4 @@ public sealed record ReviewSearchFilter(string Prompt, ImmutableArray<LikelyMatc
         }
         return scores.ToImmutable();
     }
-}
-
-/// <summary>The Review set a likely match opens in.</summary>
-public sealed record PhotoSet(ReviewCategoryKind Category, Guid GroupId, string Name);
-
-public sealed class LikelyMatchItemViewModel(ScanOccurrenceViewModel photo, PhotoSet? set)
-{
-    public ScanOccurrenceViewModel Photo { get; } = photo;
-    public PhotoSet? Set { get; } = set;
-    public bool CanOpen => Set is not null;
-    public string Context => Set?.Name ?? "Not in any set: nothing to decide";
-    public string AutomationName => string.Create(CultureInfo.InvariantCulture,
-        $"Likely match {Photo.PositionInSet} of {Photo.SizeOfSet}: {Photo.FileName}; {Context}");
 }

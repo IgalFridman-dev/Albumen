@@ -92,8 +92,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly ObservableCollection<ActionRecordViewModel> actionRecoveryRecords = [];
     private readonly object lifetime = new();
     private Task? disposalTask;
-    // Where Review was when the first likely match was opened; Show all returns there.
-    private (ReviewLevel Level, ReviewCategoryKind? Category)? likelyMatchesReturn;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
@@ -143,8 +141,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             return Task.CompletedTask;
         }, allowConcurrentExecutions: true);
         SwapViewersCommand = new AsyncCommand(SwapViewersAsync, allowConcurrentExecutions: true);
-        OpenLikelyMatchCommand = new AsyncCommand(
-            OpenLikelyMatchAsync, allowConcurrentExecutions: true);
         ReviewSearch = new(null);
         ReviewBackCommand = new AsyncCommand(ReviewBackAsync,
             canExecute: () => ReviewNavigationLevel != ReviewLevel.Categories);
@@ -164,7 +160,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         photoWorkflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
         ReviewSearch = new(likelyMatches);
-        ReviewSearch.Cleared += ReturnFromLikelyMatches;
         ReviewSearch.FilterChanged += OnReviewSearchFilterChanged;
         this.reviewDialog = reviewDialog;
         this.localScanDataControl = localScanDataControl;
@@ -189,7 +184,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand ConfirmClearScanDataCommand { get; }
     public AsyncCommand CancelClearScanDataCommand { get; }
     public AsyncCommand OpenReviewCategoryCommand { get; }
-    public AsyncCommand OpenLikelyMatchCommand { get; }
     // The search bar's prompt and the filter its result puts on the kinds and sets.
     public ReviewSearchViewModel ReviewSearch { get; }
     public AsyncCommand ReviewBackCommand { get; }
@@ -846,7 +840,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (reprojectReview)
             ProjectReviewView(snapshot, sessionChanged: previousReview?.Pin != snapshot.Review.Pin
                 || previousScan?.Pin != snapshot.Scan.Pin);
-        if (previousScan?.Pin != snapshot.Scan.Pin) likelyMatchesReturn = null;
         legacyCouldNotAnalyze = null;
         ScanOutcomeSummaries = ProjectOutcomeSummaries(snapshot.Scan);
         ProjectReview(snapshot.Review);
@@ -1216,25 +1209,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
         SetReviewNavigation(ReviewLevel.Gallery, category);
         return Task.CompletedTask;
-    }
-
-    private async Task OpenLikelyMatchAsync(object? parameter)
-    {
-        if (parameter is not LikelyMatchItemViewModel { Set: { } set } match) return;
-        var category = ReviewCategories.FirstOrDefault(row => row.Category == set.Category);
-        if (category?.FindGroup(set.GroupId) is not { } group
-            || group.FindMember(match.Photo.OccurrenceId) is not { } member)
-            return;
-        likelyMatchesReturn ??= (ReviewNavigationLevel, ActiveReviewCategory?.Category);
-        SetReviewNavigation(ReviewLevel.Gallery, category);
-        await PlaceInViewerAsync(new PlaceInViewer(ViewerSide.Left, group.GroupId, member));
-    }
-
-    private void ReturnFromLikelyMatches()
-    {
-        if (likelyMatchesReturn is not { } back) return;
-        likelyMatchesReturn = null;
-        RestoreReviewNavigation(back.Level, back.Category);
     }
 
     private Task ReviewBackAsync()

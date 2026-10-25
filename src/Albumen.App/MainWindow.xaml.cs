@@ -265,13 +265,9 @@ public partial class MainWindow : Window
         if (FindAncestor<Button>(source) is { } button && IsWithin(button, list)
             && !AutomationProperties.GetAutomationId(button).StartsWith("open-review-", StringComparison.Ordinal))
             return;
-        var item = list.SelectedItem
-            ?? FindDataContext<ReviewCategoryViewModel>(source)
-            ?? (object?)FindDataContext<LikelyMatchItemViewModel>(source);
+        var item = list.SelectedItem ?? FindDataContext<ReviewCategoryViewModel>(source);
         if (ReferenceEquals(list, ReviewCategoriesList) && item is ReviewCategoryViewModel category)
             shellViewModel.OpenReviewCategoryCommand.Execute(category);
-        else if (ReferenceEquals(list, LikelyMatchesList) && item is LikelyMatchItemViewModel match)
-            shellViewModel.OpenLikelyMatchCommand.Execute(match);
         else
             return;
 
@@ -326,16 +322,6 @@ public partial class MainWindow : Window
         if (!suggestionLoads.Remove(set, out var cancellation)) return;
         cancellation.Cancel();
         cancellation.Dispose();
-    }
-
-    private void OnOpenLikelyMatchClick(object sender, RoutedEventArgs eventArgs)
-    {
-        if (sender is not Button { DataContext: LikelyMatchItemViewModel match }) return;
-        shellViewModel?.OpenLikelyMatchCommand.Execute(match);
-        // Show the top of the viewers so the match visibly opens, scrolling the page no
-        // further than that.
-        ReviewViewersPanel.BringIntoView(new Rect(0, 0, ReviewViewersPanel.ActualWidth,
-            Math.Min(ReviewViewersPanel.ActualHeight, 160)));
     }
 
     // Show all clears the search; the prompt keeps focus so the next search starts there.

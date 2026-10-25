@@ -10,7 +10,7 @@ public enum ViewerSide
 }
 
 // Placing a photo names the viewer, the photo's set and the photo. A click on a tile places
-// only while that viewer is empty; the menu, a drop and a likely match replace its photo.
+// only while that viewer is empty; the menu and a drop replace its photo.
 public sealed record PlaceInViewer(
     ViewerSide Side,
     Guid GroupId,
