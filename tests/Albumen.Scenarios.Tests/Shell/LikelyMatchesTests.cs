@@ -24,7 +24,7 @@ public sealed class LikelyMatchesTests
     [InlineData(SemanticState.Failed, false, "Search isn't available for this Scan: The photo search data could not be saved. Everything else in Review works.")]
     public void EachSearchStateHasItsOwnWordsAndOnlyReadyCanSearch(SemanticState state, bool canSearch, string text)
     {
-        var fixture = new Fixture(index: new(state, 6, 3, 3, Fixture.Profile.Fingerprint,
+        var fixture = new SearchFixture(index: new(state, 6, 3, 3, SearchFixture.Profile.Fingerprint,
             state switch
             {
                 SemanticState.Failed => "The photo search data could not be saved.",
@@ -36,20 +36,24 @@ public sealed class LikelyMatchesTests
         Assert.Equal(canSearch, fixture.Matches.CanSearch);
         Assert.Equal(canSearch, fixture.Matches.SearchCommand.CanExecute(null));
         Assert.False(fixture.Matches.IsActive);
+        // The bar's placeholder says why search can't run; ready, it invites a search and the
+        // status line under the bar stays hidden.
+        Assert.Equal(canSearch ? "Find photos by what they show" : text, fixture.Matches.PlaceholderText);
+        Assert.Equal(!canSearch, fixture.Matches.HasStatus);
     }
 
     [Fact]
     public void ReadySaysItSearchesOnlyThisScanAndDisclosesPhotosThatCouldNotBePrepared()
     {
-        Assert.Equal("Searches only the 6 photos in this Scan.", new Fixture().Matches.ScopeText);
+        Assert.Equal("Searches only the 6 photos in this Scan.", new SearchFixture().Matches.ScopeText);
         Assert.Equal("Searches only this Scan: 4 of 6 photos could be prepared, so some photos can't be found.",
-            new Fixture(index: Fixture.Ready with { Indexed = 4 }).Matches.ScopeText);
+            new SearchFixture(index: SearchFixture.Ready with { Indexed = 4 }).Matches.ScopeText);
     }
 
     [Fact]
     public async Task APromptListsTheScansPhotosByRankWithTheSetEachIsIn()
     {
-        var fixture = new Fixture();
+        var fixture = new SearchFixture();
 
         await fixture.SearchAsync("  at   sea ");
 
@@ -65,7 +69,7 @@ public sealed class LikelyMatchesTests
     [Fact]
     public async Task NoMatchSaysSoForThisScanOnly()
     {
-        var fixture = new Fixture();
+        var fixture = new SearchFixture();
 
         await fixture.SearchAsync("nothing");
 
@@ -77,7 +81,7 @@ public sealed class LikelyMatchesTests
     [Fact]
     public async Task ATooLongPromptIsRejectedAndNothingIsSearched()
     {
-        var fixture = new Fixture();
+        var fixture = new SearchFixture();
 
         await fixture.SearchAsync(new string('a', LikelyMatchesQuery.MaximumPromptLength + 1));
 
@@ -89,7 +93,7 @@ public sealed class LikelyMatchesTests
     [Fact]
     public async Task MarksTheListDoesNotShowAreCountedAndKept()
     {
-        var fixture = new Fixture();
+        var fixture = new SearchFixture();
 
         await fixture.SearchAsync("lone");
 
@@ -101,7 +105,7 @@ public sealed class LikelyMatchesTests
     [Fact]
     public async Task OpeningAMatchShowsItInItsSetAndShowAllReturnsToWhereReviewWas()
     {
-        var fixture = new Fixture();
+        var fixture = new SearchFixture();
         var review = fixture.Workflow.Current.Review;
         await fixture.ViewModel.OpenReviewCategoryCommand.ExecuteAsync(fixture.ViewModel.ReviewCategories[0]);
         await fixture.SearchAsync("at sea");
@@ -127,7 +131,7 @@ public sealed class LikelyMatchesTests
     [Fact]
     public async Task AnEmptyPromptClearsTheList()
     {
-        var fixture = new Fixture();
+        var fixture = new SearchFixture();
         await fixture.SearchAsync("at sea");
 
         await fixture.SearchAsync("   ");
@@ -139,7 +143,7 @@ public sealed class LikelyMatchesTests
     [Fact]
     public async Task AMarkChangedElsewhereKeepsTheListAndUpdatesTheCount()
     {
-        var fixture = new Fixture();
+        var fixture = new SearchFixture();
         await fixture.SearchAsync("lone");
         var results = fixture.Matches.Results;
 
@@ -162,7 +166,7 @@ public sealed class LikelyMatchesTests
     [Fact]
     public async Task PhotosThatLeftReviewAreNotListed()
     {
-        var fixture = new Fixture();
+        var fixture = new SearchFixture();
         await fixture.SearchAsync("at sea");
 
         // After a cleanup the moved photo leaves every set but stays in the Scan.
@@ -183,7 +187,7 @@ public sealed class LikelyMatchesTests
     [Fact]
     public async Task ANewScanClearsThePromptAndTheList()
     {
-        var fixture = new Fixture();
+        var fixture = new SearchFixture();
         fixture.Matches.Prompt = "at sea";
         await fixture.Matches.SearchCommand.ExecuteAsync();
 
@@ -200,7 +204,7 @@ public sealed class LikelyMatchesTests
     [Fact]
     public async Task TheWordsMakeNoCompletenessClassificationOrRemovalClaims()
     {
-        var fixture = new Fixture();
+        var fixture = new SearchFixture();
         var texts = new List<string> { fixture.Matches.StatusText, fixture.Matches.ScopeText, LikelyMatchesViewModel.PromptHelpText };
         await fixture.SearchAsync("at sea");
         texts.AddRange([fixture.Matches.StatusText, .. Items(fixture).Select(item => item.Context)]);
@@ -217,56 +221,56 @@ public sealed class LikelyMatchesTests
     private static readonly string[] BannedWords =
         ["vector", "embedding", "all matches", "every match", "category", "confidence", "will be removed", "delete"];
 
-    private static ImmutableArray<LikelyMatchItemViewModel> Items(Fixture fixture) =>
+    private static ImmutableArray<LikelyMatchItemViewModel> Items(SearchFixture fixture) =>
         [.. Enumerable.Range(0, fixture.Matches.Results.Count).Select(index => fixture.Matches.Results[index])];
 
-    private static IEnumerable<long> Ids(Fixture fixture) => Items(fixture).Select(item => item.Photo.OccurrenceId);
+    private static IEnumerable<long> Ids(SearchFixture fixture) => Items(fixture).Select(item => item.Photo.OccurrenceId);
+}
 
-    // GroupedReviewData's overlapping sets: photo 1 is marked in Identical copies and also in the
-    // Look-alike and Maybe-similar sets; photo 50 is in no set.
-    private sealed class Fixture
+// GroupedReviewData's overlapping sets: photo 1 is marked in Identical copies and also in the
+// Look-alike and Maybe-similar sets; photo 50 is in no set. The search bar's WPF tests use it too.
+internal sealed class SearchFixture
+{
+    public static readonly EncoderProfile Profile = new(
+        "siglip2-test", new string('A', 64), new string('B', 64), new string('C', 64), 512, 224, 64, 0, 3, 1, 100, -10);
+
+    public static readonly SemanticSnapshot Ready = new(SemanticState.Ready, 6, 6, 6, Profile.Fingerprint, "");
+
+    public SearchFixture(SemanticSnapshot? index = null)
     {
-        public static readonly EncoderProfile Profile = new(
-            "siglip2-test", new string('A', 64), new string('B', 64), new string('C', 64), 512, 224, 64, 0, 3, 1, 100, -10);
-
-        public static readonly SemanticSnapshot Ready = new(SemanticState.Ready, 6, 6, 6, Profile.Fingerprint, "");
-
-        public Fixture(SemanticSnapshot? index = null)
+        var scope = new ReviewStaticScope();
+        var snapshot = GroupedReviewData.OverlappingSnapshot(scope.Current);
+        var source = snapshot.Scan.Occurrences[0];
+        var key = new PhysicalFileKey(7, new(0, 50));
+        var lone = new ScanFileOccurrence(source.Token with { OccurrenceId = 50 }, @"C:\Photos\50.jpg",
+            @"C:\Photos\50.jpg", key, source.Enumerate, source.Exact, new(key, 512, new string('A', 64)),
+            source.Allocation);
+        Workflow = new(snapshot with
         {
-            var scope = new ReviewStaticScope();
-            var snapshot = GroupedReviewData.OverlappingSnapshot(scope.Current);
-            var source = snapshot.Scan.Occurrences[0];
-            var key = new PhysicalFileKey(7, new(0, 50));
-            var lone = new ScanFileOccurrence(source.Token with { OccurrenceId = 50 }, @"C:\Photos\50.jpg",
-                @"C:\Photos\50.jpg", key, source.Enumerate, source.Exact, new(key, 512, new string('A', 64)),
-                source.Allocation);
-            Workflow = new(snapshot with
-            {
-                Scan = snapshot.Scan with { Occurrences = snapshot.Scan.Occurrences.Add(lone), Semantic = index ?? Ready },
-            });
-            ViewModel = new ShellViewModel(scope, Workflow, likelyMatches: new LikelyMatchesQuery(Encoder, Store));
-        }
+            Scan = snapshot.Scan with { Occurrences = snapshot.Scan.Occurrences.Add(lone), Semantic = index ?? Ready },
+        });
+        ViewModel = new ShellViewModel(scope, Workflow, likelyMatches: new LikelyMatchesQuery(Encoder, Store));
+    }
 
-        public TextEncoder Encoder { get; } = new();
-        public PromptScores Store { get; } = new();
-        public PublishingReviewWorkflow Workflow { get; }
-        public ShellViewModel ViewModel { get; }
-        public LikelyMatchesViewModel Matches => ViewModel.LikelyMatches;
+    public TextEncoder Encoder { get; } = new();
+    public PromptScores Store { get; } = new();
+    public PublishingReviewWorkflow Workflow { get; }
+    public ShellViewModel ViewModel { get; }
+    public LikelyMatchesViewModel Matches => ViewModel.LikelyMatches;
 
-        public Task SearchAsync(string prompt)
-        {
-            Matches.Prompt = prompt;
-            return Matches.SearchCommand.ExecuteAsync();
-        }
+    public Task SearchAsync(string prompt)
+    {
+        Matches.Prompt = prompt;
+        return Matches.SearchCommand.ExecuteAsync();
     }
 
     // "at sea" encodes as (1, 0, 0) and "lone" as (0, 1, 0), so a photo's score for each is the
     // first or second component of its vector. Any other prompt scores nothing.
-    private sealed class TextEncoder : IVisionLanguageEncoder
+    internal sealed class TextEncoder : IVisionLanguageEncoder
     {
         public List<string> Prompts { get; } = [];
 
-        public EncoderProfileResult LoadProfile() => new(Fixture.Profile, null);
+        public EncoderProfileResult LoadProfile() => new(Profile, null);
 
         public EmbeddingResult EncodeImage(EncoderProfile profile, EncoderImage image) => throw new NotSupportedException();
 
@@ -284,7 +288,7 @@ public sealed class LikelyMatchesTests
 
     // Photos within ln 50 / 100 = 0.039 cosine of the best one are listed: "at sea" ranks the grouped
     // photos (2 falls far below) and photo 50; "lone" finds only 50.
-    private sealed class PromptScores : IEmbeddingStore
+    internal sealed class PromptScores : IEmbeddingStore
     {
         private static readonly Dictionary<long, (float AtSea, float Lone)> Scores = new()
         {
