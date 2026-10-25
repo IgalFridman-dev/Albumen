@@ -5,22 +5,24 @@ namespace Albumen.App.Themes;
 
 // The one place Albumen chooses a colour. Views paint through DynamicResource
 // Albumen.*Brush keys; Apply fills them with the dark palette (sampled from the Windows
-// Photos gallery), or with the system brushes under High Contrast so the user's contrast
-// theme wins.
+// Photos gallery, then lifted a step after the owner's 2026-10-25 walkthrough), or with the
+// system brushes under High Contrast so the user's contrast theme wins.
 internal static class AlbumenPalette
 {
     private static readonly Token[] Tokens =
     [
-        new("Albumen.WindowBrush", Solid(0x0A0A0A), () => SystemColors.WindowBrush),
-        new("Albumen.SurfaceBrush", Solid(0x171717), () => SystemColors.WindowBrush),
-        new("Albumen.FieldBrush", Solid(0x1F1F1F), () => SystemColors.WindowBrush),
-        new("Albumen.SubtleFillBrush", Solid(0x262626), () => SystemColors.ControlBrush),
-        new("Albumen.HoverBrush", Solid(0x2E2E2E), () => SystemColors.ControlBrush),
-        new("Albumen.PressedBrush", Solid(0x373737), () => SystemColors.ControlBrush),
-        new("Albumen.PillBrush", Solid(0x373737), () => SystemColors.ControlBrush),
-        new("Albumen.PillHoverBrush", Solid(0x444444), () => SystemColors.ControlBrush),
-        new("Albumen.BorderBrush", Solid(0x2A2A2A), () => SystemColors.ActiveBorderBrush),
-        new("Albumen.BorderStrongBrush", Solid(0x3A3A3A), () => SystemColors.WindowTextBrush),
+        new("Albumen.WindowBrush", Solid(0x121212), () => SystemColors.WindowBrush),
+        new("Albumen.SurfaceBrush", Solid(0x1E1E1E), () => SystemColors.WindowBrush),
+        new("Albumen.FieldBrush", Solid(0x262626), () => SystemColors.WindowBrush),
+        new("Albumen.SubtleFillBrush", Solid(0x2D2D2D), () => SystemColors.ControlBrush),
+        new("Albumen.HoverBrush", Solid(0x353535), () => SystemColors.ControlBrush),
+        new("Albumen.PressedBrush", Solid(0x3E3E3E), () => SystemColors.ControlBrush),
+        new("Albumen.PillBrush", Solid(0x3E3E3E), () => SystemColors.ControlBrush),
+        new("Albumen.PillHoverBrush", Solid(0x4B4B4B), () => SystemColors.ControlBrush),
+        new("Albumen.BorderBrush", Solid(0x313131), () => SystemColors.ActiveBorderBrush),
+        new("Albumen.BorderStrongBrush", Solid(0x414141), () => SystemColors.WindowTextBrush),
+        // The panel behind the step rail: a navy tone apart from the page, in the accent's blue.
+        new("Albumen.RailBrush", Solid(0x141821), () => SystemColors.WindowBrush),
         new("Albumen.TextBrush", Solid(0xDEDEDE), () => SystemColors.WindowTextBrush),
         new("Albumen.MutedTextBrush", Solid(0x9D9D9D), () => SystemColors.WindowTextBrush),
         new("Albumen.AccentBrush", Solid(0x3D7FE6), () => SystemColors.HighlightBrush),

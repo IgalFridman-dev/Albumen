@@ -622,16 +622,17 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <ScrollViewer Grid.Column="0"
-                          HorizontalScrollBarVisibility="Disabled"
+            <!-- The steps sit on a navy panel of their own, a tone apart from the page. -->
+            <Border x:Name="PhaseRailPanel" Grid.Column="0" CornerRadius="12" Padding="6,6,6,2"
+                    Background="{DynamicResource Albumen.RailBrush}">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
                 <ItemsControl x:Name="PhaseRail"
-                              Margin="4,4,0,0"
                               AutomationProperties.Name="Workflow steps"
                               ItemsSource="{Binding RailSteps}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Button Margin="0,0,8,4"
+                            <Button Margin="0,0,0,4"
                                     MinHeight="52"
                                     Padding="10,6"
                                     HorizontalAlignment="Stretch"
@@ -644,7 +645,7 @@
                                     <Style TargetType="Button" BasedOn="{StaticResource Albumen.StepButton}">
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                                <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                                                <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
                                             </DataTrigger>
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
@@ -719,6 +720,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
+            </Border>
 
             <Grid Grid.Column="2" Visibility="{Binding IsChooseFolderPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <!-- The page fits 1280×800 without scrolling; the ScrollViewer is for smaller windows. -->
