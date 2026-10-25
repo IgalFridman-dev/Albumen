@@ -124,10 +124,13 @@ public sealed class ReviewPhotoTile : Button
     {
         var tile = (ReviewPhotoTile)target;
         tile.UpdateMenu();
-        var before = (eventArgs.OldValue as ScanOccurrenceViewModel)?.IsSelected is true;
-        var after = (eventArgs.NewValue as ScanOccurrenceViewModel)?.IsSelected is true;
-        if (before != after && UIElementAutomationPeer.FromElement(tile) is ReviewPhotoTilePeer peer)
-            peer.RaiseToggleStateChanged(before, after);
+        // A recycled tile that now shows another photo has not toggled anything.
+        if (eventArgs.OldValue is not ScanOccurrenceViewModel old
+            || eventArgs.NewValue is not ScanOccurrenceViewModel current
+            || old.OccurrenceId != current.OccurrenceId)
+            return;
+        if (old.IsSelected != current.IsSelected && UIElementAutomationPeer.FromElement(tile) is ReviewPhotoTilePeer peer)
+            peer.RaiseToggleStateChanged(old.IsSelected, current.IsSelected);
     }
 
     private static void OnShownInChanged(DependencyObject target, DependencyPropertyChangedEventArgs eventArgs) =>

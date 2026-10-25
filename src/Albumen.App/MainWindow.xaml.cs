@@ -608,7 +608,12 @@ public partial class MainWindow : Window
         if (direction is not { } move || Keyboard.FocusedElement is not UIElement focused
             || !IsWithin(focused, ReviewGalleryList))
             return;
-        focused.MoveFocus(new TraversalRequest(move));
+        // Directional moves from the list itself would leave it (its own photos don't count as
+        // targets), so the first arrow after a kind opens enters the first photo instead.
+        if (ReferenceEquals(focused, ReviewGalleryList))
+            Descendants<ReviewPhotoTile>(ReviewGalleryList).FirstOrDefault(CanReceiveFocus)?.Focus();
+        else
+            focused.MoveFocus(new TraversalRequest(move));
         eventArgs.Handled = true;
     }
 

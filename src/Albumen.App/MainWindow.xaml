@@ -210,7 +210,9 @@
              the sets themselves take no focus, their photos do. -->
         <Style x:Key="ReviewGalleryStyle" TargetType="ListBox" BasedOn="{StaticResource ReviewListStyle}">
             <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
-            <Setter Property="KeyboardNavigation.TabNavigation" Value="Continue" />
+            <!-- Tab enters one photo and the next Tab leaves the gallery; arrows move between photos.
+                 "Continue" would walk every photo of a 2,000-copy set before reaching the viewers. -->
+            <Setter Property="KeyboardNavigation.TabNavigation" Value="Once" />
             <Setter Property="ItemContainerStyle">
                 <Setter.Value>
                     <Style TargetType="ListBoxItem">
@@ -422,7 +424,7 @@
         <app:BooleanToStyleConverter x:Key="RemoveButtonStyleConverter"
                 TrueStyle="{StaticResource Albumen.DangerButton}" FalseStyle="{StaticResource Albumen.Button}" />
         <!-- One likely match: thumbnail, name and the set it is in. Opening it shows it in
-             that set, where Keep / Remove works as usual; the list itself marks nothing. -->
+             that set and in the Left Viewer; the list itself marks nothing. -->
         <DataTemplate x:Key="LikelyMatchTemplate">
             <Button Width="156" Margin="2,3" Padding="6" Click="OnOpenLikelyMatchClick"
                     IsEnabled="{Binding CanOpen}"
