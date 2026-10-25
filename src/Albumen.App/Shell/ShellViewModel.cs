@@ -1068,26 +1068,26 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             Candidate, FindCandidate);
     }
 
-    // A search shows a set, whole, when any of its photos matches: best match first, ties by set
-    // id. A set keeps the number it has without the search.
+    // A search shows a set, whole, when any of its photos matches: the set with the best-ranked
+    // match first, ties by set id. A set keeps the number it has without the search.
     private static int[] ShownSets<T>(
         ImmutableArray<T> groups,
         Func<T, Guid> groupId,
         Func<T, IEnumerable<long>> memberIds,
         ReviewSearchFilter filter)
     {
-        var shown = new List<(int Index, float Best, Guid GroupId)>();
+        var shown = new List<(int Index, int Best, Guid GroupId)>();
         for (var index = 0; index < groups.Length; index++)
         {
-            float? best = null;
+            int? best = null;
             foreach (var occurrenceId in memberIds(groups[index]))
             {
-                if (filter.Matches.TryGetValue(occurrenceId, out var score) && (best is null || score > best))
-                    best = score;
+                if (filter.Places.TryGetValue(occurrenceId, out var place) && (best is null || place < best))
+                    best = place;
             }
             if (best is { } value) shown.Add((index, value, groupId(groups[index])));
         }
-        return [.. shown.OrderByDescending(set => set.Best).ThenBy(set => set.GroupId).Select(set => set.Index)];
+        return [.. shown.OrderBy(set => set.Best).ThenBy(set => set.GroupId).Select(set => set.Index)];
     }
 
     // The sets a search shows, in its order. A photo of a set it hides is still found, so a viewer

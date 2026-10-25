@@ -238,6 +238,10 @@ public sealed record ReviewSearchFilter(string Prompt, ImmutableArray<LikelyMatc
 {
     public ImmutableDictionary<long, float> Matches { get; } = ScoresOf(Ranked);
 
+    // Each photo's place in the ranking, 0 for the best. Strong matches can share a score once the
+    // model's probability rounds to 1, so sets are ordered by place, not by score.
+    public ImmutableDictionary<long, int> Places { get; } = PlacesOf(Ranked);
+
     private static ImmutableDictionary<long, float> ScoresOf(ImmutableArray<LikelyMatch> ranked)
     {
         var scores = ImmutableDictionary.CreateBuilder<long, float>();
@@ -246,5 +250,15 @@ public sealed record ReviewSearchFilter(string Prompt, ImmutableArray<LikelyMatc
             if (!scores.ContainsKey(match.OccurrenceId)) scores.Add(match.OccurrenceId, match.Score);
         }
         return scores.ToImmutable();
+    }
+
+    private static ImmutableDictionary<long, int> PlacesOf(ImmutableArray<LikelyMatch> ranked)
+    {
+        var places = ImmutableDictionary.CreateBuilder<long, int>();
+        for (var place = 0; place < ranked.Length; place++)
+        {
+            if (!places.ContainsKey(ranked[place].OccurrenceId)) places.Add(ranked[place].OccurrenceId, place);
+        }
+        return places.ToImmutable();
     }
 }
