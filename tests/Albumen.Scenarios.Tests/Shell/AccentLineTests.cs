@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Albumen.App;
+using Albumen.App.Shell;
 using Xunit;
 
 namespace Albumen.Scenarios.Tests.Shell;
@@ -60,6 +61,36 @@ public sealed class AccentLineTests
 
                 Assert.Empty(VisibleAccentLines(window, photos));
                 Assert.Single(VisibleAccentLines(window, history));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    // Igal, 2026-10-25: the steps sit on a navy panel of their own, a tone apart from the page;
+    // the current step keeps its accent line and takes the accent's soft fill.
+    [Fact]
+    public void TheStepRailSitsOnItsOwnNavyPanel()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = GroupedWpfFixture.Create();
+            var window = new MainWindow { DataContext = fixture.ViewModel, Width = 1280, Height = 800 };
+            try
+            {
+                ShowAndDrain(window);
+                var rail = Assert.IsType<ItemsControl>(window.FindName("PhaseRail"));
+                var panel = Assert.IsType<Border>(window.FindName("PhaseRailPanel"));
+                Assert.Contains(panel, Ancestors(rail));
+                Assert.Same(window.FindResource("Albumen.RailBrush"), panel.Background);
+                Assert.NotSame(window.FindResource("Albumen.WindowBrush"), panel.Background);
+
+                var current = Assert.Single(WpfReviewSelectionTests.Descendants<Button>(rail),
+                    step => step.DataContext is PhaseItemViewModel { IsCurrent: true });
+                Assert.Same(window.FindResource("Albumen.AccentSoftBrush"), current.Background);
+                Assert.Single(VisibleAccentLines(window, rail));
             }
             finally
             {

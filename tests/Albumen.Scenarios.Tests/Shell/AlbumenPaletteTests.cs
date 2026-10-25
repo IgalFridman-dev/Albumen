@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -73,6 +74,39 @@ public sealed class AlbumenPaletteTests
         });
     }
 
+    // Tuned after the b9e6761 walkthrough (Igal, 2026-10-25): the grounds, fields and fills sit a
+    // step lighter, the step rail has its own navy panel, and the text, accent and accent-line
+    // tokens are exactly as they were.
+    [Fact]
+    public void TheDarkTonesSitAStepLighterAndTheTextAndAccentStay()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var dark = new ResourceDictionary();
+            AlbumenPalette.Apply(dark, highContrast: false);
+
+            Assert.Equal("#FF121212", ColorOf(dark, "Albumen.WindowBrush"));
+            Assert.Equal("#FF1E1E1E", ColorOf(dark, "Albumen.SurfaceBrush"));
+            Assert.Equal("#FF262626", ColorOf(dark, "Albumen.FieldBrush"));
+            Assert.Equal("#FF2D2D2D", ColorOf(dark, "Albumen.SubtleFillBrush"));
+            Assert.Equal("#FF353535", ColorOf(dark, "Albumen.HoverBrush"));
+            Assert.Equal("#FF3E3E3E", ColorOf(dark, "Albumen.PressedBrush"));
+            Assert.Equal("#FF3E3E3E", ColorOf(dark, "Albumen.PillBrush"));
+            Assert.Equal("#FF4B4B4B", ColorOf(dark, "Albumen.PillHoverBrush"));
+            Assert.Equal("#FF313131", ColorOf(dark, "Albumen.BorderBrush"));
+            Assert.Equal("#FF414141", ColorOf(dark, "Albumen.BorderStrongBrush"));
+            Assert.Equal("#FF141821", ColorOf(dark, "Albumen.RailBrush"));
+
+            Assert.Equal("#FFDEDEDE", ColorOf(dark, "Albumen.TextBrush"));
+            Assert.Equal("#FF9D9D9D", ColorOf(dark, "Albumen.MutedTextBrush"));
+            Assert.Equal("#FF3D7FE6", ColorOf(dark, "Albumen.AccentBrush"));
+            Assert.Equal("#FF1B2A44", ColorOf(dark, "Albumen.AccentSoftBrush"));
+            var line = Assert.IsType<LinearGradientBrush>(dark["Albumen.AccentLineBrush"]);
+            Assert.Equal(["#FF3B82F6", "#FF8B5CF6"],
+                line.GradientStops.Select(stop => stop.Color.ToString(CultureInfo.InvariantCulture)).ToArray());
+        });
+    }
+
     [Fact]
     public void NoViewUsesSystemColorsDirectly()
     {
@@ -91,6 +125,9 @@ public sealed class AlbumenPaletteTests
 
     private static string[] Keys(ResourceDictionary dictionary) =>
         dictionary.Keys.Cast<string>().Order(StringComparer.Ordinal).ToArray();
+
+    private static string ColorOf(ResourceDictionary dictionary, string key) =>
+        Assert.IsType<SolidColorBrush>(dictionary[key]).Color.ToString(CultureInfo.InvariantCulture);
 
     private static IEnumerable<string> XamlFiles()
     {
