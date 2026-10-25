@@ -350,8 +350,19 @@ public partial class MainWindow : Window
         LikelyMatchesPromptBox.SelectAll();
     }
 
-    private void OnPromptBoxGotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs eventArgs) =>
+    // Only focus that moves into the box from another element of this window (Tab, Shift+Tab, a
+    // click) selects the prompt. Focus that comes back with the window (Alt+Tab, a closed dialog)
+    // comes from no element, and the Review focus restore puts focus back where it was: both leave
+    // the prompt and its caret as they were, so the next key does not replace the prompt.
+    private void OnPromptBoxGotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs eventArgs)
+    {
+        if (isRestoringReviewFocus
+            || eventArgs.OldFocus is not DependencyObject previous
+            || ReferenceEquals(previous, LikelyMatchesPromptBox)
+            || !ReferenceEquals(GetWindow(previous), this))
+            return;
         LikelyMatchesPromptBox.SelectAll();
+    }
 
     // Enter searches through the box's key binding, which still runs.
     private void OnPromptBoxPreviewKeyDown(object sender, KeyEventArgs eventArgs)
