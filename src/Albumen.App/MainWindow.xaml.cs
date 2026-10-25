@@ -328,6 +328,19 @@ public partial class MainWindow : Window
     private void OnLikelyMatchesShowAllClick(object sender, RoutedEventArgs eventArgs) =>
         Dispatcher.BeginInvoke(() => LikelyMatchesPromptBox.Focus(), DispatcherPriority.Input);
 
+    // A click into the search box, or Tab, selects the whole prompt, so typing a new one replaces
+    // it. The click is taken before the box sees it, since the box would put the caret where the
+    // pointer is; a click in the box that already has focus places the caret as usual.
+    private void OnPromptBoxPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs eventArgs)
+    {
+        if (LikelyMatchesPromptBox.IsKeyboardFocusWithin) return;
+        eventArgs.Handled = true;
+        LikelyMatchesPromptBox.Focus();
+    }
+
+    private void OnPromptBoxGotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs eventArgs) =>
+        LikelyMatchesPromptBox.SelectAll();
+
     private void OnReviewBackClick(object sender, RoutedEventArgs eventArgs) =>
         shellViewModel?.ReviewBackCommand.Execute(null);
 

@@ -617,6 +617,8 @@
                         <TextBox x:Name="LikelyMatchesPromptBox" Grid.Column="1" Style="{StaticResource Albumen.SearchBox}"
                                  Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
                                  IsEnabled="{Binding CanSearch}"
+                                 PreviewMouseLeftButtonDown="OnPromptBoxPreviewMouseLeftButtonDown"
+                                 GotKeyboardFocus="OnPromptBoxGotKeyboardFocus"
                                  AutomationProperties.Name="Describe the photos to find"
                                  AutomationProperties.HelpText="{x:Static shell:ReviewSearchViewModel.PromptHelpText}">
                             <TextBox.InputBindings>
