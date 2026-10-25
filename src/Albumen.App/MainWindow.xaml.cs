@@ -1168,6 +1168,26 @@ internal sealed class ReviewAutomationBorderPeer(ReviewAutomationBorder owner)
     protected override bool IsContentElementCore() => true;
 }
 
+// The window's views as tabs. Its tab row also shows the element in Tag (the photo search bar),
+// which is no tab: an ItemsControl's automation peer lists only its items, so this one lists the
+// bar after the tabs.
+public class TopBarTabControl : TabControl
+{
+    protected override AutomationPeer OnCreateAutomationPeer() => new TopBarTabControlPeer(this);
+}
+
+internal sealed class TopBarTabControlPeer(TopBarTabControl owner) : TabControlAutomationPeer(owner)
+{
+    protected override List<AutomationPeer> GetChildrenCore()
+    {
+        var children = base.GetChildrenCore() ?? [];
+        if (((TabControl)Owner).Tag is UIElement { IsVisible: true } header
+            && (UIElementAutomationPeer.FromElement(header) ?? UIElementAutomationPeer.CreatePeerForElement(header)) is { } peer)
+            children.Add(peer);
+        return children;
+    }
+}
+
 public class ReviewAnnouncementTextBlock : TextBlock
 {
     private string itemStatus = string.Empty;

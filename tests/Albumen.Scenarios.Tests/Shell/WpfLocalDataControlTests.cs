@@ -153,7 +153,7 @@ public sealed class WpfLocalDataControlTests
                     && confirm.IsVisible && confirm.IsKeyboardFocusWithin);
 
                 var history = Assert.IsType<TabItem>(window.FindName("ActionRecordsTab"));
-                var photos = Assert.IsType<TabControl>(history.Parent).Items.OfType<TabItem>()
+                var photos = Assert.IsAssignableFrom<TabControl>(history.Parent).Items.OfType<TabItem>()
                     .Single(tab => !ReferenceEquals(tab, history));
                 photos.IsSelected = true;
                 PumpUntil(() => !viewModel.IsClearScanDataConfirmationPending);

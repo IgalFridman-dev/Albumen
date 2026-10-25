@@ -31,11 +31,12 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
     {
         this.query = query;
         SearchCommand = new AsyncCommand(SearchAsync, allowConcurrentExecutions: true, canExecute: () => CanSearch);
+        // The clear button and Esc: Esc also clears a prompt that was typed but not searched.
         ShowAllCommand = new AsyncCommand(() =>
         {
             Clear();
             return Task.CompletedTask;
-        }, canExecute: () => IsActive);
+        }, canExecute: () => IsActive || prompt.Length != 0);
         Results = new(0, _ => throw new InvalidOperationException());
     }
 
@@ -57,6 +58,7 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
             if (prompt == (value ??= string.Empty)) return;
             prompt = value;
             OnPropertyChanged();
+            ShowAllCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -68,6 +70,14 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
     public bool IsActive => result?.Outcome is LikelyMatchesOutcome.Matches or LikelyMatchesOutcome.NoMatches;
 
     public bool HasResults => !shown.IsEmpty;
+
+    /// <summary>Inside the empty bar: the invitation to search, or why search can't run.</summary>
+    public string PlaceholderText => CanSearch ? "Find photos by what they show" : StatusText;
+
+    /// <summary>The line under the bar shows only when it has news: not while search is idle.</summary>
+    public bool HasStatus => StatusText != IdleText;
+
+    private const string IdleText = "Describe what's in a photo, for example “at sea”, and press Enter.";
 
     public LazyReviewCollection<LikelyMatchItemViewModel> Results { get; private set; }
 
@@ -136,7 +146,7 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
                     $"Use at most {Count(LikelyMatchesQuery.MaximumPromptLength)} characters. This one has {Count(result.Prompt.Length)}.",
                 { Outcome: LikelyMatchesOutcome.Unavailable or LikelyMatchesOutcome.Failed } =>
                     $"Search didn't work: {Reason(result.Reason)} Everything else in Review works.",
-                _ => "Describe what's in a photo, for example “at sea”, and press Enter.",
+                _ => IdleText,
             };
         }
     }
@@ -258,7 +268,8 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
     private void Changed()
     {
         foreach (var name in new[] { nameof(CanSearch), nameof(IsActive), nameof(HasResults), nameof(Results),
-            nameof(StatusText), nameof(ScopeText), nameof(SelectionOutsideText), nameof(HasSelectionOutside) })
+            nameof(StatusText), nameof(PlaceholderText), nameof(HasStatus), nameof(ScopeText),
+            nameof(SelectionOutsideText), nameof(HasSelectionOutside) })
             OnPropertyChanged(name);
         SearchCommand.NotifyCanExecuteChanged();
         ShowAllCommand.NotifyCanExecuteChanged();

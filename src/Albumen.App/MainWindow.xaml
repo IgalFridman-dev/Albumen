@@ -545,8 +545,89 @@
             </Border>
         </Grid>
 
-        <TabControl Grid.Row="1" Style="{StaticResource Albumen.TopBar}" Padding="8,6,4,4"
+        <app:TopBarTabControl Grid.Row="1" Style="{StaticResource Albumen.TopBar}" Padding="8,6,4,4"
                     AutomationProperties.Name="Albumen views">
+          <!-- The photo search sits in the tab row, centred, and shows only while Review is the
+               current step on the Photos tab, since it searches Review and nothing else. Typing
+               hides the placeholder; Enter searches, Esc or the clear button clears. -->
+          <app:TopBarTabControl.Tag>
+            <app:ReviewAutomationBorder x:Name="SearchBar" MaxWidth="320" VerticalAlignment="Top"
+                    AutomationProperties.Name="Photo search">
+                <app:ReviewAutomationBorder.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsReviewPhase}" Value="True" />
+                                    <Condition Binding="{Binding SelectedIndex, RelativeSource={RelativeSource AncestorType=TabControl}}" Value="0" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </app:ReviewAutomationBorder.Style>
+              <StackPanel>
+                <Border x:Name="SearchField" DataContext="{Binding LikelyMatches}" ToolTip="{Binding ScopeText}">
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource Albumen.SearchBar}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ScopeText}" Value="">
+                                    <Setter Property="ToolTipService.IsEnabled" Value="False" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Grid Margin="2,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="LikelyMatchesFindButton" Content="&#xE721;" IsTabStop="False"
+                                Style="{StaticResource Albumen.SearchBarButton}" Command="{Binding SearchCommand}"
+                                AutomationProperties.Name="Find photos" />
+                        <TextBlock x:Name="SearchPlaceholderText" Grid.Column="1" Margin="4,0,0,0" VerticalAlignment="Center"
+                                   IsHitTestVisible="False" TextTrimming="CharacterEllipsis" Text="{Binding PlaceholderText}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Prompt}" Value="">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBox x:Name="LikelyMatchesPromptBox" Grid.Column="1" Style="{StaticResource Albumen.SearchBox}"
+                                 Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
+                                 IsEnabled="{Binding CanSearch}"
+                                 AutomationProperties.Name="Describe the photos to find"
+                                 AutomationProperties.HelpText="{x:Static shell:LikelyMatchesViewModel.PromptHelpText}">
+                            <TextBox.InputBindings>
+                                <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
+                                <KeyBinding Key="Escape" Command="{Binding ShowAllCommand}" />
+                            </TextBox.InputBindings>
+                        </TextBox>
+                        <Button x:Name="LikelyMatchesShowAllButton" Grid.Column="2" Content="&#xE894;"
+                                Style="{StaticResource Albumen.SearchBarButton}"
+                                Command="{Binding ShowAllCommand}" Click="OnLikelyMatchesShowAllClick"
+                                Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                ToolTip="Show all Review results"
+                                AutomationProperties.Name="Show all Review results" />
+                    </Grid>
+                </Border>
+                <!-- Indexing, unavailable, searching, how many matched: said under the bar, never while idle. -->
+                <TextBlock x:Name="LikelyMatchesStatusText" DataContext="{Binding LikelyMatches}" Margin="12,4,12,0"
+                           Style="{StaticResource Albumen.Caption}" TextAlignment="Center" Text="{Binding StatusText}"
+                           Visibility="{Binding HasStatus, Converter={StaticResource BooleanToVisibilityConverter}}"
+                           AutomationProperties.Name="Likely matches status" AutomationProperties.ItemStatus="{Binding StatusText}"
+                           AutomationProperties.LiveSetting="Polite" />
+              </StackPanel>
+            </app:ReviewAutomationBorder>
+          </app:TopBarTabControl.Tag>
           <TabItem Header="Photos" IsSelected="True" AutomationProperties.Name="Photos">
         <Grid>
             <Grid.ColumnDefinitions>
@@ -1155,56 +1236,27 @@
                     </Expander>
                 </StackPanel>
 
-                <!-- Likely matches: a prompt ranks this Scan's photos. It is a list of its own and
-                     changes nothing in the kinds and sets below. -->
-                <Border x:Name="LikelyMatchesPanel" Margin="0,10,0,0" Padding="12" CornerRadius="12"
-                        DataContext="{Binding LikelyMatches}"
-                        Background="{DynamicResource Albumen.SurfaceBrush}"
-                        BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}"
-                        AutomationProperties.Name="Likely matches">
-                    <StackPanel>
-                        <TextBlock Text="Find photos by what they show" Style="{StaticResource Albumen.SectionTitle}" />
-                        <DockPanel Margin="0,6,0,0">
-                            <Button x:Name="LikelyMatchesShowAllButton" DockPanel.Dock="Right" Content="Show all Review results"
-                                    MinHeight="34" Padding="14,4" Margin="8,0,0,0" Style="{StaticResource Albumen.Button}"
-                                    Command="{Binding ShowAllCommand}" Click="OnLikelyMatchesShowAllClick"
-                                    Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            <Button x:Name="LikelyMatchesFindButton" DockPanel.Dock="Right" Content="Find" MinHeight="34" Padding="18,4"
-                                    Margin="8,0,0,0" Style="{StaticResource Albumen.PrimaryButton}"
-                                    Command="{Binding SearchCommand}" />
-                            <TextBox x:Name="LikelyMatchesPromptBox" MinHeight="34" VerticalContentAlignment="Center" Padding="6,2"
-                                     Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
-                                     IsEnabled="{Binding CanSearch}"
-                                     AutomationProperties.Name="Describe the photos to find"
-                                     AutomationProperties.HelpText="{x:Static shell:LikelyMatchesViewModel.PromptHelpText}">
-                                <TextBox.InputBindings>
-                                    <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
-                                </TextBox.InputBindings>
-                            </TextBox>
-                        </DockPanel>
-                        <TextBlock x:Name="LikelyMatchesStatusText" Margin="0,6,0,0" Text="{Binding StatusText}" TextWrapping="Wrap"
-                                   AutomationProperties.Name="Likely matches status" AutomationProperties.ItemStatus="{Binding StatusText}"
-                                   AutomationProperties.LiveSetting="Polite" />
-                        <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding ScopeText}" TextWrapping="Wrap" />
-                        <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding SelectionOutsideText}" TextWrapping="Wrap"
-                                   Visibility="{Binding HasSelectionOutside, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <ListBox x:Name="LikelyMatchesList" Margin="0,8,0,0" ItemsSource="{Binding Results}"
-                                 PreviewMouseWheel="OnReviewListPreviewMouseWheel" PreviewKeyDown="OnReviewListPreviewKeyDown"
-                                 ItemTemplate="{StaticResource LikelyMatchTemplate}"
-                                 ScrollViewer.CanContentScroll="True"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                                 VirtualizingPanel.ScrollUnit="Item"
-                                 Visibility="{Binding HasResults, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                 AutomationProperties.Name="Likely matches in this Scan">
-                            <ListBox.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <VirtualizingStackPanel Orientation="Horizontal" />
-                                </ItemsPanelTemplate>
-                            </ListBox.ItemsPanel>
-                        </ListBox>
-                    </StackPanel>
-                </Border>
+                <!-- The 1.1 list of likely matches, filled by the search bar. It is a list of its own
+                     and changes nothing in the kinds and sets below. -->
+                <StackPanel DataContext="{Binding LikelyMatches}">
+                    <TextBlock Margin="0,10,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding SelectionOutsideText}" TextWrapping="Wrap"
+                               Visibility="{Binding HasSelectionOutside, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <ListBox x:Name="LikelyMatchesList" Margin="0,8,0,0" ItemsSource="{Binding Results}"
+                             PreviewMouseWheel="OnReviewListPreviewMouseWheel" PreviewKeyDown="OnReviewListPreviewKeyDown"
+                             ItemTemplate="{StaticResource LikelyMatchTemplate}"
+                             ScrollViewer.CanContentScroll="True"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingPanel.ScrollUnit="Item"
+                             Visibility="{Binding HasResults, Converter={StaticResource BooleanToVisibilityConverter}}"
+                             AutomationProperties.Name="Likely matches in this Scan">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                    </ListBox>
+                </StackPanel>
 
                 <!-- The kinds, and beside them the open kind's sets as a gallery of photos. -->
                 <Grid x:Name="ReviewNavigationGrid" Height="300" Margin="0,10,0,0">
@@ -1659,7 +1711,7 @@
               </StackPanel>
             </ScrollViewer>
           </TabItem>
-        </TabControl>
+        </app:TopBarTabControl>
 
         <StackPanel Grid.Row="2" Margin="0,10,0,0">
             <app:ReviewAnnouncementTextBlock x:Name="ReviewAnnouncementText"
