@@ -1221,13 +1221,16 @@
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           SizeChanged="OnReviewPageSizeChanged">
               <StackPanel Margin="4,4,20,8">
-                <!-- The page opens with the Scan's coverage and the hint right under it (Igal,
-                     2026-10-25); Back and the breadcrumb sit above the tab row, and what the Scan
-                     found waits in the Scan summary. The coverage line takes focus when Review opens. -->
+                <!-- The page opens with the Scan's coverage, the sets to review and the hint, one
+                     under the other (Igal, 2026-10-25); Back and the breadcrumb sit above the tab
+                     row, and the Scan's counts wait in the Scan summary. The coverage line takes
+                     focus when Review opens. -->
                 <StackPanel>
                     <TextBlock x:Name="ReviewHeading" Text="{Binding CoverageStatus}" FontWeight="SemiBold" TextWrapping="Wrap"
                                Focusable="True" FocusVisualStyle="{StaticResource Albumen.FocusVisual}"
                                AutomationProperties.Name="{Binding CoverageStatus, StringFormat='Review. {0}'}" />
+                    <TextBlock x:Name="ReviewResultsSummaryText" Margin="0,2,0,0" FontWeight="SemiBold" TextWrapping="Wrap"
+                               Text="{Binding ReviewResultsSummary}" />
                     <TextBlock x:Name="ReviewHintText" Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}"
                                Text="Pick a kind to see its sets. Right-click a photo to mark it for removal or show it in a viewer. Nothing changes until you approve the cleanup below." />
                     <TextBlock x:Name="ReviewStatusText" Margin="0,6,0,0" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
@@ -1241,9 +1244,7 @@
                     <Expander x:Name="ReviewScanSummaryExpander" Header="Scan summary" IsExpanded="False" Margin="0,2,0,0"
                               AutomationProperties.Name="Scan summary">
                         <StackPanel Margin="0,4,0,0">
-                            <TextBlock x:Name="ReviewResultsSummaryText" FontWeight="SemiBold" TextWrapping="Wrap"
-                                       Text="{Binding ReviewResultsSummary}" />
-                            <TextBlock Margin="0,2,0,0" Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
                             <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
                                           ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
                                           AutomationProperties.Name="Scan outcome categories" />
