@@ -3,6 +3,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Albumen.App;
 using Albumen.App.Shell;
 using Albumen.Application.Semantic;
 using Albumen.Domain.Workflow;
@@ -44,6 +45,37 @@ public sealed class WpfReviewSearchBarTests
                 Assert.Equal("", find.Content);
                 Assert.Equal("Find photos", AutomationProperties.GetName(find));
                 Assert.Equal("Describe the photos to find", AutomationProperties.GetName(box));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    // At the smallest window with 200 % text the tab strip takes the width it needs on one row,
+    // and the bar stays centred between it and an equal space on the right.
+    [Fact]
+    public void TheTabStripKeepsOneRowAndTheBarStaysCentredAtLargeTextInTheSmallestWindow()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new SearchFixture();
+            var window = new MainWindow { DataContext = fixture.ViewModel, Width = 680, Height = 520, FontSize = 24 };
+            try
+            {
+                ReviewTiles.ShowAndDrain(window);
+                var root = Assert.IsAssignableFrom<FrameworkElement>(window.Content);
+                var tabs = WpfReviewSelectionTests.Descendants<TabControl>(window).Single().Items.Cast<TabItem>().ToArray();
+                Assert.Equal(2, tabs.Length);
+                var tops = tabs.Select(tab => tab.TransformToAncestor(root).Transform(new Point()).Y).ToArray();
+                Assert.Equal(tops[0], tops[1], 0.5);
+
+                var bar = Element(window, "SearchBar");
+                Assert.True(bar.IsVisible && bar.ActualWidth > 0);
+                Assert.True(bar.ActualWidth <= 320);
+                var centre = bar.TransformToAncestor(root).Transform(new Point(bar.ActualWidth / 2, 0)).X;
+                Assert.InRange(centre, root.ActualWidth / 2 - 8, root.ActualWidth / 2 + 8);
             }
             finally
             {
