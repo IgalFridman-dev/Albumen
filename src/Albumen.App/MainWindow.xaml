@@ -435,6 +435,7 @@
     <Grid Margin="24,16,24,16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -531,7 +532,33 @@
             </Border>
         </Grid>
 
-        <app:TopBarTabControl Grid.Row="1" Style="{StaticResource Albumen.TopBar}" Padding="8,6,4,4"
+        <!-- Review's Back button and where it leads, on a row of their own above the tab row
+             (Igal, 2026-10-25), lined up with the tab strip. Like the search bar, the row shows only
+             while Review is the current step on the Photos tab. -->
+        <DockPanel x:Name="ReviewBackRow" Grid.Row="1" Margin="8,0,0,8">
+            <DockPanel.Style>
+                <Style TargetType="DockPanel">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding IsReviewPhase}" Value="True" />
+                                <Condition Binding="{Binding SelectedIndex, ElementName=ViewTabs}" Value="0" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter Property="Visibility" Value="Visible" />
+                        </MultiDataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DockPanel.Style>
+            <Button x:Name="ReviewBackButton" Content="Back" MinHeight="34" Padding="14,4" Margin="0,0,10,0"
+                    Style="{StaticResource Albumen.Button}"
+                    Click="OnReviewBackClick" IsEnabled="{Binding CanReviewBack}"
+                    AutomationProperties.Name="Back one review level" />
+            <TextBlock x:Name="ReviewBreadcrumbText" VerticalAlignment="Center" TextWrapping="Wrap"
+                       Text="{Binding ReviewBreadcrumbText}" AutomationProperties.Name="Review breadcrumb" />
+        </DockPanel>
+
+        <app:TopBarTabControl x:Name="ViewTabs" Grid.Row="2" Style="{StaticResource Albumen.TopBar}" Padding="8,6,4,4"
                     AutomationProperties.Name="Albumen views">
           <!-- The photo search sits in the tab row, centred, and shows only while Review is the
                current step on the Photos tab, since it searches Review and nothing else. Typing
@@ -1188,13 +1215,14 @@
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           SizeChanged="OnReviewPageSizeChanged">
               <StackPanel Margin="4,4,20,8">
+                <!-- The page opens with the Scan's coverage and the hint right under it (Igal,
+                     2026-10-25); Back and the breadcrumb sit above the tab row, and what the Scan
+                     found waits in the Scan summary. The coverage line takes focus when Review opens. -->
                 <StackPanel>
-                    <TextBlock x:Name="ReviewHeading" Text="Review" Style="{StaticResource Albumen.PageTitle}" Focusable="True"
-                               FocusVisualStyle="{StaticResource Albumen.FocusVisual}"
-                               AutomationProperties.Name="Grouped duplicate review" />
-                    <TextBlock x:Name="ReviewResultsSummaryText" Margin="0,4,0,0" Style="{StaticResource Albumen.SectionTitle}"
-                               Text="{Binding ReviewResultsSummary}" />
-                    <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}"
+                    <TextBlock x:Name="ReviewHeading" Text="{Binding CoverageStatus}" FontWeight="SemiBold" TextWrapping="Wrap"
+                               Focusable="True" FocusVisualStyle="{StaticResource Albumen.FocusVisual}"
+                               AutomationProperties.Name="{Binding CoverageStatus, StringFormat='Review. {0}'}" />
+                    <TextBlock x:Name="ReviewHintText" Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}"
                                Text="Pick a kind to see its sets. Right-click a photo to mark it for removal or show it in a viewer. Nothing changes until you approve the cleanup below." />
                     <TextBlock x:Name="ReviewStatusText" Margin="0,6,0,0" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
                                AutomationProperties.Name="Review status" AutomationProperties.ItemStatus="{Binding ReviewStatusText}"
@@ -1204,19 +1232,12 @@
                                Style="{StaticResource Albumen.MutedText}"
                                Visibility="{Binding HasReviewContinuation, Converter={StaticResource BooleanToVisibilityConverter}}"
                                AutomationProperties.Name="Review continuation" />
-                    <DockPanel Margin="0,8,0,4">
-                        <Button x:Name="ReviewBackButton" Content="Back" MinHeight="34" Padding="14,4" Margin="0,0,10,0"
-                                Style="{StaticResource Albumen.Button}"
-                                Click="OnReviewBackClick" IsEnabled="{Binding CanReviewBack}"
-                                AutomationProperties.Name="Back one review level" />
-                        <TextBlock x:Name="ReviewBreadcrumbText" VerticalAlignment="Center" TextWrapping="Wrap"
-                                   Text="{Binding ReviewBreadcrumbText}" AutomationProperties.Name="Review breadcrumb" />
-                    </DockPanel>
-                    <TextBlock Style="{StaticResource Albumen.MutedText}" Text="{Binding CoverageStatus}" />
                     <Expander x:Name="ReviewScanSummaryExpander" Header="Scan summary" IsExpanded="False" Margin="0,2,0,0"
                               AutomationProperties.Name="Scan summary">
                         <StackPanel Margin="0,4,0,0">
-                            <TextBlock Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ReviewResultsSummaryText" FontWeight="SemiBold" TextWrapping="Wrap"
+                                       Text="{Binding ReviewResultsSummary}" />
+                            <TextBlock Margin="0,2,0,0" Text="{Binding ScanCountsText}" TextWrapping="Wrap" />
                             <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
                                           ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
                                           AutomationProperties.Name="Scan outcome categories" />
@@ -1702,7 +1723,7 @@
           </TabItem>
         </app:TopBarTabControl>
 
-        <StackPanel Grid.Row="2" Margin="0,10,0,0">
+        <StackPanel Grid.Row="3" Margin="0,10,0,0">
             <app:ReviewAnnouncementTextBlock x:Name="ReviewAnnouncementText"
                        Text="{Binding ReviewAnnouncement}" TextWrapping="Wrap"
                        AutomationProperties.Name="Review command status"
