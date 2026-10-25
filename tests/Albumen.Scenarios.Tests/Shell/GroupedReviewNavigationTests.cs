@@ -14,7 +14,7 @@ namespace Albumen.Scenarios.Tests.Shell;
 public sealed class GroupedReviewNavigationTests
 {
     [Fact]
-    public void ReviewAlwaysExposesTheFourStableCategoriesInEvidenceOrder()
+    public async Task ReviewAlwaysExposesTheFourStableCategoriesInEvidenceOrder()
     {
         var fixture = GroupedReviewFixture.Create();
 
@@ -23,6 +23,22 @@ public sealed class GroupedReviewNavigationTests
             row => AssertCategory(row, ReviewCategoryKind.Near, "Look-alike", 1),
             row => AssertCategory(row, ReviewCategoryKind.Uncertain, "Maybe similar", 1),
             row => AssertCategory(row, ReviewCategoryKind.CouldNotAnalyze, "Couldn't check", 1));
+        Assert.Equal([1, 2, 3, 4], fixture.ViewModel.ReviewCategories.Select(row => row.PositionInSet));
+        Assert.All(fixture.ViewModel.ReviewCategories, row => Assert.Equal(4, row.SizeOfSet));
+
+        // While a search filters Review, Other matches comes fifth, before Couldn't check.
+        var search = new SearchFixture();
+        await search.SearchAsync("at sea");
+
+        Assert.Equal([ReviewCategoryKind.Exact, ReviewCategoryKind.Near, ReviewCategoryKind.Uncertain,
+                ReviewCategoryKind.OtherMatches, ReviewCategoryKind.CouldNotAnalyze],
+            search.ViewModel.ReviewCategories.Select(row => row.Category));
+        Assert.Equal([1, 2, 3, 4, 5], search.ViewModel.ReviewCategories.Select(row => row.PositionInSet));
+        Assert.All(search.ViewModel.ReviewCategories, row => Assert.Equal(5, row.SizeOfSet));
+
+        await search.Search.ShowAllCommand.ExecuteAsync();
+
+        Assert.Equal(4, search.ViewModel.ReviewCategories.Length);
     }
 
     [Fact]

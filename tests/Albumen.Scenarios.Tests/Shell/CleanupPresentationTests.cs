@@ -30,6 +30,10 @@ public sealed class CleanupPresentationTests
         Assert.Equal("and 2 more photos", viewModel.ApprovalMoreMarkedText);
         Assert.True(viewModel.HasMoreMarkedPhotos);
         Assert.Equal("8 selected occurrences", viewModel.ApprovalSelectedOccurrenceText);
+        // Without a search nothing is hidden, so the approval says nothing about hidden photos.
+        Assert.Equal(string.Empty, viewModel.ApprovalHiddenMarkedText);
+        Assert.False(viewModel.HasApprovalHiddenMarked);
+        Assert.DoesNotContain("hidden", viewModel.ReviewSelectionBarText, StringComparison.Ordinal);
     }
 
     [Fact]

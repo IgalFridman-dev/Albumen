@@ -70,11 +70,11 @@ public sealed class WpfReviewSearchBarTests
 
                 box.Text = "at sea";
                 ReviewTiles.ShowAndDrain(window);
-                Assert.Equal("at sea", fixture.Matches.Prompt);
+                Assert.Equal("at sea", fixture.Search.Prompt);
                 Assert.False(placeholder.IsVisible);
 
                 Search(fixture, window, box);
-                Assert.True(fixture.Matches.IsActive);
+                Assert.True(fixture.Search.IsActive);
                 Assert.True(clear.IsVisible);
                 Assert.Equal("", clear.Content);
                 Assert.Equal("Show all Review results", AutomationProperties.GetName(clear));
@@ -82,7 +82,7 @@ public sealed class WpfReviewSearchBarTests
                 ReviewTiles.Invoke(clear);
                 ReviewTiles.ShowAndDrain(window);
 
-                Assert.False(fixture.Matches.IsActive);
+                Assert.False(fixture.Search.IsActive);
                 Assert.Equal(string.Empty, box.Text);
                 Assert.True(placeholder.IsVisible);
                 Assert.False(clear.IsVisible);
@@ -111,15 +111,15 @@ public sealed class WpfReviewSearchBarTests
 
                 Search(fixture, window, box);
 
-                Assert.True(fixture.Matches.IsActive);
+                Assert.True(fixture.Search.IsActive);
                 // One search is one ranking: the prompt is encoded once.
                 Assert.Equal(["a photo of at sea"], fixture.Encoder.Prompts);
 
                 WpfReviewSelectionTests.Press(box, Key.Escape);
                 ReviewTiles.ShowAndDrain(window);
 
-                Assert.False(fixture.Matches.IsActive);
-                Assert.Equal(string.Empty, fixture.Matches.Prompt);
+                Assert.False(fixture.Search.IsActive);
+                Assert.Equal(string.Empty, fixture.Search.Prompt);
                 Assert.Equal(string.Empty, box.Text);
                 Assert.True(PlaceholderOf(window).IsVisible);
                 Assert.Single(fixture.Encoder.Prompts);
@@ -238,12 +238,64 @@ public sealed class WpfReviewSearchBarTests
         });
     }
 
+    [Fact]
+    public void AFilteredGalleryLabelsMatchesAndTheApprovalSaysWhatIsHidden()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new SearchFixture();
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
+            var window = ReviewTiles.Show(fixture.ViewModel);
+            try
+            {
+                var box = PromptBox(window);
+                box.Text = "at sea";
+                Search(fixture, window, box);
+
+                // The identical-copies set shows whole; only its matching photo carries the label.
+                Assert.Contains(VisibleTexts(ReviewTiles.Tile(window, 1)), text => text == "Matches");
+                Assert.DoesNotContain(VisibleTexts(ReviewTiles.Tile(window, 2)), text => text == "Matches");
+                Assert.Contains(VisibleTexts(window), text => text == "1 of 1 set");
+
+                box.Text = "lone";
+                Search(fixture, window, box);
+
+                var hidden = Assert.IsType<TextBlock>(window.FindName("ApprovalHiddenMarkedText"));
+                Assert.True(hidden.IsVisible);
+                Assert.Equal("It is hidden by the search.", hidden.Text);
+                Assert.EndsWith(" · 1 hidden by the search",
+                    Assert.IsType<TextBlock>(window.FindName("ReviewSelectionBarText")).Text, StringComparison.Ordinal);
+
+                box.Text = "nothing";
+                Search(fixture, window, box);
+
+                var empty = Assert.IsType<TextBlock>(window.FindName("ReviewSearchEmptyText"));
+                Assert.True(empty.IsVisible);
+                Assert.Equal("No photos match “nothing”", empty.Text);
+                var clear = Assert.IsType<Button>(window.FindName("ReviewSearchClearButton"));
+                Assert.Equal("Show all Review results", AutomationProperties.GetName(clear));
+
+                ReviewTiles.Invoke(clear);
+                ReviewTiles.ShowAndDrain(window);
+
+                Assert.False(fixture.Search.IsActive);
+                Assert.False(empty.IsVisible);
+                Assert.False(hidden.IsVisible);
+                Assert.Empty(fixture.Workflow.SelectionCommands);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     // Enter in the prompt box, then wait for the ranking to come back.
     private static void Search(SearchFixture fixture, Window window, TextBox box)
     {
         ReviewTiles.Focus(box);
         WpfReviewSelectionTests.Press(box, Key.Enter);
-        WpfActionAccessibilityTests.PumpUntil(() => fixture.Matches.StatusText != "Searching…");
+        WpfActionAccessibilityTests.PumpUntil(() => fixture.Search.StatusText != "Searching…");
         ReviewTiles.ShowAndDrain(window);
     }
 
