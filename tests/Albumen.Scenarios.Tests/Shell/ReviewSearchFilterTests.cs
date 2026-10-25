@@ -544,6 +544,8 @@ internal sealed class SearchFixture
 
         public EncoderProfileResult LoadProfile() => new(Profile, null);
 
+        public EncoderFailure? PrepareText(EncoderProfile profile) => null;
+
         public EmbeddingResult EncodeImage(EncoderProfile profile, EncoderImage image) => throw new NotSupportedException();
 
         public EmbeddingResult EncodeText(EncoderProfile profile, string prompt)

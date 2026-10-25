@@ -192,6 +192,35 @@ public sealed class OnnxVisionLanguageEncoderTests : IDisposable
         Assert.Null(encoder.EncodeImage(profile, SyntheticImage(0, 64, 48)).Failure);
     }
 
+    // The Scan opens the text tower ahead of the first search. That encodes nothing, and a text
+    // tower that cannot open gives the very failure the search's own encoding then reports.
+    [Fact]
+    public void PreparingTextOpensItsTowerAndKeepsItsFailureForTheSearch()
+    {
+        using (var encoder = new OnnxVisionLanguageEncoder(models))
+        {
+            var profile = encoder.LoadProfile().Profile!;
+            Assert.Null(encoder.PrepareText(profile));
+            Assert.Null(encoder.EncodeText(profile, "a dog").Failure);
+            Assert.Equal(EncoderFailureKind.Failed, encoder.PrepareText(profile with { DecodeEdge = 256 })!.Kind);
+        }
+
+        File.WriteAllText(Path.Combine(models, "tokenizer.model"), "not a sentencepiece model");
+        EditManifest(manifest =>
+        {
+            manifest["files"]!["tokenizer"]!["length"] = new FileInfo(Path.Combine(models, "tokenizer.model")).Length;
+            manifest["files"]!["tokenizer"]!["sha256"] = Sha256("tokenizer.model");
+        });
+        using var broken = new OnnxVisionLanguageEncoder(models);
+        var brokenProfile = broken.LoadProfile().Profile!;
+
+        var failure = broken.PrepareText(brokenProfile);
+
+        Assert.Equal(EncoderFailureKind.Failed, failure?.Kind);
+        Assert.Equal(failure, broken.EncodeText(brokenProfile, "a dog").Failure);
+        Assert.Null(broken.EncodeImage(brokenProfile, SyntheticImage(0, 64, 48)).Failure);
+    }
+
     [Fact]
     public void UnexpectedOutputNameFails()
     {
