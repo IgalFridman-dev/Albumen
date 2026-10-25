@@ -361,33 +361,36 @@ public partial class MainWindow : Window
         RightPreviewStatusControl.FitHeight = LeftPreviewStatusControl.FitHeight;
     }
 
-    // The two viewers pan together; photos of different widths by the same share of their own
-    // width. A new or re-zoomed photo takes the Left Viewer's position.
+    // The two viewers pan together, sideways and up and down; photos of different sizes by the same
+    // share of their own width and height. A new or re-zoomed photo takes the Left Viewer's position.
     private static void LinkViewerPanning(ScrollViewer left, ScrollViewer right)
     {
         var syncing = false;
+        static double Share(double offset, double scrollable) => scrollable > 0 ? offset / scrollable : 0;
         void Follow(ScrollViewer leader, ScrollViewer follower)
         {
             if (syncing) return;
             syncing = true;
             try
             {
-                var share = leader.ScrollableWidth > 0 ? leader.HorizontalOffset / leader.ScrollableWidth : 0;
-                follower.ScrollToHorizontalOffset(share * follower.ScrollableWidth);
+                follower.ScrollToHorizontalOffset(Share(leader.HorizontalOffset, leader.ScrollableWidth) * follower.ScrollableWidth);
+                follower.ScrollToVerticalOffset(Share(leader.VerticalOffset, leader.ScrollableHeight) * follower.ScrollableHeight);
             }
             finally
             {
                 syncing = false;
             }
         }
+        static bool Panned(ScrollChangedEventArgs change) => change.HorizontalChange != 0 || change.VerticalChange != 0;
+        static bool Resized(ScrollChangedEventArgs change) => change.ExtentWidthChange != 0 || change.ExtentHeightChange != 0;
         left.ScrollChanged += (_, change) =>
         {
-            if (change.HorizontalChange != 0 || change.ExtentWidthChange != 0) Follow(left, right);
+            if (Panned(change) || Resized(change)) Follow(left, right);
         };
         right.ScrollChanged += (_, change) =>
         {
-            if (change.HorizontalChange != 0) Follow(right, left);
-            else if (change.ExtentWidthChange != 0) Follow(left, right);
+            if (Panned(change)) Follow(right, left);
+            else if (Resized(change)) Follow(left, right);
         };
     }
 
