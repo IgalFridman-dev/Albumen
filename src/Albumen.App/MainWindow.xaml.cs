@@ -330,17 +330,31 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(() => LikelyMatchesPromptBox.Focus(), DispatcherPriority.Input);
 
     // A click into the search box, or Tab, selects the whole prompt, so typing a new one replaces
-    // it. The click is taken before the box sees it, since the box would put the caret where the
-    // pointer is; a click in the box that already has focus places the caret as usual.
+    // it; so does the first click after a search, since Enter leaves the focus in the box. The
+    // click is taken before the box sees it, as the box would put the caret where the pointer is;
+    // the next click, or one after more typing, places the caret as usual.
+    private bool selectPromptOnClick;
+
     private void OnPromptBoxPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs eventArgs)
     {
-        if (LikelyMatchesPromptBox.IsKeyboardFocusWithin) return;
+        if (LikelyMatchesPromptBox.IsKeyboardFocusWithin && !selectPromptOnClick) return;
         eventArgs.Handled = true;
+        selectPromptOnClick = false;
         LikelyMatchesPromptBox.Focus();
+        LikelyMatchesPromptBox.SelectAll();
     }
 
     private void OnPromptBoxGotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs eventArgs) =>
         LikelyMatchesPromptBox.SelectAll();
+
+    // Enter searches through the box's key binding, which still runs.
+    private void OnPromptBoxPreviewKeyDown(object sender, KeyEventArgs eventArgs)
+    {
+        if (eventArgs.Key == Key.Enter) selectPromptOnClick = true;
+    }
+
+    private void OnPromptBoxTextChanged(object sender, TextChangedEventArgs eventArgs) =>
+        selectPromptOnClick = false;
 
     private void OnReviewBackClick(object sender, RoutedEventArgs eventArgs) =>
         shellViewModel?.ReviewBackCommand.Execute(null);

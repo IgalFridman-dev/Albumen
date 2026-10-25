@@ -619,6 +619,7 @@
                                  IsEnabled="{Binding CanSearch}"
                                  PreviewMouseLeftButtonDown="OnPromptBoxPreviewMouseLeftButtonDown"
                                  GotKeyboardFocus="OnPromptBoxGotKeyboardFocus"
+                                 PreviewKeyDown="OnPromptBoxPreviewKeyDown" TextChanged="OnPromptBoxTextChanged"
                                  AutomationProperties.Name="Describe the photos to find"
                                  AutomationProperties.HelpText="{x:Static shell:ReviewSearchViewModel.PromptHelpText}">
                             <TextBox.InputBindings>
