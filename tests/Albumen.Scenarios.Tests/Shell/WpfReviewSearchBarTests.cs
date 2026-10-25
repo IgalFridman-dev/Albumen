@@ -350,6 +350,54 @@ public sealed class WpfReviewSearchBarTests
         });
     }
 
+    // Igal, 2026-10-25: clicking into the box after a search selects the whole prompt, so typing
+    // "Pizza" replaces "Hamburger"; Tab into the box does the same. A click in the box that already
+    // has focus is left to the box, which places the caret as usual.
+    [Fact]
+    public void AClickOrTabIntoTheBoxSelectsThePromptAndASecondClickPlacesTheCaret()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new SearchFixture();
+            var window = ReviewTiles.Show(fixture.ViewModel);
+            try
+            {
+                var box = PromptBox(window);
+                var heading = Assert.IsType<TextBlock>(window.FindName("ReviewHeading"));
+                box.Text = "at sea";
+                Search(fixture, window, box);
+                ReviewTiles.Focus(heading);
+                box.Select(box.Text.Length, 0);
+
+                var first = PressLeftButton(box);
+
+                Assert.True(first.Handled);
+                Assert.True(box.IsKeyboardFocused);
+                Assert.Equal("at sea", box.SelectedText);
+
+                box.Select(2, 0);
+                var second = PressLeftButton(box);
+
+                Assert.False(second.Handled);
+                Assert.Equal(0, box.SelectionLength);
+                Assert.Equal(2, box.CaretIndex);
+
+                ReviewTiles.Focus(heading);
+                box.Select(0, 0);
+                // Keyboard focus arriving in the box, as Tab gives it.
+                ReviewTiles.Focus(box);
+
+                Assert.Equal("at sea", box.SelectedText);
+                Assert.Single(fixture.Encoder.Prompts);
+                Assert.Empty(fixture.Workflow.SelectionCommands);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     // The filter replaced the 1.1 strip of results: a search shows its matches in the kinds.
     [Fact]
     public void NoResultStripIsShownUnderTheBar()
@@ -392,6 +440,19 @@ public sealed class WpfReviewSearchBarTests
 
     private static TextBox PromptBox(Window window) =>
         Assert.IsType<TextBox>(window.FindName("LikelyMatchesPromptBox"));
+
+    // The left-button press as the element sees it first, before the box's own mouse handling.
+    private static MouseButtonEventArgs PressLeftButton(UIElement element)
+    {
+        var press = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+        {
+            RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent,
+            Source = element,
+        };
+        element.RaiseEvent(press);
+        WpfReviewSelectionTests.Drain();
+        return press;
+    }
 
     private static TextBlock PlaceholderOf(Window window) =>
         Assert.IsType<TextBlock>(window.FindName("SearchPlaceholderText"));
