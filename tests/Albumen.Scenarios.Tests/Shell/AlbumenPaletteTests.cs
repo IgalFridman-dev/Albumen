@@ -123,6 +123,27 @@ public sealed class AlbumenPaletteTests
         Assert.Empty(offenders);
     }
 
+    // A keyed control style skips Fluent's dark implicit style, so the control falls back to the
+    // classic theme's black text, and a tab passes that black to its whole page (the e363606
+    // walkthrough, Igal, 2026-10-25). Each such style names its text brush.
+    [Fact]
+    public void EveryKeyedControlStyleNamesItsTextBrush()
+    {
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        var controls = typeof(System.Windows.Controls.Control).Assembly;
+        var offenders = XamlFiles()
+            .SelectMany(file => XDocument.Load(file).Descendants(presentation + "Style"))
+            .Where(style => (string?)style.Attribute(Xaml + "Key") is { } key && !key.EndsWith("FocusVisual", StringComparison.Ordinal)
+                && style.Attribute("BasedOn") is null
+                && controls.GetType($"System.Windows.Controls.{(string?)style.Attribute("TargetType")}") is { } type
+                && type.IsSubclassOf(typeof(System.Windows.Controls.Control)))
+            .Where(style => !style.Elements(presentation + "Setter").Any(setter => (string?)setter.Attribute("Property") == "Foreground"))
+            .Select(style => (string)style.Attribute(Xaml + "Key")!)
+            .ToArray();
+
+        Assert.Empty(offenders);
+    }
+
     private static string[] Keys(ResourceDictionary dictionary) =>
         dictionary.Keys.Cast<string>().Order(StringComparer.Ordinal).ToArray();
 
