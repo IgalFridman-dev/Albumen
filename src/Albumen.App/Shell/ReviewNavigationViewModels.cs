@@ -88,7 +88,7 @@ public sealed class ReviewCategoryViewModel
         ReviewCategoryKind.Exact => "The same file saved more than once.",
         ReviewCategoryKind.Near => "The same photo resized, recompressed or lightly edited.",
         ReviewCategoryKind.Uncertain => "Photos that look close.",
-        ReviewCategoryKind.OtherMatches => "Matching photos that are in no set.",
+        ReviewCategoryKind.OtherMatches => "Photos that match the search but aren't in any set.",
         _ => "Unsupported files.",
     };
     // "3 sets", or "3 of 14 sets" while a search filters Review; other matches are counted as photos.
