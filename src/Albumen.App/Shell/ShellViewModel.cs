@@ -490,6 +490,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public bool HasReviewSearchEmpty => ReviewSearchEmptyText.Length != 0;
 
+    // A search that leaves the open kind without a set while other kinds have matches says so in
+    // the gallery, which would otherwise be blank.
+    public string ReviewKindEmptyText => ReviewSearch.Filter is { } filter
+        && ActiveReviewCategory is { GroupCount: 0 } open
+        && ReviewCategories.Any(category => category.GroupCount != 0)
+            ? $"No photos in {open.Name} match “{filter.Prompt}”. Other kinds have matches."
+            : string.Empty;
+
+    public bool HasReviewKindEmpty => ReviewKindEmptyText.Length != 0;
+
     public string SelectionSummary
     {
         get => selectionSummary;
@@ -896,6 +906,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         OnPropertyChanged(nameof(ReviewResultsSummary));
         OnPropertyChanged(nameof(ReviewSearchEmptyText));
         OnPropertyChanged(nameof(HasReviewSearchEmpty));
+        OnPropertyChanged(nameof(ReviewKindEmptyText));
+        OnPropertyChanged(nameof(HasReviewKindEmpty));
     }
 
     // A search or Show all projects Review again with the new filter. Nothing is written: marks,
@@ -1250,6 +1262,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         OnPropertyChanged(nameof(ReviewBreadcrumbText));
         if (navigationLevelChanged) OnPropertyChanged(nameof(CanReviewBack));
         OnPropertyChanged(nameof(ActiveReviewGroups));
+        OnPropertyChanged(nameof(ReviewKindEmptyText));
+        OnPropertyChanged(nameof(HasReviewKindEmpty));
         ReviewBackCommand.NotifyCanExecuteChanged();
     }
 

@@ -1294,6 +1294,10 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
+                            <!-- The search left the open kind without a set, but other kinds have matches. -->
+                            <TextBlock x:Name="ReviewKindEmptyText" Margin="6,10" Style="{StaticResource Albumen.MutedText}"
+                                       Text="{Binding ReviewKindEmptyText}"
+                                       Visibility="{Binding HasReviewKindEmpty, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <ListBox x:Name="ReviewGalleryList" ItemsSource="{Binding ActiveReviewGroups}"
                                      Style="{StaticResource ReviewGalleryStyle}" ItemTemplate="{StaticResource ReviewSetTemplate}"
                                      PreviewMouseWheel="OnGalleryPreviewMouseWheel" PreviewKeyDown="OnGalleryPreviewKeyDown"
