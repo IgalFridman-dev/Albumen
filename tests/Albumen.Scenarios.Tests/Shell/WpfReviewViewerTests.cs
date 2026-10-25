@@ -307,6 +307,68 @@ public sealed class WpfReviewViewerTests
         });
     }
 
+    // Igal, 2026-10-25: while a photo is dragged, a small picture of it follows the pointer: the
+    // tile's own thumbnail, or the photo a viewer shows. It takes no hit test, so the viewer under
+    // the pointer still gets the drop. DoDragDrop itself cannot run under the test harness, so the
+    // picture's start, move and end are driven directly.
+    [Fact]
+    public void ADraggedPhotoShowsItsOwnPictureAtThePointer()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var scope = new ReviewStaticScope();
+            var workflow = new RecordingReviewWorkflow(scope.Current, ReviewData.CreateSnapshot());
+            var viewModel = new ShellViewModel(scope, workflow, new RecordingReviewDialogService(),
+                reviewPreviewSource: new SizedPreviewSource(40, 30),
+                reviewThumbnailSource: new SizedThumbnailSource(new Dictionary<long, (int, int)>
+                {
+                    [1] = (4000, 3000), [2] = (4000, 3000), [3] = (4000, 3000), [4] = (4000, 3000),
+                }));
+            WpfReviewSelectionTests.OpenIdenticalCopies(viewModel);
+            var window = ReviewTiles.Show(viewModel);
+            try
+            {
+                var root = Assert.IsAssignableFrom<FrameworkElement>(window.Content);
+                var layer = Assert.IsType<System.Windows.Documents.AdornerLayer>(System.Windows.Documents.AdornerLayer.GetAdornerLayer(root));
+                var tile = ReviewTiles.Tile(window, 1);
+                var thumbnail = Assert.Single(WpfReviewSelectionTests.Descendants<PhotoThumbnail>(tile));
+                WpfActionAccessibilityTests.PumpUntil(() => thumbnail.Image is not null);
+
+                var picture = Assert.IsType<ReviewDragImage>(window.ShowDragImage(tile));
+
+                Assert.Same(thumbnail.Image, picture.Picture);
+                Assert.False(picture.IsHitTestVisible);
+                Assert.Contains(picture, layer.GetAdorners(root) ?? []);
+                Assert.InRange(Math.Max(picture.PictureSize.Width, picture.PictureSize.Height), 1, ReviewDragImage.Edge + 0.5);
+
+                window.MoveDragImage(root.PointToScreen(new Point(200, 150)));
+                window.UpdateLayout();
+                Assert.Equal(200 + ReviewDragImage.Offset.X, picture.Position.X, 1.0);
+                Assert.Equal(150 + ReviewDragImage.Offset.Y, picture.Position.Y, 1.0);
+
+                window.HideDragImage();
+                Assert.Null(layer.GetAdorners(root));
+
+                // A viewer's photo is dragged with the photo that viewer shows.
+                Place(viewModel, ViewerSide.Left, viewModel.ReviewCategories[0].Groups[0], 1);
+                ShowAndDrain(window);
+                var shown = Named<PreviewStatusControl>(window, "LeftPreviewStatusControl").PreviewImage.Source;
+                Assert.NotNull(shown);
+                var dragged = Assert.IsType<ReviewDragImage>(window.ShowDragImage(Named<UIElement>(window, "LeftViewerPanel")));
+                Assert.Same(shown, dragged.Picture);
+
+                window.HideDragImage();
+                Assert.Null(layer.GetAdorners(root));
+                Assert.Equal(2, viewModel.LeftViewer.Member?.OccurrenceId);
+                Assert.Empty(workflow.SelectionCommands);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     [Fact]
     public void TheRemoveButtonMarksThroughTheSelectionPathAndTurnsRed()
     {
