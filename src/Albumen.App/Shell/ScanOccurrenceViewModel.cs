@@ -114,6 +114,8 @@ public sealed class ScanOccurrenceViewModel
     public string UncertaintyLine { get; } = string.Empty;
     // "Marked in Look-alike set 2" on the tile of a photo whose mark another set holds.
     public string MarkedElsewhereText { get; } = string.Empty;
+    // True while a search filters Review and this photo is one of its matches ("Matches" chip).
+    public bool MatchesSearch { get; init; }
     public string SizeText { get; }
     public string FileName { get; }
     public string PhysicalIdentity { get; }

@@ -11,10 +11,11 @@ using Albumen.Domain.Scan;
 namespace Albumen.App.Shell;
 
 /// <summary>
-/// Review's prompt box and its ranked list. Ephemeral and read-only: the ranking comes from
+/// Review's photo search: the search bar's prompt and the filter its result puts on Review, plus
+/// the 1.1 ranked list. Ephemeral and read-only: the ranking comes from
 /// <see cref="LikelyMatchesQuery"/>, and nothing here changes a set, a mark or a cleanup.
 /// </summary>
-public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
+public sealed class ReviewSearchViewModel : INotifyPropertyChanged
 {
     private readonly LikelyMatchesQuery? query;
     private AlbumenSnapshot? snapshot;
@@ -27,7 +28,7 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
     private ImmutableHashSet<long> grouped = [];
     private ImmutableArray<LikelyMatch> shown = [];
 
-    public LikelyMatchesViewModel(LikelyMatchesQuery? query)
+    public ReviewSearchViewModel(LikelyMatchesQuery? query)
     {
         this.query = query;
         SearchCommand = new AsyncCommand(SearchAsync, allowConcurrentExecutions: true, canExecute: () => CanSearch);
@@ -44,6 +45,12 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
 
     /// <summary>Raised by Show all, so Review can restore the kind and set open before the search.</summary>
     internal event Action? Cleared;
+
+    /// <summary>Raised when a search or Show all changes <see cref="Filter"/>, so Review is projected again.</summary>
+    internal event Action? FilterChanged;
+
+    /// <summary>The search Review is filtered by: set by a search that ran, empty or not.</summary>
+    public ReviewSearchFilter? Filter { get; private set; }
 
     public AsyncCommand SearchCommand { get; }
     public AsyncCommand ShowAllCommand { get; }
@@ -159,7 +166,7 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
         {
             request++;
             searching = false;
-            result = null;
+            SetResult(null);
             prompt = string.Empty;
             OnPropertyChanged(nameof(Prompt));
         }
@@ -189,8 +196,10 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
             Clear();
             return;
         }
-        result = found;
+        var before = Filter;
+        SetResult(found);
         Project();
+        if (!ReferenceEquals(before, Filter)) FilterChanged?.Invoke();
     }
 
     private void Clear()
@@ -198,10 +207,21 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
         var wasActive = IsActive;
         request++;
         searching = false;
-        result = null;
+        SetResult(null);
         Prompt = string.Empty;
         Project();
-        if (wasActive) Cleared?.Invoke();
+        if (!wasActive) return;
+        FilterChanged?.Invoke();
+        Cleared?.Invoke();
+    }
+
+    // Only a search that ran filters Review; one that could not run leaves it unfiltered.
+    private void SetResult(LikelyMatchesResult? value)
+    {
+        result = value;
+        Filter = value is { Outcome: LikelyMatchesOutcome.Matches or LikelyMatchesOutcome.NoMatches }
+            ? new(value.Prompt, value.Matches)
+            : null;
     }
 
     // Photos that left Review (moved to the Recycle Bin, or in a set closed after a cleanup) are
@@ -282,6 +302,25 @@ public sealed class LikelyMatchesViewModel : INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}
+
+/// <summary>
+/// A search that filters Review: its prompt and the photos <see cref="LikelyMatchesQuery"/> ranked
+/// for it, best first, with each photo's score.
+/// </summary>
+public sealed record ReviewSearchFilter(string Prompt, ImmutableArray<LikelyMatch> Ranked)
+{
+    public ImmutableDictionary<long, float> Matches { get; } = ScoresOf(Ranked);
+
+    private static ImmutableDictionary<long, float> ScoresOf(ImmutableArray<LikelyMatch> ranked)
+    {
+        var scores = ImmutableDictionary.CreateBuilder<long, float>();
+        foreach (var match in ranked)
+        {
+            if (!scores.ContainsKey(match.OccurrenceId)) scores.Add(match.OccurrenceId, match.Score);
+        }
+        return scores.ToImmutable();
+    }
 }
 
 /// <summary>The Review set a likely match opens in.</summary>

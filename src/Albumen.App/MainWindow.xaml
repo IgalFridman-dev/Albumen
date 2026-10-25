@@ -271,9 +271,10 @@
         </DataTemplate>
         <!-- One photo of a set: its thumbnail on the dark ground with rounded corners, as wide as
              its shape needs. A photo a viewer shows is dimmed and names that viewer; a photo marked
-             for removal carries the Removed sign; the set's hints sit as chips at the bottom. A
-             click shows it in the Left Viewer while that viewer is empty; it can be dragged onto
-             either viewer; its menu marks it or places it. -->
+             for removal carries the Removed sign; the set's hints, and "Matches" while a search
+             finds the photo, sit as chips at the bottom. A click shows it in the Left Viewer while
+             that viewer is empty; it can be dragged onto either viewer; its menu marks it or
+             places it. -->
         <DataTemplate x:Key="ReviewPhotoTileTemplate">
             <review:ReviewPhotoTile Style="{StaticResource Albumen.ThumbnailButton}" Member="{Binding}"
                     GroupId="{Binding DataContext.GroupId, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
@@ -324,6 +325,10 @@
                         </StackPanel>
                     </Border>
                     <WrapPanel VerticalAlignment="Bottom" Margin="6,0,0,6">
+                        <Border Style="{StaticResource Albumen.Badge}"
+                                Visibility="{Binding MatchesSearch, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="Matches" />
+                        </Border>
                         <Border Style="{StaticResource Albumen.Badge}">
                             <Border.Visibility>
                                 <MultiBinding Converter="{StaticResource EqualValuesToVisibilityConverter}">
@@ -568,7 +573,7 @@
                     </Style>
                 </app:ReviewAutomationBorder.Style>
               <StackPanel>
-                <Border x:Name="SearchField" DataContext="{Binding LikelyMatches}" ToolTip="{Binding ScopeText}">
+                <Border x:Name="SearchField" DataContext="{Binding ReviewSearch}" ToolTip="{Binding ScopeText}">
                     <Border.Style>
                         <Style TargetType="Border" BasedOn="{StaticResource Albumen.SearchBar}">
                             <Style.Triggers>
@@ -605,7 +610,7 @@
                                  Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
                                  IsEnabled="{Binding CanSearch}"
                                  AutomationProperties.Name="Describe the photos to find"
-                                 AutomationProperties.HelpText="{x:Static shell:LikelyMatchesViewModel.PromptHelpText}">
+                                 AutomationProperties.HelpText="{x:Static shell:ReviewSearchViewModel.PromptHelpText}">
                             <TextBox.InputBindings>
                                 <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
                                 <KeyBinding Key="Escape" Command="{Binding ShowAllCommand}" />
@@ -620,7 +625,7 @@
                     </Grid>
                 </Border>
                 <!-- Indexing, unavailable, searching, how many matched: said under the bar, never while idle. -->
-                <TextBlock x:Name="LikelyMatchesStatusText" DataContext="{Binding LikelyMatches}" Margin="12,4,12,0"
+                <TextBlock x:Name="LikelyMatchesStatusText" DataContext="{Binding ReviewSearch}" Margin="12,4,12,0"
                            Style="{StaticResource Albumen.Caption}" TextAlignment="Center" Text="{Binding StatusText}"
                            Visibility="{Binding HasStatus, Converter={StaticResource BooleanToVisibilityConverter}}"
                            AutomationProperties.Name="Likely matches status" AutomationProperties.ItemStatus="{Binding StatusText}"
@@ -1238,7 +1243,7 @@
 
                 <!-- The 1.1 list of likely matches, filled by the search bar. It is a list of its own
                      and changes nothing in the kinds and sets below. -->
-                <StackPanel DataContext="{Binding LikelyMatches}">
+                <StackPanel DataContext="{Binding ReviewSearch}">
                     <TextBlock Margin="0,10,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding SelectionOutsideText}" TextWrapping="Wrap"
                                Visibility="{Binding HasSelectionOutside, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <ListBox x:Name="LikelyMatchesList" Margin="0,8,0,0" ItemsSource="{Binding Results}"
@@ -1256,6 +1261,17 @@
                             </ItemsPanelTemplate>
                         </ListBox.ItemsPanel>
                     </ListBox>
+                </StackPanel>
+
+                <!-- A search that matched nothing in Review says so, with the way back. -->
+                <StackPanel x:Name="ReviewSearchEmptyPanel" Margin="0,10,0,0"
+                            Visibility="{Binding HasReviewSearchEmpty, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock x:Name="ReviewSearchEmptyText" Text="{Binding ReviewSearchEmptyText}"
+                               Style="{StaticResource Albumen.SectionTitle}" />
+                    <Button x:Name="ReviewSearchClearButton" Content="Show all Review results" Margin="0,8,0,0"
+                            HorizontalAlignment="Left" Style="{StaticResource Albumen.Button}"
+                            Command="{Binding ReviewSearch.ShowAllCommand}" Click="OnLikelyMatchesShowAllClick"
+                            AutomationProperties.Name="Show all Review results" />
                 </StackPanel>
 
                 <!-- The kinds, and beside them the open kind's sets as a gallery of photos. -->
@@ -1283,9 +1299,13 @@
                                     <Style TargetType="TextBlock" BasedOn="{StaticResource Albumen.MutedText}">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding ActiveReviewCategory}" Value="{x:Null}">
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding ActiveReviewCategory}" Value="{x:Null}" />
+                                                    <Condition Binding="{Binding HasReviewSearchEmpty}" Value="False" />
+                                                </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
+                                            </MultiDataTrigger>
                                         </Style.Triggers>
                                     </Style>
                                 </TextBlock.Style>
@@ -1387,6 +1407,10 @@
                         <StackPanel>
                             <TextBlock x:Name="ApprovalTitleText" Text="{Binding ApprovalTitle}" FontSize="20"
                                        Style="{StaticResource Albumen.SectionTitle}" />
+                            <!-- While a search filters Review: the marked photos it hides still move. -->
+                            <TextBlock x:Name="ApprovalHiddenMarkedText" Margin="0,2,0,0" FontWeight="SemiBold" TextWrapping="Wrap"
+                                       Text="{Binding ApprovalHiddenMarkedText}"
+                                       Visibility="{Binding HasApprovalHiddenMarked, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <TextBlock Margin="0,4,0,10" Style="{StaticResource Albumen.MutedText}"
                                        Text="Nothing changes until you approve. Marked photos go to the Windows Recycle Bin only, and each file is checked again right before it moves." />
                             <!-- The first marked photos, so the approval names what it moves. -->

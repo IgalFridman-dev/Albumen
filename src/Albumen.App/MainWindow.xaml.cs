@@ -206,9 +206,11 @@ public partial class MainWindow : Window
             _ => null,
         };
 
+    // The search box too: a search projects Review again, and focus must stay in the box.
     private bool IsDeliberateReviewFocusTarget(FrameworkElement element) =>
         ReferenceEquals(element, ReviewHeading)
         || ReferenceEquals(element, ApprovalPanel)
+        || ReferenceEquals(element, LikelyMatchesPromptBox)
         || element is ButtonBase;
 
     internal long BeginReviewDialogFocusTransition()

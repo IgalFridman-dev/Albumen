@@ -290,6 +290,33 @@ public sealed class WpfReviewSearchBarTests
         });
     }
 
+    [Fact]
+    public void ASearchAfterAPhotoHadFocusKeepsFocusInTheBox()
+    {
+        WpfReviewSelectionTests.RunOnSta(() =>
+        {
+            var fixture = new SearchFixture();
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
+            var window = ReviewTiles.Show(fixture.ViewModel);
+            try
+            {
+                // A photo's tile held focus, so a projection would give focus back to it.
+                ReviewTiles.Focus(ReviewTiles.Tile(window, 2));
+                var box = PromptBox(window);
+                box.Text = "at sea";
+
+                Search(fixture, window, box);
+
+                Assert.True(fixture.Search.IsActive);
+                Assert.True(box.IsKeyboardFocused);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     // Enter in the prompt box, then wait for the ranking to come back.
     private static void Search(SearchFixture fixture, Window window, TextBox box)
     {

@@ -14,6 +14,8 @@ public enum ReviewCategoryKind
     Near,
     Uncertain,
     CouldNotAnalyze,
+    // Shown only while a search filters Review: the matching photos that are in no open set.
+    OtherMatches,
 }
 
 // The names people see for each kind. The enum keeps the internal Exact / Near / Uncertain terms.
@@ -25,6 +27,7 @@ public static class ReviewCategoryNames
         ReviewCategoryKind.Near => "Look-alike",
         ReviewCategoryKind.Uncertain => "Maybe similar",
         ReviewCategoryKind.CouldNotAnalyze => "Couldn't check",
+        ReviewCategoryKind.OtherMatches => "Other matches",
         _ => throw new InvalidOperationException($"Unknown Review category: {category}"),
     };
 }
@@ -40,9 +43,12 @@ public sealed class ReviewCategoryViewModel
 {
     private readonly Func<Guid, int?> findGroupIndex;
     private readonly Func<long, int?>? findSingletonIndex;
+    private readonly Func<Guid, long, ScanOccurrenceViewModel?>? findHiddenMember;
 
-    // Couldn't-check files are each their own set without a set id (Guid.Empty), so they are
-    // found by photo through findSingletonIndex.
+    // Couldn't-check files and other matches are each their own set without a set id
+    // (Guid.Empty), so they are found by photo through findSingletonIndex. While a search filters
+    // Review, Groups holds only the sets it shows, totalGroupCount counts them all, and
+    // findHiddenMember still finds a photo of a set the search hides (for a viewer that shows it).
     internal ReviewCategoryViewModel(
         ReviewCategoryKind category,
         string name,
@@ -51,21 +57,29 @@ public sealed class ReviewCategoryViewModel
         int sizeOfSet,
         Func<int, ReviewGroupViewModel> groupFactory,
         Func<Guid, int?> findGroupIndex,
-        Func<long, int?>? findSingletonIndex = null)
+        Func<long, int?>? findSingletonIndex = null,
+        int? totalGroupCount = null,
+        Func<Guid, long, ScanOccurrenceViewModel?>? findHiddenMember = null)
     {
         Category = category;
         Name = name;
         GroupCount = groupCount;
+        TotalGroupCount = totalGroupCount ?? groupCount;
+        IsFiltered = totalGroupCount is not null;
         PositionInSet = positionInSet;
         SizeOfSet = sizeOfSet;
         Groups = new(groupCount, groupFactory);
         this.findGroupIndex = findGroupIndex;
         this.findSingletonIndex = findSingletonIndex;
+        this.findHiddenMember = findHiddenMember;
     }
 
     public ReviewCategoryKind Category { get; }
     public string Name { get; }
+    // The sets shown: all of the kind's sets, or those with a match while a search filters Review.
     public int GroupCount { get; }
+    public int TotalGroupCount { get; }
+    public bool IsFiltered { get; }
     public int PositionInSet { get; }
     public int SizeOfSet { get; }
     public string AutomationName => $"{Name}: {CountText}";
@@ -74,24 +88,33 @@ public sealed class ReviewCategoryViewModel
         ReviewCategoryKind.Exact => "The same file saved more than once.",
         ReviewCategoryKind.Near => "The same photo resized, recompressed or lightly edited.",
         ReviewCategoryKind.Uncertain => "Photos that look close.",
+        ReviewCategoryKind.OtherMatches => "Matching photos that are in no set.",
         _ => "Unsupported files.",
     };
-    public string CountText => GroupCount == 1
-        ? Category == ReviewCategoryKind.CouldNotAnalyze ? "1 file" : "1 set"
-        : Category == ReviewCategoryKind.CouldNotAnalyze
-            ? $"{GroupCount.ToString(CultureInfo.InvariantCulture)} files"
-            : $"{GroupCount.ToString(CultureInfo.InvariantCulture)} sets";
+    // "3 sets", or "3 of 14 sets" while a search filters Review; other matches are counted as photos.
+    public string CountText => IsFiltered && Category != ReviewCategoryKind.OtherMatches
+        ? $"{GroupCount.ToString(CultureInfo.InvariantCulture)} of {TotalGroupCount.ToString(CultureInfo.InvariantCulture)} {Unit(TotalGroupCount)}"
+        : $"{GroupCount.ToString(CultureInfo.InvariantCulture)} {Unit(GroupCount)}";
     public LazyReviewCollection<ReviewGroupViewModel> Groups { get; }
+
+    private string Unit(int count) => Category switch
+    {
+        ReviewCategoryKind.CouldNotAnalyze => count == 1 ? "file" : "files",
+        ReviewCategoryKind.OtherMatches => count == 1 ? "photo" : "photos",
+        _ => count == 1 ? "set" : "sets",
+    };
 
     internal ReviewGroupViewModel? FindGroup(Guid groupId) =>
         findGroupIndex(groupId) is { } index ? Groups[index] : null;
 
     internal ScanOccurrenceViewModel? FindMember(Guid groupId, long occurrenceId)
     {
-        if (findSingletonIndex is null) return FindGroup(groupId)?.FindMember(occurrenceId);
-        return groupId == Guid.Empty && findSingletonIndex(occurrenceId) is { } index
-            ? Groups[index].Members[0]
-            : null;
+        var shown = findSingletonIndex is null
+            ? FindGroup(groupId)?.FindMember(occurrenceId)
+            : groupId == Guid.Empty && findSingletonIndex(occurrenceId) is { } index
+                ? Groups[index].Members[0]
+                : null;
+        return shown ?? findHiddenMember?.Invoke(groupId, occurrenceId);
     }
 }
 
@@ -101,11 +124,13 @@ public sealed class ReviewGroupViewModel : INotifyPropertyChanged
     private SuggestedBest? suggestion;
     private bool suggestionSettled;
 
+    // matches holds the photos a search found while it filters Review; they carry a "Matches" chip.
     internal ReviewGroupViewModel(
         CandidateGroup group,
         ReviewCategoryKind category,
         int positionInSet,
-        int sizeOfSet)
+        int sizeOfSet,
+        ImmutableDictionary<long, float>? matches = null)
     {
         GroupId = group.GroupId;
         Category = category;
@@ -116,7 +141,10 @@ public sealed class ReviewGroupViewModel : INotifyPropertyChanged
             .Select((member, index) => (OccurrenceId: member.Token.OccurrenceId, Index: index))
             .ToDictionary(pair => pair.OccurrenceId, pair => pair.Index);
         Members = new(members.Length, index => new ScanOccurrenceViewModel(
-            members[index], IsAlias(members, index), index + 1, members.Length));
+            members[index], IsAlias(members, index), index + 1, members.Length)
+        {
+            MatchesSearch = matches?.ContainsKey(members[index].Token.OccurrenceId) is true,
+        });
         MemberCount = members.Length;
         Summary = FormatSummary(positionInSet, MemberCount);
         AutomationName = FormatAutomationName(category, positionInSet, sizeOfSet, MemberCount);
@@ -132,7 +160,8 @@ public sealed class ReviewGroupViewModel : INotifyPropertyChanged
         int sizeOfSet,
         bool reviewAllowsSelection,
         Func<SelectionCommandKind, ImmutableArray<long>, Task> changeSelection,
-        Func<Guid, string>? describeSet = null)
+        Func<Guid, string>? describeSet = null,
+        ImmutableDictionary<long, float>? matches = null)
     {
         GroupId = group.Candidate.GroupId;
         Category = category;
@@ -156,7 +185,10 @@ public sealed class ReviewGroupViewModel : INotifyPropertyChanged
             members[index].SelectedInGroup is { } holder ? describeSet?.Invoke(holder) : null,
             blurrier.Contains(members[index].Occurrence.Token.OccurrenceId),
             DescribeKind(category, group.Candidate, members[index].Occurrence.Token.OccurrenceId),
-            uncertaintyLine));
+            uncertaintyLine)
+        {
+            MatchesSearch = matches?.ContainsKey(members[index].Occurrence.Token.OccurrenceId) is true,
+        });
         MemberCount = members.Length;
         Summary = FormatSummary(positionInSet, MemberCount);
         // A set is settled once marks held elsewhere leave at most one photo undecided:
@@ -188,21 +220,23 @@ public sealed class ReviewGroupViewModel : INotifyPropertyChanged
             canExecute: () => canChangeSelection);
     }
 
-    internal ReviewGroupViewModel(ScanFileOccurrence occurrence, int positionInSet, int sizeOfSet)
+    // A photo in no set: a Couldn't-check file, or one of a search's other matches.
+    internal ReviewGroupViewModel(ScanFileOccurrence occurrence, int positionInSet, int sizeOfSet,
+        ReviewCategoryKind category = ReviewCategoryKind.CouldNotAnalyze, bool matchesSearch = false)
     {
         GroupId = Guid.Empty;
-        Category = ReviewCategoryKind.CouldNotAnalyze;
+        Category = category;
         PositionInSet = positionInSet;
         SizeOfSet = sizeOfSet;
         memberIndexes = new Dictionary<long, int> { [occurrence.Token.OccurrenceId] = 0 };
         Members = new(1, _ => new ScanOccurrenceViewModel(occurrence,
-            positionInSet: 1, sizeOfSet: 1));
+            positionInSet: 1, sizeOfSet: 1) { MatchesSearch = matchesSearch });
         MemberCount = 1;
         var fileName = Path.GetFileName(occurrence.DiscoveredPath.TrimEnd('\\', '/')) is { Length: > 0 } name
             ? name : occurrence.DiscoveredPath;
-        Summary = $"{ReviewCategoryNames.For(ReviewCategoryKind.CouldNotAnalyze)}: {fileName}";
+        Summary = $"{ReviewCategoryNames.For(category)}: {fileName}";
         AutomationName = $"{Summary}; {occurrence.DiscoveredPath}";
-        ItemStatus = $"{ReviewCategoryNames.For(ReviewCategoryKind.CouldNotAnalyze)}; 1 file";
+        ItemStatus = $"{ReviewCategoryNames.For(category)}; {(category == ReviewCategoryKind.CouldNotAnalyze ? "1 file" : "1 photo")}";
         SelectAllCommand = DisabledCommand();
         ReplaceSelectionCommand = DisabledCommand(parameterized: true);
     }
