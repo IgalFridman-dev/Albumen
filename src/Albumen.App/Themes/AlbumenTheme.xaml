@@ -684,8 +684,8 @@
         </Style.Triggers>
     </Style>
 
-    <!-- The top bar's row holds the tab strip on the left and, centred in the middle 40 % of the
-         row, whatever the window puts in the TabControl's Tag (the photo search bar). -->
+    <!-- The top bar's row holds the tab strip on the left and, centred in the rest of the row,
+         whatever the window puts in the TabControl's Tag (the photo search bar). -->
     <Style x:Key="Albumen.TopBar" TargetType="TabControl">
         <Setter Property="Background" Value="Transparent" />
         <!-- Every page lives in this control's content, and text that has no brush of its own
@@ -700,11 +700,13 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <Grid x:Name="HeaderRow">
+                        <!-- The strip takes the width it needs, so it never wraps at large text; the
+                             empty right column shares that width, so the middle stays centred. -->
+                        <Grid x:Name="HeaderRow" Grid.IsSharedSizeScope="True">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="3*" />
-                                <ColumnDefinition Width="4*" />
-                                <ColumnDefinition Width="3*" />
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="TopBarSide" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="TopBarSide" />
                             </Grid.ColumnDefinitions>
                             <Border x:Name="Strip" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,0,0,0"
                                     Padding="3" CornerRadius="10" Background="{DynamicResource Albumen.SubtleFillBrush}">
