@@ -91,7 +91,7 @@ flowchart LR
   App --> Windows
   App --> Onnx
   Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature<br/>sharpness"] --> Application
-  Sqlite["Infrastructure.Sqlite<br/>schema v6, journals, records, photo vectors"] --> Application
+  Sqlite["Infrastructure.Sqlite<br/>schema v7, journals, records, photo vectors, signatures"] --> Application
   Onnx["Infrastructure.Onnx<br/>SigLIP 2 encoder on ONNX Runtime"] --> Application
   Windows["Infrastructure.Windows<br/>Win32 scope and traversal, WIC decode,<br/>IFileOperation Recycle Bin"] --> Application
   Application["Albumen.Application<br/>workflows, coordinators, ports"] --> Domain["Albumen.Domain<br/>pure rules and policies"]
@@ -185,8 +185,10 @@ Raw observations, not benchmarks or promises. The verification VM has 2 CPUs and
 - As a filter, a weak search match hides the rest of Review. The search cut-off is still 1.1's, set on
   65 of the owner's photos; the labelled corpus has not measured it yet.
 - Albumen is dark only; a light mode is not scheduled.
-- Text search misses small objects in the frame (the model sees the photo at 224 px), and every scan
-  recomputes the photo vectors; nothing is reused across scans.
+- Text search misses small objects in the frame (the model sees the photo at 224 px).
+- A second scan reuses the look-alike features, sharpness scores and photo vectors of photos whose
+  content (SHA-256) is unchanged, but still reads and hashes every file once. Stored results stay
+  until "Clear scan data" (in History); nothing removes them sooner.
 - A first scan of 300 images took 12.1 s on a 2-CPU, 4 GiB VM. That is an observation, not a benchmark.
 
 ## Roadmap
