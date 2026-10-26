@@ -32,6 +32,15 @@ internal static class CorpusMeasurement
         return new(signature, sharpness, embedding.Vector.ToArray());
     }
 
+    // A prompt encoded as Review's search encodes it.
+    public static float[] EncodePrompt(string prompt, IVisionLanguageEncoder encoder, EncoderProfile profile)
+    {
+        var text = encoder.EncodeText(profile, LikelyMatchesQuery.Caption(prompt));
+        return text.Failure is { } failure
+            ? throw new InvalidDataException($"\"{prompt}\": {failure.Reason}")
+            : text.Vector.ToArray();
+    }
+
     private static async Task<PreviewFrame> DecodeAsync(string path, int maximumEdge)
     {
         using var result = await Decoder.DecodeAsync(path, maximumEdge).ConfigureAwait(false);

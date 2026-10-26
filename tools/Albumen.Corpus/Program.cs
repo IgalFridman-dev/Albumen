@@ -6,8 +6,8 @@ using Albumen.Infrastructure.Onnx;
 // the repositories; see README.md for the layout.
 const string Usage = """
     usage:
-      Albumen.Corpus label  <corpus folder>                  write labels.csv from the folders
-      Albumen.Corpus report <corpus folder> <models folder>  measure the photos, write report-<version>.md
+      Albumen.Corpus label  <corpus folder>                  write labels.csv from the folders, check search-answers.txt
+      Albumen.Corpus report <corpus folder> <models folder>  measure the photos and prompts, write report-<version>.md
     """;
 
 try
@@ -25,11 +25,15 @@ try
             Console.WriteLine($"Wrote {CorpusLabels.FileName} {CorpusLabels.Version(corpus)}: {photos.Count} photos, "
                 + $"{photos.Where(photo => photo.Set.Length > 0).Select(photo => photo.Set).Distinct().Count()} sets, "
                 + string.Join(", ", CorpusLabels.BlurSlices.Select(slice => $"{photos.Count(photo => photo.Blur == slice)} {slice}")) + ".");
+            var answers = SearchAnswers.Read(corpus, photos);
+            Console.WriteLine($"Read {SearchAnswers.FileName} {SearchAnswers.Version(corpus)}: {answers.Count} prompts, "
+                + $"{answers.Count(answer => answer.Photos.Count == 0)} with no photo in the corpus.");
             return 0;
         }
         case ["report", var corpus, var models]:
         {
             var photos = CorpusLabels.ReadVerified(corpus);
+            var answers = SearchAnswers.Read(corpus, photos);
             using var encoder = new OnnxVisionLanguageEncoder(models);
             var loaded = encoder.LoadProfile();
             if (loaded.Profile is not { } profile)
@@ -43,10 +47,13 @@ try
                     Console.WriteLine($"Measured {features.Count} of {photos.Count}");
             }
 
+            var prompts = answers.Select(answer => CorpusMeasurement.EncodePrompt(answer.Prompt, encoder, profile)).ToList();
+
             var version = CorpusLabels.Version(corpus);
             var code = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
             var path = Path.Combine(corpus, $"report-{version}.md");
-            File.WriteAllText(path, CorpusReport.Write(version, code, $"{profile.Model}, vision {profile.VisionSha256[..12]}", photos, features));
+            File.WriteAllText(path, CorpusReport.Write(version, code, profile, photos, features,
+                SearchAnswers.Version(corpus), answers, prompts));
             Console.WriteLine($"Wrote {path}");
             return 0;
         }
