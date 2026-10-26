@@ -23,25 +23,62 @@ public sealed class SqliteNonWritingAdmissionTests
         Assert.Equal(8, error.SqliteErrorCode);
     }
 
+    // A crash leaves a WAL database's -wal and -shm behind. SQLite folds the committed frames back
+    // into the database on open; nothing Albumen did is run again, so an interrupted cleanup still
+    // reads as unknown in History.
     [Fact]
-    public async Task RejectedRetainedCommittedWalCannotCheckpointOrChangeAnySidecar()
+    public async Task ACrashedWalDatabaseIsRecoveredOnOpenAndItsSidecarsRemoved()
     {
         await using var donor = new SqliteOverrideFixture();
-        await using var rejected = new SqliteOverrideFixture();
+        await using var crashed = new SqliteOverrideFixture();
+        await using (var stores = new SqliteAlbumenStores(donor.DatabasePath))
+            Assert.Equal(OverrideReadOutcome.Missing,
+                (await stores.OverrideEvidence.ReadAsync(OverrideEvidenceData.KnownEvidenceId, TestContext.Current.CancellationToken)).Outcome);
+        await using (var connection = await donor.OpenRawAsync())
+        {
+            await ExecuteAsync(connection, "PRAGMA wal_autocheckpoint=0; CREATE TABLE committed_in_wal(value TEXT); DROP TABLE committed_in_wal;");
+            await CopySnapshotAsync(CommittedWal(await SnapshotAsync(donor.DatabasePath)), crashed.DatabasePath);
+        }
+
+        await using (var stores = new SqliteAlbumenStores(crashed.DatabasePath))
+            Assert.Equal(OverrideReadOutcome.Missing,
+                (await stores.OverrideEvidence.ReadAsync(OverrideEvidenceData.KnownEvidenceId, TestContext.Current.CancellationToken)).Outcome);
+
+        Assert.False(File.Exists(crashed.DatabasePath + "-wal"));
+        Assert.False(File.Exists(crashed.DatabasePath + "-shm"));
+    }
+
+    // Recovery is SQLite's own and the schema check still follows it: committed foreign state is
+    // folded in and then refused like any other foreign database.
+    [Fact]
+    public async Task ARecoveredWalWithForeignStateIsStillRefused()
+    {
+        await using var donor = new SqliteOverrideFixture();
+        await using var crashed = new SqliteOverrideFixture();
         await SeedAsync(donor, 2);
         await using (var connection = await donor.OpenRawAsync())
         {
             Assert.Equal("wal", await ScalarAsync(connection, "PRAGMA journal_mode=WAL;"));
             await ExecuteAsync(connection, "PRAGMA wal_autocheckpoint=0; CREATE TABLE foreign_object(value TEXT); INSERT INTO foreign_object VALUES ('committed-in-wal');");
-            var bytes = await SnapshotAsync(donor.DatabasePath);
-            var wal = Assert.IsType<byte[]>(bytes["-wal"]);
-            Assert.True(wal.Length > 32);
-            var pageSize = checked((int)BinaryPrimitives.ReadUInt32BigEndian(wal.AsSpan(8, 4)));
-            Assert.Contains(Enumerable.Range(0, (wal.Length - 32) / (pageSize + 24)), frame =>
-                BinaryPrimitives.ReadUInt32BigEndian(wal.AsSpan(32 + frame * (pageSize + 24) + 4, 4)) > 0);
-            await CopySnapshotAsync(bytes, rejected.DatabasePath);
+            await CopySnapshotAsync(CommittedWal(await SnapshotAsync(donor.DatabasePath)), crashed.DatabasePath);
         }
-        await RejectAndRetainAsync(rejected, expectedHeaderMode: 2);
+
+        await using (var stores = new SqliteAlbumenStores(crashed.DatabasePath))
+            Assert.Equal(OverrideReadOutcome.Unavailable,
+                (await stores.OverrideEvidence.ReadAsync(OverrideEvidenceData.KnownEvidenceId, TestContext.Current.CancellationToken)).Outcome);
+        await using var recovered = await crashed.OpenRawAsync();
+        Assert.Equal("committed-in-wal", await ScalarAsync(recovered, "SELECT value FROM foreign_object;"));
+    }
+
+    // The snapshot holds a -wal with at least one committed frame, as a crash would leave it.
+    private static Dictionary<string, byte[]?> CommittedWal(Dictionary<string, byte[]?> bytes)
+    {
+        var wal = Assert.IsType<byte[]>(bytes["-wal"]);
+        Assert.True(wal.Length > 32);
+        var pageSize = checked((int)BinaryPrimitives.ReadUInt32BigEndian(wal.AsSpan(8, 4)));
+        Assert.Contains(Enumerable.Range(0, (wal.Length - 32) / (pageSize + 24)), frame =>
+            BinaryPrimitives.ReadUInt32BigEndian(wal.AsSpan(32 + frame * (pageSize + 24) + 4, 4)) > 0);
+        return bytes;
     }
 
     [Fact]
