@@ -469,3 +469,30 @@ internal sealed class ShortReadScanStream() : MemoryStream([1, 2, 3])
     public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
         base.ReadAsync(buffer[..Math.Min(buffer.Length, 1)], cancellationToken);
 }
+
+internal sealed class FakeSignatureStore : ISignatureStore
+{
+    public ConcurrentDictionary<SignatureKey, byte[]?> Rows { get; } = new();
+    public ConcurrentQueue<IReadOnlyList<StoredSignature>> Added { get; } = new();
+    public ConcurrentQueue<int> Lookups { get; } = new();
+    public Exception? LookupFailure { get; set; }
+    public Exception? AddFailure { get; set; }
+
+    public ValueTask<IReadOnlyDictionary<SignatureKey, byte[]?>> LookupAsync(
+        IReadOnlyCollection<SignatureKey> keys, CancellationToken cancellationToken)
+    {
+        Lookups.Enqueue(keys.Count);
+        if (LookupFailure is { } failure) return ValueTask.FromException<IReadOnlyDictionary<SignatureKey, byte[]?>>(failure);
+        IReadOnlyDictionary<SignatureKey, byte[]?> found = keys.Distinct().Where(Rows.ContainsKey)
+            .ToDictionary(key => key, key => Rows[key]);
+        return ValueTask.FromResult(found);
+    }
+
+    public ValueTask AddAsync(IReadOnlyList<StoredSignature> signatures, CancellationToken cancellationToken)
+    {
+        Added.Enqueue(signatures.ToArray());
+        if (AddFailure is { } failure) return ValueTask.FromException(failure);
+        foreach (var signature in signatures) Rows.TryAdd(signature.Key, signature.Value);
+        return ValueTask.CompletedTask;
+    }
+}
