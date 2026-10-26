@@ -67,6 +67,18 @@ public sealed class LikelyMatchesQueryTests
     }
 
     [Fact]
+    public void AHigherMinimumScoreListsFewerPhotos()
+    {
+        // With scale 100 and bias -10 the probability is 0.01% at cosine 0.0079, 0.1% at 0.0309 and
+        // 1% at 0.0541; all three photos are within a fiftieth of the best photo's odds (0.0209).
+        (long, float)[] cosines = [(3, 0.03f), (1, 0.06f), (2, 0.05f)];
+
+        Assert.Equal([1L, 2L, 3L], LikelyMatchesQuery.Listed(Profile, cosines).Select(row => row.OccurrenceId));
+        Assert.Equal([1L, 2L], LikelyMatchesQuery.Listed(Profile, cosines, minimumScore: 0.001).Select(row => row.OccurrenceId));
+        Assert.Equal([1L], LikelyMatchesQuery.Listed(Profile, cosines, minimumScore: 0.01).Select(row => row.OccurrenceId));
+    }
+
+    [Fact]
     public async Task ARepeatedPromptOnlyEncodesTheTextAndReadsTheStoredVectorsOfThisScan()
     {
         var fixture = new Fixture();
