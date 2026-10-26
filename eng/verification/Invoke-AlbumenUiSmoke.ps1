@@ -58,7 +58,7 @@ param(
 
     # The full name of one Albumen.Scenarios.Tests method to run on the guest desktop instead of
     # the app: a Desktop test, which needs WPF to draw on a signed-in desktop. The host builds the
-    # tests into the run folder; give -TimeoutMinutes room for the test's own limit.
+    # tests into the run folder. The run's limit defaults to 45 minutes, room for the test's own.
     [Parameter()]
     [string]$DesktopTest,
 
@@ -70,6 +70,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if ($DesktopTest -and -not $PSBoundParameters.ContainsKey('TimeoutMinutes')) {
+    $TimeoutMinutes = 45
+}
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 Import-Module (Join-Path $PSScriptRoot 'AlbumenVerification.psm1') -Force
 $deadline = [System.DateTimeOffset]::Now.AddMinutes($TimeoutMinutes)
@@ -393,12 +396,19 @@ try {
         Start-ScheduledTask -TaskName $TaskName
     } -ArgumentList $guestRoot, $guestAppPath, $guestOutputPath, $LaunchSeconds, $guestLaunchScript, $taskName, $GuestDotnetRoot, $Launches, $AppTheme, $DesktopTest
 
-    # A desktop test keeps its own time limit; the run's deadline bounds the wait.
+    # A desktop test keeps its own time limit; the run's deadline bounds the wait. A launch that
+    # does not finish still has its output collected before the run fails.
     $launchWaitSeconds = if ($DesktopTest) { $TimeoutMinutes * 60 } else { ($LaunchSeconds + 45) * $Launches + 180 }
-    Wait-AlbumenGuestCondition -Description 'the guest launch script' -TimeoutSeconds $launchWaitSeconds -Condition {
-        Invoke-Command -Session $session -ScriptBlock {
-            param($OutputPath) Test-Path -LiteralPath (Join-Path $OutputPath 'done.flag')
-        } -ArgumentList $guestOutputPath
+    $launchFailure = $null
+    try {
+        Wait-AlbumenGuestCondition -Description 'the guest launch script' -TimeoutSeconds $launchWaitSeconds -Condition {
+            Invoke-Command -Session $session -ScriptBlock {
+                param($OutputPath) Test-Path -LiteralPath (Join-Path $OutputPath 'done.flag')
+            } -ArgumentList $guestOutputPath
+        }
+    }
+    catch {
+        $launchFailure = $_.Exception.Message
     }
 
     Write-Output 'Collecting results.'
@@ -441,6 +451,7 @@ try {
             passed = [int]$assembly.passed
             failed = [int]$assembly.failed
             skipped = [int]$assembly.skipped
+            seconds = [double]$assembly.time
         }
     }
     [ordered]@{
@@ -457,6 +468,9 @@ try {
         desktopTest = $desktopTestResult
         completedAtUtc = [System.DateTimeOffset]::UtcNow.ToString('O')
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runPath 'summary.json') -Encoding UTF8
+    if ($launchFailure) {
+        throw "$launchFailure What the guest left is in $hostOutputPath."
+    }
     if ($DesktopTest -and -not ($desktopTestResult -and $desktopTestResult.total -eq 1 -and $desktopTestResult.passed -eq 1)) {
         throw "The desktop test $DesktopTest did not pass; its log and any crash dump are in $hostOutputPath."
     }
