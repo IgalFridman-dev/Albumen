@@ -18,7 +18,8 @@ public sealed class BoundedSemanticIndexerTests
 
         var result = await fixture.IndexAsync(rows);
 
-        Assert.Equal(new SemanticSnapshot(SemanticState.Ready, 3, 3, 3, IndexerFixture.Profile.Fingerprint, ""), result);
+        Assert.Equal(new SemanticSnapshot(SemanticState.Ready, 3, 3, 3, IndexerFixture.Profile.Fingerprint, "")
+            { Vectors = new(0, 3, 0) }, result);
         Assert.False(result.IsPartial);
         Assert.Equal(["clear", "add"], fixture.Store.Calls.Distinct());
         Assert.Equal([1L, 2L, 3L], fixture.Store.Stored.Keys.Order());
@@ -68,6 +69,7 @@ public sealed class BoundedSemanticIndexerTests
         Assert.Equal((expected, 2, 0, "The model files are not installed."), (result.State, result.Total, result.Indexed, result.Reason));
         Assert.Empty(fixture.Store.Calls);
         Assert.Equal(0, fixture.Images.Reads);
+        Assert.Empty(fixture.Signatures.Lookups);
     }
 
     [Fact]
@@ -93,6 +95,7 @@ public sealed class BoundedSemanticIndexerTests
 
         Assert.Equal(SemanticState.Failed, result.State);
         Assert.Equal(0, fixture.Images.Live);
+        Assert.Empty(fixture.Signatures.Added);
     }
 
     [Fact]
@@ -127,6 +130,7 @@ public sealed class BoundedSemanticIndexerTests
         Assert.True(result.IsPartial);
         Assert.Equal([1L, 2L], fixture.Store.Stored.Keys.Order());
         Assert.Equal(0, fixture.Images.Live);
+        Assert.Equal([fixture.VectorKey(1), fixture.VectorKey(2)], fixture.Signatures.Rows.Keys.OrderBy(key => key.Sha256));
     }
 
     [Fact]
@@ -202,7 +206,8 @@ public sealed class BoundedSemanticIndexerTests
         var result = await fixture.IndexAsync(fixture.Rows(2));
         await fixture.Encoder.TextPrepared.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
-        Assert.Equal(new SemanticSnapshot(SemanticState.Ready, 2, 2, 2, IndexerFixture.Profile.Fingerprint, ""), result);
+        Assert.Equal(new SemanticSnapshot(SemanticState.Ready, 2, 2, 2, IndexerFixture.Profile.Fingerprint, "")
+            { Vectors = new(0, 2, 0) }, result);
         Assert.All(fixture.Progress, progress => Assert.Equal(SemanticState.Indexing, progress.State));
     }
 
@@ -223,6 +228,81 @@ public sealed class BoundedSemanticIndexerTests
 
         Assert.All(new[] { empty, unavailable, failed }, fixture => Assert.Equal(0, fixture.Encoder.TextPreparations));
     }
+
+    [Fact]
+    public async Task AStoredVectorIsCopiedIntoTheIndexWithoutReadingThePhoto()
+    {
+        var fixture = new IndexerFixture();
+        fixture.Seed(1, 9f, 9f, 9f, 9f);
+        fixture.Seed(2, 8f, 8f, 8f, 8f);
+
+        var result = await fixture.IndexAsync(fixture.Rows(3));
+
+        Assert.Equal((SemanticState.Ready, 3, 3), (result.State, result.Processed, result.Indexed));
+        Assert.Equal(new(2, 1, 0), result.Vectors);
+        Assert.Equal(1, fixture.Images.Reads);
+        Assert.Equal([9f, 9f, 9f, 9f], fixture.Store.Stored[1].Vector);
+        Assert.Equal([8f, 8f, 8f, 8f], fixture.Store.Stored[2].Vector);
+        Assert.Equal([3f, 0f, 0f, 0f], fixture.Store.Stored[3].Vector);
+        var written = Assert.Single(Assert.Single(fixture.Signatures.Added));
+        Assert.Equal(fixture.VectorKey(3), written.Key);
+        Assert.Equal(SignatureCodec.EncodeVector([3f, 0f, 0f, 0f]), written.Value);
+    }
+
+    [Fact]
+    public async Task AVectorMadeUnderAnotherProfileIsNotReused()
+    {
+        var fixture = new IndexerFixture();
+        var other = IndexerFixture.Profile with { VisionSha256 = new string('E', 64) };
+        fixture.Signatures.Rows[fixture.VectorKey(1) with { Revision = other.Fingerprint }] =
+            SignatureCodec.EncodeVector([9f, 9f, 9f, 9f]);
+
+        var result = await fixture.IndexAsync(fixture.Rows(1));
+
+        Assert.Equal(new(0, 1, 0), result.Vectors);
+        Assert.Equal(1, fixture.Images.Reads);
+        Assert.Equal([1f, 0f, 0f, 0f], fixture.Store.Stored[1].Vector);
+    }
+
+    [Fact]
+    public async Task VectorsAreLookedUpOneBatchAtATime()
+    {
+        var fixture = new IndexerFixture();
+
+        await fixture.IndexAsync(fixture.Rows(130));
+
+        Assert.Equal([64, 64, 2], fixture.Signatures.Lookups);
+    }
+
+    [Theory]
+    [InlineData("lookup")]
+    [InlineData("add")]
+    public async Task ASignatureStoreFailureIsARejectAndTheIndexIsStillReady(string failing)
+    {
+        var fixture = new IndexerFixture();
+        if (failing == "lookup") fixture.Signatures.LookupFailure = new IOException("locked");
+        else fixture.Signatures.AddFailure = new IOException("disk full");
+
+        var result = await fixture.IndexAsync(fixture.Rows(3));
+
+        Assert.Equal((SemanticState.Ready, 3), (result.State, result.Indexed));
+        Assert.Equal(new(0, 0, 3), result.Vectors);
+        Assert.Equal(3, fixture.Images.Reads);
+        Assert.Equal(3, fixture.Store.Stored.Count);
+    }
+
+    [Fact]
+    public async Task AStoredVectorOfTheWrongDimensionIsARejectAndIsEncoded()
+    {
+        var fixture = new IndexerFixture();
+        fixture.Seed(1, 9f, 9f, 9f);
+
+        var result = await fixture.IndexAsync(fixture.Rows(1));
+
+        Assert.Equal(new(0, 0, 1), result.Vectors);
+        Assert.Equal([1f, 0f, 0f, 0f], fixture.Store.Stored[1].Vector);
+        Assert.Empty(fixture.Signatures.Added);
+    }
 }
 
 internal sealed class IndexerFixture(int workers = 2)
@@ -235,6 +315,7 @@ internal sealed class IndexerFixture(int workers = 2)
     public FakeEncoder Encoder { get; } = new();
     public FakeImageSource Images { get; } = new();
     public FakeEmbeddingStore Store { get; } = new();
+    public FakeSignatureStore Signatures { get; } = new();
     public List<SemanticSnapshot> Progress { get; } = [];
     public Action<SemanticSnapshot>? OnProgress { get; set; }
 
@@ -250,12 +331,16 @@ internal sealed class IndexerFixture(int workers = 2)
             new AllocationEvidence(10, 1, true));
     }
 
+    public SignatureKey VectorKey(long id) => new(Sha(id), 10, SignatureKind.Vector, Profile.Fingerprint);
+
+    public void Seed(long id, params float[] vector) => Signatures.Rows[VectorKey(id)] = SignatureCodec.EncodeVector(vector);
+
     public ImmutableArray<ScanFileOccurrence> Rows(int count) =>
         [.. Enumerable.Range(1, count).Select(id => Row(id))];
 
     public Task<SemanticSnapshot> IndexAsync(
         ImmutableArray<ScanFileOccurrence> rows, CancellationTokenSource? cancel = null) =>
-        ScanTestData.Bound(new BoundedSemanticIndexer(Encoder, Images, Store, workers).IndexAsync(context, rows,
+        ScanTestData.Bound(new BoundedSemanticIndexer(Encoder, Images, Store, Signatures, workers).IndexAsync(context, rows,
             progress =>
             {
                 Progress.Add(progress);
