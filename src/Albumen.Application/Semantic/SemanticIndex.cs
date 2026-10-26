@@ -37,6 +37,9 @@ public sealed record SemanticSnapshot(
 {
     public static SemanticSnapshot Idle { get; } = new(SemanticState.Idle, 0, 0, 0, null, string.Empty);
 
+    /// <summary>The photos whose vector was reused from an earlier Scan, computed, or computed after a store failure.</summary>
+    public SignatureReuseCounts Vectors { get; init; } = SignatureReuseCounts.None;
+
     /// <summary>Some eligible photos have no vector (canceled, unreadable, changed or failed).</summary>
     public bool IsPartial => Indexed < Total;
 }
