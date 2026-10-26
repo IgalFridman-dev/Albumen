@@ -1183,7 +1183,7 @@
                                            Text="{Binding SemanticProgressText}"
                                            Visibility="{Binding HasSemanticProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                 <TextBlock Margin="0,6,0,0" Style="{StaticResource Albumen.MutedText}" TextWrapping="Wrap"
-                                           Text="{Binding SignatureReuseText}" AutomationProperties.Name="Reused results"
+                                           Text="{Binding SignatureReuseText}"
                                            Visibility="{Binding HasSignatureReuse, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                                 <Border Height="1" Margin="0,16" Background="{DynamicResource Albumen.BorderBrush}" />
