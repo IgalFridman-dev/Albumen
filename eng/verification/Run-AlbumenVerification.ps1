@@ -170,6 +170,16 @@ try {
     [System.IO.Directory]::CreateDirectory($env:DOTNET_CLI_HOME) | Out-Null
     [System.IO.Directory]::CreateDirectory($env:APPDATA) | Out-Null
 
+    # A scenario test process that crashes (as WPF's native renderer can) leaves a full dump in
+    # the output, which goes back to the host with it. The checkpoint restore drops the setting.
+    $dumpPath = Join-Path $outputPath 'dumps'
+    [System.IO.Directory]::CreateDirectory($dumpPath) | Out-Null
+    $localDumps = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Albumen.Scenarios.Tests.exe'
+    New-Item -Path $localDumps -Force | Out-Null
+    New-ItemProperty -Path $localDumps -Name 'DumpFolder' -Value $dumpPath -PropertyType ExpandString -Force | Out-Null
+    New-ItemProperty -Path $localDumps -Name 'DumpType' -Value 2 -PropertyType DWord -Force | Out-Null
+    New-ItemProperty -Path $localDumps -Name 'DumpCount' -Value 2 -PropertyType DWord -Force | Out-Null
+
     $sdkResult = Invoke-LoggedCommand `
         -Name 'dotnet-version' `
         -FilePath $dotnetPath `

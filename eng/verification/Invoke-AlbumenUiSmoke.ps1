@@ -322,6 +322,15 @@ try {
     Invoke-Command -Session $session -ScriptBlock {
         param($AppPath, $OutputPath)
         New-Item -ItemType Directory -Path $AppPath, $OutputPath -Force | Out-Null
+        # A crash of the app (as WPF's native renderer can) leaves a full dump in the output. With
+        # -KeepRunning a crash after the collection stays in the guest at the same path.
+        $dumpPath = Join-Path $OutputPath 'dumps'
+        New-Item -ItemType Directory -Path $dumpPath -Force | Out-Null
+        $localDumps = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Albumen.App.exe'
+        New-Item -Path $localDumps -Force | Out-Null
+        New-ItemProperty -Path $localDumps -Name 'DumpFolder' -Value $dumpPath -PropertyType ExpandString -Force | Out-Null
+        New-ItemProperty -Path $localDumps -Name 'DumpType' -Value 2 -PropertyType DWord -Force | Out-Null
+        New-ItemProperty -Path $localDumps -Name 'DumpCount' -Value 2 -PropertyType DWord -Force | Out-Null
     } -ArgumentList $guestAppPath, $guestOutputPath
     Copy-Item -Path (Join-Path $PackagePath '*') -Destination $guestAppPath -Recurse -Force -ToSession $session
     if (-not [string]::IsNullOrWhiteSpace($GuestModelsRoot)) {
