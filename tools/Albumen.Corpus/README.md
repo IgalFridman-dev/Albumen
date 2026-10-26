@@ -46,7 +46,7 @@ a giraffe:
 ```
 
 Photos are written as `<folder>/<file>`, as `labels.csv` lists them (`\` and any letter case are
-fine). Prompts follow the app's rules: at most 60 characters, typed as in the search bar ("a photo
+fine, quoted or not). Prompts follow the app's rules: at most 60 characters, typed as in the search bar ("a photo
 of " is added unless the prompt says "photo"), each prompt once. Include small objects and a few
 prompts with no answer: those show whether a search that should find nothing still filters Review.
 
@@ -63,7 +63,8 @@ dotnet run --project tools/Albumen.Corpus -c Release -- report <corpus folder> C
 `search-answers.txt` against it. The corpus version is the first 12 hex digits of `labels.csv`'s
 SHA-256, so any added, removed, renamed or edited photo gives a new version; the answer key has its
 own version the same way. `report` refuses to run when the folders no longer match `labels.csv` or
-the key names a photo that is not there, then writes `report-<version>.md`: pairwise precision and
+the key names a photo that is not there, then writes `report-<version>.md` (the key's version is
+inside it): pairwise precision and
 recall of the hash rules and of Maybe similar at cosine thresholds 0.70 to 0.99 (overall and per
 kind), the closest wrong and farthest right pairs, the blur numbers against the 90% obvious-blur
 relevance target with a sweep of the "blurrier" factor, and per prompt the photos listed, recall,
