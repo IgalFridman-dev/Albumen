@@ -477,6 +477,7 @@ internal sealed class FakeSignatureStore : ISignatureStore
     public ConcurrentQueue<int> Lookups { get; } = new();
     public Exception? LookupFailure { get; set; }
     public Exception? AddFailure { get; set; }
+    public Action<CancellationToken>? OnAdd { get; set; }
 
     public ValueTask<IReadOnlyDictionary<SignatureKey, byte[]?>> LookupAsync(
         IReadOnlyCollection<SignatureKey> keys, CancellationToken cancellationToken)
@@ -491,6 +492,7 @@ internal sealed class FakeSignatureStore : ISignatureStore
     public ValueTask AddAsync(IReadOnlyList<StoredSignature> signatures, CancellationToken cancellationToken)
     {
         Added.Enqueue(signatures.ToArray());
+        OnAdd?.Invoke(cancellationToken);
         if (AddFailure is { } failure) return ValueTask.FromException(failure);
         foreach (var signature in signatures) Rows.TryAdd(signature.Key, signature.Value);
         return ValueTask.CompletedTask;

@@ -134,6 +134,25 @@ public sealed class BoundedSemanticIndexerTests
     }
 
     [Fact]
+    public async Task CancelDuringTheSignatureWriteKeepsTheSavedVectorsCounted()
+    {
+        var fixture = new IndexerFixture();
+        using var cancel = new CancellationTokenSource();
+        // Cancel arrives while a batch's signatures are written, after its vectors were saved.
+        fixture.Signatures.OnAdd = token =>
+        {
+            cancel.Cancel();
+            token.ThrowIfCancellationRequested();
+        };
+
+        var result = await fixture.IndexAsync(fixture.Rows(3), cancel);
+
+        Assert.Equal(SemanticState.Ready, result.State);
+        Assert.Equal(3, fixture.Store.Stored.Count);
+        Assert.Equal(fixture.Store.Stored.Count, result.Indexed);
+    }
+
+    [Fact]
     public async Task CancelBeforeAnyVectorIsEmpty()
     {
         var fixture = new IndexerFixture();
@@ -235,6 +254,8 @@ public sealed class BoundedSemanticIndexerTests
         var fixture = new IndexerFixture();
         fixture.Seed(1, 9f, 9f, 9f, 9f);
         fixture.Seed(2, 8f, 8f, 8f, 8f);
+        var indexedAtWrite = 0;
+        fixture.Signatures.OnAdd = _ => indexedAtWrite = fixture.Store.Stored.Count;
 
         var result = await fixture.IndexAsync(fixture.Rows(3));
 
@@ -247,6 +268,8 @@ public sealed class BoundedSemanticIndexerTests
         var written = Assert.Single(Assert.Single(fixture.Signatures.Added));
         Assert.Equal(IndexerFixture.VectorKey(3), written.Key);
         Assert.Equal(SignatureCodec.EncodeVector([3f, 0f, 0f, 0f]), written.Value);
+        // The index holds the batch before its signatures are written.
+        Assert.Equal(3, indexedAtWrite);
     }
 
     [Fact]
