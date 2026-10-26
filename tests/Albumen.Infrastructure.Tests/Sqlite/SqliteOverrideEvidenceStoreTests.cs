@@ -25,7 +25,7 @@ public sealed class SqliteOverrideEvidenceStoreTests
         Assert.Equal(7L, await ScalarLongAsync(connection, "PRAGMA user_version;"));
         Assert.Equal("wal", Assert.IsType<string>(await ScalarAsync(connection, "PRAGMA journal_mode;")),
             ignoreCase: true);
-        Assert.Equal(["action_items", "action_revalidations", "action_transitions", "override_evidence", "scan_accounting", "scan_embeddings", "scan_file_occurrences", "scan_lifecycle", "scan_stage_checkpoints", "scans"], await ReadStringsAsync(connection,
+        Assert.Equal(["action_items", "action_revalidations", "action_transitions", "override_evidence", "scan_accounting", "scan_embeddings", "scan_file_occurrences", "scan_lifecycle", "scan_stage_checkpoints", "scans", "signatures"], await ReadStringsAsync(connection,
             "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 7) <> 'sqlite_' ORDER BY name;"));
         Assert.Equal(OverrideEvidenceData.ExpectedColumns, await ReadStringsAsync(connection,
             "SELECT name FROM pragma_table_info('override_evidence') ORDER BY cid;"));

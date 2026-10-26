@@ -21,7 +21,7 @@ public sealed class SqliteSchemaVersionTwoTests
             (await stores.OverrideEvidence.ReadAsync(OverrideEvidenceData.KnownEvidenceId, TestContext.Current.CancellationToken)).Outcome);
         await using var connection = await fixture.OpenRawAsync();
         Assert.Equal(7L, await ScalarAsync(connection, "PRAGMA user_version;"));
-        Assert.Equal("action_items,action_revalidations,action_transitions,override_evidence,scan_accounting,scan_embeddings,scan_file_occurrences,scan_lifecycle,scan_stage_checkpoints,scans,sqlite_autoindex_action_items_1,sqlite_autoindex_action_items_2,sqlite_autoindex_action_revalidations_1,sqlite_autoindex_action_revalidations_2,sqlite_autoindex_action_transitions_1,sqlite_autoindex_override_evidence_1,sqlite_autoindex_scan_accounting_1,sqlite_autoindex_scan_embeddings_1,sqlite_autoindex_scan_file_occurrences_1,sqlite_autoindex_scan_lifecycle_1,sqlite_autoindex_scan_stage_checkpoints_1,sqlite_autoindex_scans_1",
+        Assert.Equal("action_items,action_revalidations,action_transitions,override_evidence,scan_accounting,scan_embeddings,scan_file_occurrences,scan_lifecycle,scan_stage_checkpoints,scans,signatures,sqlite_autoindex_action_items_1,sqlite_autoindex_action_items_2,sqlite_autoindex_action_revalidations_1,sqlite_autoindex_action_revalidations_2,sqlite_autoindex_action_transitions_1,sqlite_autoindex_override_evidence_1,sqlite_autoindex_scan_accounting_1,sqlite_autoindex_scan_embeddings_1,sqlite_autoindex_scan_file_occurrences_1,sqlite_autoindex_scan_lifecycle_1,sqlite_autoindex_scan_stage_checkpoints_1,sqlite_autoindex_scans_1,sqlite_autoindex_signatures_1",
             await ScalarAsync(connection, "SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_schema ORDER BY name);"));
         Assert.Equal("wal", await ScalarAsync(connection, "PRAGMA journal_mode;"));
     }
@@ -39,7 +39,7 @@ public sealed class SqliteSchemaVersionTwoTests
         string before;
         await using (var connection = await fixture.OpenRawAsync())
         {
-            await ExecuteAsync(connection, "DROP TABLE IF EXISTS scan_embeddings; DROP TABLE IF EXISTS scan_stage_checkpoints; DROP TABLE IF EXISTS scan_accounting; DROP TABLE IF EXISTS scan_lifecycle; DROP TABLE IF EXISTS scan_file_occurrences; DROP TABLE IF EXISTS scans; DROP TABLE IF EXISTS action_revalidations; DROP TABLE IF EXISTS action_transitions; DROP TABLE IF EXISTS action_items; PRAGMA user_version=1; PRAGMA journal_mode=DELETE;");
+            await ExecuteAsync(connection, "DROP TABLE IF EXISTS signatures; DROP TABLE IF EXISTS scan_embeddings; DROP TABLE IF EXISTS scan_stage_checkpoints; DROP TABLE IF EXISTS scan_accounting; DROP TABLE IF EXISTS scan_lifecycle; DROP TABLE IF EXISTS scan_file_occurrences; DROP TABLE IF EXISTS scans; DROP TABLE IF EXISTS action_revalidations; DROP TABLE IF EXISTS action_transitions; DROP TABLE IF EXISTS action_items; PRAGMA user_version=1; PRAGMA journal_mode=DELETE;");
             before = await OverrideRowAsync(connection);
         }
         await using (var stores = new SqliteAlbumenStores(fixture.DatabasePath))
