@@ -62,7 +62,15 @@ public sealed class SignatureReuseScanTests
         await using var folder = ReuseFolder.Create();
         folder.WriteSet();
         await folder.ScanAsync();
-        folder.Write("a.png", CreatePng(5, 1200, 900));
+        // The same pixels at another DPI: other bytes, the same length, and the old timestamp put back.
+        var original = File.ReadAllBytes(folder.PathOf("a.png"));
+        var replacement = CreatePng(1, 1200, 900, dpi: 72);
+        Assert.Equal(original.Length, replacement.Length);
+        Assert.NotEqual(original, replacement);
+        var written = File.GetLastWriteTimeUtc(folder.PathOf("a.png"));
+        folder.Write("a.png", replacement);
+        File.SetLastWriteTimeUtc(folder.PathOf("a.png"), written);
+        Assert.Equal(written, File.GetLastWriteTimeUtc(folder.PathOf("a.png")));
         File.Delete(folder.PathOf("small-2.png"));
         folder.Write("small-2.png", CreatePng(6, 40, 30));
 
@@ -150,7 +158,7 @@ public sealed class SignatureReuseScanTests
     }
 
     // A different gradient per seed; a twin is the seed-1 photo with one row changed.
-    private static byte[] CreatePng(int seed, int width, int height, bool twin = false)
+    private static byte[] CreatePng(int seed, int width, int height, bool twin = false, double dpi = 96)
     {
         var pixels = new byte[width * height * 4];
         for (var y = 0; y < height; y++)
@@ -167,7 +175,7 @@ public sealed class SignatureReuseScanTests
         if (twin) Array.Fill(pixels, (byte)255, height / 2 * width * 4, width * 4);
 
         var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32,
+        encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(width, height, dpi, dpi, PixelFormats.Bgra32,
             null, pixels, width * 4)));
         using var stream = new MemoryStream();
         encoder.Save(stream);
