@@ -33,11 +33,14 @@ try
         case ["report", var corpus, var models]:
         {
             var photos = CorpusLabels.ReadVerified(corpus);
+            var version = CorpusLabels.Version(corpus);
             var answers = SearchAnswers.Read(corpus, photos);
+            var keyVersion = SearchAnswers.Version(corpus);
             using var encoder = new OnnxVisionLanguageEncoder(models);
             var loaded = encoder.LoadProfile();
             if (loaded.Profile is not { } profile)
                 throw new InvalidDataException($"No usable model in {models}: {loaded.Failure?.Reason}");
+            var prompts = answers.Select(answer => CorpusMeasurement.EncodePrompt(answer.Prompt, encoder, profile)).ToList();
 
             var features = new List<CorpusFeatures>(photos.Count);
             foreach (var photo in photos)
@@ -47,13 +50,9 @@ try
                     Console.WriteLine($"Measured {features.Count} of {photos.Count}");
             }
 
-            var prompts = answers.Select(answer => CorpusMeasurement.EncodePrompt(answer.Prompt, encoder, profile)).ToList();
-
-            var version = CorpusLabels.Version(corpus);
             var code = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
             var path = Path.Combine(corpus, $"report-{version}.md");
-            File.WriteAllText(path, CorpusReport.Write(version, code, profile, photos, features,
-                SearchAnswers.Version(corpus), answers, prompts));
+            File.WriteAllText(path, CorpusReport.Write(version, code, profile, photos, features, keyVersion, answers, prompts));
             Console.WriteLine($"Wrote {path}");
             return 0;
         }

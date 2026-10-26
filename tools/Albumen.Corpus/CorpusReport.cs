@@ -13,7 +13,9 @@ namespace Albumen.Corpus;
 internal static class CorpusReport
 {
     private static readonly double[] BlurrierFactors = [2, 2.5, 3, 4, 5, 6];
-    private static readonly double[] MinimumScores = [LikelyMatchesQuery.MinimumScore, 0.001, 0.01, 0.1];
+    // As floats, like MinimumScore, so the shipped value is one of the rows whichever it is.
+    private static readonly double[] MinimumScores = new[] { 0.0001f, 0.001f, 0.01f, 0.1f, LikelyMatchesQuery.MinimumScore }
+        .Select(score => (double)score).Distinct().Order().ToArray();
     private const int ListedPairs = 10;
     private const int FirstListed = 10;
 
@@ -167,7 +169,7 @@ internal static class CorpusReport
         {
             var listed = LikelyMatchesQuery.Listed(profile, cosines);
             var first = listed.Take(FirstListed).ToList();
-            Line(Invariant($"| {prompt} | {expected.Count} | {listed.Count} | {listed.Count(row => expected.Contains(row.OccurrenceId))} | ")
+            Line(Invariant($"| {prompt.Replace("|", "\\|", StringComparison.Ordinal)} | {expected.Count} | {listed.Count} | {listed.Count(row => expected.Contains(row.OccurrenceId))} | ")
                 + Invariant($"{Percent(listed.Count(row => expected.Contains(row.OccurrenceId)), expected.Count)} | {Percent(first.Count(row => expected.Contains(row.OccurrenceId)), first.Count)} | ")
                 + Invariant($"{Score(LikelyMatchesQuery.Probability(profile, cosines.Max(row => row.Cosine)))} |"));
         }
@@ -224,7 +226,8 @@ internal static class CorpusReport
     }
 
     // A model probability as a percentage, fine enough for the 0.01% minimum score.
-    private static string Score(double probability) => Invariant($"{probability * 100:0.###}%");
+    private static string Score(double probability) =>
+        probability < 0.00001 ? "<0.001%" : Invariant($"{probability * 100:0.###}%");
 
     private static string Percent(int part, int whole) => whole == 0 ? "–" : Invariant($"{100.0 * part / whole:0.0}%");
 
