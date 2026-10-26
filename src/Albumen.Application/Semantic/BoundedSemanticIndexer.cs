@@ -172,9 +172,10 @@ public sealed class BoundedSemanticIndexer : ISemanticIndexer
         {
             try
             {
-                await signatures.AddAsync(fresh, cancellationToken).ConfigureAwait(false);
+                // Not canceled: the batch's vectors are already in the index and counted, and a cancel
+                // here would return the count from before them. It is one small transaction.
+                await signatures.AddAsync(fresh, CancellationToken.None).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception)
             {
                 // The index has the vectors; only the next Scan encodes these photos again.
