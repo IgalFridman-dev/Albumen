@@ -130,7 +130,7 @@ public sealed class BoundedSemanticIndexerTests
         Assert.True(result.IsPartial);
         Assert.Equal([1L, 2L], fixture.Store.Stored.Keys.Order());
         Assert.Equal(0, fixture.Images.Live);
-        Assert.Equal([fixture.VectorKey(1), fixture.VectorKey(2)], fixture.Signatures.Rows.Keys.OrderBy(key => key.Sha256));
+        Assert.Equal([IndexerFixture.VectorKey(1), IndexerFixture.VectorKey(2)], fixture.Signatures.Rows.Keys.OrderBy(key => key.Sha256));
     }
 
     [Fact]
@@ -245,7 +245,7 @@ public sealed class BoundedSemanticIndexerTests
         Assert.Equal([8f, 8f, 8f, 8f], fixture.Store.Stored[2].Vector);
         Assert.Equal([3f, 0f, 0f, 0f], fixture.Store.Stored[3].Vector);
         var written = Assert.Single(Assert.Single(fixture.Signatures.Added));
-        Assert.Equal(fixture.VectorKey(3), written.Key);
+        Assert.Equal(IndexerFixture.VectorKey(3), written.Key);
         Assert.Equal(SignatureCodec.EncodeVector([3f, 0f, 0f, 0f]), written.Value);
     }
 
@@ -254,7 +254,7 @@ public sealed class BoundedSemanticIndexerTests
     {
         var fixture = new IndexerFixture();
         var other = IndexerFixture.Profile with { VisionSha256 = new string('E', 64) };
-        fixture.Signatures.Rows[fixture.VectorKey(1) with { Revision = other.Fingerprint }] =
+        fixture.Signatures.Rows[IndexerFixture.VectorKey(1) with { Revision = other.Fingerprint }] =
             SignatureCodec.EncodeVector([9f, 9f, 9f, 9f]);
 
         var result = await fixture.IndexAsync(fixture.Rows(1));
@@ -331,7 +331,7 @@ internal sealed class IndexerFixture(int workers = 2)
             new AllocationEvidence(10, 1, true));
     }
 
-    public SignatureKey VectorKey(long id) => new(Sha(id), 10, SignatureKind.Vector, Profile.Fingerprint);
+    public static SignatureKey VectorKey(long id) => new(Sha(id), 10, SignatureKind.Vector, Profile.Fingerprint);
 
     public void Seed(long id, params float[] vector) => Signatures.Rows[VectorKey(id)] = SignatureCodec.EncodeVector(vector);
 

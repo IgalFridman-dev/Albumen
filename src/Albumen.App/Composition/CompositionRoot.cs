@@ -55,7 +55,7 @@ public static class CompositionRoot
         var encoder = new OnnxVisionLanguageEncoder(Path.Combine(AppContext.BaseDirectory, "models"));
         var semanticIndex = new BoundedSemanticIndexer(encoder,
             new WicEncoderImageSource(reader, analyzer, new WicPreviewDecoder()),
-            stores.Embeddings, Environment.ProcessorCount);
+            stores.Embeddings, stores.Signatures, Environment.ProcessorCount);
         var scan = new ScanCoordinator(scheduler, preflight, executor, stores.ScanIdentities,
             stores.ScanCheckpoints, nearDuplicates, semanticIndex,
             new StoredEmbeddingMatcher(encoder, stores.Embeddings));
