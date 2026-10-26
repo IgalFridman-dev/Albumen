@@ -162,6 +162,7 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
         token.ThrowIfCancellationRequested();
         var parent = Path.GetDirectoryName(databasePath);
         if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+        await RecoverCrashedWalAsync(token).ConfigureAwait(false);
         RefuseRetainedSidecars();
         var existing = File.Exists(databasePath);
         if (existing)
@@ -249,6 +250,41 @@ internal sealed class SqliteDatabaseOwner : IAsyncDisposable
         if (await ScalarAsync(connection, "PRAGMA synchronous;", token).ConfigureAwait(false) is not long actual
             || actual != expected)
             throw new InvalidDataException($"{name} durability could not be verified.");
+    }
+
+    // A crash leaves a WAL database's -wal and -shm behind. SQLite folds the committed frames into
+    // the database and the last close removes both; the admission below then validates the result
+    // as usual. Only committed database writes come back, so no Action is replayed. Anything else
+    // (a rollback journal, sidecars beside a non-WAL database, a checkpoint another process holds
+    // off) is left as it is and refused.
+    private async Task RecoverCrashedWalAsync(CancellationToken token)
+    {
+        if (!File.Exists(databasePath) || Path.Exists(databasePath + "-journal")
+            || !(Path.Exists(databasePath + "-wal") || Path.Exists(databasePath + "-shm")))
+            return;
+        var header = new byte[20];
+        await using (var file = new FileStream(databasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            if (await file.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, token).ConfigureAwait(false) < header.Length)
+                return;
+        }
+        if (header[18] != 2 || header[19] != 2) return;
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false,
+            DefaultTimeout = 1,
+        }.ToString());
+        try
+        {
+            await connection.OpenAsync(token).ConfigureAwait(false);
+            await ExecuteAsync(connection, "PRAGMA wal_checkpoint(TRUNCATE);", token).ConfigureAwait(false);
+        }
+        catch (SqliteException)
+        {
+            System.Diagnostics.Trace.WriteLine("ALBUMEN_DIAGNOSTIC stage=open code=wal_recovery_failed");
+        }
     }
 
     private void RefuseRetainedSidecars()
