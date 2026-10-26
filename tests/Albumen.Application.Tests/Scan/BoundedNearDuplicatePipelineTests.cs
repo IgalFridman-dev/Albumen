@@ -88,6 +88,24 @@ public sealed class BoundedNearDuplicatePipelineTests
         Assert.Null(result.Sharpness);
     }
 
+    [Fact]
+    public async Task AScoreWhoseDecodeFailedIsNotStored()
+    {
+        var (context, store, rows) = Scan(2);
+        var signatures = new FakeSignatureStore();
+        var source = new TrackingFeatureSource { SharpnessFailing = 1 };
+
+        var batch = await new BoundedNearDuplicatePipeline(source, signatures).AnalyzeAsync(
+            context, rows, TestContext.Current.CancellationToken);
+
+        Assert.Equal((Succeeded, (double?)null), (batch.Results[0].Outcome, batch.Results[0].Sharpness));
+        Assert.Equal(
+            [Key(rows[0], SignatureKind.Near), Key(rows[1], SignatureKind.Near), Key(rows[1], SignatureKind.Sharpness)],
+            Assert.Single(signatures.Added).Select(signature => signature.Key));
+        Assert.Equal(new SignatureReuse(new(0, 2, 0), new(0, 2, 0), SignatureReuseCounts.None), batch.Reuse);
+        Assert.True(store.CommitNearDuplicates(batch).Accepted);
+    }
+
     [Theory]
     [InlineData(SignatureKind.Sharpness)]
     [InlineData(SignatureKind.Near)]
@@ -253,6 +271,7 @@ public sealed class BoundedNearDuplicatePipelineTests
     {
         private int active;
         public long? Failing { get; init; }
+        public long? SharpnessFailing { get; init; }
         public (int Calls, CancellationTokenSource Source)? CancelAfter { get; init; }
         public ConcurrentQueue<(long OccurrenceId, NearFeatures Wanted)> Calls { get; } = new();
         public int MaximumActive { get; private set; }
@@ -271,9 +290,13 @@ public sealed class BoundedNearDuplicatePipelineTests
                 if (row.Content is null)
                     return new(row.Token, null, null, new(ScanStageState.NotApplicable, row.Exact.Reason));
                 if (row.Token.OccurrenceId == Failing) throw new IOException("injected");
+                var sharpnessFailed = wanted.HasFlag(NearFeatures.Sharpness) && row.Token.OccurrenceId == SharpnessFailing;
                 return new(row.Token, row.Content,
                     wanted.HasFlag(NearFeatures.Signature) ? Computed(row) : null, Succeeded,
-                    wanted.HasFlag(NearFeatures.Sharpness) ? 1.0 : null);
+                    wanted.HasFlag(NearFeatures.Sharpness) && !sharpnessFailed ? 1.0 : null)
+                {
+                    SharpnessFailed = sharpnessFailed,
+                };
             }
             finally { Interlocked.Decrement(ref active); }
         }

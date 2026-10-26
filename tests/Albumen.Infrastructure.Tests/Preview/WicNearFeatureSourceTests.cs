@@ -58,6 +58,22 @@ public sealed class WicNearFeatureSourceTests
 
         Assert.Equal(ScanStageState.Succeeded, result.Outcome.State);
         Assert.Null(result.Sharpness);
+        Assert.False(result.SharpnessFailed);
+    }
+
+    // The second decode sees the file change, so the photo has no score but is not a photo without one.
+    [Fact]
+    public async Task AFailedSharpnessDecodeIsReportedApartFromASmallPhoto()
+    {
+        var png = CreatePng(1200, 900);
+
+        var result = await Source(new MemoryReader(png) { ChangedAtRefresh = 2 }).AnalyzeAsync(
+            Context(), Occurrence(png, Digest(png)), NearFeatures.All, Token);
+
+        Assert.Equal(ScanStageState.Succeeded, result.Outcome.State);
+        Assert.NotNull(result.Signature);
+        Assert.Null(result.Sharpness);
+        Assert.True(result.SharpnessFailed);
     }
 
     [Fact]
@@ -126,20 +142,26 @@ public sealed class WicNearFeatureSourceTests
     {
         public int Opens { get; private set; }
 
+        // The refresh, counted from 1, that reports another length.
+        public int? ChangedAtRefresh { get; init; }
+
         public ValueTask<IProtectedFileLease> OpenAsync(ProtectedOpenRequest request, CancellationToken cancellationToken)
         {
             Opens++;
             return ValueTask.FromResult<IProtectedFileLease>(new MemoryLease(new MemoryStream(content, writable: false),
                 new(request.ExpectedPhysicalFileKey, content.LongLength, request.ResolvedPath, DateTimeOffset.UnixEpoch,
-                    new(content.LongLength, 1, true))));
+                    new(content.LongLength, 1, true)), ChangedAtRefresh));
         }
     }
 
-    private sealed class MemoryLease(Stream stream, ProtectedFileFacts facts) : IProtectedFileLease
+    private sealed class MemoryLease(Stream stream, ProtectedFileFacts facts, int? changedAtRefresh) : IProtectedFileLease
     {
+        private int refreshes;
+
         public Stream Content { get; } = stream;
         public ProtectedFileFacts OpenedFacts { get; } = facts;
-        public ValueTask<ProtectedFileFacts> RefreshAsync(CancellationToken cancellationToken) => ValueTask.FromResult(OpenedFacts);
+        public ValueTask<ProtectedFileFacts> RefreshAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult(++refreshes == changedAtRefresh ? OpenedFacts with { ByteLength = OpenedFacts.ByteLength + 1 } : OpenedFacts);
         public ValueTask DisposeAsync() => Content.DisposeAsync();
     }
 }
