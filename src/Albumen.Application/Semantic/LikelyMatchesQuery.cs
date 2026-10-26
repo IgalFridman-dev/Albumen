@@ -138,7 +138,7 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
     }
 
     /// <summary>What is encoded for a normalized prompt (see <see cref="PromptTemplate"/>).</summary>
-    public static string Caption(string normalized)
+    internal static string Caption(string normalized)
     {
         ArgumentNullException.ThrowIfNull(normalized);
         return normalized.Contains("photo", StringComparison.OrdinalIgnoreCase) ? normalized : PromptTemplate + normalized;
@@ -149,7 +149,7 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
     /// <see cref="LeastOddsRelativeToBest"/> of the best photo and at or above
     /// <paramref name="minimumScore"/>. The corpus report (E3-S6) sweeps <paramref name="minimumScore"/>.
     /// </summary>
-    public static IReadOnlyList<(long OccurrenceId, float Cosine)> Listed(EncoderProfile profile,
+    internal static IReadOnlyList<(long OccurrenceId, float Cosine)> Listed(EncoderProfile profile,
         IReadOnlyCollection<(long OccurrenceId, float Cosine)> cosines, double minimumScore = MinimumScore)
     {
         ArgumentNullException.ThrowIfNull(profile);
@@ -170,7 +170,7 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
         prompt, failure.Reason);
 
     /// <summary>The model's own reading of a cosine: sigmoid(scale * cosine + bias), as it was trained.</summary>
-    public static float Probability(EncoderProfile profile, float cosine) =>
+    internal static float Probability(EncoderProfile profile, float cosine) =>
         (float)(1 / (1 + Math.Exp(-(profile.LogitScale * cosine + profile.LogitBias))));
 
     // The cosine at which the model's probability is exactly this.
