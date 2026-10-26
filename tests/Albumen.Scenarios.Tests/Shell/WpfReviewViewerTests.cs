@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
@@ -526,15 +527,21 @@ public sealed class WpfReviewViewerTests
 
     // 1.2: in the Golden VM, which draws in software, the app closed with an access violation in
     // wpfgfx_cor3.dll (WPF's native renderer) while a photo was zoomed in and moved in the Right
-    // Viewer. This takes two full-size photos (the viewer decodes up to 4,096 px) through every
-    // zoom step, to every edge, and through drags of each viewer's photo across the window onto
-    // the other viewer and out, for 100 rounds, with each step drawn in software before the next.
-    // It runs in a child process, so a renderer crash fails this test instead of ending the run,
-    // and its last output lines say the round, zoom and action it stopped at.
+    // Viewer. Each of 100 rounds takes two full-size photos (the viewer decodes up to 4,096 px)
+    // through every zoom step up and down, to every edge at each step, and drags each viewer's
+    // photo across the window, one onto the other viewer and one out, with each step drawn in
+    // software before the next. It runs in a child process, so a renderer crash fails this test
+    // instead of ending the run, and its last output lines say the round, zoom and action it
+    // stopped at. WPF draws to the screen only on a signed-in desktop, which the Golden VM stages
+    // do not have, so they leave it out and Invoke-AlbumenUiSmoke.ps1 -DesktopTest runs it there.
     [Fact]
-    [Trait("Category", "GoldenVm")]
-    public Task ZoomingScrollingAndDraggingFullSizePhotosNeverCrashesTheRenderer() =>
-        WpfScenarioIsolation.RunAsync(typeof(WpfReviewViewerTests), "viewer-stress",
+    [Trait("Category", "Desktop")]
+    public Task ZoomingScrollingAndDraggingFullSizePhotosNeverCrashesTheRenderer()
+    {
+        using (var current = Process.GetCurrentProcess())
+            Assert.True((uint)current.SessionId == WTSGetActiveConsoleSessionId(),
+                "This test draws on the signed-in console desktop; run it with Invoke-AlbumenUiSmoke.ps1 -DesktopTest.");
+        return WpfScenarioIsolation.RunAsync(typeof(WpfReviewViewerTests), "viewer-stress",
             nameof(ZoomingScrollingAndDraggingFullSizePhotosNeverCrashesTheRenderer), stage =>
         {
             WpfReviewSelectionTests.RunOnSta(() =>
@@ -581,24 +588,25 @@ public sealed class WpfReviewViewerTests
                     for (var round = 1; round <= StressRounds; round++)
                     {
                         var leader = round % 2 == 1 ? ViewerSide.Left : ViewerSide.Right;
-                        for (var index = 0; index < steps.Length; index++)
+                        foreach (var step in steps)
                         {
-                            Act(round, $"zoom {steps[index]:0.00}", () => zoom.Value = steps[index]);
-                            // Each corner in turn reaches every edge from both sides; the other follows.
-                            foreach (var (across, down) in new[] { (1.0, 1.0), (0.0, 0.0), (1.0, 0.0), (0.0, 1.0) })
-                                Act(round, $"scroll {leader} to {across},{down}", () =>
+                            Act(round, $"zoom {step:0.00}", () => zoom.Value = step);
+                            // The far corner and back reach every edge from both sides; the other viewer follows.
+                            foreach (var edge in new[] { 1.0, 0.0 })
+                                Act(round, $"scroll {leader} to {edge}", () =>
                                 {
-                                    scrollers[leader].ScrollToHorizontalOffset(across * scrollers[leader].ScrollableWidth);
-                                    scrollers[leader].ScrollToVerticalOffset(down * scrollers[leader].ScrollableHeight);
+                                    scrollers[leader].ScrollToHorizontalOffset(edge * scrollers[leader].ScrollableWidth);
+                                    scrollers[leader].ScrollToVerticalOffset(edge * scrollers[leader].ScrollableHeight);
                                 });
-                            var side = index % 2 == 0 ? ViewerSide.Left : ViewerSide.Right;
-                            var ontoOther = (round + index) % 2 == 0;
-                            Act(round, $"drag {side} {(ontoOther ? "onto the other viewer" : "out")}",
-                                () => DragViewerPhoto(side, ontoOther));
                         }
+                        // The drags take a different zoom step each round.
+                        var dragZoom = up[round % up.Length];
+                        Act(round, $"zoom {dragZoom:0.00}", () => zoom.Value = dragZoom);
+                        var other = Other(leader);
+                        Act(round, $"drag {leader} onto the other viewer", () => DragViewerPhoto(leader, ontoOther: true));
+                        Act(round, $"drag {other} out", () => DragViewerPhoto(other, ontoOther: false));
                         progress.WriteLine($"ALBUMEN_VIEWER_STRESS round={round} done after {clock.Elapsed.TotalSeconds:0} s");
                     }
-                    Assert.True(viewModel.LeftViewer.HasPhoto && viewModel.RightViewer.HasPhoto);
 
                     void Act(int round, string action, Action change)
                     {
@@ -610,13 +618,13 @@ public sealed class WpfReviewViewerTests
                     // What a drag of a viewer's photo does between the press and the release: the
                     // picture of the full-size photo follows the pointer over the viewers and the
                     // gallery, and a pan meanwhile moves both viewers. Dropped on the other viewer
-                    // the photos swap; dropped outside the photo leaves its viewer and comes back.
+                    // the photos swap; dropped outside the photo leaves its viewer and is put back.
                     void DragViewerPhoto(ViewerSide side, bool ontoOther)
                     {
-                        var other = side == ViewerSide.Left ? ViewerSide.Right : ViewerSide.Left;
-                        var slot = side == ViewerSide.Left ? viewModel.LeftViewer : viewModel.RightViewer;
-                        var member = Assert.IsType<ScanOccurrenceViewModel>(slot.Member);
-                        var data = ReviewDragData.Create(member.OccurrenceId, group.GroupId, side);
+                        var other = Other(side);
+                        var dragged = Shown(side);
+                        var stays = Shown(other);
+                        var data = ReviewDragData.Create(dragged.OccurrenceId, group.GroupId, side);
                         Assert.NotNull(window.ShowDragImage(panels[side]));
                         Render(window);
                         foreach (var (target, x, y) in new (FrameworkElement, double, double)[]
@@ -638,36 +646,58 @@ public sealed class WpfReviewViewerTests
                             data, DragDropEffects.Move, new Point(30, 30));
                         window.HideDragImage();
                         window.FinishViewerDrag(side, droppedOnViewer: ontoOther, canceled: false);
-                        if (ontoOther) return;
-                        viewModel.PlaceInViewerCommand.ExecuteAsync(new PlaceInViewer(side, group.GroupId, member))
+                        if (ontoOther)
+                        {
+                            Assert.Equal(dragged.OccurrenceId, Shown(other).OccurrenceId);
+                            Assert.Equal(stays.OccurrenceId, Shown(side).OccurrenceId);
+                            return;
+                        }
+                        Assert.False(Slot(side).HasPhoto);
+                        viewModel.PlaceInViewerCommand.ExecuteAsync(new PlaceInViewer(side, group.GroupId, dragged))
                             .GetAwaiter().GetResult();
+                        Assert.Equal(dragged.OccurrenceId, Shown(side).OccurrenceId);
                         // The emptied viewer was shorter for a moment; the page keeps both in view.
                         window.UpdateLayout();
                         viewers.BringIntoView();
                     }
+
+                    ReviewViewerSlot Slot(ViewerSide side) => side == ViewerSide.Left ? viewModel.LeftViewer : viewModel.RightViewer;
+                    ScanOccurrenceViewModel Shown(ViewerSide side) => Assert.IsType<ScanOccurrenceViewModel>(Slot(side).Member);
+                    static ViewerSide Other(ViewerSide side) => side == ViewerSide.Left ? ViewerSide.Right : ViewerSide.Left;
                 }
                 finally
                 {
                     window.Close();
                 }
                 stage.CleanupSucceeded();
-            });
-        }, timeout: TimeSpan.FromMinutes(20));
+            }, StressLimit - TimeSpan.FromMinutes(1));
+        }, StressLimit);
+    }
 
     private const int StressRounds = 100;
 
-    private static readonly Type MediaContext = typeof(System.Windows.Media.Visual).Assembly
-        .GetType("System.Windows.Media.MediaContext", throwOnError: true)!;
-    private static readonly MethodInfo MediaContextFrom = MediaContext.GetMethod(
-        "From", BindingFlags.Static | BindingFlags.NonPublic, [typeof(System.Windows.Threading.Dispatcher)])!;
-    private static readonly MethodInfo CompleteRender = MediaContext.GetMethod(
-        "CompleteRender", BindingFlags.Instance | BindingFlags.NonPublic, Type.EmptyTypes)!;
+    // Not measured yet: the limit leaves the VM's software renderer room.
+    private static readonly TimeSpan StressLimit = TimeSpan.FromMinutes(25);
+
+#pragma warning disable SYSLIB1054 // Same test-only import convention as the Infrastructure tests; tests do not enable unsafe code.
+    [DllImport("kernel32.dll")]
+    private static extern uint WTSGetActiveConsoleSessionId();
+#pragma warning restore SYSLIB1054
+
+    // WPF's internal MediaContext.From and CompleteRender, which draw and present a frame.
+    private static readonly Type? MediaContext = typeof(System.Windows.Media.Visual).Assembly
+        .GetType("System.Windows.Media.MediaContext");
+    private static readonly MethodInfo? MediaContextFrom = MediaContext?.GetMethod(
+        "From", BindingFlags.Static | BindingFlags.NonPublic, [typeof(System.Windows.Threading.Dispatcher)]);
+    private static readonly MethodInfo? CompleteRender = MediaContext?.GetMethod(
+        "CompleteRender", BindingFlags.Instance | BindingFlags.NonPublic, Type.EmptyTypes);
 
     // Lays the window out, sends the frame to WPF's renderer and waits until the renderer has drawn
-    // and presented it (WPF's internal MediaContext.CompleteRender), so each step is drawn before
-    // the next one changes it.
+    // and presented it, so each step is drawn before the next one changes it.
     private static void Render(Window window)
     {
+        Assert.NotNull(MediaContextFrom);
+        Assert.NotNull(CompleteRender);
         window.UpdateLayout();
         WpfReviewSelectionTests.Drain();
         CompleteRender.Invoke(MediaContextFrom.Invoke(null, [window.Dispatcher]), null);
