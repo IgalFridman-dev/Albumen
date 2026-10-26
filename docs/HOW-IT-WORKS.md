@@ -77,6 +77,9 @@ Key ideas:
 - **Reuse needs proof**: a stored feature or vector is used only for the SHA-256 and length the
   Exact stage just read under its lease, and only under the current analyzer revision or model
   profile; anything else is computed again (`BoundedNearDuplicatePipeline`, `BoundedSemanticIndexer`).
+  The revisions cover Albumen's own analyzers and decode settings, not the Windows codecs; bump them
+  (or `OnnxVisionLanguageEncoder.PipelineRevision`) when those change. A hit opens no file, so a photo
+  changed after the Exact stage hashed it keeps the reused results for that scan.
 - **Near duplicates are conservative**: thresholds live in `Application/Scan/NearDuplicateThresholds.cs`;
   borderline pairs are not grouped.
 - **The photo model only adds Maybe similar**: two photos the hash does not relate are Maybe similar
@@ -93,7 +96,8 @@ Key ideas:
 - `models\` next to `Albumen.App.exe` — the SigLIP 2 files (`vision.onnx`, `text.onnx`,
   `tokenizer.model`, 1,112 MB) and `manifest.json` with each file's length and SHA-256. A missing or
   changed file makes only the semantic features unavailable; Exact, Look-alike, Review and cleanup
-  work without them.
+  work without them. A scan that reuses every vector never opens `vision.onnx`, so a same-size
+  change to it is noticed by the next photo that needs encoding.
 - Photos are only read, never modified; removal = Windows Recycle Bin (restorable).
 - No network access at all (verified by network audits in a VM with no network adapter).
 

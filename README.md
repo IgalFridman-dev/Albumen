@@ -189,6 +189,9 @@ Raw observations, not benchmarks or promises. The verification VM has 2 CPUs and
 - A second scan reuses the look-alike features, sharpness scores and photo vectors of photos whose
   content (SHA-256) is unchanged, but still reads and hashes every file once. Stored results stay
   until "Clear scan data" (in History); nothing removes them sooner.
+- A scan that reuses every photo vector never opens the vision model, so a damaged `vision.onnx` of
+  the same size is noticed only by the next photo that needs encoding. A photo changed during a scan,
+  after it was hashed, keeps the reused results of that scan; cleanup checks every file again first.
 - A first scan of 300 images took 12.1 s on a 2-CPU, 4 GiB VM. That is an observation, not a benchmark.
 
 ## Roadmap
