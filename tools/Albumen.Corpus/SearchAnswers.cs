@@ -19,7 +19,7 @@ internal static class SearchAnswers
         var path = Path.Combine(root, FileName);
         if (!File.Exists(path))
             throw new InvalidDataException($"No {FileName} in {root}; write the search answer key (see the README) and run the label command again.");
-        // Paths come from Explorer: any letter case and '\' separators.
+        // Paths come from Explorer: any letter case, '\' separators, "Copy as path" quotes.
         var labelled = photos.ToDictionary(photo => photo.Path, photo => photo.Path, StringComparer.OrdinalIgnoreCase);
 
         var answers = new List<SearchAnswer>();
@@ -29,7 +29,8 @@ internal static class SearchAnswers
             var line = lines[number - 1];
             if (string.IsNullOrWhiteSpace(line)) continue;
             string Problem(string what) => $"{FileName} line {number}: {what}";
-            var colon = line.IndexOf(':', StringComparison.Ordinal);
+            // The last colon: a prompt may hold one, a Windows file name cannot.
+            var colon = line.LastIndexOf(':');
             if (colon < 0)
                 throw new InvalidDataException(Problem("write the prompt, a colon, then its photos separated by ;."));
             var prompt = LikelyMatchesQuery.Normalize(line[..colon]);
@@ -42,7 +43,7 @@ internal static class SearchAnswers
             var expected = new List<string>();
             foreach (var name in line[(colon + 1)..].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                if (!labelled.TryGetValue(name.Replace('\\', '/'), out var photo))
+                if (!labelled.TryGetValue(name.Trim('"').Replace('\\', '/'), out var photo))
                     throw new InvalidDataException(Problem($"\"{name}\" is not a photo in {CorpusLabels.FileName}."));
                 if (expected.Contains(photo))
                     throw new InvalidDataException(Problem($"\"{name}\" is listed twice."));

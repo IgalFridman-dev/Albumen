@@ -20,11 +20,11 @@ public sealed class SearchAnswersTests : IDisposable
     [Fact]
     public void AWellFormedKeyIsReadAgainstTheLabels()
     {
-        // Paths as Explorer gives them: backslashes and any letter case.
-        Write("  a   dog : burst dog/1.jpg;burst dog\\2.jpg ;\n\na red bicycle: single/img_3.jpg\na giraffe:\n");
+        // Paths as Explorer gives them: backslashes, any letter case, quotes from "Copy as path".
+        Write("  a   dog : burst dog/1.jpg;\"burst dog\\2.jpg\" ;\n\na red bicycle: single/img_3.jpg\na giraffe:\na sign: stop:\n");
 
         Assert.Equal(
-            ["a dog|burst dog/1.jpg,burst dog/2.jpg", "a red bicycle|single/IMG_3.JPG", "a giraffe|"],
+            ["a dog|burst dog/1.jpg,burst dog/2.jpg", "a red bicycle|single/IMG_3.JPG", "a giraffe|", "a sign: stop|"],
             SearchAnswers.Read(root, Photos).Select(answer => $"{answer.Prompt}|{string.Join(',', answer.Photos)}"));
     }
 
