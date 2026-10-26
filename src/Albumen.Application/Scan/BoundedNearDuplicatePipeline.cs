@@ -29,7 +29,12 @@ public interface INearDuplicatePipeline
 public sealed class BoundedNearDuplicatePipeline(INearFeatureSource source) : INearDuplicatePipeline
 {
     public const int Capacity = 16;
+
+    // A stored feature is reused only under the revision it was made with. Each revision covers the
+    // analyzer and the decode it sees (WicNearFeatureSource: 256 px for the dHash, 1024 px for
+    // sharpness, EXIF-oriented, WIC-scaled BGRA32): change either and bump it.
     public const string ImplementationRevision = "managed-dhash-bgra-v1";
+    public const string SharpnessRevision = "managed-laplacian-bgra-1024-v1";
 
     public async Task<NearDuplicateBatch> AnalyzeAsync(ScanRunContext context,
         ImmutableArray<ScanFileOccurrence> rows, CancellationToken cancellationToken)
