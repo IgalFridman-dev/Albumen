@@ -2,8 +2,9 @@
 
 Measures the owner's labelled photo corpus with the app's own code: the same WIC decodes, the
 dHash and colour rule (Look-alike, Maybe similar), the tile sharpness score and `SharpnessComparison`
-(E3-S3), and the SigLIP 2 image embedding (E4-S6). It writes one Markdown report per corpus version.
-The photos, `labels.csv` and the reports stay in the corpus folder, outside both repositories.
+(E3-S3), the SigLIP 2 image embedding (E4-S6) and the text search cut-off (`LikelyMatchesQuery`). It
+writes one Markdown report per corpus version. The photos, `labels.csv`, `search-answers.txt` and the
+reports stay in the corpus folder, outside both repositories.
 
 ## Corpus layout
 
@@ -32,6 +33,23 @@ slice; without one the photo is `sharp`:
 Blur is compared only within a set, so a `blur-` or `soft-` photo needs a normal shot of the same
 moment in its set. Folder and file names appear in the report.
 
+## Search answer key
+
+`search-answers.txt` in the corpus folder, written by the owner: one prompt per line, a colon, then
+the photos the prompt should find, separated by `;`. Nothing after the colon means no photo in the
+corpus fits.
+
+```
+a watch: single/IMG_0412.jpg; burst kids-pool/IMG_0533.jpg
+a dog on a beach: burst dog-park/IMG_0101.jpg; burst dog-park/IMG_0102.jpg
+a giraffe:
+```
+
+Photos are written as `<folder>/<file>`, as `labels.csv` lists them (`\` and any letter case are
+fine). Prompts follow the app's rules: at most 60 characters, typed as in the search bar ("a photo
+of " is added unless the prompt says "photo"), each prompt once. Include small objects and a few
+prompts with no answer: those show whether a search that should find nothing still filters Review.
+
 ## Commands
 
 From the repository root on Windows, with the model files at `C:\PhotoSift\models`:
@@ -41,10 +59,13 @@ dotnet run --project tools/Albumen.Corpus -c Release -- label  <corpus folder>
 dotnet run --project tools/Albumen.Corpus -c Release -- report <corpus folder> C:\PhotoSift\models
 ```
 
-`label` checks the layout and writes `labels.csv` (path, SHA-256, set, blur slice). The corpus version
-is the first 12 hex digits of that file's SHA-256, so any added, removed, renamed or edited photo
-gives a new version. `report` refuses to run when the folders no longer match `labels.csv`, then
-writes `report-<version>.md`: pairwise precision and recall of the hash rules and of Maybe similar at
-cosine thresholds 0.70 to 0.99 (overall and per kind), the closest wrong and farthest right pairs,
-and the blur numbers against the 90% obvious-blur relevance target with a sweep of the "blurrier"
-factor.
+`label` checks the layout, writes `labels.csv` (path, SHA-256, set, blur slice) and then checks
+`search-answers.txt` against it. The corpus version is the first 12 hex digits of `labels.csv`'s
+SHA-256, so any added, removed, renamed or edited photo gives a new version; the answer key has its
+own version the same way. `report` refuses to run when the folders no longer match `labels.csv` or
+the key names a photo that is not there, then writes `report-<version>.md`: pairwise precision and
+recall of the hash rules and of Maybe similar at cosine thresholds 0.70 to 0.99 (overall and per
+kind), the closest wrong and farthest right pairs, the blur numbers against the 90% obvious-blur
+relevance target with a sweep of the "blurrier" factor, and per prompt the photos listed, recall,
+precision of the first 10 and the best score, with a sweep of the search minimum score. Same corpus,
+key and code give the same report.
