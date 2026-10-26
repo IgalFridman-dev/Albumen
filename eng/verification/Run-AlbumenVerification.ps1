@@ -243,6 +243,8 @@ try {
                 -Arguments @('build', 'Albumen.slnx', '-c', 'Release', '--no-restore') | Out-Null
         }
 
+        # Desktop tests need WPF to draw on a signed-in desktop, which PowerShell Direct does not
+        # give; Invoke-AlbumenUiSmoke.ps1 -DesktopTest runs them on the guest's desktop.
         foreach ($testName in @($stageDefinition.testProjects)) {
             $testProject = "tests\$testName\$testName.csproj"
             if ($Stage -ceq 'Core') {
@@ -260,6 +262,7 @@ try {
                     '-r', 'win-x64',
                     '--no-build',
                     '--no-restore',
+                    '--filter', 'Category!=Desktop',
                     '--logger', "trx;LogFileName=$testName.trx",
                     '--results-directory', (Join-Path $outputPath 'TestResults')) | Out-Null
             Add-TestProjectEvidence `

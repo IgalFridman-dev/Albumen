@@ -56,6 +56,12 @@ param(
     [Parameter()]
     [switch]$KeepRunning,
 
+    # The full name of one Albumen.Scenarios.Tests method to run on the guest desktop instead of
+    # the app: a Desktop test, which needs WPF to draw on a signed-in desktop. The host builds the
+    # tests into the run folder; give -TimeoutMinutes room for the test's own limit.
+    [Parameter()]
+    [string]$DesktopTest,
+
     [Parameter()]
     [ValidateRange(1, 120)]
     [int]$TimeoutMinutes = 20
@@ -97,7 +103,20 @@ $sourceDirty = [bool](& git -C $repositoryRoot status --porcelain)
 Write-Output "UI smoke run $runId"
 Write-Output "Output: $runPath"
 
-if ([string]::IsNullOrWhiteSpace($PackagePath)) {
+if ($DesktopTest) {
+    # The tests' build output carries the app and every dependency beside the test host.
+    $PackagePath = Join-Path $runPath 'tests'
+    Write-Output 'Building tests\Albumen.Scenarios.Tests (Release, win-x64).'
+    & dotnet build (Join-Path $repositoryRoot 'tests\Albumen.Scenarios.Tests\Albumen.Scenarios.Tests.csproj') `
+        --configuration Release `
+        --runtime win-x64 `
+        --output $PackagePath `
+        -nologo
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet build exited $LASTEXITCODE."
+    }
+}
+elseif ([string]::IsNullOrWhiteSpace($PackagePath)) {
     $PackagePath = Join-Path $runPath 'package'
     Write-Output 'Publishing src\Albumen.App (Release, win-x64, framework-dependent).'
     & dotnet publish (Join-Path $repositoryRoot 'src\Albumen.App\Albumen.App.csproj') `
@@ -111,8 +130,9 @@ if ([string]::IsNullOrWhiteSpace($PackagePath)) {
     }
 }
 $PackagePath = (Resolve-Path -LiteralPath $PackagePath).Path
-if (-not (Test-Path -LiteralPath (Join-Path $PackagePath 'Albumen.App.exe'))) {
-    throw "Albumen.App.exe was not found in $PackagePath."
+$entryPoint = if ($DesktopTest) { 'Albumen.Scenarios.Tests.exe' } else { 'Albumen.App.exe' }
+if (-not (Test-Path -LiteralPath (Join-Path $PackagePath $entryPoint))) {
+    throw "$entryPoint was not found in $PackagePath."
 }
 
 $guestRoot = "C:\PhotoSift\ui-smoke\$runId"
@@ -124,7 +144,7 @@ $session = $null
 # Runs inside the guest, in PhotoSiftRunner's interactive desktop session, via
 # a scheduled task. PowerShell Direct itself has no desktop to draw on.
 $guestLaunchScript = @'
-param([string]$AppPath, [string]$OutputPath, [int]$LaunchSeconds, [string]$DotnetRoot, [int]$Launches = 1, [string]$AppTheme = 'Default')
+param([string]$AppPath, [string]$OutputPath, [int]$LaunchSeconds, [string]$DotnetRoot, [int]$Launches = 1, [string]$AppTheme = 'Default', [string]$DesktopTest)
 $ErrorActionPreference = 'Stop'
 $log = Join-Path $OutputPath 'guest-launch.log'
 function Write-Log([string]$Message) {
@@ -153,6 +173,16 @@ try {
         Set-ItemProperty $personalize -Name SystemUsesLightTheme -Value $light -Type DWord
         Start-Sleep -Seconds 3
         Write-Log "AppTheme=$AppTheme"
+    }
+    if ($DesktopTest) {
+        Write-Log "Desktop test $DesktopTest : starting"
+        $test = Start-Process -FilePath (Join-Path $AppPath 'Albumen.Scenarios.Tests.exe') -WorkingDirectory $AppPath `
+            -ArgumentList '-method', $DesktopTest, '-noColor', '-xml', (Join-Path $OutputPath 'desktop-test.xml') `
+            -RedirectStandardOutput (Join-Path $OutputPath 'desktop-test.log') `
+            -RedirectStandardError (Join-Path $OutputPath 'desktop-test-error.log') `
+            -NoNewWindow -Wait -PassThru
+        Write-Log "Desktop test exit code $($test.ExitCode)"
+        return
     }
     $dataPath = Join-Path $env:LOCALAPPDATA 'Albumen'
     function Get-DataFiles {
@@ -322,15 +352,17 @@ try {
     Invoke-Command -Session $session -ScriptBlock {
         param($AppPath, $OutputPath)
         New-Item -ItemType Directory -Path $AppPath, $OutputPath -Force | Out-Null
-        # A crash of the app (as WPF's native renderer can) leaves a full dump in the output. With
-        # -KeepRunning a crash after the collection stays in the guest at the same path.
+        # A crash of the app or a test process (as WPF's native renderer can) leaves a full dump in
+        # the output. With -KeepRunning a crash after the collection stays in the guest at the same path.
         $dumpPath = Join-Path $OutputPath 'dumps'
         New-Item -ItemType Directory -Path $dumpPath -Force | Out-Null
-        $localDumps = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Albumen.App.exe'
-        New-Item -Path $localDumps -Force | Out-Null
-        New-ItemProperty -Path $localDumps -Name 'DumpFolder' -Value $dumpPath -PropertyType ExpandString -Force | Out-Null
-        New-ItemProperty -Path $localDumps -Name 'DumpType' -Value 2 -PropertyType DWord -Force | Out-Null
-        New-ItemProperty -Path $localDumps -Name 'DumpCount' -Value 2 -PropertyType DWord -Force | Out-Null
+        foreach ($name in 'Albumen.App.exe', 'Albumen.Scenarios.Tests.exe') {
+            $localDumps = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\$name"
+            New-Item -Path $localDumps -Force | Out-Null
+            New-ItemProperty -Path $localDumps -Name 'DumpFolder' -Value $dumpPath -PropertyType ExpandString -Force | Out-Null
+            New-ItemProperty -Path $localDumps -Name 'DumpType' -Value 2 -PropertyType DWord -Force | Out-Null
+            New-ItemProperty -Path $localDumps -Name 'DumpCount' -Value 2 -PropertyType DWord -Force | Out-Null
+        }
     } -ArgumentList $guestAppPath, $guestOutputPath
     Copy-Item -Path (Join-Path $PackagePath '*') -Destination $guestAppPath -Recurse -Force -ToSession $session
     if (-not [string]::IsNullOrWhiteSpace($GuestModelsRoot)) {
@@ -342,20 +374,28 @@ try {
         } -ArgumentList $GuestModelsRoot, $guestAppPath
     }
 
-    Write-Output "Launching Albumen on the guest desktop for $LaunchSeconds seconds."
+    if ($DesktopTest) {
+        Write-Output "Running $DesktopTest on the guest desktop."
+    }
+    else {
+        Write-Output "Launching Albumen on the guest desktop for $LaunchSeconds seconds."
+    }
     Invoke-Command -Session $session -ScriptBlock {
-        param($Root, $AppPath, $OutputPath, $Seconds, $ScriptText, $TaskName, $DotnetRoot, $LaunchCount, $Theme)
+        param($Root, $AppPath, $OutputPath, $Seconds, $ScriptText, $TaskName, $DotnetRoot, $LaunchCount, $Theme, $Test)
         $scriptPath = Join-Path $Root 'launch.ps1'
         Set-Content -LiteralPath $scriptPath -Value $ScriptText -Encoding UTF8
         $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -AppPath "{1}" -OutputPath "{2}" -LaunchSeconds {3} -DotnetRoot "{4}" -Launches {5} -AppTheme {6}' -f `
             $scriptPath, $AppPath, $OutputPath, $Seconds, $DotnetRoot, $LaunchCount, $Theme
+        if ($Test) { $arguments += ' -DesktopTest "{0}"' -f $Test }
         $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
         $taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\PhotoSiftRunner" -LogonType Interactive -RunLevel Limited
         Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $taskPrincipal -Force | Out-Null
         Start-ScheduledTask -TaskName $TaskName
-    } -ArgumentList $guestRoot, $guestAppPath, $guestOutputPath, $LaunchSeconds, $guestLaunchScript, $taskName, $GuestDotnetRoot, $Launches, $AppTheme
+    } -ArgumentList $guestRoot, $guestAppPath, $guestOutputPath, $LaunchSeconds, $guestLaunchScript, $taskName, $GuestDotnetRoot, $Launches, $AppTheme, $DesktopTest
 
-    Wait-AlbumenGuestCondition -Description 'the guest launch script' -TimeoutSeconds (($LaunchSeconds + 45) * $Launches + 180) -Condition {
+    # A desktop test keeps its own time limit; the run's deadline bounds the wait.
+    $launchWaitSeconds = if ($DesktopTest) { $TimeoutMinutes * 60 } else { ($LaunchSeconds + 45) * $Launches + 180 }
+    Wait-AlbumenGuestCondition -Description 'the guest launch script' -TimeoutSeconds $launchWaitSeconds -Condition {
         Invoke-Command -Session $session -ScriptBlock {
             param($OutputPath) Test-Path -LiteralPath (Join-Path $OutputPath 'done.flag')
         } -ArgumentList $guestOutputPath
@@ -371,7 +411,7 @@ try {
             $name = if ($folder.Name -eq 'Albumen') { 'localappdata' } else { "localappdata-$($folder.Name)" }
             Copy-Item -LiteralPath $folder.FullName -Destination (Join-Path $OutputPath $name) -Recurse -Force
         }
-        $since = (Get-Date).AddMinutes(-30)
+        $since = (Get-Date).AddMinutes(-120)
         Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $since; Level = 1, 2, 3 } -ErrorAction SilentlyContinue |
             Select-Object TimeCreated, ProviderName, Id, LevelDisplayName, Message |
             ConvertTo-Json -Depth 3 |
@@ -391,6 +431,18 @@ try {
     if (Test-Path -LiteralPath $appStatePath) {
         $appState = Get-Content -LiteralPath $appStatePath -Raw | ConvertFrom-Json
     }
+    $desktopTestResult = $null
+    $desktopTestXml = Join-Path $hostOutputPath 'desktop-test.xml'
+    if ($DesktopTest -and (Test-Path -LiteralPath $desktopTestXml)) {
+        $assembly = ([xml](Get-Content -LiteralPath $desktopTestXml -Raw)).assemblies.assembly
+        $desktopTestResult = [ordered]@{
+            method = $DesktopTest
+            total = [int]$assembly.total
+            passed = [int]$assembly.passed
+            failed = [int]$assembly.failed
+            skipped = [int]$assembly.skipped
+        }
+    }
     [ordered]@{
         runId = $runId
         vmName = $VMName
@@ -402,8 +454,12 @@ try {
         mainWindowTitle = $(if ($appState) { $appState.mainWindowTitle } else { $null })
         uiaElementCount = $(if ($appState) { $appState.uiaElementCount } else { 0 })
         screenshot = $(if (Test-Path (Join-Path $hostOutputPath 'screen.png')) { 'output\screen.png' } else { $null })
+        desktopTest = $desktopTestResult
         completedAtUtc = [System.DateTimeOffset]::UtcNow.ToString('O')
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runPath 'summary.json') -Encoding UTF8
+    if ($DesktopTest -and -not ($desktopTestResult -and $desktopTestResult.total -eq 1 -and $desktopTestResult.passed -eq 1)) {
+        throw "The desktop test $DesktopTest did not pass; its log and any crash dump are in $hostOutputPath."
+    }
 
     $runSucceeded = $true
     Get-Content -LiteralPath (Join-Path $runPath 'summary.json')
