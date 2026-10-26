@@ -54,6 +54,26 @@ public sealed class CorpusReportTests : IDisposable
     }
 
     [Fact]
+    public void SearchPrecisionCountsTheFirstTenListedAndTheSweepCountsPromptsLeftEmpty()
+    {
+        // Twelve photos 0.001 apart for "boat", all within ln 50 / 100 of the best; the two expected
+        // photos rank 11th and 12th. "kite" finds only photo 0, at 0.05%, which a 0.1% minimum hides.
+        var photos = Enumerable.Range(0, 12).Select(index => new CorpusPhoto($"single/{index:00}.jpg", "", "", CorpusLabels.Sharp)).ToArray();
+        var features = Enumerable.Range(0, 12)
+            .Select(index => new CorpusFeatures(Signature(0), null, [0.99f - 0.001f * index, index == 0 ? 0.024f : 0, 0])).ToArray();
+        SearchAnswer[] answers = [new("boat", ["single/10.jpg", "single/11.jpg"]), new("kite", ["single/00.jpg"])];
+        float[][] prompts = [[1, 0, 0], [0, 1, 0]];
+
+        var report = CorpusReport.Write("v", "code", Profile, photos, features, "k", answers, prompts);
+
+        Assert.Contains("\n| boat | 2 | 12 | 2 | 100.0% | 0.0% | 100% |\n", report, StringComparison.Ordinal);
+        Assert.Contains("\n| kite | 1 | 1 | 1 | 100.0% | 100.0% | 0.05% |\n", report, StringComparison.Ordinal);
+        Assert.Contains("\n| 0.01% (shipped) | 100.0% | 23.1% | 0 | 0 | 0 |\n", report, StringComparison.Ordinal);
+        Assert.Contains("\n| 0.1% | 66.7% | 16.7% | 1 | 0 | 0 |\n", report, StringComparison.Ordinal);
+        Assert.Contains("\n| 10% | 66.7% | 16.7% | 1 | 0 | 0 |\n", report, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TheSameCorpusAndCodeGiveTheSameReport()
     {
         Draw("burst bars/1.png", shift: 0, vertical: true);
