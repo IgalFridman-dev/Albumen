@@ -181,9 +181,9 @@ public sealed class BoundedNearDuplicatePipelineTests
     [Fact]
     public async Task APhotoWithoutProvenContentIsNeitherLookedUpNorCounted()
     {
-        var (context, store, rows) = Scan(2);
-        Assert.True(store.Fail(rows[1].Token, ScanTestData.ReadFailure));
-        rows = StoreFixture.Snapshot(store).Occurrences;
+        var (context, store, _) = Scan(1);
+        Assert.True(store.Fail(StoreFixture.Register(store, 2).Token, ScanTestData.ReadFailure));
+        var rows = StoreFixture.Snapshot(store).Occurrences;
         var signatures = new FakeSignatureStore();
         var source = new TrackingFeatureSource();
 

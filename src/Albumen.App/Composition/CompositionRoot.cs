@@ -51,7 +51,7 @@ public static class CompositionRoot
         var stores = new SqliteAlbumenStores(databasePath);
         var nearDuplicates = new BoundedNearDuplicatePipeline(
             new WicNearFeatureSource(reader, analyzer, new WicPreviewDecoder(),
-                new ManagedPerceptualSignature(), new ManagedSharpness()));
+                new ManagedPerceptualSignature(), new ManagedSharpness()), stores.Signatures);
         var encoder = new OnnxVisionLanguageEncoder(Path.Combine(AppContext.BaseDirectory, "models"));
         var semanticIndex = new BoundedSemanticIndexer(encoder,
             new WicEncoderImageSource(reader, analyzer, new WicPreviewDecoder()),

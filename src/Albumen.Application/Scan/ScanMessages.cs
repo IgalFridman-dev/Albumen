@@ -41,7 +41,10 @@ public sealed record NearFeatureResult(
 public sealed record NearDuplicateBatch(
     ScanPin Pin,
     string ImplementationRevision,
-    ImmutableArray<NearFeatureResult> Results);
+    ImmutableArray<NearFeatureResult> Results)
+{
+    public SignatureReuse Reuse { get; init; } = SignatureReuse.None;
+}
 
 public sealed record NearDuplicateCommit(bool Accepted);
 
