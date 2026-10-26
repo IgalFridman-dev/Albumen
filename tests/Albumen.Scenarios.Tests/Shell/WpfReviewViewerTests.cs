@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
@@ -523,6 +524,155 @@ public sealed class WpfReviewViewerTests
         });
     }
 
+    // 1.2: in the Golden VM, which draws in software, the app closed with an access violation in
+    // wpfgfx_cor3.dll (WPF's native renderer) while a photo was zoomed in and moved in the Right
+    // Viewer. This takes two full-size photos (the viewer decodes up to 4,096 px) through every
+    // zoom step, to every edge, and through drags of each viewer's photo across the window onto
+    // the other viewer and out, for 100 rounds, with each step drawn in software before the next.
+    // It runs in a child process, so a renderer crash fails this test instead of ending the run,
+    // and its last output lines say the round, zoom and action it stopped at.
+    [Fact]
+    [Trait("Category", "GoldenVm")]
+    public Task ZoomingScrollingAndDraggingFullSizePhotosNeverCrashesTheRenderer() =>
+        WpfScenarioIsolation.RunAsync(typeof(WpfReviewViewerTests), "viewer-stress",
+            nameof(ZoomingScrollingAndDraggingFullSizePhotosNeverCrashesTheRenderer), stage =>
+        {
+            WpfReviewSelectionTests.RunOnSta(() =>
+            {
+                var scope = new ReviewStaticScope();
+                var workflow = new RecordingReviewWorkflow(scope.Current, ReviewData.CreateSnapshot());
+                var viewModel = new ShellViewModel(scope, workflow, new RecordingReviewDialogService(),
+                    reviewPreviewSource: new FullSizePreviewSource());
+                WpfReviewSelectionTests.OpenIdenticalCopies(viewModel);
+                var group = viewModel.ReviewCategories[0].Groups[0];
+                Place(viewModel, ViewerSide.Left, group, 0);
+                Place(viewModel, ViewerSide.Right, group, 1);
+                var window = new MainWindow { DataContext = viewModel, Width = 1280, Height = 800 };
+                using var progress = new StreamWriter(Console.OpenStandardOutput(), leaveOpen: true) { AutoFlush = true };
+                try
+                {
+                    ShowAndDrain(window);
+                    Assert.IsType<System.Windows.Interop.HwndSource>(PresentationSource.FromVisual(window))
+                        .CompositionTarget.RenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+                    var viewers = Named<FrameworkElement>(window, "ReviewViewersPanel");
+                    viewers.BringIntoView();
+                    var zoom = Named<Slider>(window, "ReviewZoomSlider");
+                    var gallery = Named<UIElement>(window, "ReviewGalleryList");
+                    var panels = new Dictionary<ViewerSide, FrameworkElement>
+                    {
+                        [ViewerSide.Left] = Named<FrameworkElement>(window, "LeftViewerPanel"),
+                        [ViewerSide.Right] = Named<FrameworkElement>(window, "RightViewerPanel"),
+                    };
+                    var scrollers = new Dictionary<ViewerSide, ScrollViewer>
+                    {
+                        [ViewerSide.Left] = Named<PreviewStatusControl>(window, "LeftPreviewStatusControl").PreviewImageScroller,
+                        [ViewerSide.Right] = Named<PreviewStatusControl>(window, "RightPreviewStatusControl").PreviewImageScroller,
+                    };
+                    Render(window);
+                    var photo = Assert.IsAssignableFrom<System.Windows.Media.Imaging.BitmapSource>(
+                        Named<PreviewStatusControl>(window, "LeftPreviewStatusControl").PreviewImage.Source);
+                    Assert.Equal(4096, photo.PixelWidth);
+
+                    // Every slider step up to the largest zoom and back down.
+                    var up = Enumerable.Range(0, (int)Math.Round((zoom.Maximum - zoom.Minimum) / zoom.SmallChange) + 1)
+                        .Select(step => zoom.Minimum + step * zoom.SmallChange).ToArray();
+                    var steps = up.Concat(up.Reverse().Skip(1)).ToArray();
+                    var clock = Stopwatch.StartNew();
+                    for (var round = 1; round <= StressRounds; round++)
+                    {
+                        var leader = round % 2 == 1 ? ViewerSide.Left : ViewerSide.Right;
+                        for (var index = 0; index < steps.Length; index++)
+                        {
+                            Act(round, $"zoom {steps[index]:0.00}", () => zoom.Value = steps[index]);
+                            // Each corner in turn reaches every edge from both sides; the other follows.
+                            foreach (var (across, down) in new[] { (1.0, 1.0), (0.0, 0.0), (1.0, 0.0), (0.0, 1.0) })
+                                Act(round, $"scroll {leader} to {across},{down}", () =>
+                                {
+                                    scrollers[leader].ScrollToHorizontalOffset(across * scrollers[leader].ScrollableWidth);
+                                    scrollers[leader].ScrollToVerticalOffset(down * scrollers[leader].ScrollableHeight);
+                                });
+                            var side = index % 2 == 0 ? ViewerSide.Left : ViewerSide.Right;
+                            var ontoOther = (round + index) % 2 == 0;
+                            Act(round, $"drag {side} {(ontoOther ? "onto the other viewer" : "out")}",
+                                () => DragViewerPhoto(side, ontoOther));
+                        }
+                        progress.WriteLine($"ALBUMEN_VIEWER_STRESS round={round} done after {clock.Elapsed.TotalSeconds:0} s");
+                    }
+                    Assert.True(viewModel.LeftViewer.HasPhoto && viewModel.RightViewer.HasPhoto);
+
+                    void Act(int round, string action, Action change)
+                    {
+                        progress.WriteLine($"ALBUMEN_VIEWER_STRESS round={round} zoom={zoom.Value:0.00} {action}");
+                        change();
+                        Render(window);
+                    }
+
+                    // What a drag of a viewer's photo does between the press and the release: the
+                    // picture of the full-size photo follows the pointer over the viewers and the
+                    // gallery, and a pan meanwhile moves both viewers. Dropped on the other viewer
+                    // the photos swap; dropped outside the photo leaves its viewer and comes back.
+                    void DragViewerPhoto(ViewerSide side, bool ontoOther)
+                    {
+                        var other = side == ViewerSide.Left ? ViewerSide.Right : ViewerSide.Left;
+                        var slot = side == ViewerSide.Left ? viewModel.LeftViewer : viewModel.RightViewer;
+                        var member = Assert.IsType<ScanOccurrenceViewModel>(slot.Member);
+                        var data = ReviewDragData.Create(member.OccurrenceId, group.GroupId, side);
+                        Assert.NotNull(window.ShowDragImage(panels[side]));
+                        Render(window);
+                        foreach (var (target, x, y) in new (FrameworkElement, double, double)[]
+                        {
+                            (panels[side], 0.2, 0.3), (panels[side], 0.5, 0.5), (panels[side], 0.9, 0.9),
+                            (panels[other], 0.1, 0.5), (panels[other], 0.6, 0.4),
+                        })
+                        {
+                            RaiseDrag(target, DragDrop.PreviewDragOverEvent, DragDrop.DragOverEvent, data,
+                                DragDropEffects.Move, new Point(target.ActualWidth * x, target.ActualHeight * y));
+                            Render(window);
+                        }
+                        RaiseDrag(gallery, DragDrop.PreviewDragOverEvent, DragDrop.DragOverEvent, data,
+                            DragDropEffects.Move, new Point(20, 20));
+                        scrollers[side].ScrollToHorizontalOffset(scrollers[side].ScrollableWidth / 2);
+                        scrollers[side].ScrollToVerticalOffset(scrollers[side].ScrollableHeight / 2);
+                        Render(window);
+                        RaiseDrag(ontoOther ? panels[other] : gallery, DragDrop.PreviewDropEvent, DragDrop.DropEvent,
+                            data, DragDropEffects.Move, new Point(30, 30));
+                        window.HideDragImage();
+                        window.FinishViewerDrag(side, droppedOnViewer: ontoOther, canceled: false);
+                        if (ontoOther) return;
+                        viewModel.PlaceInViewerCommand.ExecuteAsync(new PlaceInViewer(side, group.GroupId, member))
+                            .GetAwaiter().GetResult();
+                        // The emptied viewer was shorter for a moment; the page keeps both in view.
+                        window.UpdateLayout();
+                        viewers.BringIntoView();
+                    }
+                }
+                finally
+                {
+                    window.Close();
+                }
+                stage.CleanupSucceeded();
+            });
+        }, timeout: TimeSpan.FromMinutes(20));
+
+    private const int StressRounds = 100;
+
+    private static readonly Type MediaContext = typeof(System.Windows.Media.Visual).Assembly
+        .GetType("System.Windows.Media.MediaContext", throwOnError: true)!;
+    private static readonly MethodInfo MediaContextFrom = MediaContext.GetMethod(
+        "From", BindingFlags.Static | BindingFlags.NonPublic, [typeof(System.Windows.Threading.Dispatcher)])!;
+    private static readonly MethodInfo CompleteRender = MediaContext.GetMethod(
+        "CompleteRender", BindingFlags.Instance | BindingFlags.NonPublic, Type.EmptyTypes)!;
+
+    // Lays the window out, sends the frame to WPF's renderer and waits until the renderer has drawn
+    // and presented it (WPF's internal MediaContext.CompleteRender), so each step is drawn before
+    // the next one changes it.
+    private static void Render(Window window)
+    {
+        window.UpdateLayout();
+        WpfReviewSelectionTests.Drain();
+        CompleteRender.Invoke(MediaContextFrom.Invoke(null, [window.Dispatcher]), null);
+    }
+
     // WPF makes a drag's event arguments only inside DoDragDrop. This raises what its drop target
     // raises over the element under the pointer: the preview event, then, only if no handler took
     // the preview, the bubbling one, with the same arguments; the effects are what the drag shows.
@@ -607,6 +757,47 @@ internal sealed class SizedThumbnailSource(IReadOnlyDictionary<long, (int Width,
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+// Answers every viewer request at once with a photo as large as the viewer decodes one (4,096 px
+// on the long edge): odd photos landscape (6000 x 4000), even ones portrait, with detail in every
+// pixel so that no part of the picture is uniform.
+internal sealed class FullSizePreviewSource : IReviewPreviewSource
+{
+    private static readonly Lazy<byte[]> Landscape = new(() => Pattern(4096, 2731));
+    private static readonly Lazy<byte[]> Portrait = new(() => Pattern(2731, 4096));
+
+    public Task<ReviewPreviewResult> LoadAsync(
+        ScanRunContext context,
+        ScanFileOccurrence occurrence,
+        CancellationToken cancellationToken)
+    {
+        var landscape = occurrence.Token.OccurrenceId % 2 == 1;
+        var pattern = landscape ? Landscape.Value : Portrait.Value;
+        var pixels = MemoryPool<byte>.Shared.Rent(pattern.Length);
+        pattern.CopyTo(pixels.Memory.Span);
+        var frame = landscape
+            ? new PreviewFrame(4096, 2731, 6000, 4000, pixels)
+            : new PreviewFrame(2731, 4096, 4000, 6000, pixels);
+        return Task.FromResult(ReviewPreviewResult.Success(occurrence.ResolvedPath, frame, 8_000_000, null));
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private static byte[] Pattern(int width, int height)
+    {
+        var pixels = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+            {
+                var offset = ((y * width) + x) * 4;
+                pixels[offset] = (byte)x;
+                pixels[offset + 1] = (byte)y;
+                pixels[offset + 2] = (byte)(x ^ y);
+                pixels[offset + 3] = 0xFF;
+            }
+        return pixels;
+    }
 }
 
 // Answers every viewer request at once with a small solid frame that the viewer scales up.
