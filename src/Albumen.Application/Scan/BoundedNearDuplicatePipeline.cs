@@ -110,7 +110,7 @@ public sealed class BoundedNearDuplicatePipeline(INearFeatureSource source, ISig
         var before = work.Fresh.Count;
         if (signature == Found.Miss && computed.Signature is { } made)
             work.Fresh.Add(new(signatureKey, SignatureCodec.EncodeNear(made)));
-        if (sharpness == Found.Miss)
+        if (sharpness == Found.Miss && !computed.SharpnessFailed)
             work.Fresh.Add(new(sharpnessKey, SignatureCodec.EncodeSharpness(computed.Sharpness)));
         if (work.Fresh.Count != before) work.FreshPhotos++;
         return computed with

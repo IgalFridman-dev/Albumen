@@ -44,23 +44,24 @@ public sealed class WicNearFeatureSource(
                     : Failure(row, ScanStageState.FailedRetryable, ScanReason.ReadFailure);
             signature = signatures.Extract(frame.Width, frame.Height, frame.AnalysisPixels.Span);
         }
+        var (score, failed) = wanted.HasFlag(NearFeatures.Sharpness)
+            ? await MeasureSharpnessAsync(lease, row, cancellationToken).ConfigureAwait(false)
+            : (null, false);
         return new(row.Token, content, signature,
-            new StageOutcome(ScanStageState.Succeeded, ScanReason.None),
-            wanted.HasFlag(NearFeatures.Sharpness)
-                ? await MeasureSharpnessAsync(lease, row, cancellationToken).ConfigureAwait(false)
-                : null);
+            new StageOutcome(ScanStageState.Succeeded, ScanReason.None), score) { SharpnessFailed = failed };
     }
 
     // Scores compare only at one scale, so a photo smaller than SharpnessEdge (never enlarged)
     // or one that fails this second decode gets no score and no blur claim.
-    private async Task<double?> MeasureSharpnessAsync(
+    private async Task<(double? Score, bool Failed)> MeasureSharpnessAsync(
         IProtectedFileLease lease, ScanFileOccurrence row, CancellationToken cancellationToken)
     {
         using var decoded = await decoder.DecodeAsync(
             lease, row.ResolvedPath, SharpnessEdge, cancellationToken).ConfigureAwait(false);
-        return decoded.Frame is { } frame && Math.Max(frame.Width, frame.Height) == SharpnessEdge
+        if (decoded.Frame is not { } frame) return (null, true);
+        return (Math.Max(frame.Width, frame.Height) == SharpnessEdge
             ? sharpness.Analyze(frame.Width, frame.Height, frame.AnalysisPixels.Span)
-            : null;
+            : null, false);
     }
 
     private static NearFeatureResult Failure(ScanFileOccurrence row,
