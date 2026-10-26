@@ -546,6 +546,9 @@ public sealed class WpfReviewViewerTests
         {
             WpfReviewSelectionTests.RunOnSta(() =>
             {
+                // The run sends no input, so without this the guest would turn its display off and
+                // WPF would stop presenting partway through. It lasts while this thread runs.
+                Assert.NotEqual(0u, SetThreadExecutionState(KeepDisplayOn));
                 var scope = new ReviewStaticScope();
                 var workflow = new RecordingReviewWorkflow(scope.Current, ReviewData.CreateSnapshot());
                 var viewModel = new ShellViewModel(scope, workflow, new RecordingReviewDialogService(),
@@ -679,9 +682,15 @@ public sealed class WpfReviewViewerTests
     // Not measured yet: the limit leaves the VM's software renderer room.
     private static readonly TimeSpan StressLimit = TimeSpan.FromMinutes(25);
 
+    // ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED
+    private const uint KeepDisplayOn = 0x80000003;
+
 #pragma warning disable SYSLIB1054 // Same test-only import convention as the Infrastructure tests; tests do not enable unsafe code.
     [DllImport("kernel32.dll")]
     private static extern uint WTSGetActiveConsoleSessionId();
+
+    [DllImport("kernel32.dll")]
+    private static extern uint SetThreadExecutionState(uint flags);
 #pragma warning restore SYSLIB1054
 
     // WPF's internal MediaContext.From and CompleteRender, which draw and present a frame.
