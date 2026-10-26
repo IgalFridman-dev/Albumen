@@ -108,8 +108,7 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
 
         // The indexer opens the text model once a Scan's photos are indexed; should it still be
         // opening (or have failed to), the first prompt waits for it here: keep it off the caller.
-        var caption = normalized.Contains("photo", StringComparison.OrdinalIgnoreCase) ? normalized : PromptTemplate + normalized;
-        var text = await Task.Run(() => encoder.EncodeText(profile, caption), cancellationToken).ConfigureAwait(false);
+        var text = await Task.Run(() => encoder.EncodeText(profile, Caption(normalized)), cancellationToken).ConfigureAwait(false);
         if (text.Failure is { } failure) return Failure(normalized, failure);
 
         var content = scan.Occurrences
@@ -132,25 +131,46 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
                 "The photo search data could not be read.");
         }
 
-        // The odds are exp(scale * cosine + bias), so a fraction of the best odds is a fixed step
-        // down in cosine from the best photo.
-        var floor = Math.Max(CosineAt(profile, MinimumScore),
-            cosines.Count == 0 ? 0 : cosines.Max(row => row.Cosine) + Math.Log(LeastOddsRelativeToBest) / profile.LogitScale);
-        var ranked = cosines
-            .Where(row => row.Cosine >= floor)
-            .OrderByDescending(row => MathF.Round(row.Cosine, CosineDecimals))
-            .ThenBy(row => row.OccurrenceId)
+        var ranked = Listed(profile, cosines)
             .Select(row => new LikelyMatch(row.OccurrenceId, Probability(profile, row.Cosine)))
             .ToImmutableArray();
         return new(ranked.IsEmpty ? LikelyMatchesOutcome.NoMatches : LikelyMatchesOutcome.Matches, normalized, ranked);
+    }
+
+    /// <summary>What is encoded for a normalized prompt (see <see cref="PromptTemplate"/>).</summary>
+    public static string Caption(string normalized)
+    {
+        ArgumentNullException.ThrowIfNull(normalized);
+        return normalized.Contains("photo", StringComparison.OrdinalIgnoreCase) ? normalized : PromptTemplate + normalized;
+    }
+
+    /// <summary>
+    /// The photos listed for one prompt, by descending cosine, ties by occurrence id: those within
+    /// <see cref="LeastOddsRelativeToBest"/> of the best photo and at or above
+    /// <paramref name="minimumScore"/>. The corpus report (E3-S6) sweeps <paramref name="minimumScore"/>.
+    /// </summary>
+    public static IReadOnlyList<(long OccurrenceId, float Cosine)> Listed(EncoderProfile profile,
+        IReadOnlyCollection<(long OccurrenceId, float Cosine)> cosines, double minimumScore = MinimumScore)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(cosines);
+        // The odds are exp(scale * cosine + bias), so a fraction of the best odds is a fixed step
+        // down in cosine from the best photo.
+        var floor = Math.Max(CosineAt(profile, minimumScore),
+            cosines.Count == 0 ? 0 : cosines.Max(row => row.Cosine) + Math.Log(LeastOddsRelativeToBest) / profile.LogitScale);
+        return cosines
+            .Where(row => row.Cosine >= floor)
+            .OrderByDescending(row => MathF.Round(row.Cosine, CosineDecimals))
+            .ThenBy(row => row.OccurrenceId)
+            .ToList();
     }
 
     private static LikelyMatchesResult Failure(string prompt, EncoderFailure failure) => LikelyMatchesResult.Of(
         failure.Kind == EncoderFailureKind.Unavailable ? LikelyMatchesOutcome.Unavailable : LikelyMatchesOutcome.Failed,
         prompt, failure.Reason);
 
-    // The model's own reading of a cosine: sigmoid(scale * cosine + bias), as it was trained.
-    private static float Probability(EncoderProfile profile, float cosine) =>
+    /// <summary>The model's own reading of a cosine: sigmoid(scale * cosine + bias), as it was trained.</summary>
+    public static float Probability(EncoderProfile profile, float cosine) =>
         (float)(1 / (1 + Math.Exp(-(profile.LogitScale * cosine + profile.LogitBias))));
 
     // The cosine at which the model's probability is exactly this.
