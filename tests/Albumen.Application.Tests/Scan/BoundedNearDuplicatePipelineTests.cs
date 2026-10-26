@@ -38,7 +38,7 @@ public sealed class BoundedNearDuplicatePipelineTests
         public int MaximumActive { get; private set; }
 
         public async ValueTask<NearFeatureResult> AnalyzeAsync(
-            ScanRunContext context, ScanFileOccurrence row, CancellationToken cancellationToken)
+            ScanRunContext context, ScanFileOccurrence row, NearFeatures wanted, CancellationToken cancellationToken)
         {
             var count = Interlocked.Increment(ref active);
             MaximumActive = Math.Max(MaximumActive, count);

@@ -4,10 +4,20 @@ using Albumen.Domain.Scan;
 
 namespace Albumen.Application.Scan;
 
+[Flags]
+public enum NearFeatures
+{
+    None = 0,
+    Signature = 1,
+    Sharpness = 2,
+    All = Signature | Sharpness,
+}
+
 public interface INearFeatureSource
 {
+    /// <summary>Computes the wanted features from one open of the file; the others stay null.</summary>
     ValueTask<NearFeatureResult> AnalyzeAsync(
-        ScanRunContext context, ScanFileOccurrence row, CancellationToken cancellationToken);
+        ScanRunContext context, ScanFileOccurrence row, NearFeatures wanted, CancellationToken cancellationToken);
 }
 
 public interface IPerceptualSignatureAnalyzer
@@ -53,7 +63,7 @@ public sealed class BoundedNearDuplicatePipeline(INearFeatureSource source) : IN
         {
             try
             {
-                var result = await source.AnalyzeAsync(context, row, cancellationToken).ConfigureAwait(false);
+                var result = await source.AnalyzeAsync(context, row, NearFeatures.All, cancellationToken).ConfigureAwait(false);
                 results.Add(result);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
