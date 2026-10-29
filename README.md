@@ -10,7 +10,7 @@
 
 *Albumen was called PhotoSift until October 2026. It was renamed because another Windows duplicate-photo app already uses that name.*
 
-![Albumen reviewing a set of identical copies: the kinds of duplicates found, the sets, and each photo with Keep or Remove, its path and size](docs/images/hero-review-exact.png)
+![Albumen Review: the kinds of duplicates found beside the Maybe similar sets as a photo gallery, the sharpest photo of a set suggested as best](docs/images/hero-review.png)
 
 Albumen is a privacy-first desktop app for Windows 11 built with .NET 10, C# 14 and WPF. It scans one
 local folder for byte-identical and conservatively near-identical JPEG/PNG images, groups them for
@@ -23,7 +23,7 @@ permanently, and keeps a durable record of every action it takes.
 
 | 1. Choose a folder | 2. Approve exactly what goes | 3. See every outcome |
 |---|---|---|
-| ![Folder screen with a demo folder ready to scan and the scan options](docs/images/choose-folder.png) | ![Approval asking to move one photo to the Recycle Bin, with its path and what the cleanup covers](docs/images/approve-cleanup.png) | ![Cleanup finished with one photo moved to the Recycle Bin](docs/images/cleanup-results.png) |
+| ![Folder screen with a photo folder ready to scan, the first photos it holds named](docs/images/choose-folder.png) | ![Approval asking to move one photo to the Recycle Bin, with its path and what the cleanup covers](docs/images/approve-cleanup.png) | ![Cleanup finished with one photo moved to the Recycle Bin](docs/images/cleanup-results.png) |
 | Preflight checks the folder is local and readable and names the first photos in it; identical copies and look-alikes are always found. | Nothing moves until you approve. The approval lists every photo and where it goes. | Each photo is sent on its own, and its result is kept in History. |
 
 ### New in 1.1: find photos by what they show
@@ -33,15 +33,13 @@ bar at the top of Review and, from 1.1.5, every kind narrows to the sets that ho
 best match first, with the matches labelled; matching photos in no set are listed under Other matches.
 Nothing leaves the PC, and searching marks nothing for removal and keeps every mark.
 
-![Review right after a scan: the search box above the kinds of duplicates found, with 8 Maybe similar sets](docs/images/review-search.png)
-
 | "at sea" | "food" |
 |---|---|
-| ![Find photos by what they show: 12 likely matches for "at sea", ships and sea views first](docs/images/likely-matches.png) | ![Find photos by what they show: 4 likely matches for "food", the dinner photos](docs/images/likely-matches-food.png) |
+| ![Review filtered by "at sea": 6 of 8 Maybe similar sets, the ships first, each match labelled](docs/images/review-search.png) | ![Review filtered by "food": the dinner sets, each match labelled](docs/images/review-search-food.png) |
 
-| Maybe similar, found by the model | Sharpest photo of a set |
+| Maybe similar, found by the model | Two viewers side by side |
 |---|---|
-| ![Compare view of two shots of the same ship that the model put in one Maybe similar set](docs/images/maybe-similar.png) | ![A set where the suggested best photo is marked as the sharpest and largest file](docs/images/sharpest.png) |
+| ![Maybe similar sets the model grouped: reef shots taken moments apart, and three shots of a passing ship](docs/images/maybe-similar.png) | ![Two shots of one parasail in the Left and Right Viewers, each with its own Remove button](docs/images/viewers.png) |
 
 The same model groups shots of one moment that the pixel hash misses, such as a ship that moved
 between frames, as Maybe similar. A classical sharpness measure names the sharpest photo of a set.
@@ -114,7 +112,7 @@ A walkthrough of one run from folder selection to Recycle Bin, with the classes 
 
 - **About 25,600 lines of production C# and 43,800 lines of tests** across Domain, Application,
   Analysis, Infrastructure and real-window WPF scenario suites.
-- **Full suite: 2,070 / 2,070 passing** in the official gate on the 1.1.0 release candidate.
+- **Full suite: 2,153 / 2,153 passing** in the official gate on the 1.1.5 candidate.
 - **Isolated verification VM.** Official gates run in a Hyper-V VM with no network adapter, restored
   from a known checkpoint for every run. This proves the offline guarantee and keeps runs reproducible.
 - **Reproducible release.** Two independent locked, self-contained publishes are compared file by
