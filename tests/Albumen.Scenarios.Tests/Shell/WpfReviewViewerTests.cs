@@ -595,7 +595,7 @@ public sealed class WpfReviewViewerTests
                         {
                             Act(round, $"zoom {step:0.00}", () => zoom.Value = step);
                             // The far corner and back reach every edge from both sides; the other viewer follows.
-                            foreach (var edge in new[] { 1.0, 0.0 })
+                            foreach (var edge in StressEdges)
                                 Act(round, $"scroll {leader} to {edge}", () =>
                                 {
                                     scrollers[leader].ScrollToHorizontalOffset(edge * scrollers[leader].ScrollableWidth);
@@ -678,6 +678,8 @@ public sealed class WpfReviewViewerTests
     }
 
     private const int StressRounds = 100;
+    // The far corner, then back to the near one.
+    private static readonly double[] StressEdges = [1.0, 0.0];
 
     // Not measured yet: the limit leaves the VM's software renderer room.
     private static readonly TimeSpan StressLimit = TimeSpan.FromMinutes(25);
