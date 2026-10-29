@@ -17,6 +17,22 @@ public sealed class PlainWordingTests
     public void KindsUsePlainNames(ReviewCategoryKind category, string name) =>
         Assert.Equal(name, ReviewCategoryNames.For(category));
 
+    // 1.1.5: the narrower "What was found" column says each kind in a few words.
+    [Theory]
+    [InlineData(ReviewCategoryKind.Exact, "The same file saved more than once.")]
+    [InlineData(ReviewCategoryKind.Near, "The same photo resized, recompressed or lightly edited.")]
+    [InlineData(ReviewCategoryKind.Uncertain, "Photos that look close.")]
+    [InlineData(ReviewCategoryKind.CouldNotAnalyze, "Unsupported files.")]
+    // Igal, 2026-10-25: "Matching photos…" alone didn't say matching what.
+    [InlineData(ReviewCategoryKind.OtherMatches, "Photos that match the search but aren't in any set.")]
+    public void CategoriesUseShortDescriptions(ReviewCategoryKind category, string description)
+    {
+        var row = new ReviewCategoryViewModel(category, ReviewCategoryNames.For(category), 0, 1, 4,
+            _ => throw new InvalidOperationException("An empty kind has no sets."), _ => null);
+
+        Assert.Equal(description, row.Description);
+    }
+
     [Theory]
     [InlineData(ScanStatus.Idle, ScanStageState.Pending, 0L, "Not started")]
     [InlineData(ScanStatus.Checking, ScanStageState.Pending, 0L, "Getting ready: checking the folder")]

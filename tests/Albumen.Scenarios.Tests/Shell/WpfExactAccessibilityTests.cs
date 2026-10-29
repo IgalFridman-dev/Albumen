@@ -3,8 +3,6 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
-using System.Windows.Automation.Peers;
-using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -36,24 +34,20 @@ public sealed class WpfExactAccessibilityTests
                 fixture.PublishPhase(WorkflowPhase.ConfirmRules);
                 Drain();
                 var scanFolder = Assert.IsType<Button>(window.FindName("ScanFolderButton"));
-                var near = Assert.IsType<CommandSwitchCheckBox>(window.FindName("NearDuplicatesCheckBox"));
-                var nearCaption = Assert.IsType<TextBlock>(window.FindName("NearDuplicatesCaption"));
+                var subfolders = Assert.IsType<CommandSwitchCheckBox>(window.FindName("IncludeSubfoldersCheckBox"));
                 var guidance = Assert.IsType<TextBlock>(window.FindName("ScanOptionsGuidanceText"));
                 var choose = Assert.IsType<Button>(window.FindName("ChooseAnotherScopeButton"));
                 // Folder and options are one screen: the folder controls stay in view with the options.
-                Assert.True(choose.IsVisible && near.IsVisible && nearCaption.IsVisible && scanFolder.IsVisible);
+                Assert.True(choose.IsVisible && subfolders.IsVisible && scanFolder.IsVisible);
+                // Identical copies and look-alikes are always found; no switch can turn either off.
                 Assert.Null(window.FindName("ExactDuplicatesCheckBox"));
-                // The promise about identical copies lives in the caption, not in a switch nobody can move.
-                Assert.Equal(
-                    "Bursts and near-identical shots. Identical copies are always found.",
-                    nearCaption.Text);
-                Assert.True(near.IsChecked);
-                Assert.True(near.IsTabStop && near.Focusable && near.IsEnabled);
-                Assert.Equal("Look-alikes", AutomationProperties.GetName(near));
-                Assert.Contains("Maybe similar", AutomationProperties.GetHelpText(near), StringComparison.Ordinal);
+                Assert.Null(window.FindName("NearDuplicatesCheckBox"));
+                Assert.Null(window.FindName("NearDuplicatesCaption"));
+                Assert.True(subfolders.IsTabStop && subfolders.Focusable && subfolders.IsEnabled);
+                Assert.True(choose.IsTabStop && choose.Focusable && choose.IsEnabled);
                 // Valid options before any scan: the guidance has nothing to add, so it is hidden.
                 Assert.Equal(Visibility.Collapsed, guidance.Visibility);
-                Assert.Contains("Identical copies are always included", guidance.Text, StringComparison.Ordinal);
+                Assert.Equal("Identical copies and look-alikes are always found. Nothing is marked for you.", guidance.Text);
                 Assert.Equal("Scan 2 photos", scanFolder.Content);
                 Assert.Equal("Scan 2 photos", AutomationProperties.GetName(scanFolder));
                 Assert.Same(fixture.ViewModel.ScanFolderCommand, scanFolder.Command);
@@ -70,34 +64,7 @@ public sealed class WpfExactAccessibilityTests
                 fixture.PublishPhase(WorkflowPhase.ChooseScope);
                 Drain();
                 Assert.True(choose.IsKeyboardFocusWithin);
-                Assert.True(near.IsVisible && scanFolder.IsVisible);
-            }
-            finally { window.Close(); }
-        });
-    }
-
-    [Fact]
-    public void AutomationToggleOnNearSwitchChangesTheScanOptions()
-    {
-        RunOnSta(() =>
-        {
-            var fixture = new ExactShellFixture();
-            var window = new MainWindow { DataContext = fixture.ViewModel };
-            try
-            {
-                window.Show();
-                fixture.PublishPhase(WorkflowPhase.ChooseScope);
-                Drain();
-                var near = Assert.IsType<CommandSwitchCheckBox>(window.FindName("NearDuplicatesCheckBox"));
-                Assert.True(near.IsChecked);
-                Assert.True(near.IsEnabled);
-                var peer = UIElementAutomationPeer.CreatePeerForElement(near);
-                Assert.NotNull(peer);
-
-                Assert.IsAssignableFrom<IToggleProvider>(peer.GetPattern(PatternInterface.Toggle)).Toggle();
-                Drain();
-
-                Assert.Contains($"options:{NearDuplicateMode.Disabled}", fixture.Workflow.Actions);
+                Assert.True(subfolders.IsVisible && scanFolder.IsVisible);
             }
             finally { window.Close(); }
         });
@@ -140,7 +107,7 @@ public sealed class WpfExactAccessibilityTests
     }
 
     [Fact]
-    public void LargeReviewActuallyVirtualizesAndExposesSelectableWrappingReadOnlyPaths()
+    public void LargeReviewActuallyVirtualizesItsSetsAndRemovesNothingByItself()
     {
         RunOnSta(() =>
         {
@@ -155,32 +122,19 @@ public sealed class WpfExactAccessibilityTests
                 window.Show();
                 Drain();
                 window.UpdateLayout();
-                var groups = Assert.IsType<ListBox>(window.FindName("ReviewGroupsList"));
-                Assert.True(VirtualizingPanel.GetIsVirtualizing(groups));
-                Assert.Equal(1000, groups.Items.Count);
-                Assert.Null(groups.ItemContainerGenerator.ContainerFromIndex(999));
-                fixture.ViewModel.OpenReviewGroupCommand.ExecuteAsync(exact.Groups[0])
-                    .GetAwaiter().GetResult();
-                Drain();
-                window.UpdateLayout();
-                var comparisons = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                var paths = Descendants<TextBox>(comparisons).ToArray();
-                Assert.NotEmpty(paths);
-                Assert.All(paths, path =>
-                {
-                    Assert.True(path.IsReadOnly);
-                    Assert.Equal(TextWrapping.Wrap, path.TextWrapping);
-                    Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(path)));
-                });
-                var selectionControls = Descendants<ToggleButton>(comparisons)
-                    .Where(control => AutomationProperties.GetAutomationId(control) == "selection-control").ToArray();
-                Assert.NotEmpty(selectionControls);
-                Assert.All(selectionControls, control => Assert.True(control.IsTabStop));
+                var gallery = Assert.IsType<ListBox>(window.FindName("ReviewGalleryList"));
+                Assert.True(VirtualizingPanel.GetIsVirtualizing(gallery));
+                Assert.Equal(1000, gallery.Items.Count);
+                Assert.Null(gallery.ItemContainerGenerator.ContainerFromIndex(999));
+                var tiles = Descendants<Button>(gallery)
+                    .Where(tile => AutomationProperties.GetAutomationId(tile) == "review-photo").ToArray();
+                Assert.NotEmpty(tiles);
+                Assert.All(tiles, tile => Assert.True(tile.IsTabStop && tile.Focusable));
                 Assert.DoesNotContain(Descendants<Button>(window), button => button.IsEnabled &&
                     (button.Content?.ToString()?.Contains("Remove", StringComparison.OrdinalIgnoreCase) == true ||
                      button.Name == "ApproveCleanupButton"));
                 var textBrush = new SolidColorBrush(Colors.Coral);
-                window.Resources[SystemColors.WindowTextBrushKey] = textBrush;
+                window.Resources["Albumen.TextBrush"] = textBrush;
                 Drain();
                 Assert.Same(textBrush, window.Foreground);
                 Assert.True(fixture.ViewModel.ReviewCategories.Single(category =>
@@ -196,51 +150,65 @@ public sealed class WpfExactAccessibilityTests
         RunOnSta(() =>
         {
             var fixture = ReviewShellFixture.Ready();
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             var window = new MainWindow { DataContext = fixture.ViewModel, FontSize = 24 };
             try
             {
                 window.Show();
                 Drain();
                 window.UpdateLayout();
-                var comparisons = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                Assert.True(VirtualizingPanel.GetIsVirtualizing(comparisons));
-                Assert.All(Descendants<TextBox>(comparisons), path =>
-                {
-                    Assert.True(path.IsReadOnly);
-                    Assert.Equal(TextWrapping.Wrap, path.TextWrapping);
-                    Assert.False(path.IsTabStop);
-                });
-                Assert.All(Descendants<TextBlock>(comparisons), metadata => Assert.False(metadata.Focusable));
-                Assert.Contains("照片-very-long-name", fixture.ViewModel.ExactGroups[0].Members[0].DiscoveredPath);
+                var gallery = Assert.IsType<ListBox>(window.FindName("ReviewGalleryList"));
+                Assert.True(VirtualizingPanel.GetIsVirtualizing(gallery));
+                Assert.Empty(Descendants<TextBox>(gallery));
+                Assert.All(Descendants<TextBlock>(gallery), metadata => Assert.False(metadata.Focusable));
+                // A photo's path is in its hover facts: selectable text that wraps and takes no tab stop.
+                var tile = ReviewTiles.Tile(window, 1);
+                ReviewTiles.Facts(tile, out var path);
+                Assert.True(path.IsReadOnly);
+                Assert.Equal(TextWrapping.Wrap, path.TextWrapping);
+                Assert.False(path.IsTabStop);
+                Assert.Contains("照片-very-long-name", path.Text, StringComparison.Ordinal);
             }
             finally { window.Close(); }
         });
     }
 
+    // A set shows all of its photos, so a 2,000-photo set realizes 2,000 tiles; only the rows in
+    // view (and one either side) decode their thumbnails until the gallery scrolls.
     [Fact]
-    public void OneLargeExactGroupKeepsItsMemberViewportVirtualized()
+    public void OneLargeExactGroupKeepsThumbnailLoadsToTheVisibleRows()
     {
-        RunOnSta(() =>
+        WpfReviewSelectionTests.RunOnSta(() =>
         {
-            var fixture = new ExactShellFixture();
-            fixture.PublishReview(ScanStatus.Complete, memberCount: 2000);
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
-            var window = new MainWindow { DataContext = fixture.ViewModel };
+            var scope = new ReviewStaticScope();
+            var workflow = new RecordingReviewWorkflow(scope.Current, ReviewData.CreateLargeMemberSnapshot(2000));
+            var thumbnails = new ControllableReviewPreviewSource(autoComplete: true);
+            var viewModel = new ShellViewModel(scope, workflow, reviewThumbnailSource: thumbnails);
+            WpfReviewSelectionTests.OpenIdenticalCopies(viewModel);
+            var window = new MainWindow { DataContext = viewModel };
             try
             {
                 window.Show();
-                Drain();
+                WpfReviewSelectionTests.Drain();
                 window.UpdateLayout();
-                var members = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                Assert.Equal(2000, members.Items.Count);
-                Assert.True(VirtualizingPanel.GetIsVirtualizing(members));
-                Assert.Null(members.ItemContainerGenerator.ContainerFromIndex(1999));
-                members.ScrollIntoView(members.Items[1999]);
-                Drain();
+                WpfReviewSelectionTests.Drain();
+                var gallery = Assert.IsType<ListBox>(window.FindName("ReviewGalleryList"));
+                Assert.Single(gallery.Items.Cast<object>());
+                var tiles = Descendants<Button>(gallery)
+                    .Where(tile => AutomationProperties.GetAutomationId(tile) == "review-photo").ToArray();
+                Assert.Equal(2000, tiles.Length);
+                Assert.NotEmpty(thumbnails.Requests);
+                Assert.True(thumbnails.Requests.Count < 40,
+                    $"The first rows asked for {thumbnails.Requests.Count} thumbnails.");
+                Assert.DoesNotContain(thumbnails.Requests, request => request.Occurrence.Token.OccurrenceId == 2000);
+
+                var scroller = Descendants<ScrollViewer>(gallery).First();
+                scroller.ScrollToEnd();
+                WpfReviewSelectionTests.Drain();
                 window.UpdateLayout();
-                Assert.NotNull(members.ItemContainerGenerator.ContainerFromIndex(1999));
-                Assert.True(Descendants<ListBoxItem>(members).Count() < 100);
+                WpfReviewSelectionTests.Drain();
+
+                Assert.Contains(thumbnails.Requests, request => request.Occurrence.Token.OccurrenceId == 2000);
             }
             finally { window.Close(); }
         });

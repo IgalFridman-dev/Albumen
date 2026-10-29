@@ -257,6 +257,8 @@ public sealed class LikelyMatchesQueryTests
 
         public EncoderProfileResult LoadProfile() => LoadFailure is null ? new(Profile, null) : new(null, LoadFailure);
 
+        public EncoderFailure? PrepareText(EncoderProfile profile) => TextFailure;
+
         public EmbeddingResult EncodeImage(EncoderProfile profile, EncoderImage image)
         {
             Images++;

@@ -97,10 +97,10 @@ public sealed class WpfActionAccessibilityTests
                     var panel = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("ActionPanel"));
                     foreach (var text in WpfReviewSelectionTests.Descendants<TextBlock>(panel)) text.FontSize *= 2;
                     foreach (var path in WpfReviewSelectionTests.Descendants<TextBox>(panel)) path.FontSize *= 2;
-                    window.Resources[SystemColors.WindowBrushKey] = Brushes.Black;
-                    window.Resources[SystemColors.WindowTextBrushKey] = Brushes.White;
-                    window.Resources[SystemColors.ControlBrushKey] = Brushes.Black;
-                    window.Resources[SystemColors.ControlTextBrushKey] = Brushes.White;
+                    window.Resources["Albumen.WindowBrush"] = Brushes.Black;
+                    window.Resources["Albumen.TextBrush"] = Brushes.White;
+                    window.Resources["Albumen.SurfaceBrush"] = Brushes.Black;
+                    window.Resources["Albumen.MutedTextBrush"] = Brushes.White;
                     window.UpdateLayout();
                     WpfReviewSelectionTests.Drain();
                     Assert.Same(Brushes.Black, window.Background);

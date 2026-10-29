@@ -1,33 +1,12 @@
-<!-- Albumen visual tokens and control styles. MainWindow merges this dictionary itself
-     (tests construct MainWindow without App), so every style here is keyed and opt-in.
-     Text and surfaces keep SystemColors brushes so High Contrast still applies; only
-     accents, borders and decorative tints are fixed colors. -->
+<!-- Albumen control styles. MainWindow merges this dictionary itself (tests construct
+     MainWindow without App), so every style here is keyed and opt-in. Colours are the
+     Albumen.*Brush palette tokens, always through DynamicResource: Themes/AlbumenPalette.cs
+     writes them into the window and swaps them for system brushes under High Contrast. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <FontFamily x:Key="Albumen.FontFamily">Segoe UI Variable Text, Segoe UI</FontFamily>
     <FontFamily x:Key="Albumen.DisplayFontFamily">Segoe UI Variable Display, Segoe UI</FontFamily>
-
-    <SolidColorBrush x:Key="Albumen.AccentBrush" Color="#2563EB" />
-    <SolidColorBrush x:Key="Albumen.AccentHoverBrush" Color="#1D4ED8" />
-    <SolidColorBrush x:Key="Albumen.AccentPressedBrush" Color="#1E40AF" />
-    <SolidColorBrush x:Key="Albumen.AccentSoftBrush" Color="#EFF4FF" />
-    <SolidColorBrush x:Key="Albumen.BorderBrush" Color="#E4E4E7" />
-    <SolidColorBrush x:Key="Albumen.BorderStrongBrush" Color="#C4C4CC" />
-    <SolidColorBrush x:Key="Albumen.HoverBrush" Color="#F4F4F5" />
-    <SolidColorBrush x:Key="Albumen.PressedBrush" Color="#E4E4E7" />
-    <SolidColorBrush x:Key="Albumen.MutedTextBrush" Color="#52525B" />
-    <SolidColorBrush x:Key="Albumen.SubtleFillBrush" Color="#EEF0F3" />
-    <SolidColorBrush x:Key="Albumen.SuccessBrush" Color="#15803D" />
-    <SolidColorBrush x:Key="Albumen.SuccessSoftBrush" Color="#ECFDF3" />
-    <SolidColorBrush x:Key="Albumen.WarningSoftBrush" Color="#FFF7ED" />
-    <SolidColorBrush x:Key="Albumen.WarningBorderBrush" Color="#F5C38B" />
-    <SolidColorBrush x:Key="Albumen.DangerBrush" Color="#B42318" />
-    <SolidColorBrush x:Key="Albumen.DangerHoverBrush" Color="#912018" />
-    <SolidColorBrush x:Key="Albumen.DangerSoftBrush" Color="#FEF3F2" />
-    <!-- Review kinds: Identical copies (accent), Look-alike (teal), Maybe similar (amber). -->
-    <SolidColorBrush x:Key="Albumen.LookAlikeBrush" Color="#0F766E" />
-    <SolidColorBrush x:Key="Albumen.MaybeSimilarBrush" Color="#B45309" />
 
     <!-- Keyboard focus ring shared by every themed control. -->
     <Style x:Key="Albumen.FocusVisual">
@@ -35,50 +14,65 @@
             <Setter.Value>
                 <ControlTemplate>
                     <Rectangle Margin="-2" RadiusX="10" RadiusY="10" StrokeThickness="2"
-                               Stroke="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
+                               Stroke="{DynamicResource Albumen.AccentBrush}"
                                SnapsToDevicePixels="True" />
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
 
-    <!-- Text roles. Muted text falls back to the system text color under High Contrast. -->
+    <!-- The 3 px blue-to-violet line that marks what is selected or current, and nothing
+         else: the open category, the selected tab, the current step and each set label. -->
+    <Style x:Key="Albumen.AccentLine" TargetType="Border">
+        <Setter Property="Width" Value="3" />
+        <Setter Property="CornerRadius" Value="1.5" />
+        <Setter Property="Background" Value="{DynamicResource Albumen.AccentLineBrush}" />
+    </Style>
+
+    <!-- The primary button's focus ring carries the same gradient. -->
+    <Style x:Key="Albumen.PrimaryFocusVisual">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Rectangle Margin="-3" RadiusX="19" RadiusY="19" StrokeThickness="2"
+                               Stroke="{DynamicResource Albumen.AccentLineBrush}"
+                               SnapsToDevicePixels="True" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Text roles. -->
+    <!-- Titles name their brush: a keyed style skips Fluent's implicit TextBlock style, and the
+         inherited Foreground inside the Fluent tab content is black, not the window's. -->
     <Style x:Key="Albumen.PageTitle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="FontFamily" Value="{StaticResource Albumen.DisplayFontFamily}" />
         <Setter Property="FontSize" Value="28" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
     <Style x:Key="Albumen.SectionTitle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="FontSize" Value="16" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
     <Style x:Key="Albumen.MutedText" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource Albumen.MutedTextBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
         <Setter Property="TextWrapping" Value="Wrap" />
-        <Style.Triggers>
-            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-            </DataTrigger>
-        </Style.Triggers>
     </Style>
     <Style x:Key="Albumen.Caption" TargetType="TextBlock" BasedOn="{StaticResource Albumen.MutedText}">
         <Setter Property="FontSize" Value="12" />
     </Style>
 
-    <!-- A white rounded surface. Background stays the system window brush. -->
+    <!-- A rounded surface a step lighter than the window. -->
     <Style x:Key="Albumen.Card" TargetType="Border">
-        <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Albumen.BorderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="12" />
         <Setter Property="Padding" Value="20" />
-        <Style.Triggers>
-            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" />
-            </DataTrigger>
-        </Style.Triggers>
     </Style>
 
     <!-- High Contrast replaces the whole template rather than layering triggers on the
@@ -151,13 +145,15 @@
         </ControlTemplate.Triggers>
     </ControlTemplate>
 
-    <!-- Buttons. One template; the variants only change colors. -->
+    <!-- Buttons: borderless pills as in Windows Photos; the variants only change colors.
+         Under High Contrast every variant takes the system button template above, drawn on
+         the window colours with a text-coloured outline. -->
     <Style x:Key="Albumen.Button" TargetType="Button">
         <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
-        <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-        <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Albumen.BorderStrongBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Background" Value="{DynamicResource Albumen.PillBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="MinHeight" Value="36" />
         <Setter Property="Padding" Value="16,7" />
@@ -167,7 +163,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Chrome" CornerRadius="8" SnapsToDevicePixels="True"
+                    <Border x:Name="Chrome" CornerRadius="16" SnapsToDevicePixels="True"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}">
@@ -177,10 +173,10 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Albumen.HoverBrush}" />
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.PillHoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Albumen.PressedBrush}" />
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.HoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
@@ -193,21 +189,22 @@
         <Style.Triggers>
             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                 <Setter Property="Template" Value="{StaticResource Albumen.HighContrastButtonTemplate}" />
-                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.ControlBrushKey}}" />
-                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
-                <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
             </DataTrigger>
         </Style.Triggers>
     </Style>
 
-    <Style x:Key="Albumen.PrimaryButton" TargetType="Button" BasedOn="{StaticResource Albumen.Button}">
-        <Setter Property="Background" Value="{StaticResource Albumen.AccentBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
-        <Setter Property="Foreground" Value="White" />
+    <!-- A destructive confirmation, such as clearing scan data. -->
+    <Style x:Key="Albumen.DangerButton" TargetType="Button" BasedOn="{StaticResource Albumen.Button}">
+        <Setter Property="Background" Value="{DynamicResource Albumen.DangerBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.OnAccentBrush}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Chrome" CornerRadius="8" SnapsToDevicePixels="True"
+                    <Border x:Name="Chrome" CornerRadius="16" SnapsToDevicePixels="True"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}">
@@ -217,10 +214,42 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Albumen.AccentHoverBrush}" />
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.DangerHoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Albumen.AccentPressedBrush}" />
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.DangerHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="Albumen.PrimaryButton" TargetType="Button" BasedOn="{StaticResource Albumen.Button}">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.PrimaryFocusVisual}" />
+        <Setter Property="Background" Value="{DynamicResource Albumen.AccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.OnAccentBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Chrome" CornerRadius="16" SnapsToDevicePixels="True"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}">
+                        <ContentPresenter Margin="{TemplateBinding Padding}" RecognizesAccessKey="True"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.AccentHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.AccentPressedBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
@@ -241,6 +270,7 @@
          keyboard behavior stay those of a CheckBox. -->
     <Style x:Key="Albumen.SwitchCheckBox" TargetType="CheckBox">
         <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Template">
@@ -252,19 +282,19 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Border x:Name="Track" Width="44" Height="24" CornerRadius="12" VerticalAlignment="Center"
-                                Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                                BorderBrush="{StaticResource Albumen.MutedTextBrush}" BorderThickness="1.5">
+                                Background="{DynamicResource Albumen.FieldBrush}"
+                                BorderBrush="{DynamicResource Albumen.MutedTextBrush}" BorderThickness="1.5">
                             <Ellipse x:Name="Knob" Width="14" Height="14" Margin="4,0" HorizontalAlignment="Left"
-                                     Fill="{StaticResource Albumen.MutedTextBrush}" />
+                                     Fill="{DynamicResource Albumen.MutedTextBrush}" />
                         </Border>
                         <ContentPresenter Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center"
                                           RecognizesAccessKey="True" />
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Track" Property="Background" Value="{StaticResource Albumen.AccentBrush}" />
-                            <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
-                            <Setter TargetName="Knob" Property="Fill" Value="White" />
+                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource Albumen.AccentBrush}" />
+                            <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
+                            <Setter TargetName="Knob" Property="Fill" Value="{DynamicResource Albumen.OnAccentBrush}" />
                             <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right" />
                             <Setter TargetName="Knob" Property="Width" Value="16" />
                             <Setter TargetName="Knob" Property="Height" Value="16" />
@@ -291,7 +321,7 @@
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
     </Style>
 
@@ -324,7 +354,7 @@
     <!-- Workflow step in the left rail. -->
     <Style x:Key="Albumen.StepButton" TargetType="Button">
         <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
-        <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="BorderThickness" Value="1" />
@@ -345,7 +375,7 @@
                                 <Condition Property="IsMouseOver" Value="True" />
                                 <Condition Property="IsEnabled" Value="True" />
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                         </MultiTrigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="Chrome" Property="Opacity" Value="0.5" />
@@ -380,9 +410,9 @@
 
     <Style x:Key="Albumen.CardButton" TargetType="Button">
         <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
-        <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-        <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Albumen.BorderBrush}" />
+        <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="12,10" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -400,10 +430,10 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Albumen.BorderStrongBrush}" />
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Albumen.PressedBrush}" />
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.PressedBrush}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -412,16 +442,18 @@
         <Style.Triggers>
             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                 <Setter Property="Template" Value="{StaticResource Albumen.HighContrastCardTemplate}" />
-                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
             </DataTrigger>
         </Style.Triggers>
     </Style>
 
-    <!-- A photo thumbnail that opens the photo in the viewer. -->
+    <!-- A photo thumbnail that opens the photo in the viewer. The photo sits on the dark
+         ground; only hover draws a border, and High Contrast an outline. -->
     <Style x:Key="Albumen.ThumbnailButton" TargetType="Button">
         <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
-        <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Albumen.BorderBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
+        <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Cursor" Value="Hand" />
@@ -436,7 +468,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -444,156 +476,27 @@
         </Setter>
         <Style.Triggers>
             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
             </DataTrigger>
         </Style.Triggers>
     </Style>
 
-    <!-- Colored mark for a Review kind; bound to anything with a Category property. -->
-    <Style x:Key="Albumen.KindMark" TargetType="Border">
-        <Setter Property="Width" Value="4" />
-        <Setter Property="CornerRadius" Value="2" />
-        <Setter Property="Background" Value="{StaticResource Albumen.BorderStrongBrush}" />
-        <Style.Triggers>
-            <DataTrigger Binding="{Binding Category}" Value="Exact">
-                <Setter Property="Background" Value="{StaticResource Albumen.AccentBrush}" />
-            </DataTrigger>
-            <DataTrigger Binding="{Binding Category}" Value="Near">
-                <Setter Property="Background" Value="{StaticResource Albumen.LookAlikeBrush}" />
-            </DataTrigger>
-            <DataTrigger Binding="{Binding Category}" Value="Uncertain">
-                <Setter Property="Background" Value="{StaticResource Albumen.MaybeSimilarBrush}" />
-            </DataTrigger>
-            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-            </DataTrigger>
-        </Style.Triggers>
-    </Style>
 
     <!-- A small rounded label on a photo card. -->
     <Style x:Key="Albumen.Badge" TargetType="Border">
         <Setter Property="CornerRadius" Value="6" />
         <Setter Property="Padding" Value="8,2" />
         <Setter Property="Margin" Value="0,4,6,0" />
-        <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+        <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
         <Setter Property="TextElement.FontSize" Value="12" />
         <Setter Property="TextElement.FontWeight" Value="SemiBold" />
         <Style.Triggers>
+            <!-- High Contrast: window colours with an outline instead of a fill. -->
             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
-                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-            </DataTrigger>
-        </Style.Triggers>
-    </Style>
-
-    <ControlTemplate x:Key="Albumen.HighContrastKeepRemoveTemplate" TargetType="CheckBox">
-        <StackPanel>
-            <Border x:Name="Track" CornerRadius="8" Padding="2" HorizontalAlignment="Left" BorderThickness="2"
-                    Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                    BorderBrush="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}">
-                <StackPanel Orientation="Horizontal">
-                    <Border x:Name="KeepPart" CornerRadius="6" Padding="14,4"
-                            Background="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}">
-                        <TextBlock x:Name="KeepText" Text="Keep" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
-                    </Border>
-                    <Border x:Name="RemovePart" CornerRadius="6" Padding="14,4" Background="Transparent">
-                        <TextBlock x:Name="RemoveText" Text="Remove" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                    </Border>
-                </StackPanel>
-            </Border>
-            <ContentPresenter x:Name="Reason" Margin="0,4,0,0" Visibility="Collapsed"
-                              TextElement.Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}">
-                <ContentPresenter.Resources>
-                    <Style TargetType="TextBlock">
-                        <Setter Property="TextWrapping" Value="Wrap" />
-                    </Style>
-                </ContentPresenter.Resources>
-            </ContentPresenter>
-        </StackPanel>
-        <ControlTemplate.Triggers>
-            <Trigger Property="IsChecked" Value="True">
-                <Setter TargetName="KeepPart" Property="Background" Value="Transparent" />
-                <Setter TargetName="KeepText" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                <Setter TargetName="RemovePart" Property="Background" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
-                <Setter TargetName="RemoveText" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
-            </Trigger>
-            <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
-            </Trigger>
-            <Trigger Property="IsEnabled" Value="False">
-                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
-                <Setter TargetName="KeepPart" Property="Background" Value="Transparent" />
-                <Setter TargetName="RemovePart" Property="Background" Value="Transparent" />
-                <Setter TargetName="KeepText" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
-                <Setter TargetName="RemoveText" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
-                <Setter TargetName="Reason" Property="Visibility" Value="Visible" />
-                <Setter Property="Cursor" Value="Arrow" />
-            </Trigger>
-        </ControlTemplate.Triggers>
-    </ControlTemplate>
-
-    <!-- Keep / Remove drawn over the real Review selection CheckBox: checked means
-         "marked for removal". The command, automation name and keyboard behavior stay
-         those of the CheckBox; the eligibility text shows only when it can't change. -->
-    <Style x:Key="Albumen.KeepRemoveToggle" TargetType="CheckBox">
-        <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
-        <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="CheckBox">
-                    <StackPanel>
-                        <Border x:Name="Track" CornerRadius="8" Padding="2" HorizontalAlignment="Left" BorderThickness="1"
-                                Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                                BorderBrush="{StaticResource Albumen.BorderStrongBrush}">
-                            <StackPanel Orientation="Horizontal">
-                                <Border x:Name="KeepPart" CornerRadius="6" Padding="14,4"
-                                        Background="{StaticResource Albumen.SuccessSoftBrush}">
-                                    <TextBlock x:Name="KeepText" Text="Keep" FontWeight="SemiBold"
-                                               Foreground="{StaticResource Albumen.SuccessBrush}" />
-                                </Border>
-                                <Border x:Name="RemovePart" CornerRadius="6" Padding="14,4" Background="Transparent">
-                                    <TextBlock x:Name="RemoveText" Text="Remove" FontWeight="SemiBold"
-                                               Foreground="{StaticResource Albumen.MutedTextBrush}" />
-                                </Border>
-                            </StackPanel>
-                        </Border>
-                        <ContentPresenter x:Name="Reason" Margin="0,4,0,0" Visibility="Collapsed"
-                                          TextElement.FontSize="12"
-                                          TextElement.Foreground="{StaticResource Albumen.MutedTextBrush}">
-                            <ContentPresenter.Resources>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="TextWrapping" Value="Wrap" />
-                                </Style>
-                            </ContentPresenter.Resources>
-                        </ContentPresenter>
-                    </StackPanel>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="KeepPart" Property="Background" Value="Transparent" />
-                            <Setter TargetName="KeepText" Property="Foreground" Value="{StaticResource Albumen.MutedTextBrush}" />
-                            <Setter TargetName="RemovePart" Property="Background" Value="{StaticResource Albumen.DangerBrush}" />
-                            <Setter TargetName="RemoveText" Property="Foreground" Value="White" />
-                        </Trigger>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="Track" Property="Opacity" Value="0.5" />
-                            <Setter TargetName="Reason" Property="Visibility" Value="Visible" />
-                            <Setter Property="Cursor" Value="Arrow" />
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-        <Style.Triggers>
-            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                <Setter Property="Template" Value="{StaticResource Albumen.HighContrastKeepRemoveTemplate}" />
+                <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.TextBrush}" />
             </DataTrigger>
         </Style.Triggers>
     </Style>
@@ -604,26 +507,26 @@
         <Setter Property="Padding" Value="8,2" />
         <Setter Property="HorizontalAlignment" Value="Left" />
         <Setter Property="VerticalAlignment" Value="Top" />
-        <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+        <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
         <Setter Property="TextElement.FontWeight" Value="SemiBold" />
         <Style.Triggers>
             <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Busy">
-                <Setter Property="Background" Value="{StaticResource Albumen.AccentSoftBrush}" />
-                <Setter Property="TextElement.Foreground" Value="{StaticResource Albumen.AccentBrush}" />
+                <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
+                <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.AccentBrush}" />
             </DataTrigger>
             <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Done">
-                <Setter Property="Background" Value="{StaticResource Albumen.SuccessSoftBrush}" />
-                <Setter Property="TextElement.Foreground" Value="{StaticResource Albumen.SuccessBrush}" />
+                <Setter Property="Background" Value="{DynamicResource Albumen.SuccessSoftBrush}" />
+                <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.SuccessBrush}" />
             </DataTrigger>
             <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Warning">
-                <Setter Property="Background" Value="{StaticResource Albumen.WarningSoftBrush}" />
-                <Setter Property="TextElement.Foreground" Value="{StaticResource Albumen.MaybeSimilarBrush}" />
+                <Setter Property="Background" Value="{DynamicResource Albumen.WarningSoftBrush}" />
+                <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.WarningBrush}" />
             </DataTrigger>
             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
-                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.TextBrush}" />
             </DataTrigger>
         </Style.Triggers>
     </Style>
@@ -654,28 +557,34 @@
             </Trigger>
         </ControlTemplate.Triggers>
     </ControlTemplate>
-    <!-- A tab's content inherits the tab's text properties, so the header is styled on its
-         presenter, never on the TabItem itself. -->
+    <!-- A tab's content inherits the tab's text properties: the TabItem carries the page's text
+         brush, and the header's own weight and colour are set on its presenter. -->
     <Style x:Key="Albumen.TopBarItem" TargetType="TabItem">
         <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="Padding" Value="14,4" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabItem">
-                    <Border x:Name="Chrome" CornerRadius="8" Padding="{TemplateBinding Padding}" Margin="0,0,2,0"
-                            Background="Transparent" BorderThickness="1" BorderBrush="Transparent" SnapsToDevicePixels="True">
-                        <ContentPresenter x:Name="Header" ContentSource="Header" RecognizesAccessKey="True" HorizontalAlignment="Center"
-                                          TextElement.FontWeight="SemiBold"
-                                          TextElement.Foreground="{StaticResource Albumen.MutedTextBrush}" />
-                    </Border>
+                    <!-- The accent line lies over the pill's left edge, so selecting a tab moves nothing. -->
+                    <Grid Margin="0,0,2,0" SnapsToDevicePixels="True">
+                        <Border x:Name="Chrome" CornerRadius="8" Padding="{TemplateBinding Padding}"
+                                Background="Transparent" BorderThickness="1" BorderBrush="Transparent">
+                            <ContentPresenter x:Name="Header" ContentSource="Header" RecognizesAccessKey="True" HorizontalAlignment="Center"
+                                              TextElement.FontWeight="SemiBold"
+                                              TextElement.Foreground="{DynamicResource Albumen.MutedTextBrush}" />
+                        </Border>
+                        <Border x:Name="AccentLine" Style="{StaticResource Albumen.AccentLine}" HorizontalAlignment="Left"
+                                Margin="1,7" Visibility="Collapsed" />
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Albumen.HoverBrush}" />
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.HoverBrush}" />
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Albumen.BorderBrush}" />
-                            <Setter TargetName="Header" Property="TextElement.Foreground" Value="{StaticResource Albumen.AccentBrush}" />
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.PillBrush}" />
+                            <Setter TargetName="Header" Property="TextElement.Foreground" Value="{DynamicResource Albumen.TextBrush}" />
+                            <Setter TargetName="AccentLine" Property="Visibility" Value="Visible" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -688,8 +597,103 @@
         </Style.Triggers>
     </Style>
 
+    <!-- The photo search bar: one short rounded field, like the taskbar's search box, with an
+         accent outline while it has keyboard focus. It grows only for large text. -->
+    <Style x:Key="Albumen.SearchBar" TargetType="Border">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="CornerRadius" Value="16" />
+        <Setter Property="Background" Value="{DynamicResource Albumen.FieldBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
+            </DataTrigger>
+            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- The bar's text box: only the text and its caret; the bar draws the field around it. -->
+    <Style x:Key="Albumen.SearchBox" TargetType="TextBox">
+        <!-- The Fluent TextBox style would otherwise impose MinHeight 32 and grow the 32 px bar. -->
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="2,0" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource Albumen.TextBrush}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <ScrollViewer x:Name="PART_ContentHost" Focusable="False" Margin="{TemplateBinding Padding}"
+                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                  HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A round icon button inside the search bar (the magnifier and the clear button). -->
+    <Style x:Key="Albumen.SearchBarButton" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource Albumen.FocusVisual}" />
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Chrome" CornerRadius="14" SnapsToDevicePixels="True"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.HoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Albumen.PressedBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
+                <Setter Property="Template" Value="{StaticResource Albumen.HighContrastButtonTemplate}" />
+                <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- The top bar's row holds the tab strip on the left and, centred in the rest of the row,
+         whatever the window puts in the TabControl's Tag (the photo search bar). -->
     <Style x:Key="Albumen.TopBar" TargetType="TabControl">
         <Setter Property="Background" Value="Transparent" />
+        <!-- Every page lives in this control's content, and text that has no brush of its own
+             inherits from here; without this the Golden VM showed it black on the dark ground. -->
+        <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
         <Setter Property="ItemContainerStyle" Value="{StaticResource Albumen.TopBarItem}" />
         <Setter Property="Template">
             <Setter.Value>
@@ -699,17 +703,27 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <Border x:Name="Strip" HorizontalAlignment="Left" Margin="8,0,0,0" Padding="3" CornerRadius="10"
-                                Background="{StaticResource Albumen.SubtleFillBrush}">
-                            <TabPanel IsItemsHost="True" KeyboardNavigation.TabIndex="1" />
-                        </Border>
+                        <!-- The strip takes the width it needs, so it never wraps at large text; the
+                             empty right column shares that width, so the middle stays centred. -->
+                        <Grid x:Name="HeaderRow" Grid.IsSharedSizeScope="True">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="TopBarSide" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="TopBarSide" />
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="Strip" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,0,0,0"
+                                    Padding="3" CornerRadius="10" Background="{DynamicResource Albumen.SubtleFillBrush}">
+                                <TabPanel IsItemsHost="True" KeyboardNavigation.TabIndex="1" />
+                            </Border>
+                            <ContentPresenter x:Name="HeaderCenter" Grid.Column="1" Content="{TemplateBinding Tag}" />
+                        </Grid>
                         <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Row="1" ContentSource="SelectedContent"
                                           Margin="{TemplateBinding Padding}" KeyboardNavigation.TabNavigation="Local" />
                     </Grid>
                     <ControlTemplate.Triggers>
                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                            <Setter TargetName="Strip" Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                            <Setter TargetName="Strip" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                            <Setter TargetName="Strip" Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                            <Setter TargetName="Strip" Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                             <Setter TargetName="Strip" Property="BorderThickness" Value="1" />
                         </DataTrigger>
                     </ControlTemplate.Triggers>

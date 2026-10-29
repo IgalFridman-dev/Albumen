@@ -199,6 +199,29 @@ public sealed class ScopeProjectionTests
     }
 
     [Theory]
+    [InlineData(3, "Includes a.jpg, b.jpg and c.png.")]
+    [InlineData(8, "Includes a.jpg, b.jpg, c.png, d.jpg, e.jpg, f.jpg and 2 more.")]
+    [InlineData(1, "Includes a.jpg.")]
+    [InlineData(0, "")]
+    public void ReadyFolderListsTheFirstPhotosByName(int supported, string expected)
+    {
+        string[] names = ["a.jpg", "b.jpg", "c.png", "d.jpg", "e.jpg", "f.jpg"];
+        var ready = ReadySnapshot();
+        var snapshot = ready with
+        {
+            Preflight = ready.Preflight! with
+            {
+                CompleteCounts = new ScopeOutcomeCounts(supported, 0, 0, 0, [.. names.Take(supported)]),
+            },
+        };
+
+        var viewModel = new ShellViewModel(new RecordingChooseScopeWorkflow(snapshot));
+
+        Assert.Equal(expected, viewModel.FolderContentsText);
+        Assert.Equal(supported > 0, viewModel.HasFolderContents);
+    }
+
+    [Theory]
     [InlineData(@"C:\Users\Igal\Pictures\2024 trip", "2024 trip")]
     [InlineData(@"C:\Photos\", "Photos")]
     [InlineData(@"D:\", @"D:\")]

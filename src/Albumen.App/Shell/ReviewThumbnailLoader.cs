@@ -52,7 +52,7 @@ public sealed class ReviewThumbnailLoader
     internal ReviewThumbnailLoader(
         IReviewPreviewSource source,
         Func<long, (ScanRunContext Context, ScanFileOccurrence Occurrence)?> resolve,
-        long byteCapacity = 48L * 1024 * 1024)
+        long byteCapacity = 96L * 1024 * 1024)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(byteCapacity);
         this.source = source ?? throw new ArgumentNullException(nameof(source));

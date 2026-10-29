@@ -5,7 +5,12 @@
     <UseWPF>true</UseWPF>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <SelfContained>false</SelfContained>
+    <!-- Drawn by eng\icon\New-AlbumenIcon.ps1; the windows load the same file for their title bar. -->
+    <ApplicationIcon>Assets\Albumen.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\Albumen.ico" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Albumen.Domain\Albumen.Domain.csproj" />
     <ProjectReference Include="..\Albumen.Application\Albumen.Application.csproj" />

@@ -4,10 +4,7 @@ using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using System.Windows.Data;
 using System.Windows.Input;
-using System.Windows.Media;
 using Albumen.App;
 using Albumen.App.Shell;
 using Albumen.Application.Review;
@@ -20,47 +17,39 @@ namespace Albumen.Scenarios.Tests.Shell;
 public sealed class E1S4ReviewAcceptanceTests
 {
     [Fact]
-    public void PointerActivationThroughProtectedOnClickKeyboardOverrideAndAutomationApprovalRemainSeparateExplicitCommands()
+    public void PointerMenuChoiceAutomationToggleKeyboardOverrideAndApprovalRemainSeparateExplicitCommands()
     {
         WpfReviewSelectionTests.RunOnSta(() =>
         {
             var window = new MainWindow();
             var fixture = ReviewShellFixture.Ready(
                 dialog: new WpfReviewDialogService(() => window));
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             window.DataContext = fixture.ViewModel;
             try
             {
                 window.Show();
                 WpfReviewSelectionTests.Drain();
 
-                var liveSelection = WpfReviewSelectionTests
-                    .Descendants<ReviewSelectionCheckBox>(window)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel
-                        { OccurrenceId: 1 });
-                var liveOccurrence = Assert.IsType<ScanOccurrenceViewModel>(
-                    liveSelection.DataContext);
-                var liveSlot = Assert.IsType<StackPanel>(
-                    VisualTreeHelper.GetParent(liveSelection));
-                var liveIndex = liveSlot.Children.IndexOf(liveSelection);
-                Assert.True(liveIndex >= 0);
-                liveSlot.Children.RemoveAt(liveIndex);
-                var pointerProbe = CreateLivePointerProbe(liveOccurrence);
-                liveSlot.Children.Insert(liveIndex, pointerProbe);
-                window.UpdateLayout();
-                WpfReviewSelectionTests.Drain();
-                Assert.Same(pointerProbe, liveSlot.Children[liveIndex]);
-                Assert.DoesNotContain(liveSelection,
-                    WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(window));
-                Assert.Same(pointerProbe,
-                    WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(window)
-                        .Single(control => control.DataContext is ScanOccurrenceViewModel
-                            { OccurrenceId: 1 }));
-
-                var pointerCommand = Assert.IsType<AsyncCommand>(pointerProbe.Command);
-                RunTrackedCommand(pointerCommand, pointerProbe.ReleasePointer);
+                // Pointer: "Remove" chosen from the photo's menu.
+                var first = ReviewTiles.Tile(window, 1);
+                var pointerCommand = Assert.IsType<AsyncCommand>(first.Member?.ToggleSelectionCommand);
+                RunTrackedCommand(pointerCommand, () => ReviewTiles.Click(ReviewTiles.RemoveItem(first)));
                 Assert.Equal([1L], fixture.Workflow.Current.Review.Groups[0]
                     .SelectedOccurrenceIds.Order());
+                Assert.Empty(fixture.Workflow.Affirmations);
+                Assert.Empty(fixture.Workflow.Approvals);
+
+                // UI Automation: the tile's Toggle pattern unmarks it, and marks it again so the
+                // approval below has a photo to move.
+                var marked = ReviewTiles.Tile(window, 1);
+                var automationCommand = Assert.IsType<AsyncCommand>(marked.Member?.ToggleSelectionCommand);
+                RunTrackedCommand(automationCommand, () => ReviewTiles.Toggle(marked));
+                Assert.Empty(fixture.Workflow.Current.Review.Groups[0].SelectedOccurrenceIds);
+                var unmarked = ReviewTiles.Tile(window, 1);
+                var remarkCommand = Assert.IsType<AsyncCommand>(unmarked.Member?.ToggleSelectionCommand);
+                RunTrackedCommand(remarkCommand, () => ReviewTiles.Toggle(unmarked));
+                Assert.Equal([1L], fixture.Workflow.Current.Review.Groups[0].SelectedOccurrenceIds.Order());
                 Assert.Empty(fixture.Workflow.Affirmations);
                 Assert.Empty(fixture.Workflow.Approvals);
 
@@ -70,20 +59,12 @@ public sealed class E1S4ReviewAcceptanceTests
                     ReviewCommandOutcome.OverrideRequired,
                     beforeOverride,
                     proposal);
-                window.Activate();
-                window.UpdateLayout();
-                WpfReviewSelectionTests.Drain();
-                var occurrences = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                var fourth = fixture.ViewModel.ActiveReviewGroup!.Members
-                    .Single(member => member.OccurrenceId == 4);
-                occurrences.ScrollIntoView(fourth);
-                window.UpdateLayout();
-                WpfReviewSelectionTests.Drain();
-                var keyboardSelection = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(window)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 4 });
-                Assert.True(keyboardSelection.Focus());
-                Keyboard.Focus(keyboardSelection);
-                var keyboardCommand = Assert.IsType<AsyncCommand>(keyboardSelection.Command);
+                ReviewTiles.ShowAndDrain(window);
+                // Keyboard: the Menu key opens the photo's menu, and Enter chooses "Remove".
+                var fourth = ReviewTiles.Tile(window, 4);
+                ReviewTiles.Focus(fourth);
+                var keyboardCommand = Assert.IsType<AsyncCommand>(fourth.Member?.ToggleSelectionCommand);
+                var remove = ReviewTiles.OpenMenuAtRemove(fourth);
 
                 var interaction = WpfSurvivorOverrideDialogTests.RunModalInteraction(
                     window,
@@ -98,7 +79,7 @@ public sealed class E1S4ReviewAcceptanceTests
                     },
                     () => RunTrackedCommand(
                         keyboardCommand,
-                        () => WpfReviewSelectionTests.Press(keyboardSelection, Key.Space)));
+                        () => WpfReviewSelectionTests.Press(remove, Key.Enter)));
 
                 Assert.True(interaction.DialogClosed);
                 Assert.Equal(SurvivorOverrideDialogResult.Affirm, interaction.DialogResult);
@@ -127,6 +108,16 @@ public sealed class E1S4ReviewAcceptanceTests
                         Assert.Equal(SelectionCommandKind.Toggle, pointer.Kind);
                         Assert.Equal([1L], pointer.OccurrenceIds);
                     },
+                    automation =>
+                    {
+                        Assert.Equal(SelectionCommandKind.Toggle, automation.Kind);
+                        Assert.Equal([1L], automation.OccurrenceIds);
+                    },
+                    remark =>
+                    {
+                        Assert.Equal(SelectionCommandKind.Toggle, remark.Kind);
+                        Assert.Equal([1L], remark.OccurrenceIds);
+                    },
                     keyboard =>
                     {
                         Assert.Equal(SelectionCommandKind.Toggle, keyboard.Kind);
@@ -142,34 +133,6 @@ public sealed class E1S4ReviewAcceptanceTests
                 WpfReviewSelectionTests.Drain();
             }
         });
-    }
-
-    private static ReviewSelectionInputProbe CreateLivePointerProbe(
-        ScanOccurrenceViewModel dataContext)
-    {
-        var probe = new ReviewSelectionInputProbe
-        {
-            DataContext = dataContext,
-            MinHeight = 34,
-            Padding = new Thickness(4),
-        };
-        probe.SetBinding(ButtonBase.CommandProperty,
-            new Binding(nameof(ScanOccurrenceViewModel.ToggleSelectionCommand)));
-        probe.SetBinding(ToggleButton.IsCheckedProperty,
-            new Binding(nameof(ScanOccurrenceViewModel.IsSelected))
-            {
-                Mode = BindingMode.OneWay,
-            });
-        probe.SetBinding(UIElement.IsEnabledProperty,
-            new Binding(nameof(ScanOccurrenceViewModel.CanSelect)));
-        probe.SetBinding(ContentControl.ContentProperty,
-            new Binding(nameof(ScanOccurrenceViewModel.EligibilityText)));
-        AutomationProperties.SetAutomationId(probe, "selection-control");
-        probe.SetBinding(AutomationProperties.NameProperty,
-            new Binding(nameof(ScanOccurrenceViewModel.AutomationName)));
-        probe.SetBinding(AutomationProperties.ItemStatusProperty,
-            new Binding(nameof(ScanOccurrenceViewModel.ItemStatus)));
-        return probe;
     }
 
     private static void RunTrackedCommand(AsyncCommand command, Action activation)

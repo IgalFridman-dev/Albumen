@@ -106,7 +106,8 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
             return LikelyMatchesResult.Of(LikelyMatchesOutcome.Failed, normalized,
                 "The search model changed after this Scan. Scan again to search.");
 
-        // The first prompt loads the text model, which takes about a second: keep it off the caller.
+        // The indexer opens the text model once a Scan's photos are indexed; should it still be
+        // opening (or have failed to), the first prompt waits for it here: keep it off the caller.
         var caption = normalized.Contains("photo", StringComparison.OrdinalIgnoreCase) ? normalized : PromptTemplate + normalized;
         var text = await Task.Run(() => encoder.EncodeText(profile, caption), cancellationToken).ConfigureAwait(false);
         if (text.Failure is { } failure) return Failure(normalized, failure);

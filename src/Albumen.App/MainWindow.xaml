@@ -3,16 +3,18 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:app="clr-namespace:Albumen.App"
         xmlns:shell="clr-namespace:Albumen.App.Shell"
+        xmlns:review="clr-namespace:Albumen.App.Review"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Albumen"
+        Icon="/Albumen.App;component/Assets/Albumen.ico"
         Width="960"
         Height="720"
         MinWidth="680"
         MinHeight="520"
-        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-        Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+        Background="{DynamicResource Albumen.WindowBrush}"
+        Foreground="{DynamicResource Albumen.TextBrush}"
         FontFamily="Segoe UI Variable Text, Segoe UI"
         WindowStartupLocation="CenterScreen">
     <Window.CommandBindings>
@@ -31,16 +33,10 @@
                 <Setter.Value>
                     <ControlTemplate>
                         <Rectangle Margin="2" StrokeThickness="2" StrokeDashArray="1,1"
-                                   Stroke="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                                   Stroke="{DynamicResource Albumen.TextBrush}" />
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
-        </Style>
-        <Style x:Key="DangerButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="#FFB3261E" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="FocusVisualStyle" Value="{StaticResource ActionFocusVisual}" />
         </Style>
         <DataTemplate x:Key="ScanOutcomeSummaryTemplate">
             <StackPanel Margin="0,2">
@@ -55,8 +51,8 @@
         <!-- One photo in a cleanup: what it is, where it was, and what happened to it. -->
         <DataTemplate x:Key="ActionItemTemplate">
             <app:ReviewAutomationBorder Margin="0,4" Padding="14,10" BorderThickness="1" CornerRadius="10"
-                    Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    Background="{DynamicResource Albumen.SurfaceBrush}"
+                    BorderBrush="{DynamicResource Albumen.BorderBrush}"
                     AutomationProperties.AutomationId="action-item"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding ItemStatus}">
@@ -79,7 +75,7 @@
         </DataTemplate>
         <DataTemplate x:Key="ActionRecordItemTemplate">
             <app:ReviewAutomationBorder Margin="0,8,0,0" Padding="0,8,0,0" BorderThickness="0,1,0,0"
-                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    BorderBrush="{DynamicResource Albumen.BorderBrush}"
                     AutomationProperties.AutomationId="action-record-item"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding StatusText}">
@@ -121,6 +117,9 @@
             </Border>
         </DataTemplate>
         <Style x:Key="ReviewListStyle" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource Albumen.TextBrush}" />
             <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
             <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
@@ -130,47 +129,18 @@
                 <Setter.Value>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <!-- The cards inside show what is open; the item adds no chrome. -->
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
                     </Style>
                 </Setter.Value>
             </Setter>
         </Style>
-        <DataTemplate x:Key="OccurrenceTemplate">
-            <StackPanel Margin="4,6">
-                <TextBlock Text="{Binding PathKind}" FontWeight="SemiBold" />
-                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" TextWrapping="Wrap"
-                         AutomationProperties.Name="Discovered file path" />
-                <TextBox Text="{Binding ResolvedPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" TextWrapping="Wrap"
-                         AutomationProperties.Name="Resolved file path" />
-                <TextBlock Text="{Binding PhysicalIdentity}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding ByteLength, StringFormat='Content length: {0} bytes'}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Allocation}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Outcome}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding OutcomeLabel}" TextWrapping="Wrap" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding NextStep}" TextWrapping="Wrap" />
-            </StackPanel>
-        </DataTemplate>
-        <DataTemplate x:Key="ReviewOccurrenceTemplate">
-            <StackPanel Margin="4,6">
-                <app:ReviewSelectionCheckBox MinHeight="34"
-                          Padding="4"
-                          IsChecked="{Binding IsSelected, Mode=OneWay}"
-                          IsEnabled="{Binding CanSelect}"
-                          Command="{Binding ToggleSelectionCommand}"
-                          AutomationProperties.AutomationId="selection-control"
-                          AutomationProperties.Name="{Binding AutomationName}"
-                          AutomationProperties.ItemStatus="{Binding ItemStatus}"
-                           Content="{Binding EligibilityText}" />
-                <TextBlock Text="{Binding PathKind}" FontWeight="SemiBold" />
-                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False"
-                         TextWrapping="Wrap" AutomationProperties.Name="Discovered file path" />
-                <TextBox Text="{Binding ResolvedPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False"
-                         TextWrapping="Wrap" AutomationProperties.Name="Resolved file path" />
-                <TextBlock Text="{Binding PhysicalIdentity}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding ByteLength, StringFormat='Content length: {0} bytes'}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Allocation}" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Outcome}" TextWrapping="Wrap" />
-            </StackPanel>
-        </DataTemplate>
         <app:EqualValuesConverter x:Key="EqualValuesConverter" />
         <app:EqualValuesToVisibilityConverter x:Key="EqualValuesToVisibilityConverter" />
         <!-- A kind of result (Identical copies, Look-alike, Maybe similar, couldn't check). -->
@@ -193,10 +163,8 @@
                                             </MultiBinding>
                                         </Condition.Binding>
                                     </Condition>
-                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
                                 </MultiDataTrigger.Conditions>
-                                <Setter Property="Background" Value="{StaticResource Albumen.AccentSoftBrush}" />
-                                <Setter Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
+                                <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
                             </MultiDataTrigger>
                             <MultiDataTrigger>
                                 <MultiDataTrigger.Conditions>
@@ -210,7 +178,7 @@
                                     </Condition>
                                     <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
                                 </MultiDataTrigger.Conditions>
-                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                                 <Setter Property="BorderThickness" Value="2" />
                             </MultiDataTrigger>
                         </Style.Triggers>
@@ -218,11 +186,18 @@
                 </Button.Style>
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="13" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Border Style="{StaticResource Albumen.KindMark}" Margin="0,2,10,2" />
+                    <Border Style="{StaticResource Albumen.AccentLine}" Margin="0,2,10,2">
+                        <Border.Visibility>
+                            <MultiBinding Converter="{StaticResource EqualValuesToVisibilityConverter}">
+                                <Binding Path="Category" />
+                                <Binding Path="DataContext.ActiveReviewCategory.Category" RelativeSource="{RelativeSource AncestorType=Window}" />
+                            </MultiBinding>
+                        </Border.Visibility>
+                    </Border>
                     <StackPanel Grid.Column="1">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
                         <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.Caption}" Text="{Binding Description}" />
@@ -231,276 +206,238 @@
                 </Grid>
             </Button>
         </DataTemplate>
-        <!-- One set of photos inside the open kind. -->
-        <DataTemplate x:Key="ReviewGroupTemplate">
-            <Button MinHeight="44" Margin="2,3" Click="OnOpenReviewGroupClick"
-                    AutomationProperties.AutomationId="open-review-group"
+        <!-- The gallery scrolls by pixel through the open kind's sets, a whole set per item;
+             the sets themselves take no focus, their photos do. -->
+        <Style x:Key="ReviewGalleryStyle" TargetType="ListBox" BasedOn="{StaticResource ReviewListStyle}">
+            <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
+            <!-- Tab enters one photo and the next Tab leaves the gallery; arrows move between photos.
+                 "Continue" would walk every photo of a 2,000-copy set before reaching the viewers. -->
+            <Setter Property="KeyboardNavigation.TabNavigation" Value="Once" />
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Focusable" Value="False" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <app:ViewerOverlayConverter x:Key="ViewerOverlayConverter" />
+        <!-- One line of a photo's facts; an empty line is left out. -->
+        <Style x:Key="ReviewFactLine" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+            <Style.Triggers>
+                <Trigger Property="Text" Value="">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- A photo's facts, shown on hover over its tile: name, path, size, pixel size, why it is
+             in its set, and why it can't be marked when it can't. -->
+        <DataTemplate x:Key="ReviewPhotoFactsTemplate">
+            <StackPanel MaxWidth="420">
+                <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False"
+                         TextWrapping="Wrap" Margin="0,2,0,0" Style="{StaticResource Albumen.PathText}"
+                         AutomationProperties.Name="{Binding DiscoveredPath}" />
+                <TextBlock Style="{StaticResource ReviewFactLine}" Text="{Binding SizeText}" />
+                <TextBlock Style="{StaticResource ReviewFactLine}"
+                           Text="{Binding PlacementTarget.DimensionsText, RelativeSource={RelativeSource AncestorType=ToolTip}}" />
+                <TextBlock Style="{StaticResource ReviewFactLine}" Text="{Binding KindLine}" />
+                <TextBlock Style="{StaticResource ReviewFactLine}" Text="{Binding UncertaintyLine}" />
+                <TextBlock Style="{StaticResource ReviewFactLine}" Text="{x:Static shell:ScanOccurrenceViewModel.BlurrierText}"
+                           Visibility="{Binding LooksBlurrier, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <TextBlock Text="{Binding EligibilityText}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource ReviewFactLine}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CanSelect}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <TextBlock Style="{StaticResource ReviewFactLine}" Text="{x:Static shell:ScanOccurrenceViewModel.RecommendationText}" />
+            </StackPanel>
+        </DataTemplate>
+        <!-- One photo of a set: its thumbnail on the dark ground with rounded corners, as wide as
+             its shape needs. A photo a viewer shows is dimmed and names that viewer; a photo marked
+             for removal carries the Removed sign; the set's hints, and "Matches" while a search
+             finds the photo, sit as chips at the bottom. A click shows it in the Left Viewer while
+             that viewer is empty; it can be dragged onto either viewer; its menu marks it or
+             places it. -->
+        <DataTemplate x:Key="ReviewPhotoTileTemplate">
+            <review:ReviewPhotoTile Style="{StaticResource Albumen.ThumbnailButton}" Member="{Binding}"
+                    GroupId="{Binding DataContext.GroupId, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                    PlaceCommand="{Binding DataContext.PlaceInViewerCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    DimensionsText="{Binding DimensionsText, ElementName=Thumbnail}"
+                    PreviewMouseLeftButtonDown="OnTilePreviewMouseLeftButtonDown" PreviewMouseMove="OnTileMouseMove"
+                    AutomationProperties.AutomationId="review-photo"
                     AutomationProperties.Name="{Binding AutomationName}"
                     AutomationProperties.ItemStatus="{Binding ItemStatus}"
                     AutomationProperties.PositionInSet="{Binding PositionInSet}"
                     AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
-                <Button.Style>
-                    <Style TargetType="Button" BasedOn="{StaticResource Albumen.CardButton}">
+                <review:ReviewPhotoTile.ShownIn>
+                    <MultiBinding Converter="{StaticResource ViewerOverlayConverter}">
+                        <Binding Path="OccurrenceId" />
+                        <Binding Path="DataContext.GroupId" RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
+                        <Binding Path="DataContext.LeftViewer.Member.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                        <Binding Path="DataContext.LeftViewer.GroupId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                        <Binding Path="DataContext.RightViewer.Member.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                        <Binding Path="DataContext.RightViewer.GroupId" RelativeSource="{RelativeSource AncestorType=Window}" />
+                    </MultiBinding>
+                </review:ReviewPhotoTile.ShownIn>
+                <Grid>
+                    <app:PhotoThumbnail x:Name="Thumbnail" Member="{Binding}" CornerRadius="8" LoadsWhenInView="True"
+                            Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}">
+                        <app:PhotoThumbnail.Style>
+                            <Style TargetType="app:PhotoThumbnail">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsShownInViewer, RelativeSource={RelativeSource AncestorType=review:ReviewPhotoTile}}" Value="True">
+                                        <Setter Property="Opacity" Value="0.4" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </app:PhotoThumbnail.Style>
+                    </app:PhotoThumbnail>
+                    <Border HorizontalAlignment="Center" VerticalAlignment="Center" Padding="10,4" CornerRadius="12"
+                            Background="{DynamicResource Albumen.PillBrush}"
+                            Visibility="{Binding IsShownInViewer, RelativeSource={RelativeSource AncestorType=review:ReviewPhotoTile}, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Text="{Binding ShownIn, RelativeSource={RelativeSource AncestorType=review:ReviewPhotoTile}}"
+                                   FontWeight="SemiBold" Foreground="{DynamicResource Albumen.TextBrush}" />
+                    </Border>
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="6" Padding="6,2" CornerRadius="6"
+                            Background="{DynamicResource Albumen.DangerBrush}"
+                            TextElement.Foreground="{DynamicResource Albumen.OnAccentBrush}"
+                            Visibility="{Binding IsSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Text="&#xE74D;" VerticalAlignment="Center" />
+                            <TextBlock Margin="4,0,0,0" Text="Removed" FontSize="12" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                    <WrapPanel VerticalAlignment="Bottom" Margin="6,0,0,6">
+                        <Border Style="{StaticResource Albumen.Badge}"
+                                Visibility="{Binding MatchesSearch, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="Matches" />
+                        </Border>
+                        <Border Style="{StaticResource Albumen.Badge}">
+                            <Border.Visibility>
+                                <MultiBinding Converter="{StaticResource EqualValuesToVisibilityConverter}">
+                                    <Binding Path="OccurrenceId" />
+                                    <Binding Path="DataContext.Suggestion.OccurrenceId" RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
+                                </MultiBinding>
+                            </Border.Visibility>
+                            <TextBlock TextTrimming="CharacterEllipsis">
+                                <Run Text="Suggested best:" />
+                                <Run Text="{Binding DataContext.Suggestion.Reason, RelativeSource={RelativeSource AncestorType=ItemsControl}, Mode=OneWay}" />
+                            </TextBlock>
+                        </Border>
+                        <Border Style="{StaticResource Albumen.Badge}"
+                                Visibility="{Binding LooksBlurrier, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="Blurrier" />
+                        </Border>
+                        <Border Style="{StaticResource Albumen.Badge}"
+                                Visibility="{Binding IsAliasPath, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="Another path to the same file" TextTrimming="CharacterEllipsis" />
+                        </Border>
+                        <Border Style="{StaticResource Albumen.Badge}"
+                                Visibility="{Binding IsMarkedElsewhere, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="{Binding MarkedElsewhereText}" TextTrimming="CharacterEllipsis" />
+                        </Border>
+                    </WrapPanel>
+                </Grid>
+            </review:ReviewPhotoTile>
+        </DataTemplate>
+        <!-- One set in the gallery: its label ("Set 2: 3 photos") with the accent line, what is
+             marked in it, then all of its photos in justified rows. A set settled by marks held in
+             other sets reads as done: dimmed, except in High Contrast where the caption alone says
+             so. -->
+        <DataTemplate x:Key="ReviewSetTemplate">
+            <app:ReviewAutomationBorder Margin="0,0,0,18"
+                    Loaded="OnReviewSetLoaded" Unloaded="OnReviewSetUnloaded"
+                    AutomationProperties.AutomationId="review-set"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.ItemStatus="{Binding ItemStatus}"
+                    AutomationProperties.PositionInSet="{Binding PositionInSet}"
+                    AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
+                <app:ReviewAutomationBorder.Style>
+                    <Style TargetType="Border">
                         <Style.Triggers>
                             <MultiDataTrigger>
                                 <MultiDataTrigger.Conditions>
-                                    <Condition Value="True">
-                                        <Condition.Binding>
-                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
-                                                <Binding Path="GroupId" />
-                                                <Binding Path="DataContext.ActiveReviewGroup.GroupId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                            </MultiBinding>
-                                        </Condition.Binding>
-                                    </Condition>
+                                    <Condition Binding="{Binding IsSettledElsewhere}" Value="True" />
                                     <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
                                 </MultiDataTrigger.Conditions>
-                                <Setter Property="Background" Value="{StaticResource Albumen.AccentSoftBrush}" />
-                                <Setter Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
-                            </MultiDataTrigger>
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Value="True">
-                                        <Condition.Binding>
-                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
-                                                <Binding Path="GroupId" />
-                                                <Binding Path="DataContext.ActiveReviewGroup.GroupId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                            </MultiBinding>
-                                        </Condition.Binding>
-                                    </Condition>
-                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
-                                </MultiDataTrigger.Conditions>
-                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
-                                <Setter Property="BorderThickness" Value="2" />
+                                <Setter Property="Opacity" Value="0.55" />
                             </MultiDataTrigger>
                         </Style.Triggers>
                     </Style>
-                </Button.Style>
-                <Grid>
-                    <Grid.Style>
-                        <!-- A set settled by marks held in other sets reads as done: dimmed,
-                             except in High Contrast where the caption alone says so. -->
-                        <Style TargetType="Grid">
-                            <Style.Triggers>
-                                <MultiDataTrigger>
-                                    <MultiDataTrigger.Conditions>
-                                        <Condition Binding="{Binding IsSettledElsewhere}" Value="True" />
-                                        <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="False" />
-                                    </MultiDataTrigger.Conditions>
-                                    <Setter Property="Opacity" Value="0.55" />
-                                </MultiDataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Grid.Style>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border Style="{StaticResource Albumen.KindMark}" Margin="0,2,10,2" />
-                    <StackPanel Grid.Column="1">
-                        <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                        <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.Caption}" Text="{Binding SelectionStatus}" />
-                    </StackPanel>
-                </Grid>
-            </Button>
-        </DataTemplate>
-        <!-- One photo of the open set: thumbnail (opens the viewer), name, the Keep / Remove
-             control near the top so it stays reachable at large text sizes, then path, facts
-             and badges. The selection control's direct parent
-             stays a StackPanel (acceptance tests swap it in place). -->
-        <DataTemplate x:Key="ReviewComparisonTemplate">
-            <Border x:Name="PhotoCard" Margin="2,3" Padding="10" CornerRadius="10">
-                <Border.Style>
-                    <Style TargetType="Border">
-                        <Setter Property="BorderThickness" Value="1" />
-                        <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                        <Setter Property="BorderBrush" Value="{StaticResource Albumen.BorderBrush}" />
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                            </DataTrigger>
-                            <DataTrigger Value="True">
-                                <DataTrigger.Binding>
-                                    <MultiBinding Converter="{StaticResource EqualValuesConverter}">
-                                        <Binding Path="OccurrenceId" />
-                                        <Binding Path="DataContext.ActiveReviewMember.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                    </MultiBinding>
-                                </DataTrigger.Binding>
-                                <Setter Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
-                                <Setter Property="BorderThickness" Value="2" />
-                            </DataTrigger>
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Value="True">
-                                        <Condition.Binding>
-                                            <MultiBinding Converter="{StaticResource EqualValuesConverter}">
-                                                <Binding Path="OccurrenceId" />
-                                                <Binding Path="DataContext.ActiveReviewMember.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                            </MultiBinding>
-                                        </Condition.Binding>
-                                    </Condition>
-                                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
-                                </MultiDataTrigger.Conditions>
-                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
-                            </MultiDataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Border.Style>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <!-- Compare sits under the thumbnail so it is never clipped by a narrow card. -->
-                    <StackPanel Grid.Column="0" Width="124" VerticalAlignment="Top">
-                        <Button Width="112" Height="84" VerticalAlignment="Top" Margin="0,0,12,0"
-                                Style="{StaticResource Albumen.ThumbnailButton}"
-                                Click="OnOpenReviewMemberClick"
-                                ToolTip="Open in the viewer"
-                                AutomationProperties.AutomationId="open-review-member"
-                                AutomationProperties.Name="{Binding AutomationName}"
-                                AutomationProperties.ItemStatus="{Binding ItemStatus}"
-                                AutomationProperties.PositionInSet="{Binding PositionInSet}"
-                                AutomationProperties.SizeOfSet="{Binding SizeOfSet}">
-                            <app:PhotoThumbnail x:Name="Thumbnail" Member="{Binding}"
-                                    Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
-                        </Button>
-                        <!-- The photo already in the viewer has nothing to be compared with. -->
-                        <Button Content="Compare" Margin="0,6,12,0" MinHeight="32" Padding="6,4" HorizontalAlignment="Stretch"
-                                Command="{Binding DataContext.CompareReviewMemberCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                CommandParameter="{Binding}"
-                                ToolTip="Show this photo beside the one in the viewer"
-                                AutomationProperties.Name="{Binding FileName, StringFormat='Compare {0} with the photo in the viewer'}">
-                            <Button.Style>
-                                <Style TargetType="Button" BasedOn="{StaticResource Albumen.Button}">
-                                    <Style.Triggers>
-                                        <DataTrigger Value="True">
-                                            <DataTrigger.Binding>
-                                                <MultiBinding Converter="{StaticResource EqualValuesConverter}">
-                                                    <Binding Path="OccurrenceId" />
-                                                    <Binding Path="DataContext.ActiveReviewMember.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                                </MultiBinding>
-                                            </DataTrigger.Binding>
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Button.Style>
-                        </Button>
-                    </StackPanel>
-                    <StackPanel Grid.Column="1">
-                        <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
-                            <app:ReviewSelectionCheckBox x:Name="ReviewSelectionCheckBox" MinHeight="34"
-                                    VerticalAlignment="Top"
-                                    Style="{StaticResource Albumen.KeepRemoveToggle}"
-                                    IsChecked="{Binding IsSelected, Mode=OneWay}"
-                                    IsEnabled="{Binding CanSelect}"
-                                    Command="{Binding ToggleSelectionCommand}"
-                                    AutomationProperties.AutomationId="selection-control"
-                                    AutomationProperties.Name="{Binding AutomationName}"
-                                    AutomationProperties.ItemStatus="{Binding ItemStatus}"
-                                    Content="{Binding EligibilityText}" />
-                        </StackPanel>
-                        <TextBox Text="{Binding DiscoveredPath, Mode=OneWay}" IsReadOnly="True"
-                                 IsTabStop="False" TextWrapping="Wrap" FontSize="12" Margin="0,2,0,0"
-                                 Style="{StaticResource Albumen.PathText}"
-                                 AutomationProperties.Name="{Binding DiscoveredPath}" />
-                        <WrapPanel Margin="0,4,0,0">
-                            <TextBlock Margin="0,0,12,0" Style="{StaticResource Albumen.Caption}" Text="{Binding SizeText}" />
-                            <TextBlock Style="{StaticResource Albumen.Caption}"
-                                       Text="{Binding DimensionsText, ElementName=Thumbnail}" />
-                        </WrapPanel>
-                        <WrapPanel>
-                            <Border Style="{StaticResource Albumen.Badge}">
-                                <Border.Visibility>
-                                    <MultiBinding Converter="{StaticResource EqualValuesToVisibilityConverter}">
-                                        <Binding Path="OccurrenceId" />
-                                        <Binding Path="DataContext.ActiveReviewSuggestion.OccurrenceId" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                    </MultiBinding>
-                                </Border.Visibility>
-                                <TextBlock TextWrapping="Wrap">
-                                    <Run Text="Suggested best:" />
-                                    <Run Text="{Binding DataContext.ActiveReviewSuggestion.Reason, RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}" />
-                                </TextBlock>
-                            </Border>
-                            <Border Style="{StaticResource Albumen.Badge}"
-                                    Visibility="{Binding LooksBlurrier, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Text="{x:Static shell:ScanOccurrenceViewModel.BlurrierText}" TextWrapping="Wrap" />
-                            </Border>
-                            <Border Style="{StaticResource Albumen.Badge}"
-                                    Visibility="{Binding IsAliasPath, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Text="Another path to the same file" TextWrapping="Wrap" />
-                            </Border>
-                        </WrapPanel>
-                    </StackPanel>
-                </Grid>
-            </Border>
-        </DataTemplate>
-        <!-- One likely match: thumbnail, name and the set it is in. Opening it shows it in
-             that set, where Keep / Remove works as usual; the list itself marks nothing. -->
-        <DataTemplate x:Key="LikelyMatchTemplate">
-            <Button Width="156" Margin="2,3" Padding="6" Click="OnOpenLikelyMatchClick"
-                    IsEnabled="{Binding CanOpen}"
-                    Style="{StaticResource Albumen.CardButton}"
-                    ToolTip="Open in its set"
-                    AutomationProperties.AutomationId="open-likely-match"
-                    AutomationProperties.Name="{Binding AutomationName}"
-                    AutomationProperties.PositionInSet="{Binding Photo.PositionInSet}"
-                    AutomationProperties.SizeOfSet="{Binding Photo.SizeOfSet}">
+                </app:ReviewAutomationBorder.Style>
                 <StackPanel>
-                    <app:PhotoThumbnail Width="140" Height="105" Member="{Binding Photo}"
-                            Loader="{Binding DataContext.ReviewThumbnails, RelativeSource={RelativeSource AncestorType=Window}}" />
-                    <TextBlock Margin="0,6,0,0" Text="{Binding Photo.FileName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.Caption}" Text="{Binding Context}" TextWrapping="Wrap" />
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="13" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource Albumen.AccentLine}" Margin="0,2,10,2" />
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="{Binding Summary}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.Caption}" Text="{Binding SelectionStatus}" />
+                        </StackPanel>
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Members}" ItemTemplate="{StaticResource ReviewPhotoTileTemplate}"
+                                  Focusable="False">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <review:JustifiedPanel RowHeight="200" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
                 </StackPanel>
-            </Button>
+            </app:ReviewAutomationBorder>
         </DataTemplate>
+        <!-- A viewer box: a drop target with its photo, or a hint while it is empty. -->
+        <Style x:Key="ReviewViewerStyle" TargetType="Border">
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="MinHeight" Value="160" />
+            <Setter Property="AllowDrop" Value="True" />
+            <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style x:Key="ReviewViewerEmptyText" TargetType="TextBlock" BasedOn="{StaticResource Albumen.MutedText}">
+            <Setter Property="Text" Value="{x:Static shell:ReviewViewerSlot.EmptyText}" />
+            <Setter Property="Margin" Value="0,24" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HasPhoto}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- The viewer's Remove button is red while its photo is marked, a grey pill otherwise. -->
+        <app:BooleanToStyleConverter x:Key="RemoveButtonStyleConverter"
+                TrueStyle="{StaticResource Albumen.DangerButton}" FalseStyle="{StaticResource Albumen.Button}" />
         </ResourceDictionary>
     </Window.Resources>
 
-    <Grid>
-    <!-- Decorative soft glow behind the workflow. Hidden in High Contrast and while
-         reviewing photos, where a tinted background would distort how colors look. -->
-    <Grid x:Name="BackgroundGlow" IsHitTestVisible="False" ClipToBounds="True">
-        <Grid.Style>
-            <Style TargetType="Grid">
-                <Style.Triggers>
-                    <DataTrigger Binding="{Binding IsReviewPhase}" Value="True">
-                        <Setter Property="Visibility" Value="Collapsed" />
-                    </DataTrigger>
-                    <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                        <Setter Property="Visibility" Value="Collapsed" />
-                    </DataTrigger>
-                </Style.Triggers>
-            </Style>
-        </Grid.Style>
-        <Rectangle>
-            <Rectangle.Fill>
-                <RadialGradientBrush Center="0.05,-0.1" GradientOrigin="0.05,-0.1" RadiusX="0.75" RadiusY="0.8">
-                    <GradientStop Color="#FFDCE7FF" Offset="0" />
-                    <GradientStop Color="#00DCE7FF" Offset="1" />
-                </RadialGradientBrush>
-            </Rectangle.Fill>
-        </Rectangle>
-        <Rectangle>
-            <Rectangle.Fill>
-                <RadialGradientBrush Center="1,-0.05" GradientOrigin="1,-0.05" RadiusX="0.6" RadiusY="0.75">
-                    <GradientStop Color="#FFEFE4FF" Offset="0" />
-                    <GradientStop Color="#00EFE4FF" Offset="1" />
-                </RadialGradientBrush>
-            </Rectangle.Fill>
-        </Rectangle>
-        <Rectangle>
-            <Rectangle.Fill>
-                <RadialGradientBrush Center="0.6,1.1" GradientOrigin="0.6,1.1" RadiusX="0.6" RadiusY="0.7">
-                    <GradientStop Color="#FFDDF5EE" Offset="0" />
-                    <GradientStop Color="#00DDF5EE" Offset="1" />
-                </RadialGradientBrush>
-            </Rectangle.Fill>
-        </Rectangle>
-    </Grid>
+    <!-- AllowDrop is inherited, so WPF raises a drag event over every element and the dragged
+         photo's picture can follow the pointer; the window refuses any drag the viewers did not
+         take, so the root itself accepts nothing. -->
+    <Grid AllowDrop="True">
     <Grid Margin="24,16,24,16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
@@ -520,33 +457,12 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Border Width="36" Height="36" CornerRadius="9" VerticalAlignment="Top">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Background" Value="{StaticResource Albumen.AccentBrush}" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                    <Setter Property="Background" Value="Transparent" />
-                                    <Setter Property="BorderThickness" Value="1" />
-                                    <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
+                <Border Width="36" Height="36" CornerRadius="9" VerticalAlignment="Top"
+                        Background="{DynamicResource Albumen.AccentBrush}">
                     <Path Width="18" Height="18" Stretch="Uniform" StrokeThickness="2"
                           StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                          Data="M 3,6 L 15,6 L 15,18 L 3,18 Z M 7,3 L 18,3 L 18,14 M 5,15 L 8,11.5 L 11,14.5 L 13,12.5">
-                        <Path.Style>
-                            <Style TargetType="Path">
-                                <Setter Property="Stroke" Value="White" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                        <Setter Property="Stroke" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Path.Style>
-                    </Path>
+                          Stroke="{DynamicResource Albumen.OnAccentBrush}"
+                          Data="M 3,6 L 15,6 L 15,18 L 3,18 Z M 7,3 L 18,3 L 18,14 M 5,15 L 8,11.5 L 11,14.5 L 13,12.5" />
                 </Border>
                 <StackPanel Grid.Column="1" Margin="12,0,0,0">
                     <WrapPanel>
@@ -555,14 +471,12 @@
                         <Border Margin="0,3,0,0" Padding="10,2" CornerRadius="10" VerticalAlignment="Center">
                             <Border.Style>
                                 <Style TargetType="Border">
-                                    <Setter Property="Background" Value="{StaticResource Albumen.SuccessSoftBrush}" />
-                                    <Setter Property="TextElement.Foreground" Value="{StaticResource Albumen.SuccessBrush}" />
+                                    <Setter Property="Background" Value="{DynamicResource Albumen.SuccessSoftBrush}" />
+                                    <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.SuccessBrush}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                            <Setter Property="Background" Value="Transparent" />
                                             <Setter Property="BorderThickness" Value="1" />
-                                            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                            <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -575,7 +489,7 @@
             <!-- Shown only while Action records load or after local data failed to load. -->
             <Border x:Name="LocalDataStatusBanner" Grid.Row="1" Grid.ColumnSpan="2"
                     Margin="0,8,0,0" CornerRadius="4"
-                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    BorderBrush="{DynamicResource Albumen.BorderBrush}"
                     Visibility="{Binding HasActionRecoveryStatus, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Border.Style>
                     <Style TargetType="Border">
@@ -585,8 +499,8 @@
                             <DataTrigger Binding="{Binding IsLocalDataFaulted}" Value="True">
                                 <Setter Property="BorderThickness" Value="1" />
                                 <Setter Property="Padding" Value="12,8" />
-                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.InfoBrushKey}}" />
-                                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}" />
+                                <Setter Property="Background" Value="{DynamicResource Albumen.WarningSoftBrush}" />
+                                <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.WarningBrush}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -597,7 +511,7 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <Path Width="16" Height="16" Margin="0,1,10,0" VerticalAlignment="Top" Stretch="Uniform"
-                          Fill="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}"
+                          Fill="{DynamicResource Albumen.WarningBrush}"
                           Data="M 9,0 L 18,18 L 0,18 Z M 8,5 L 10,5 L 10,12 L 8,12 Z M 8,14 L 10,14 L 10,16 L 8,16 Z"
                           Visibility="{Binding IsLocalDataFaulted, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <TextBlock x:Name="LocalDataStatusText" Grid.Column="1"
@@ -621,8 +535,118 @@
             </Border>
         </Grid>
 
-        <TabControl Grid.Row="1" Style="{StaticResource Albumen.TopBar}" Padding="8,6,4,4"
+        <!-- Review's Back button and where it leads, on a row of their own above the tab row
+             (Igal, 2026-10-25), lined up with the tab strip. Like the search bar, the row shows only
+             while Review is the current step on the Photos tab. -->
+        <DockPanel x:Name="ReviewBackRow" Grid.Row="1" Margin="8,0,0,8">
+            <DockPanel.Style>
+                <Style TargetType="DockPanel">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding IsReviewPhase}" Value="True" />
+                                <Condition Binding="{Binding SelectedIndex, ElementName=ViewTabs}" Value="0" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter Property="Visibility" Value="Visible" />
+                        </MultiDataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DockPanel.Style>
+            <Button x:Name="ReviewBackButton" Content="Back" MinHeight="34" Padding="14,4" Margin="0,0,10,0"
+                    Style="{StaticResource Albumen.Button}"
+                    Click="OnReviewBackClick" IsEnabled="{Binding CanReviewBack}"
+                    AutomationProperties.Name="Back one review level" />
+            <TextBlock x:Name="ReviewBreadcrumbText" VerticalAlignment="Center" TextWrapping="Wrap"
+                       Text="{Binding ReviewBreadcrumbText}" AutomationProperties.Name="Review breadcrumb" />
+        </DockPanel>
+
+        <app:TopBarTabControl x:Name="ViewTabs" Grid.Row="2" Style="{StaticResource Albumen.TopBar}" Padding="8,6,4,4"
                     AutomationProperties.Name="Albumen views">
+          <!-- The photo search sits in the tab row, centred, and shows only while Review is the
+               current step on the Photos tab, since it searches Review and nothing else. Typing
+               hides the placeholder; Enter searches, Esc or the clear button clears. -->
+          <app:TopBarTabControl.Tag>
+            <app:ReviewAutomationBorder x:Name="SearchBar" MaxWidth="320" VerticalAlignment="Top"
+                    AutomationProperties.Name="Photo search">
+                <app:ReviewAutomationBorder.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsReviewPhase}" Value="True" />
+                                    <Condition Binding="{Binding SelectedIndex, RelativeSource={RelativeSource AncestorType=TabControl}}" Value="0" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </app:ReviewAutomationBorder.Style>
+              <StackPanel>
+                <Border x:Name="SearchField" DataContext="{Binding ReviewSearch}" ToolTip="{Binding ScopeText}">
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource Albumen.SearchBar}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ScopeText}" Value="">
+                                    <Setter Property="ToolTipService.IsEnabled" Value="False" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Grid Margin="2,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="LikelyMatchesFindButton" Content="&#xE721;" IsTabStop="False"
+                                Style="{StaticResource Albumen.SearchBarButton}" Command="{Binding SearchCommand}"
+                                AutomationProperties.Name="Find photos" />
+                        <TextBlock x:Name="SearchPlaceholderText" Grid.Column="1" Margin="4,0,0,0" VerticalAlignment="Center"
+                                   IsHitTestVisible="False" TextTrimming="CharacterEllipsis" Text="{Binding PlaceholderText}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Prompt}" Value="">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBox x:Name="LikelyMatchesPromptBox" Grid.Column="1" Style="{StaticResource Albumen.SearchBox}"
+                                 Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
+                                 IsEnabled="{Binding CanSearch}"
+                                 PreviewMouseLeftButtonDown="OnPromptBoxPreviewMouseLeftButtonDown"
+                                 GotKeyboardFocus="OnPromptBoxGotKeyboardFocus"
+                                 PreviewKeyDown="OnPromptBoxPreviewKeyDown" TextChanged="OnPromptBoxTextChanged"
+                                 AutomationProperties.Name="Describe the photos to find"
+                                 AutomationProperties.HelpText="{x:Static shell:ReviewSearchViewModel.PromptHelpText}">
+                            <TextBox.InputBindings>
+                                <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
+                                <KeyBinding Key="Escape" Command="{Binding ShowAllCommand}" />
+                            </TextBox.InputBindings>
+                        </TextBox>
+                        <Button x:Name="LikelyMatchesShowAllButton" Grid.Column="2" Content="&#xE894;"
+                                Style="{StaticResource Albumen.SearchBarButton}"
+                                Command="{Binding ShowAllCommand}" Click="OnLikelyMatchesShowAllClick"
+                                Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                ToolTip="Show all Review results"
+                                AutomationProperties.Name="Show all Review results" />
+                    </Grid>
+                </Border>
+                <!-- Indexing, unavailable, searching, how many matched: said under the bar, never while idle. -->
+                <TextBlock x:Name="LikelyMatchesStatusText" DataContext="{Binding ReviewSearch}" Margin="12,4,12,0"
+                           Style="{StaticResource Albumen.Caption}" TextAlignment="Center" Text="{Binding StatusText}"
+                           Visibility="{Binding HasStatus, Converter={StaticResource BooleanToVisibilityConverter}}"
+                           AutomationProperties.Name="Likely matches status" AutomationProperties.ItemStatus="{Binding StatusText}"
+                           AutomationProperties.LiveSetting="Polite" />
+              </StackPanel>
+            </app:ReviewAutomationBorder>
+          </app:TopBarTabControl.Tag>
           <TabItem Header="Photos" IsSelected="True" AutomationProperties.Name="Photos">
         <Grid>
             <Grid.ColumnDefinitions>
@@ -631,16 +655,17 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <ScrollViewer Grid.Column="0"
-                          HorizontalScrollBarVisibility="Disabled"
+            <!-- The steps sit on a navy panel of their own, a tone apart from the page. -->
+            <Border x:Name="PhaseRailPanel" Grid.Column="0" CornerRadius="12" Padding="6,6,6,2"
+                    Background="{DynamicResource Albumen.RailBrush}">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
                 <ItemsControl x:Name="PhaseRail"
-                              Margin="4,4,0,0"
                               AutomationProperties.Name="Workflow steps"
                               ItemsSource="{Binding RailSteps}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Button Margin="0,0,8,4"
+                            <Button Margin="0,0,0,4"
                                     MinHeight="52"
                                     Padding="10,6"
                                     HorizontalAlignment="Stretch"
@@ -653,15 +678,14 @@
                                     <Style TargetType="Button" BasedOn="{StaticResource Albumen.StepButton}">
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                                <Setter Property="BorderBrush" Value="{StaticResource Albumen.AccentBrush}" />
+                                                <Setter Property="Background" Value="{DynamicResource Albumen.AccentSoftBrush}" />
                                             </DataTrigger>
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
                                                     <Condition Binding="{Binding IsCurrent}" Value="True" />
                                                     <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True" />
                                                 </MultiDataTrigger.Conditions>
-                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.AccentBrush}" />
                                                 <Setter Property="BorderThickness" Value="2" />
                                             </MultiDataTrigger>
                                         </Style.Triggers>
@@ -669,17 +693,31 @@
                                 </Button.Style>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="11" />
                                         <ColumnDefinition Width="36" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Width="26" Height="26" CornerRadius="13" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                    <!-- Hidden, not collapsed, so every step's number lines up. -->
+                                    <Border Margin="0,4,8,4">
                                         <Border.Style>
-                                            <Style TargetType="Border">
-                                                <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                                            <Style TargetType="Border" BasedOn="{StaticResource Albumen.AccentLine}">
+                                                <Setter Property="Visibility" Value="Hidden" />
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsCurrent}" Value="True">
-                                                        <Setter Property="Background" Value="{StaticResource Albumen.AccentBrush}" />
-                                                        <Setter Property="TextElement.Foreground" Value="White" />
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                    </Border>
+                                    <Border Grid.Column="1" Width="26" Height="26" CornerRadius="13" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                        <Setter Property="Background" Value="{DynamicResource Albumen.AccentBrush}" />
+                                                        <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.OnAccentBrush}" />
                                                     </DataTrigger>
                                                     <!-- In High Contrast the number follows the step's own text color,
                                                          so an unavailable step reads as GrayText throughout. -->
@@ -695,7 +733,7 @@
                                         <TextBlock FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
                                                    Text="{Binding StepNumber}" />
                                     </Border>
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
                                         <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding DisplayName}" />
                                         <TextBlock Text="{Binding AvailabilityLabel}">
                                             <TextBlock.Style>
@@ -715,6 +753,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
+            </Border>
 
             <Grid Grid.Column="2" Visibility="{Binding IsChooseFolderPhase, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <!-- The page fits 1280×800 without scrolling; the ScrollViewer is for smaller windows. -->
@@ -745,8 +784,8 @@
                                         <Setter Property="Height" Value="52" />
                                         <Setter Property="CornerRadius" Value="6" />
                                         <Setter Property="Padding" Value="4" />
-                                        <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                        <Setter Property="BorderBrush" Value="{StaticResource Albumen.BorderStrongBrush}" />
+                                        <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                         <Setter Property="BorderThickness" Value="1" />
                                         <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
                                         <Setter Property="Effect">
@@ -758,25 +797,18 @@
                                     <Style x:Key="HeroSky" TargetType="Rectangle">
                                         <Setter Property="RadiusX" Value="3" />
                                         <Setter Property="RadiusY" Value="3" />
-                                        <Setter Property="Fill">
-                                            <Setter.Value>
-                                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                                    <GradientStop Color="#DCE7FF" Offset="0" />
-                                                    <GradientStop Color="#EFF4FF" Offset="1" />
-                                                </LinearGradientBrush>
-                                            </Setter.Value>
-                                        </Setter>
+                                        <Setter Property="Fill" Value="{DynamicResource Albumen.AccentSoftBrush}" />
                                     </Style>
                                     <Style x:Key="HeroHill" TargetType="Path">
-                                        <Setter Property="Fill" Value="{StaticResource Albumen.AccentBrush}" />
-                                        <Setter Property="Opacity" Value="0.55" />
+                                        <Setter Property="Fill" Value="{DynamicResource Albumen.AccentLineBrush}" />
+                                        <Setter Property="Opacity" Value="0.8" />
                                         <Setter Property="Stretch" Value="Fill" />
                                         <Setter Property="Data" Value="M 0,44 L 16,24 L 26,34 L 38,18 L 56,44 Z" />
                                     </Style>
                                     <Style x:Key="HeroSun" TargetType="Ellipse">
                                         <Setter Property="Width" Value="10" />
                                         <Setter Property="Height" Value="10" />
-                                        <Setter Property="Fill" Value="#F5C38B" />
+                                        <Setter Property="Fill" Value="{DynamicResource Albumen.WarningBrush}" />
                                         <Setter Property="HorizontalAlignment" Value="Right" />
                                         <Setter Property="VerticalAlignment" Value="Top" />
                                         <Setter Property="Margin" Value="0,6,8,0" />
@@ -816,32 +848,13 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Width="40" Height="40" Margin="0,0,14,0" CornerRadius="10" VerticalAlignment="Top">
-                                        <Border.Style>
-                                            <Style TargetType="Border">
-                                                <Setter Property="Background" Value="{StaticResource Albumen.AccentSoftBrush}" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                        <Setter Property="Background" Value="Transparent" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Border.Style>
+                                    <Border Width="40" Height="40" Margin="0,0,14,0" CornerRadius="10" VerticalAlignment="Top"
+                                            Background="{DynamicResource Albumen.AccentSoftBrush}">
                                         <!-- A folder, as geometry: no font glyph, nothing to fall back to. -->
                                         <Path Width="20" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center"
                                               Stretch="Uniform"
-                                              Data="M 0,2 Q 0,0 2,0 L 7,0 L 9,2 L 18,2 Q 20,2 20,4 L 20,14 Q 20,16 18,16 L 2,16 Q 0,16 0,14 Z M 0,5 L 20,5 L 20,6 L 0,6 Z">
-                                            <Path.Style>
-                                                <Style TargetType="Path">
-                                                    <Setter Property="Fill" Value="{StaticResource Albumen.AccentBrush}" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                            <Setter Property="Fill" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Path.Style>
-                                        </Path>
+                                              Fill="{DynamicResource Albumen.AccentBrush}"
+                                              Data="M 0,2 Q 0,0 2,0 L 7,0 L 9,2 L 18,2 Q 20,2 20,4 L 20,14 Q 20,16 18,16 L 2,16 Q 0,16 0,14 Z M 0,5 L 20,5 L 20,6 L 0,6 Z" />
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock x:Name="FolderNameText" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
@@ -855,11 +868,8 @@
                                                  AutomationProperties.Name="Selected folder">
                                             <TextBox.Style>
                                                 <Style TargetType="TextBox" BasedOn="{StaticResource Albumen.PathText}">
-                                                    <Setter Property="Foreground" Value="{StaticResource Albumen.MutedTextBrush}" />
+                                                    <Setter Property="Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
                                                     <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                                        </DataTrigger>
                                                         <DataTrigger Binding="{Binding SelectedPath}" Value="">
                                                             <Setter Property="Visibility" Value="Collapsed" />
                                                         </DataTrigger>
@@ -901,25 +911,25 @@
                                 <Border x:Name="FolderStatusStrip" Margin="0,14,0,0" Padding="12,9" CornerRadius="8" BorderThickness="1">
                                     <Border.Style>
                                         <Style TargetType="Border">
-                                            <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                                            <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                             <Setter Property="BorderBrush" Value="Transparent" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsReady}" Value="True">
-                                                    <Setter Property="Background" Value="{StaticResource Albumen.SuccessSoftBrush}" />
+                                                    <Setter Property="Background" Value="{DynamicResource Albumen.SuccessSoftBrush}" />
                                                 </DataTrigger>
                                                 <!-- An empty folder passes the check but is nothing to celebrate. -->
                                                 <DataTrigger Binding="{Binding SupportedCount}" Value="0">
-                                                    <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                                                    <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsBlocked}" Value="True">
-                                                    <Setter Property="Background" Value="{StaticResource Albumen.WarningSoftBrush}" />
+                                                    <Setter Property="Background" Value="{DynamicResource Albumen.WarningSoftBrush}" />
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsCanceled}" Value="True">
-                                                    <Setter Property="Background" Value="{StaticResource Albumen.WarningSoftBrush}" />
+                                                    <Setter Property="Background" Value="{DynamicResource Albumen.WarningSoftBrush}" />
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
                                                     <Setter Property="Background" Value="Transparent" />
-                                                    <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderBrush}" />
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -936,7 +946,7 @@
                                               VerticalAlignment="Top"
                                               AutomationProperties.ItemStatus="{Binding ScopeStatus}"
                                               AutomationProperties.Name="{Binding ScopeStatus, StringFormat='Folder status: {0}'}"
-                                              Fill="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                                              Fill="{DynamicResource Albumen.TextBrush}"
                                               Stretch="Uniform">
                                             <Path.Style>
                                                 <Style TargetType="Path">
@@ -976,6 +986,15 @@
                                     </Grid>
                                 </Border>
 
+                                <!-- Names the first photos so the folder can be recognised; not a live region. -->
+                                <TextBlock x:Name="FolderContentsText"
+                                           Margin="0,8,0,0"
+                                           Style="{StaticResource Albumen.MutedText}"
+                                           Text="{Binding FolderContentsText}"
+                                           Visibility="{Binding HasFolderContents, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                           AutomationProperties.Name="Photos in this folder"
+                                           AutomationProperties.ItemStatus="{Binding FolderContentsText}" />
+
                                 <Border x:Name="BlockingNotice"
                                         Margin="0,10,0,0"
                                         Padding="14"
@@ -987,15 +1006,8 @@
                                         Visibility="{Binding IsBlocked, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <Border.Style>
                                         <Style TargetType="Border">
-                                            <Setter Property="Background" Value="{StaticResource Albumen.WarningSoftBrush}" />
-                                            <Setter Property="BorderBrush" Value="{StaticResource Albumen.WarningBorderBrush}" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                    <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.InfoBrushKey}}" />
-                                                    <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" />
-                                                    <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.InfoTextBrushKey}}" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
+                                            <Setter Property="Background" Value="{DynamicResource Albumen.WarningSoftBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Albumen.WarningBrush}" />
                                         </Style>
                                     </Border.Style>
                                     <StackPanel>
@@ -1007,7 +1019,7 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border Height="1" Margin="0,16" Background="{StaticResource Albumen.BorderBrush}" />
+                                <Border Height="1" Margin="0,16" Background="{DynamicResource Albumen.BorderBrush}" />
 
                                 <app:CommandSwitchCheckBox x:Name="IncludeSubfoldersCheckBox"
                                           Style="{StaticResource Albumen.SwitchCheckBox}"
@@ -1022,21 +1034,9 @@
                                            Style="{StaticResource Albumen.MutedText}"
                                            Text="{Binding SubfoldersCaption}" />
 
-                                <app:CommandSwitchCheckBox x:Name="NearDuplicatesCheckBox"
-                                          Margin="0,14,0,0"
-                                          Style="{StaticResource Albumen.SwitchCheckBox}"
-                                          Content="Look-alikes"
-                                          IsChecked="{Binding NearDuplicatesEnabled, Mode=OneWay}"
-                                          IsEnabled="{Binding CanChangeScanOptions}"
-                                          Command="{Binding ChangeNearDuplicateModeCommand}"
-                                          CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}"
-                                          AutomationProperties.Name="Look-alikes"
-                                          AutomationProperties.HelpText="Finds a resized or re-saved copy of the same photo with one careful, fixed setting. Close calls are shown as Maybe similar." />
-                                <TextBlock x:Name="NearDuplicatesCaption" Margin="56,3,0,0"
-                                           Style="{StaticResource Albumen.MutedText}"
-                                           Text="Bursts and near-identical shots. Identical copies are always found." />
 
-                                <!-- A live region, shown only when it has something to say. -->
+                                <!-- A live region, shown only when it has something to say: invalid options,
+                                     or that changing subfolders after a scan clears its results. -->
                                 <TextBlock x:Name="ScanOptionsGuidanceText"
                                            Margin="0,14,0,0"
                                            Style="{StaticResource Albumen.MutedText}"
@@ -1085,7 +1085,7 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <Border Height="1" Margin="0,16" Background="{StaticResource Albumen.BorderBrush}" />
+                                <Border Height="1" Margin="0,16" Background="{DynamicResource Albumen.BorderBrush}" />
 
                                 <!-- The card's footer: the one next step. -->
                                 <WrapPanel>
@@ -1128,12 +1128,7 @@
                                     <Setter Property="Margin" Value="0,2,10,0" />
                                     <Setter Property="VerticalAlignment" Value="Top" />
                                     <Setter Property="Stretch" Value="Uniform" />
-                                    <Setter Property="Fill" Value="{StaticResource Albumen.SuccessBrush}" />
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                            <Setter Property="Fill" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
+                                    <Setter Property="Fill" Value="{DynamicResource Albumen.SuccessBrush}" />
                                 </Style>
                                 <Style x:Key="TrustText" TargetType="TextBlock" BasedOn="{StaticResource Albumen.MutedText}">
                                     <Setter Property="FontSize" Value="13" />
@@ -1180,7 +1175,7 @@
                                            AutomationProperties.Name="Scan status" AutomationProperties.ItemStatus="{Binding ScanStatus}"
                                            AutomationProperties.LiveSetting="Polite" />
                                 <ProgressBar Height="8" Margin="0,14,0,0" IsIndeterminate="{Binding IsScanBusy}"
-                                             Foreground="{StaticResource Albumen.AccentBrush}"
+                                             Foreground="{DynamicResource Albumen.AccentBrush}"
                                              AutomationProperties.Name="Scan activity"
                                              AutomationProperties.ItemStatus="{Binding ScanStatus}" />
                                 <TextBlock Margin="0,12,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding ScanCountsText}" />
@@ -1188,7 +1183,7 @@
                                            Text="{Binding SemanticProgressText}"
                                            Visibility="{Binding HasSemanticProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
-                                <Border Height="1" Margin="0,16" Background="{StaticResource Albumen.BorderBrush}" />
+                                <Border Height="1" Margin="0,16" Background="{DynamicResource Albumen.BorderBrush}" />
 
                                 <ItemsControl ItemsSource="{Binding ScanOutcomeSummaries}"
                                               ItemTemplate="{StaticResource ScanOutcomeSummaryTemplate}"
@@ -1226,14 +1221,18 @@
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           SizeChanged="OnReviewPageSizeChanged">
               <StackPanel Margin="4,4,20,8">
+                <!-- The page opens with the Scan's coverage, the sets to review and the hint, one
+                     under the other (Igal, 2026-10-25); Back and the breadcrumb sit above the tab
+                     row, and the Scan's counts wait in the Scan summary. The coverage line takes
+                     focus when Review opens. -->
                 <StackPanel>
-                    <TextBlock x:Name="ReviewHeading" Text="Review" Style="{StaticResource Albumen.PageTitle}" Focusable="True"
-                               FocusVisualStyle="{StaticResource Albumen.FocusVisual}"
-                               AutomationProperties.Name="Grouped duplicate review" />
-                    <TextBlock x:Name="ReviewResultsSummaryText" Margin="0,4,0,0" Style="{StaticResource Albumen.SectionTitle}"
+                    <TextBlock x:Name="ReviewHeading" Text="{Binding CoverageStatus}" FontWeight="SemiBold" TextWrapping="Wrap"
+                               Focusable="True" FocusVisualStyle="{StaticResource Albumen.FocusVisual}"
+                               AutomationProperties.Name="{Binding CoverageStatus, StringFormat='Review. {0}'}" />
+                    <TextBlock x:Name="ReviewResultsSummaryText" Margin="0,2,0,0" FontWeight="SemiBold" TextWrapping="Wrap"
                                Text="{Binding ReviewResultsSummary}" />
-                    <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}"
-                               Text="Pick a kind, open a set and choose Keep or Remove for each photo. Nothing changes until you approve the cleanup below." />
+                    <TextBlock x:Name="ReviewHintText" Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}"
+                               Text="Pick a kind to see its sets. Right-click a photo to mark it for removal or show it in a viewer. Nothing changes until you approve the cleanup below." />
                     <TextBlock x:Name="ReviewStatusText" Margin="0,6,0,0" Text="{Binding ReviewStatusText}" TextWrapping="Wrap"
                                AutomationProperties.Name="Review status" AutomationProperties.ItemStatus="{Binding ReviewStatusText}"
                                AutomationProperties.LiveSetting="Polite" />
@@ -1242,15 +1241,6 @@
                                Style="{StaticResource Albumen.MutedText}"
                                Visibility="{Binding HasReviewContinuation, Converter={StaticResource BooleanToVisibilityConverter}}"
                                AutomationProperties.Name="Review continuation" />
-                    <DockPanel Margin="0,8,0,4">
-                        <Button x:Name="ReviewBackButton" Content="Back" MinHeight="34" Padding="14,4" Margin="0,0,10,0"
-                                Style="{StaticResource Albumen.Button}"
-                                Click="OnReviewBackClick" IsEnabled="{Binding CanReviewBack}"
-                                AutomationProperties.Name="Back one review level" />
-                        <TextBlock x:Name="ReviewBreadcrumbText" VerticalAlignment="Center" TextWrapping="Wrap"
-                                   Text="{Binding ReviewBreadcrumbText}" AutomationProperties.Name="Review breadcrumb" />
-                    </DockPanel>
-                    <TextBlock Style="{StaticResource Albumen.MutedText}" Text="{Binding CoverageStatus}" />
                     <Expander x:Name="ReviewScanSummaryExpander" Header="Scan summary" IsExpanded="False" Margin="0,2,0,0"
                               AutomationProperties.Name="Scan summary">
                         <StackPanel Margin="0,4,0,0">
@@ -1262,66 +1252,26 @@
                     </Expander>
                 </StackPanel>
 
-                <!-- Likely matches: a prompt ranks this Scan's photos. It is a list of its own and
-                     changes nothing in the kinds and sets below. -->
-                <Border x:Name="LikelyMatchesPanel" Margin="0,10,0,0" Padding="12" CornerRadius="12"
-                        DataContext="{Binding LikelyMatches}"
-                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                        BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
-                        AutomationProperties.Name="Likely matches">
-                    <StackPanel>
-                        <TextBlock Text="Find photos by what they show" Style="{StaticResource Albumen.SectionTitle}" />
-                        <DockPanel Margin="0,6,0,0">
-                            <Button x:Name="LikelyMatchesShowAllButton" DockPanel.Dock="Right" Content="Show all Review results"
-                                    MinHeight="34" Padding="14,4" Margin="8,0,0,0" Style="{StaticResource Albumen.Button}"
-                                    Command="{Binding ShowAllCommand}" Click="OnLikelyMatchesShowAllClick"
-                                    Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            <Button x:Name="LikelyMatchesFindButton" DockPanel.Dock="Right" Content="Find" MinHeight="34" Padding="18,4"
-                                    Margin="8,0,0,0" Style="{StaticResource Albumen.PrimaryButton}"
-                                    Command="{Binding SearchCommand}" />
-                            <TextBox x:Name="LikelyMatchesPromptBox" MinHeight="34" VerticalContentAlignment="Center" Padding="6,2"
-                                     Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
-                                     IsEnabled="{Binding CanSearch}"
-                                     AutomationProperties.Name="Describe the photos to find"
-                                     AutomationProperties.HelpText="{x:Static shell:LikelyMatchesViewModel.PromptHelpText}">
-                                <TextBox.InputBindings>
-                                    <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
-                                </TextBox.InputBindings>
-                            </TextBox>
-                        </DockPanel>
-                        <TextBlock x:Name="LikelyMatchesStatusText" Margin="0,6,0,0" Text="{Binding StatusText}" TextWrapping="Wrap"
-                                   AutomationProperties.Name="Likely matches status" AutomationProperties.ItemStatus="{Binding StatusText}"
-                                   AutomationProperties.LiveSetting="Polite" />
-                        <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding ScopeText}" TextWrapping="Wrap" />
-                        <TextBlock Margin="0,2,0,0" Style="{StaticResource Albumen.MutedText}" Text="{Binding SelectionOutsideText}" TextWrapping="Wrap"
-                                   Visibility="{Binding HasSelectionOutside, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                        <ListBox x:Name="LikelyMatchesList" Margin="0,8,0,0" ItemsSource="{Binding Results}"
-                                 PreviewMouseWheel="OnReviewListPreviewMouseWheel" PreviewKeyDown="OnReviewListPreviewKeyDown"
-                                 ItemTemplate="{StaticResource LikelyMatchTemplate}"
-                                 ScrollViewer.CanContentScroll="True"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                                 VirtualizingPanel.ScrollUnit="Item"
-                                 Visibility="{Binding HasResults, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                 AutomationProperties.Name="Likely matches in this Scan">
-                            <ListBox.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <VirtualizingStackPanel Orientation="Horizontal" />
-                                </ItemsPanelTemplate>
-                            </ListBox.ItemsPanel>
-                        </ListBox>
-                    </StackPanel>
-                </Border>
+                <!-- A search that matched nothing in Review says so, with the way back. -->
+                <StackPanel x:Name="ReviewSearchEmptyPanel" Margin="0,10,0,0"
+                            Visibility="{Binding HasReviewSearchEmpty, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock x:Name="ReviewSearchEmptyText" Text="{Binding ReviewSearchEmptyText}"
+                               Style="{StaticResource Albumen.SectionTitle}" />
+                    <Button x:Name="ReviewSearchClearButton" Content="Show all Review results" Margin="0,8,0,0"
+                            HorizontalAlignment="Left" Style="{StaticResource Albumen.Button}"
+                            Command="{Binding ReviewSearch.ShowAllCommand}" Click="OnLikelyMatchesShowAllClick"
+                            AutomationProperties.Name="Show all Review results" />
+                </StackPanel>
 
+                <!-- The kinds, and beside them the open kind's sets as a gallery of photos. -->
                 <Grid x:Name="ReviewNavigationGrid" Height="300" Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition x:Name="ReviewCategoriesColumn" Width="*" />
-                        <ColumnDefinition x:Name="ReviewGroupsColumn" Width="*" />
-                        <ColumnDefinition x:Name="ReviewComparisonsColumn" Width="*" />
+                        <ColumnDefinition x:Name="ReviewGroupsColumn" Width="2*" />
                     </Grid.ColumnDefinitions>
                     <Border x:Name="ReviewCategoriesPanel" Grid.Column="0" Margin="0,0,4,0" Padding="6" CornerRadius="12"
-                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                            Background="{DynamicResource Albumen.SurfaceBrush}"
+                            BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="What was found" Style="{StaticResource Albumen.SectionTitle}" Margin="6,4,6,6" />
                             <ListBox x:Name="ReviewCategoriesList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ReviewCategories}"
@@ -1330,101 +1280,114 @@
                                      AutomationProperties.Name="Review categories" />
                         </DockPanel>
                     </Border>
-                    <Border x:Name="ReviewGroupsPanel" Grid.Column="1" Margin="4,0" Padding="6" CornerRadius="12"
-                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
-                        <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="Sets" Style="{StaticResource Albumen.SectionTitle}" Margin="6,4,6,6" />
-                            <ListBox x:Name="ReviewGroupsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewGroups}"
-                                     Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewGroupTemplate}"
-                                     PreviewKeyDown="OnReviewListPreviewKeyDown"
-                                     AutomationProperties.Name="Groups in selected category" />
-                        </DockPanel>
-                    </Border>
-                    <Border x:Name="ReviewComparisonsPanel" Grid.Column="2" Margin="4,0,0,0" Padding="6" CornerRadius="12"
-                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
-                        <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Text="Photos in this set" Style="{StaticResource Albumen.SectionTitle}" Margin="6,4,6,6" />
-                            <ListBox x:Name="ReviewComparisonsList" PreviewMouseWheel="OnReviewListPreviewMouseWheel" ItemsSource="{Binding ActiveReviewMembers}"
-                                     Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ReviewComparisonTemplate}"
-                                     PreviewKeyDown="OnReviewListPreviewKeyDown"
-                                     AutomationProperties.Name="Comparison paths and Selection controls" />
-                        </DockPanel>
+                    <!-- Photos sit on the dark ground: the gallery has no card around it. -->
+                    <Border x:Name="ReviewGroupsPanel" Grid.Column="1" Margin="12,0,0,0">
+                        <Grid>
+                            <TextBlock Margin="6,10" Text="Choose a kind to see its sets.">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource Albumen.MutedText}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding ActiveReviewCategory}" Value="{x:Null}" />
+                                                    <Condition Binding="{Binding HasReviewSearchEmpty}" Value="False" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <!-- The search left the open kind without a set, but other kinds have matches. -->
+                            <TextBlock x:Name="ReviewKindEmptyText" Margin="6,10" Style="{StaticResource Albumen.MutedText}"
+                                       Text="{Binding ReviewKindEmptyText}"
+                                       Visibility="{Binding HasReviewKindEmpty, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <ListBox x:Name="ReviewGalleryList" ItemsSource="{Binding ActiveReviewGroups}"
+                                     Style="{StaticResource ReviewGalleryStyle}" ItemTemplate="{StaticResource ReviewSetTemplate}"
+                                     PreviewMouseWheel="OnGalleryPreviewMouseWheel" PreviewKeyDown="OnGalleryPreviewKeyDown"
+                                     AutomationProperties.Name="Sets in the open kind" />
+                        </Grid>
                     </Border>
                 </Grid>
 
                   <StackPanel x:Name="ReviewDetailsPanel" Margin="0,10,0,0">
-                <!-- Viewer: the open photo large, Previous / Next through the set, and an
-                     optional second photo side by side with one zoom for both. -->
-                <app:ReviewAutomationBorder x:Name="ReviewEvidencePanel" Padding="14" CornerRadius="12"
-                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                        BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
-                        AutomationProperties.AutomationId="review-evidence"
-                        AutomationProperties.Name="{Binding ActiveReviewEvidence.AutomationName}"
-                        AutomationProperties.ItemStatus="{Binding ActiveReviewEvidence.ItemStatus}">
-                    <StackPanel DataContext="{Binding ActiveReviewEvidence}">
-                        <DockPanel LastChildFill="False">
-                            <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Text="Viewer"
-                                       Style="{StaticResource Albumen.SectionTitle}" />
-                            <WrapPanel DockPanel.Dock="Right"
-                                       DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
-                                <Button x:Name="PreviousPhotoButton" Content="Previous" Margin="0,0,6,4" MinHeight="32" Padding="12,4"
-                                        Style="{StaticResource Albumen.Button}"
-                                        Command="{Binding ShowPreviousReviewMemberCommand}"
-                                        AutomationProperties.Name="Previous photo in this set" />
-                                <Button x:Name="NextPhotoButton" Content="Next" Margin="0,0,12,4" MinHeight="32" Padding="12,4"
-                                        Style="{StaticResource Albumen.Button}"
-                                        Command="{Binding ShowNextReviewMemberCommand}"
-                                        AutomationProperties.Name="Next photo in this set" />
-                                <TextBlock Text="Zoom" VerticalAlignment="Center" Margin="0,0,6,4" />
-                                <Slider x:Name="ReviewZoomSlider" Width="120" Minimum="1" Maximum="4" Value="1"
-                                        SmallChange="0.25" LargeChange="0.5" VerticalAlignment="Center" Margin="0,0,12,4"
-                                        AutomationProperties.Name="Zoom for the photos in the viewer" />
-                                <Button x:Name="CloseCompareButton" Content="Close compare" Margin="0,0,0,4" MinHeight="32" Padding="12,4"
-                                        Style="{StaticResource Albumen.Button}"
-                                        Command="{Binding CloseCompareCommand}"
-                                        Visibility="{Binding IsComparingReviewMembers, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                        AutomationProperties.Name="Close side-by-side compare" />
-                            </WrapPanel>
-                        </DockPanel>
-                        <UniformGrid Rows="1" Margin="0,8,0,0">
-                            <StackPanel Margin="0,0,6,0">
-                                <TextBlock Style="{StaticResource Albumen.Caption}" Margin="0,0,0,4"
-                                           Text="{Binding DataContext.ActiveReviewMember.FileName, RelativeSource={RelativeSource AncestorType=Window}}" />
-                                <app:PreviewStatusControl x:Name="ReviewPreviewStatusControl"
-                                        Zoom="{Binding Value, ElementName=ReviewZoomSlider}"
-                                        DataContext="{Binding DataContext.ActiveReviewPreview, RelativeSource={RelativeSource AncestorType=Window}}" />
+                <!-- Viewers: two boxes below the sets, each showing one photo large, with one zoom
+                     for both; the two photos pan together. A photo is dragged in from a set (or
+                     placed from its menu). Dragged onto the other viewer, a viewer's photo swaps
+                     with that viewer's; dropped anywhere else, it leaves its viewer. -->
+                <StackPanel x:Name="ReviewViewersPanel">
+                    <DockPanel LastChildFill="False">
+                        <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Text="Viewers"
+                                   Style="{StaticResource Albumen.SectionTitle}" />
+                        <WrapPanel DockPanel.Dock="Right">
+                            <TextBlock Text="Zoom" VerticalAlignment="Center" Margin="0,0,6,4" />
+                            <Slider x:Name="ReviewZoomSlider" Width="120" Minimum="1" Maximum="4" Value="1"
+                                    SmallChange="0.25" LargeChange="0.5" VerticalAlignment="Center" Margin="0,0,0,4"
+                                    AutomationProperties.Name="Zoom for the photos in the viewers" />
+                        </WrapPanel>
+                    </DockPanel>
+                    <UniformGrid Rows="1" Margin="0,8,0,0">
+                        <app:ReviewAutomationBorder x:Name="LeftViewerPanel" Margin="0,0,6,0" Style="{StaticResource ReviewViewerStyle}"
+                                DataContext="{Binding LeftViewer}"
+                                PreviewDragEnter="OnViewerDragOver" PreviewDragOver="OnViewerDragOver" PreviewDrop="OnViewerDrop"
+                                PreviewMouseLeftButtonDown="OnViewerPreviewMouseLeftButtonDown" PreviewMouseMove="OnViewerPreviewMouseMove"
+                                QueryContinueDrag="OnViewerQueryContinueDrag"
+                                AutomationProperties.AutomationId="review-viewer"
+                                AutomationProperties.Name="{Binding AutomationName}"
+                                AutomationProperties.ItemStatus="{Binding ItemStatus}">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button x:Name="LeftViewerRemoveButton" DockPanel.Dock="Right" Margin="10,0,0,0" VerticalAlignment="Top"
+                                            Content="{Binding RemoveButtonText}" Command="{Binding ToggleRemoveCommand}"
+                                            Style="{Binding IsMarked, Converter={StaticResource RemoveButtonStyleConverter}}"
+                                            Visibility="{Binding HasRemove, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                            AutomationProperties.Name="{Binding RemoveAutomationName}" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                        <TextBlock Style="{StaticResource Albumen.Caption}" Text="{Binding Member.FileName}" />
+                                        <TextBlock Style="{StaticResource Albumen.Caption}" Text="{Binding ReadOnlyText}"
+                                                   Visibility="{Binding IsReadOnly, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    </StackPanel>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource ReviewViewerEmptyText}" />
+                                <Border Visibility="{Binding HasPhoto, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <app:PreviewStatusControl x:Name="LeftPreviewStatusControl" DataContext="{Binding Preview}"
+                                            Zoom="{Binding Value, ElementName=ReviewZoomSlider}" />
+                                </Border>
                             </StackPanel>
-                            <StackPanel Margin="6,0,0,0"
-                                        Visibility="{Binding DataContext.IsComparingReviewMembers, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Style="{StaticResource Albumen.Caption}" Margin="0,0,0,4"
-                                           Text="{Binding DataContext.ComparedReviewMember.FileName, RelativeSource={RelativeSource AncestorType=Window}, StringFormat='Compared with {0}'}" />
-                                <!-- The second preview exists only while comparing. -->
-                                <ContentControl x:Name="ComparedPreviewHost" Focusable="False"
-                                                Content="{Binding DataContext.ComparedReviewPreview, RelativeSource={RelativeSource AncestorType=Window}}">
-                                    <ContentControl.Resources>
-                                        <DataTemplate DataType="{x:Type shell:PreviewItemViewModel}">
-                                            <app:PreviewStatusControl Loaded="OnComparedPreviewLoaded" />
-                                        </DataTemplate>
-                                    </ContentControl.Resources>
-                                </ContentControl>
+                        </app:ReviewAutomationBorder>
+                        <app:ReviewAutomationBorder x:Name="RightViewerPanel" Margin="6,0,0,0" Style="{StaticResource ReviewViewerStyle}"
+                                DataContext="{Binding RightViewer}"
+                                PreviewDragEnter="OnViewerDragOver" PreviewDragOver="OnViewerDragOver" PreviewDrop="OnViewerDrop"
+                                PreviewMouseLeftButtonDown="OnViewerPreviewMouseLeftButtonDown" PreviewMouseMove="OnViewerPreviewMouseMove"
+                                QueryContinueDrag="OnViewerQueryContinueDrag"
+                                AutomationProperties.AutomationId="review-viewer"
+                                AutomationProperties.Name="{Binding AutomationName}"
+                                AutomationProperties.ItemStatus="{Binding ItemStatus}">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button x:Name="RightViewerRemoveButton" DockPanel.Dock="Right" Margin="10,0,0,0" VerticalAlignment="Top"
+                                            Content="{Binding RemoveButtonText}" Command="{Binding ToggleRemoveCommand}"
+                                            Style="{Binding IsMarked, Converter={StaticResource RemoveButtonStyleConverter}}"
+                                            Visibility="{Binding HasRemove, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                            AutomationProperties.Name="{Binding RemoveAutomationName}" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                        <TextBlock Style="{StaticResource Albumen.Caption}" Text="{Binding Member.FileName}" />
+                                        <TextBlock Style="{StaticResource Albumen.Caption}" Text="{Binding ReadOnlyText}"
+                                                   Visibility="{Binding IsReadOnly, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    </StackPanel>
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource ReviewViewerEmptyText}" />
+                                <Border Visibility="{Binding HasPhoto, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <app:PreviewStatusControl x:Name="RightPreviewStatusControl" DataContext="{Binding Preview}"
+                                            Zoom="{Binding Value, ElementName=ReviewZoomSlider}" />
+                                </Border>
                             </StackPanel>
-                        </UniformGrid>
-                        <StackPanel Margin="0,10,0,0">
-                            <TextBlock x:Name="ReviewEvidenceFullPathText" Text="{Binding FullPath}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceDimensionsText" Text="{Binding Dimensions, StringFormat='Dimensions: {0}'}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceSizeText" Text="{Binding Size, StringFormat='Size: {0}'}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceRelevantDateText" Text="{Binding RelevantDate, StringFormat='Relevant date: {0}'}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceCategoryText" Text="{Binding Category, StringFormat='Kind: {0}'}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceConfidenceText" Text="{Binding Confidence, StringFormat='Confidence: {0}'}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceUncertaintyText" Text="{Binding Uncertainty, StringFormat='Uncertainty: {0}'}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceTransformationsText" Text="{Binding Transformations, StringFormat='Transformations: {0}'}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceReasonText" Text="{Binding Reason, StringFormat='Reason: {0}'}" TextWrapping="Wrap" />
-                            <TextBlock x:Name="ReviewEvidenceRecommendationText" Text="{Binding Recommendation}" TextWrapping="Wrap" />
-                        </StackPanel>
-                    </StackPanel>
-                </app:ReviewAutomationBorder>
+                        </app:ReviewAutomationBorder>
+                    </UniformGrid>
+                </StackPanel>
 
                 <TextBlock x:Name="SelectionSummaryText" Text="{Binding SelectionSummary}" TextWrapping="Wrap" Margin="0,10,0,0"
                            AutomationProperties.Name="Selection summary"
@@ -1433,14 +1396,18 @@
 
                     <app:ReviewAutomationBorder x:Name="ApprovalPanel" Margin="0,8,0,0" Padding="16" Focusable="True" CornerRadius="12"
                             FocusVisualStyle="{StaticResource Albumen.FocusVisual}"
-                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                            BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                            Background="{DynamicResource Albumen.SurfaceBrush}"
+                            BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}"
                             AutomationProperties.AutomationId="approval-panel"
                             AutomationProperties.Name="Cleanup approval disclosure"
                             AutomationProperties.ItemStatus="{Binding ApprovalAutomationStatus}">
                         <StackPanel>
                             <TextBlock x:Name="ApprovalTitleText" Text="{Binding ApprovalTitle}" FontSize="20"
                                        Style="{StaticResource Albumen.SectionTitle}" />
+                            <!-- While a search filters Review: the marked photos it hides still move. -->
+                            <TextBlock x:Name="ApprovalHiddenMarkedText" Margin="0,2,0,0" FontWeight="SemiBold" TextWrapping="Wrap"
+                                       Text="{Binding ApprovalHiddenMarkedText}"
+                                       Visibility="{Binding HasApprovalHiddenMarked, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <TextBlock Margin="0,4,0,10" Style="{StaticResource Albumen.MutedText}"
                                        Text="Nothing changes until you approve. Marked photos go to the Windows Recycle Bin only, and each file is checked again right before it moves." />
                             <!-- The first marked photos, so the approval names what it moves. -->
@@ -1456,11 +1423,11 @@
                                             <Border Width="64" Height="48" CornerRadius="6" VerticalAlignment="Top">
                                                 <Border.Style>
                                                     <Style TargetType="Border">
-                                                        <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                                                        <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                                                <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                                                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                                                 <Setter Property="BorderThickness" Value="1" />
                                                             </DataTrigger>
                                                         </Style.Triggers>
@@ -1503,14 +1470,14 @@
                                 </StackPanel>
                                 <Border.Style>
                                     <Style TargetType="Border">
-                                        <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
-                                        <Setter Property="TextElement.Foreground" Value="{StaticResource Albumen.MutedTextBrush}" />
+                                        <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
+                                        <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                                <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                                 <Setter Property="BorderThickness" Value="1" />
-                                                <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                                <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.TextBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -1534,8 +1501,8 @@
             </ScrollViewer>
                 <!-- Sticky selection bar: what is marked, and a way to the approval panel. -->
                 <Border x:Name="ReviewSelectionBar" Grid.Row="1" Margin="4,8,20,0" Padding="14,8" CornerRadius="12"
-                        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                        BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}">
+                        Background="{DynamicResource Albumen.SurfaceBrush}"
+                        BorderThickness="1" BorderBrush="{DynamicResource Albumen.BorderBrush}">
                     <DockPanel>
                         <Button x:Name="ReviewCleanupButton" DockPanel.Dock="Right" Content="Review cleanup" MinHeight="34" Padding="14,4"
                                 Margin="10,0,0,0" Style="{StaticResource Albumen.Button}"
@@ -1572,14 +1539,14 @@
                                      AutomationProperties.ItemStatus="{Binding ActionProgressText}">
                             <ProgressBar.Style>
                                 <Style TargetType="ProgressBar">
-                                    <Setter Property="Foreground" Value="{StaticResource Albumen.AccentBrush}" />
-                                    <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource Albumen.AccentBrush}" />
+                                    <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
                                     <Setter Property="BorderThickness" Value="0" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
-                                            <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            <Setter Property="Foreground" Value="{DynamicResource Albumen.AccentBrush}" />
+                                            <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                             <Setter Property="BorderThickness" Value="1" />
                                         </DataTrigger>
                                     </Style.Triggers>
@@ -1615,20 +1582,20 @@
                              Style="{StaticResource ReviewListStyle}" ItemTemplate="{StaticResource ActionItemTemplate}"
                              AutomationProperties.Name="Photos in this cleanup and what happened to each"
                              BorderThickness="0" Background="Transparent"
-                             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                             Foreground="{DynamicResource Albumen.TextBrush}" />
                       <StackPanel x:Name="ActionNoticesPanel" Margin="0,12,0,0">
                         <!-- The recorded detail behind the summary above. -->
                         <Border Padding="12,10" CornerRadius="8">
                             <Border.Style>
                                 <Style TargetType="Border">
-                                    <Setter Property="Background" Value="{StaticResource Albumen.SubtleFillBrush}" />
-                                    <Setter Property="TextElement.Foreground" Value="{StaticResource Albumen.MutedTextBrush}" />
+                                    <Setter Property="Background" Value="{DynamicResource Albumen.SubtleFillBrush}" />
+                                    <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.MutedTextBrush}" />
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True">
-                                            <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
-                                            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            <Setter Property="Background" Value="{DynamicResource Albumen.SurfaceBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Albumen.BorderStrongBrush}" />
                                             <Setter Property="BorderThickness" Value="1" />
-                                            <Setter Property="TextElement.Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                                            <Setter Property="TextElement.Foreground" Value="{DynamicResource Albumen.TextBrush}" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -1737,7 +1704,7 @@
                                         IsDefault="False"
                                         IsCancel="False"
                                         IsTabStop="True"
-                                        Style="{StaticResource DangerButtonStyle}"
+                                        Style="{StaticResource Albumen.DangerButton}"
                                         AutomationProperties.Name="Confirm clear local Scan data"
                                         AutomationProperties.HelpText="Clears local Scan data. Source photos and Action records remain unchanged."
                                         IsVisibleChanged="OnClearScanDataConfirmationVisibilityChanged"
@@ -1765,9 +1732,9 @@
               </StackPanel>
             </ScrollViewer>
           </TabItem>
-        </TabControl>
+        </app:TopBarTabControl>
 
-        <StackPanel Grid.Row="2" Margin="0,10,0,0">
+        <StackPanel Grid.Row="3" Margin="0,10,0,0">
             <app:ReviewAnnouncementTextBlock x:Name="ReviewAnnouncementText"
                        Text="{Binding ReviewAnnouncement}" TextWrapping="Wrap"
                        AutomationProperties.Name="Review command status"

@@ -103,7 +103,7 @@ public sealed class WindowsLocalScopePreflightTests
             CancellationToken.None);
 
         Assert.Equal(ScopeTraversalState.Complete, evidence.Traversal);
-        Assert.Equal(new ScopeOutcomeCounts(1, 0, 0, 0), evidence.Counts);
+        Assert.Equal(new ScopeOutcomeCounts(1, 0, 0, 0, ["direct.jpg"]), evidence.Counts);
         Assert.Equal(SelectedPathOnly, native.InspectedPaths);
         Assert.Equal(ResolvedRootOnly, native.EnumeratedPaths);
         Assert.DoesNotContain(child, native.InspectedPaths);
@@ -211,7 +211,7 @@ public sealed class WindowsLocalScopePreflightTests
 
         Assert.Equal(ScopeCloudState.Local, evidence.Cloud);
         Assert.Equal(ScopeTraversalState.Complete, evidence.Traversal);
-        Assert.Equal(new ScopeOutcomeCounts(1, 0, 0, 0), evidence.Counts);
+        Assert.Equal(new ScopeOutcomeCounts(1, 0, 0, 0, ["inside.jpg"]), evidence.Counts);
         Assert.Equal(1, evidence.Restrictions.EscapingReparseTargets);
         Assert.Equal(ScopePreflightDecision.Ready, result.Decision);
         Assert.Contains(escapeDisplay, native.InspectedPaths);
@@ -291,7 +291,7 @@ public sealed class WindowsLocalScopePreflightTests
             Selection(ScopeRecursion.IncludeSubfolders),
             CancellationToken.None);
 
-        Assert.Equal(new ScopeOutcomeCounts(3, 0, 0, 0), evidence.Counts);
+        Assert.Equal(new ScopeOutcomeCounts(3, 0, 0, 0, ["one.JPEG", "two.png", "three.HeIc"]), evidence.Counts);
         Assert.Equal(3, Total(evidence.Counts));
     }
 

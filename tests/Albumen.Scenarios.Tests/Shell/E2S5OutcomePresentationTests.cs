@@ -25,12 +25,20 @@ public sealed class E2S5OutcomePresentationTests
         var outstanding = new ScanFileOccurrence(new(pin, 7, 1, 1), @"C:\Photos\outstanding.jpg",
             @"C:\Photos\outstanding.jpg", null, new(ScanStageState.Succeeded, ScanReason.None),
             new(ScanStageState.Running, ScanReason.None), null, new(null, null, false));
-        var candidateGroup = Group(pin, candidate, uncertain: false);
-        var uncertainGroup = Group(pin, uncertain, uncertain: true);
+        var lookAlike = Succeeded(pin, 8, @"C:\Photos\look-alike.jpg", 8);
+        var maybeSimilar = Succeeded(pin, 9, @"C:\Photos\maybe-similar.jpg", 9);
+        var both = Succeeded(pin, 10, @"C:\Photos\both.jpg", 10);
+        // A photo is counted once, in the first of Maybe similar, identical, look-alike: the candidate
+        // (identical and look-alike) counts as identical; "both" (identical and Maybe similar) counts
+        // as Uncertain, like every photo in a Maybe-similar set.
+        var identicalGroup = Group(pin, CandidateCategory.Exact, uncertain: false, candidate, both);
+        var lookAlikeGroup = Group(pin, CandidateCategory.NearDuplicate, uncertain: false, candidate, lookAlike);
+        var uncertainGroup = Group(pin, CandidateCategory.Exact, uncertain: true, uncertain);
+        var maybeSimilarGroup = Group(pin, CandidateCategory.Uncertain, uncertain: false, maybeSimilar, both);
         var scan = new ScanSnapshot(pin, ScanStatus.Incomplete,
             new(ScanStageState.Succeeded, ScanReason.None),
-            [candidate, acceptable, uncertain, unsupported, canceled, failed, outstanding],
-            [candidateGroup, uncertainGroup], new(7, 3, 1, 1, 1, 1));
+            [candidate, acceptable, uncertain, unsupported, canceled, failed, outstanding, lookAlike, maybeSimilar, both],
+            [identicalGroup, lookAlikeGroup, uncertainGroup, maybeSimilarGroup], new(10, 6, 1, 1, 1, 1));
 
         fixture.Workflow.Publish(fixture.Workflow.Current with
         {
@@ -39,15 +47,16 @@ public sealed class E2S5OutcomePresentationTests
             Scan = scan,
         });
 
+        // No "Candidate" and no "Outstanding": the rows say where the photos are.
         Assert.Equal(new[]
         {
-            ("Candidate", 1L, "Review the group and choose manually."),
-            ("Analyzed acceptable", 1L, "No duplicate candidate was found. Keep it, or scan again after the file changes."),
-            ("Uncertain", 1L, "Review it before selecting; Albumen could not classify it confidently."),
+            ("In identical sets", 1L, "Review the set and choose manually."),
+            ("In look-alike sets", 1L, "Review the set and choose manually."),
+            ("Unique photos", 1L, "No duplicate candidate was found. Keep it, or scan again after the file changes."),
+            ("Uncertain", 3L, "Review it before selecting; Albumen could not classify it confidently."),
             ("Unsupported", 1L, "Use a supported JPEG or PNG file, then start a fresh Scan."),
             ("Canceled/unprocessed", 1L, "Start a fresh Scan to analyze this file."),
             ("Failed", 1L, "Check file access and health, then start a fresh Scan."),
-            ("Outstanding", 1L, "Wait for this Scan to finish, or cancel it and start a fresh Scan."),
         }, fixture.ViewModel.ScanOutcomeSummaries.Select(item =>
             (item.Label, item.Count, item.NextStep)).ToArray());
 
@@ -56,7 +65,7 @@ public sealed class E2S5OutcomePresentationTests
             (@"C:\Photos\unsupported.gif", "Unsupported"),
             (@"C:\Photos\canceled.jpg", "Canceled/unprocessed"),
             (@"C:\Photos\failed.jpg", "Failed"),
-            (@"C:\Photos\outstanding.jpg", "Outstanding"),
+            (@"C:\Photos\outstanding.jpg", "Not finished"),
         }, fixture.ViewModel.CouldNotAnalyze.Select(item =>
             (item.DiscoveredPath, item.OutcomeLabel)).ToArray());
         Assert.All(fixture.ViewModel.CouldNotAnalyze,
@@ -66,8 +75,8 @@ public sealed class E2S5OutcomePresentationTests
             Scan = scan with
             {
                 Status = ScanStatus.Complete,
-                Occurrences = [candidate, acceptable, uncertain, unsupported, canceled, failed],
-                Counts = new(6, 3, 1, 1, 1, 0),
+                Occurrences = [candidate, acceptable, uncertain, unsupported, canceled, failed, lookAlike, maybeSimilar, both],
+                Counts = new(9, 6, 1, 1, 1, 0),
             },
         });
         Assert.Equal(
@@ -81,7 +90,7 @@ public sealed class E2S5OutcomePresentationTests
         return new(new(pin, id, 1, 1), path, path, key,
             new(ScanStageState.Succeeded, ScanReason.None),
             new(ScanStageState.Succeeded, ScanReason.None),
-            new(key, 10, new string((char)('A' + id), 64)), new(10, 1, true));
+            new(key, 10, new string("0123456789ABCDEF"[(int)id % 16], 64)), new(10, 1, true));
     }
 
     private static ScanFileOccurrence NotApplicable(
@@ -92,7 +101,8 @@ public sealed class E2S5OutcomePresentationTests
             prerequisite, new(ScanStageState.NotApplicable, prerequisite.Reason),
             null, new(null, null, false));
 
-    private static CandidateGroup Group(ScanPin pin, ScanFileOccurrence member, bool uncertain) =>
-        new(Guid.NewGuid(), 1, pin, CandidateCategory.Exact, [member], [], uncertain, null,
+    private static CandidateGroup Group(ScanPin pin, CandidateCategory category, bool uncertain,
+        params ScanFileOccurrence[] members) =>
+        new(Guid.NewGuid(), 1, pin, category, [.. members], [], uncertain, null,
             new(null, RecoveryUnavailableReason.UnknownAllocation));
 }

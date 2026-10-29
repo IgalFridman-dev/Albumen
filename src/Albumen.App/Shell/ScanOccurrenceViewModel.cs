@@ -18,6 +18,7 @@ public sealed class ScanOccurrenceViewModel
 
     // markedElsewhereIn names the set that holds this photo's mark when it is marked in
     // another set ("Look-alike set 2"); the mark is shown here too and can't be changed here.
+    // kindLine and uncertaintyLine are the set's evidence for this photo, shown on hover.
     internal ScanOccurrenceViewModel(
         ReviewMemberSnapshot member,
         bool isAlias,
@@ -26,7 +27,9 @@ public sealed class ScanOccurrenceViewModel
         int positionInSet = 0,
         int sizeOfSet = 0,
         string? markedElsewhereIn = null,
-        bool looksBlurrier = false)
+        bool looksBlurrier = false,
+        string kindLine = "",
+        string uncertaintyLine = "")
         : this(member.Occurrence, isAlias, new AsyncCommand(toggle,
             canExecute: () => selectionEnabled && member.Eligibility == ReviewEligibilityState.Eligible
                 && member.SelectedInGroup is null),
@@ -35,7 +38,10 @@ public sealed class ScanOccurrenceViewModel
         Eligibility = member.Eligibility;
         UnavailableReason = member.Reason;
         LooksBlurrier = looksBlurrier;
+        KindLine = kindLine;
+        UncertaintyLine = uncertaintyLine;
         IsMarkedElsewhere = member.SelectedInGroup is not null;
+        MarkedElsewhereText = IsMarkedElsewhere ? $"Marked in {markedElsewhereIn ?? "another set"}" : string.Empty;
         CanSelect = member.Eligibility == ReviewEligibilityState.Eligible && selectionEnabled && !IsMarkedElsewhere;
         EligibilityText = IsMarkedElsewhere
             ? $"Marked for removal in {markedElsewhereIn ?? "another set"}"
@@ -51,6 +57,17 @@ public sealed class ScanOccurrenceViewModel
         AutomationName = $"{(IsSelected ? "Marked for removal" : "Kept")}: {member.Occurrence.DiscoveredPath}";
         ItemStatus = $"{EligibilityText}; {PathKind}; {Allocation}"
             + (looksBlurrier ? $"; {BlurrierText}" : string.Empty);
+    }
+
+    // A search's match that is in no open set: it opens read-only, with nothing to decide here.
+    internal static ScanOccurrenceViewModel InNoSet(ScanFileOccurrence occurrence) => new(occurrence, NotInAnySetText);
+
+    private ScanOccurrenceViewModel(ScanFileOccurrence occurrence, string eligibilityText)
+        : this(occurrence, false, null, false, 1, 1)
+    {
+        MatchesSearch = true;
+        EligibilityText = eligibilityText;
+        ItemStatus = $"{eligibilityText}; {ItemStatus}";
     }
 
     private ScanOccurrenceViewModel(
@@ -99,6 +116,18 @@ public sealed class ScanOccurrenceViewModel
     // Blur evidence, shown as a badge: never a mark or a choice.
     public bool LooksBlurrier { get; }
     public const string BlurrierText = "Blurrier than the sharpest photo in this set";
+    // No Keeper advice (E3-S5): the "Suggested best" badge is a hint, never a choice.
+    public const string RecommendationText = "Albumen doesn't mark photos for you. You choose what to remove.";
+    public const string NotInAnySetText = "Not in any set: nothing to decide";
+    // Why the photo is in its set, for the facts shown on hover: "The files are identical, byte
+    // for byte." or the picture and color difference; empty when the set holds no evidence for it.
+    public string KindLine { get; } = string.Empty;
+    // Said only of Maybe-similar sets.
+    public string UncertaintyLine { get; } = string.Empty;
+    // "Marked in Look-alike set 2" on the tile of a photo whose mark another set holds.
+    public string MarkedElsewhereText { get; } = string.Empty;
+    // True while a search filters Review and this photo is one of its matches ("Matches" chip).
+    public bool MatchesSearch { get; init; }
     public string SizeText { get; }
     public string FileName { get; }
     public string PhysicalIdentity { get; }
@@ -159,10 +188,10 @@ public sealed class ScanOccurrenceViewModel
                 "Failed",
                 "Check file access and health, then start a fresh Scan."),
             ScanStageState.Pending or ScanStageState.Running => (
-                "Outstanding",
+                "Not finished",
                 "Wait for this Scan to finish, or cancel it and start a fresh Scan."),
             _ => (
-                "Analyzed acceptable",
+                "Unique photo",
                 "No duplicate candidate was found. Keep it, or scan again after the file changes."),
         };
     }
