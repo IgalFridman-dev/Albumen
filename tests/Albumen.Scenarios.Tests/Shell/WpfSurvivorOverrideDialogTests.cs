@@ -203,7 +203,7 @@ public sealed class WpfSurvivorOverrideDialogTests
             var owner = new MainWindow();
             var service = new WpfReviewDialogService(() => owner);
             var fixture = ReviewShellFixture.Ready(dialog: service);
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             owner.DataContext = fixture.ViewModel;
             owner.Show();
             WpfReviewSelectionTests.Drain();
@@ -213,8 +213,7 @@ public sealed class WpfSurvivorOverrideDialogTests
                 fixture.Workflow.NextSelectionResult = new ReviewCommandResult(
                     ReviewCommandOutcome.OverrideRequired, before,
                     ReviewData.Proposal(before));
-                var selection = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(owner)
-                    .First(control => AutomationProperties.GetAutomationId(control) == "selection-control");
+                var selection = ReviewTiles.Tile(owner, 1);
                 selection.Focus();
                 Keyboard.Focus(selection);
                 Assert.True(selection.IsKeyboardFocused);
@@ -224,7 +223,8 @@ public sealed class WpfSurvivorOverrideDialogTests
                     var peer = UIElementAutomationPeer.CreatePeerForElement(cancel);
                     Assert.NotNull(peer);
                     Assert.IsAssignableFrom<IInvokeProvider>(peer.GetPattern(PatternInterface.Invoke)).Invoke();
-                }, () => Assert.IsType<AsyncCommand>(selection.Command).ExecuteAsync().GetAwaiter().GetResult());
+                }, () => Assert.IsType<AsyncCommand>(selection.Member?.ToggleSelectionCommand)
+                    .ExecuteAsync().GetAwaiter().GetResult());
 
                 Assert.True(interaction.DialogClosed);
                 Assert.Empty(fixture.Workflow.Affirmations);
@@ -234,8 +234,7 @@ public sealed class WpfSurvivorOverrideDialogTests
                 Assert.Null(fixture.Workflow.Current.Review.ApprovedRequest);
                 Assert.Equal(before.Groups[0].SelectedOccurrenceIds,
                     fixture.Workflow.Current.Review.Groups[0].SelectedOccurrenceIds);
-                var currentSelection = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(owner)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                var currentSelection = ReviewTiles.Tile(owner, 1);
                 Assert.Same(selection, currentSelection);
                 Assert.True(selection.IsKeyboardFocused);
             }
@@ -251,7 +250,7 @@ public sealed class WpfSurvivorOverrideDialogTests
             var owner = new MainWindow();
             var service = new WpfReviewDialogService(() => owner);
             var fixture = ReviewShellFixture.Ready(dialog: service);
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             owner.DataContext = fixture.ViewModel;
             owner.Show();
             WpfReviewSelectionTests.Drain();
@@ -261,9 +260,8 @@ public sealed class WpfSurvivorOverrideDialogTests
                 fixture.Workflow.NextSelectionResult = new(ReviewCommandOutcome.OverrideRequired, before,
                     ReviewData.Proposal(before));
                 var delayed = fixture.Workflow.DeferNextAffirmation();
-                var selection = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(owner)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
-                var command = Assert.IsType<AsyncCommand>(selection.Command);
+                var selection = ReviewTiles.Tile(owner, 1);
+                var command = Assert.IsType<AsyncCommand>(selection.Member?.ToggleSelectionCommand);
                 Assert.True(selection.Focus());
                 Keyboard.Focus(selection);
 
@@ -295,8 +293,7 @@ public sealed class WpfSurvivorOverrideDialogTests
                     pending.GetAwaiter().GetResult();
 
                     Assert.True(command.CanExecute(null));
-                    var current = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(owner)
-                        .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                    var current = ReviewTiles.Tile(owner, 1);
                     Assert.True(current.IsKeyboardFocused);
                 }
                 finally
@@ -319,14 +316,13 @@ public sealed class WpfSurvivorOverrideDialogTests
             var owner = new MainWindow();
             var service = new WpfReviewDialogService(() => owner);
             var fixture = ReviewShellFixture.Ready();
-            WpfReviewSelectionTests.OpenFirstGroupedComparison(fixture.ViewModel);
+            WpfReviewSelectionTests.OpenIdenticalCopies(fixture.ViewModel);
             owner.DataContext = fixture.ViewModel;
             owner.Show();
             WpfReviewSelectionTests.Drain();
             try
             {
-                var selection = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(owner)
-                    .Single(control => control.DataContext is ScanOccurrenceViewModel { OccurrenceId: 1 });
+                var selection = ReviewTiles.Tile(owner, 1);
                 Assert.True(selection.Focus());
                 Keyboard.Focus(selection);
                 Assert.True(selection.IsKeyboardFocused);

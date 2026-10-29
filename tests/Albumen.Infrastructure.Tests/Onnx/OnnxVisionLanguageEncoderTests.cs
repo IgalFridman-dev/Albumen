@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -192,6 +193,101 @@ public sealed class OnnxVisionLanguageEncoderTests : IDisposable
         Assert.Null(encoder.EncodeImage(profile, SyntheticImage(0, 64, 48)).Failure);
     }
 
+    // The Scan opens the text tower ahead of the first search. That encodes nothing, and a text
+    // tower that cannot open gives the very failure the search's own encoding then reports.
+    [Fact]
+    public void PreparingTextOpensItsTowerAndKeepsItsFailureForTheSearch()
+    {
+        using (var encoder = new OnnxVisionLanguageEncoder(models))
+        {
+            var profile = encoder.LoadProfile().Profile!;
+            Assert.Null(encoder.PrepareText(profile));
+            Assert.Null(encoder.EncodeText(profile, "a dog").Failure);
+            Assert.Equal(EncoderFailureKind.Failed, encoder.PrepareText(profile with { DecodeEdge = 256 })!.Kind);
+        }
+
+        File.WriteAllText(Path.Combine(models, "tokenizer.model"), "not a sentencepiece model");
+        EditManifest(manifest =>
+        {
+            manifest["files"]!["tokenizer"]!["length"] = new FileInfo(Path.Combine(models, "tokenizer.model")).Length;
+            manifest["files"]!["tokenizer"]!["sha256"] = Sha256("tokenizer.model");
+        });
+        using var broken = new OnnxVisionLanguageEncoder(models);
+        var brokenProfile = broken.LoadProfile().Profile!;
+
+        var failure = broken.PrepareText(brokenProfile);
+
+        Assert.Equal(EncoderFailureKind.Failed, failure?.Kind);
+        Assert.Equal(failure, broken.EncodeText(brokenProfile, "a dog").Failure);
+        Assert.Null(broken.EncodeImage(brokenProfile, SyntheticImage(0, 64, 48)).Failure);
+    }
+
+    // The app can close while the Scan's warm-up still opens the text tower. A session being
+    // created cannot be interrupted, so Dispose waits for it (and then closes it) instead of
+    // returning and leaving it open.
+    [Fact]
+    public async Task DisposingWhileTheTextSessionIsCreatedWaitsForIt()
+    {
+        using var creating = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var steps = new ConcurrentQueue<OnnxVisionLanguageEncoder.TextOpenStep>();
+        var encoder = new OnnxVisionLanguageEncoder(models, step =>
+        {
+            steps.Enqueue(step);
+            if (step != OnnxVisionLanguageEncoder.TextOpenStep.CreatingSession) return;
+            creating.Set();
+            Assert.True(release.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+        });
+        var profile = encoder.LoadProfile().Profile!;
+        var warmUp = Task.Run(() => encoder.PrepareText(profile), TestContext.Current.CancellationToken);
+        Assert.True(creating.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+
+        var disposer = DisposeOnItsOwnThread(encoder);
+        release.Set();
+
+        Assert.Null(await warmUp.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+        Assert.True(disposer.Join(TimeSpan.FromSeconds(30)));
+        Assert.Equal(
+            new[]
+            {
+                OnnxVisionLanguageEncoder.TextOpenStep.Checksumming,
+                OnnxVisionLanguageEncoder.TextOpenStep.Checksumming,
+                OnnxVisionLanguageEncoder.TextOpenStep.CreatingSession,
+            },
+            steps.ToArray());
+    }
+
+    // Closing while the warm-up still checksums the text model stops it at the next chunk: no
+    // session is created and nothing is kept as the model's failure, and a closed encoder starts
+    // no warm-up at all.
+    [Fact]
+    public async Task DisposingWhileTheTextModelIsChecksummedStopsBeforeAnySession()
+    {
+        using var checksumming = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var steps = new ConcurrentQueue<OnnxVisionLanguageEncoder.TextOpenStep>();
+        var encoder = new OnnxVisionLanguageEncoder(models, step =>
+        {
+            steps.Enqueue(step);
+            if (steps.Count > 1) return;
+            checksumming.Set();
+            Assert.True(release.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+        });
+        var profile = encoder.LoadProfile().Profile!;
+        var warmUp = Task.Run(() => encoder.PrepareText(profile), TestContext.Current.CancellationToken);
+        Assert.True(checksumming.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+
+        var disposer = DisposeOnItsOwnThread(encoder);
+        release.Set();
+
+        Assert.Null(await warmUp.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+        Assert.True(disposer.Join(TimeSpan.FromSeconds(30)));
+        Assert.Equal(new[] { OnnxVisionLanguageEncoder.TextOpenStep.Checksumming }, steps.ToArray());
+
+        Assert.Null(encoder.PrepareText(profile));
+        Assert.Single(steps);
+    }
+
     [Fact]
     public void UnexpectedOutputNameFails()
     {
@@ -257,6 +353,19 @@ public sealed class OnnxVisionLanguageEncoderTests : IDisposable
         }
 
         return new EncoderImage(bgra, width, height);
+    }
+
+    // Runs Dispose on a thread of its own and returns once it is blocked, as it is only while the
+    // text tower is still opening; a Dispose that returns instead fails the test.
+    private static Thread DisposeOnItsOwnThread(OnnxVisionLanguageEncoder encoder)
+    {
+        var disposer = new Thread(encoder.Dispose) { IsBackground = true };
+        disposer.Start();
+        Assert.True(SpinWait.SpinUntil(
+            () => !disposer.IsAlive || disposer.ThreadState.HasFlag(ThreadState.WaitSleepJoin),
+            TimeSpan.FromSeconds(30)), "Dispose neither blocked nor returned.");
+        Assert.True(disposer.IsAlive, "Dispose returned while the text tower was still opening.");
+        return disposer;
     }
 
     private static JsonNode Expected() =>

@@ -23,19 +23,49 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
     private const string TokenInput = "input_ids";
     private const string EmbeddingOutput = "embedding";
 
+    // Checksums are read in chunks of this size, so a closing encoder's warm-up stops within one.
+    private const int ChecksumChunk = 1 << 20;
+
     private readonly string modelsDirectory;
     private readonly Lazy<(ModelManifest? Manifest, EncoderProfileResult Result)> installed;
     private readonly Lazy<Tower> vision;
-    private readonly Lazy<Tower> text;
+    private readonly Action<TextOpenStep>? textOpenStep;
+
+    // Cancelled first thing in Dispose, for the warm-up's open of the text tower. Never disposed, so
+    // a second Dispose can cancel it again; it holds no timer or handle.
+    private readonly CancellationTokenSource closing = new();
+    private readonly CancellationToken closingToken;
+
+    // The text tower opens once, under this lock, so Dispose can wait for an open still running.
+    private readonly object textGate = new();
+    private Tower? text;
 
     public OnnxVisionLanguageEncoder(string modelsDirectory)
+        : this(modelsDirectory, textOpenStep: null)
+    {
+    }
+
+    // textOpenStep is told of each step of opening the text tower; the tests hold one to close the
+    // encoder during it.
+    internal OnnxVisionLanguageEncoder(string modelsDirectory, Action<TextOpenStep>? textOpenStep)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelsDirectory);
         this.modelsDirectory = modelsDirectory;
+        this.textOpenStep = textOpenStep;
+        closingToken = closing.Token;
         installed = new(Install);
         // Callers embed photos in parallel, one inference thread each (spike: 2.5x the throughput of one photo on all threads).
-        vision = new(() => OpenTower(m => m.Files.Vision, PixelInput, m => [3, m.ImageSize, m.ImageSize], intraOpThreads: 1));
-        text = new(() => OpenTower(m => m.Files.Text, TokenInput, m => [m.MaxTokens], intraOpThreads: 0));
+        vision = new(() => OpenTower(m => m.Files.Vision, PixelInput, m => [3, m.ImageSize, m.ImageSize], intraOpThreads: 1,
+            CancellationToken.None));
+    }
+
+    internal enum TextOpenStep
+    {
+        /// <summary>A chunk of the text model or its tokenizer was read for its checksum.</summary>
+        Checksumming,
+
+        /// <summary>The checksums matched; the ONNX session, which cannot be interrupted, is created next.</summary>
+        CreatingSession,
     }
 
     public EncoderProfileResult LoadProfile() => installed.Value.Result;
@@ -50,7 +80,7 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
             throw new ArgumentException("The image must be BGRA32 pixels within the decode edge.", nameof(image));
         }
 
-        if (Prepare(profile, vision) is { } failure)
+        if (Prepare(profile, () => vision.Value) is { } failure)
         {
             return failure;
         }
@@ -64,25 +94,46 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(prompt);
-        if (Prepare(profile, text) is { } failure)
+        if (Prepare(profile, () => Text(CancellationToken.None)) is { } failure)
         {
             return failure;
         }
 
-        var ids = SiglipPreprocessing.TokenIds(text.Value.Tokenizer!, prompt, profile.MaxTokens, profile.PadId);
-        return Run(text.Value, TokenInput, new DenseTensor<long>(ids, [1, profile.MaxTokens]), profile.Dimension);
+        var tower = Text(CancellationToken.None);
+        var ids = SiglipPreprocessing.TokenIds(tower.Tokenizer!, prompt, profile.MaxTokens, profile.PadId);
+        return Run(tower, TokenInput, new DenseTensor<long>(ids, [1, profile.MaxTokens]), profile.Dimension);
+    }
+
+    /// <summary>
+    /// Verifies and opens the text tower and its tokenizer, as the first prompt would. Disposing the
+    /// encoder stops it between checksum chunks, keeping nothing, and it then returns null.
+    /// </summary>
+    public EncoderFailure? PrepareText(EncoderProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        try
+        {
+            return Prepare(profile, () => Text(closingToken))?.Failure;
+        }
+        catch (OperationCanceledException) when (closingToken.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     public void Dispose()
     {
+        // First, so a warm-up still checksumming the text tower stops at its next chunk. A session
+        // being created cannot be interrupted: the lock waits for it, and it is closed here.
+        closing.Cancel();
         if (vision.IsValueCreated)
         {
             vision.Value.Session?.Dispose();
         }
 
-        if (text.IsValueCreated)
+        lock (textGate)
         {
-            text.Value.Session?.Dispose();
+            text?.Session?.Dispose();
         }
     }
 
@@ -117,7 +168,7 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
         return new(vector, null);
     }
 
-    private EmbeddingResult? Prepare(EncoderProfile profile, Lazy<Tower> tower)
+    private EmbeddingResult? Prepare(EncoderProfile profile, Func<Tower> tower)
     {
         if (LoadProfile() is { Failure: { } notInstalled })
         {
@@ -129,7 +180,23 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
             return new(default, Failed("The vectors were requested for a different encoder profile."));
         }
 
-        return tower.Value.Failure is { } failure ? new(default, failure) : null;
+        return tower().Failure is { } failure ? new(default, failure) : null;
+    }
+
+    // Opened on first use and kept, failure included. An open cancelled by Dispose keeps nothing, so
+    // it is never taken for a model failure; a closed encoder starts no new one for its warm-up.
+    private Tower Text(CancellationToken cancellationToken)
+    {
+        lock (textGate)
+        {
+            if (text is null)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                text = OpenTower(m => m.Files.Text, TokenInput, m => [m.MaxTokens], intraOpThreads: 0, cancellationToken);
+            }
+
+            return text;
+        }
     }
 
     private (ModelManifest?, EncoderProfileResult) Install()
@@ -195,11 +262,13 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
         Func<ModelManifest, ModelFile> select,
         string input,
         Func<ModelManifest, int[]> inputShape,
-        int intraOpThreads)
+        int intraOpThreads,
+        CancellationToken cancellationToken)
     {
         var manifest = installed.Value.Manifest!;
         var file = select(manifest);
-        var (model, corrupt) = OpenVerified(file);
+        var step = input == TokenInput ? textOpenStep : null;
+        var (model, corrupt) = OpenVerified(file, step, cancellationToken);
         if (corrupt is not null)
         {
             return new(null, null, corrupt);
@@ -211,7 +280,7 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
             SentencePieceTokenizer? tokenizer = null;
             if (input == TokenInput)
             {
-                var (tokenizerModel, corruptTokenizer) = OpenVerified(manifest.Files.Tokenizer);
+                var (tokenizerModel, corruptTokenizer) = OpenVerified(manifest.Files.Tokenizer, step, cancellationToken);
                 if (corruptTokenizer is not null)
                 {
                     return new(null, null, corruptTokenizer);
@@ -231,6 +300,10 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
                 }
             }
 
+            // The last point a closing encoder can stop: the session's constructor cannot be
+            // interrupted, so a Dispose from here on waits for it.
+            cancellationToken.ThrowIfCancellationRequested();
+            step?.Invoke(TextOpenStep.CreatingSession);
             InferenceSession session;
             try
             {
@@ -274,26 +347,47 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
     }
 
     /// <summary>Opens the file read-only (writers and renames blocked) and returns it rewound if its checksum matches.</summary>
-    private (FileStream? Stream, EncoderFailure? Failure) OpenVerified(ModelFile file)
+    private (FileStream? Stream, EncoderFailure? Failure) OpenVerified(
+        ModelFile file, Action<TextOpenStep>? step, CancellationToken cancellationToken)
     {
         FileStream? stream = null;
         try
         {
             stream = File.OpenRead(Path.Combine(modelsDirectory, file.Path));
-            if (stream.Length == file.Length && Convert.ToHexString(SHA256.HashData(stream)) == file.Sha256)
+            if (stream.Length == file.Length && Sha256(stream, step, cancellationToken) == file.Sha256)
             {
                 stream.Position = 0;
-                return (stream, null);
+                var verified = stream;
+                stream = null;
+                return (verified, null);
             }
 
-            stream.Dispose();
             return (null, Failed($"The model file {file.Path} does not match its checksum."));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            stream?.Dispose();
             return (null, Unavailable($"The model file {file.Path} could not be read: {exception.Message}"));
         }
+        finally
+        {
+            // Unless it was verified and handed on: a wrong checksum, a read error or a cancel.
+            stream?.Dispose();
+        }
+    }
+
+    private static string Sha256(FileStream stream, Action<TextOpenStep>? step, CancellationToken cancellationToken)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var chunk = new byte[ChecksumChunk];
+        int read;
+        while ((read = stream.Read(chunk)) > 0)
+        {
+            step?.Invoke(TextOpenStep.Checksumming);
+            cancellationToken.ThrowIfCancellationRequested();
+            hash.AppendData(chunk, 0, read);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset());
     }
 
     private sealed record Tower(InferenceSession? Session, SentencePieceTokenizer? Tokenizer, EncoderFailure? Failure);

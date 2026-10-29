@@ -5,6 +5,7 @@ using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
 using Albumen.App;
+using Albumen.App.Review;
 using Albumen.App.Shell;
 using Albumen.Application.Review;
 using Albumen.Application.Scan;
@@ -118,7 +119,7 @@ public sealed class WpfReviewFaultTests
                         Assert.Equal(viewModel.ReviewAnnouncement, peer.GetItemStatus());
                         break;
                     case "selection-controls":
-                        WpfReviewSelectionTests.OpenFirstGroupedComparison(viewModel);
+                        WpfReviewSelectionTests.OpenIdenticalCopies(viewModel);
                         window.UpdateLayout();
                         WpfReviewSelectionTests.Drain();
                         var group = Assert.Single(viewModel.ExactGroups);
@@ -127,11 +128,15 @@ public sealed class WpfReviewFaultTests
                         Assert.False(group.ReplaceSelectionCommand.CanExecute(new long[] { 1 }));
                         Assert.All(group.Members, member =>
                             Assert.False(Assert.IsType<AsyncCommand>(member.ToggleSelectionCommand).CanExecute(null)));
-                        var controls = WpfReviewSelectionTests.Descendants<ReviewSelectionCheckBox>(window).ToArray();
-                        Assert.NotEmpty(controls);
-                        Assert.All(controls, control => Assert.False(control.IsEnabled));
-                        var members = Assert.IsType<ListBox>(window.FindName("ReviewComparisonsList"));
-                        Assert.False(ApplicationCommands.SelectAll.CanExecute(null, members));
+                        var tiles = WpfReviewSelectionTests.Descendants<ReviewPhotoTile>(window).ToArray();
+                        Assert.NotEmpty(tiles);
+                        Assert.All(tiles, tile =>
+                        {
+                            Assert.False(ReviewTiles.RemoveItem(tile).IsEnabled);
+                            Assert.False(ApplicationCommands.SelectAll.CanExecute(null, tile));
+                        });
+                        var gallery = Assert.IsType<ListBox>(window.FindName("ReviewGalleryList"));
+                        Assert.False(ApplicationCommands.SelectAll.CanExecute(null, gallery));
                         Assert.False(viewModel.CanApproveReview);
                         break;
                     default:

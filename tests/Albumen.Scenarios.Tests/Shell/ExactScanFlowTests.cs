@@ -70,20 +70,15 @@ public sealed class ExactScanFlowTests
     }
 
     [Fact]
-    public async Task VisibleDefaultsCanDisableNearWithoutCreatingASelection()
+    public void VisibleDefaultsFindLookAlikesWithoutCreatingASelection()
     {
         var fixture = new ExactShellFixture();
         fixture.PublishReview(ScanStatus.Complete);
         fixture.PublishPhase(WorkflowPhase.ConfirmRules);
 
-        Assert.True(fixture.ViewModel.NearDuplicatesEnabled);
-        Assert.Contains("Identical copies are always included", fixture.ViewModel.ScanOptionsGuidance, StringComparison.Ordinal);
-        Assert.All(fixture.Workflow.Current.Review.Groups,
-            group => Assert.Empty(group.SelectedOccurrenceIds));
-        await fixture.ViewModel.ChangeNearDuplicateModeCommand.ExecuteAsync(false)
-            .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
-
-        Assert.Equal(NearDuplicateMode.Disabled, fixture.Workflow.Current.Options.Near);
+        Assert.Equal(NearDuplicateMode.Conservative, fixture.Workflow.Current.Options.Near);
+        Assert.StartsWith("Identical copies and look-alikes are always found.", fixture.ViewModel.ScanOptionsGuidance, StringComparison.Ordinal);
+        Assert.DoesNotContain(fixture.Workflow.Actions, action => action.StartsWith("options:", StringComparison.Ordinal));
         Assert.All(fixture.Workflow.Current.Review.Groups,
             group => Assert.Empty(group.SelectedOccurrenceIds));
         Assert.All(fixture.ViewModel.ExactGroups,

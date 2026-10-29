@@ -5,15 +5,16 @@ data lives.
 
 ## What the user sees
 
-One window (`src/Albumen.App/MainWindow.xaml`) with a left-hand list of steps. The workflow has five
+One dark window (`src/Albumen.App/MainWindow.xaml`; colours in `Themes/AlbumenPalette.cs`, which
+switches to system colours under High Contrast) with a left-hand list of steps. The workflow has five
 phases (`Domain/Workflow/WorkflowPhase.cs`), each unlocked only when the previous one is valid; the
 first two share one screen, so the list shows four steps.
 
 | Step | Phase | What happens on screen |
 |---|---|---|
-| 1 | **Choose folder** (phases ChooseScope + ConfirmRules) | Pick one local folder, "Include subfolders", and "Look-alikes" (identical copies are always found, as the caption says). A status strip says one sentence per state (ready with the photo count, checking, blocked, not checked); blocking reasons (network, cloud-only, protected folders) appear under it, and the folder check counts, restrictions and the scan options' status wait under "Details". One "Scan N photos" button continues, confirms the options for this folder and starts the scan, each step checked by the workflow owner as before. |
-| 2 | **Scan** | Progress and live counts; "Cancel Scan". With Look-alikes on, a last stage indexes the photos for search (Cancel there skips only that stage). Outcome categories show what was grouped, skipped or unsupported. |
-| 3 | **Review** | Kinds shown as Identical copies / Look-alike / Maybe similar / Couldn't check (internally Exact / Near / Uncertain / CouldNotAnalyze) → sets → photos with bounded previews and side-by-side compare. The user switches photos to Remove; at least one survivor per group is enforced (a dialog asks for confirmation when the suggested survivor is overridden). Above the kinds, "Find photos by what they show" takes a short prompt and lists this Scan's likely matches by rank, each with its set; opening one shows it in that set. The list marks nothing; "Show all Review results" clears it. |
+| 1 | **Choose folder** (phases ChooseScope + ConfirmRules) | Pick one local folder and "Include subfolders"; identical copies and look-alikes are always found. A status strip says one sentence per state (ready with the photo count, checking, blocked, not checked) and the line under it names the first six photos the folder check found ("Includes IMG_0001.jpg, … and 12 more."), since the Windows folder picker lists folders only (its title says so). Blocking reasons (network, cloud-only, protected folders) appear under the strip, and the folder check counts, restrictions and the scan options' status wait under "Details". One "Scan N photos" button continues, confirms the options for this folder and starts the scan, each step checked by the workflow owner as before. |
+| 2 | **Scan** | Progress and live counts; "Cancel Scan". A last stage indexes the photos for search (Cancel there skips only that stage). The finished summary counts photos in identical sets, in look-alike sets, unique photos, uncertain, unsupported, canceled/unprocessed and failed. |
+| 3 | **Review** | Kinds shown as Identical copies / Look-alike / Maybe similar / Couldn't check (internally Exact / Near / Uncertain / CouldNotAnalyze) in a narrow column; opening a kind shows all of its sets as a photo gallery (`Review/JustifiedPanel.cs`: rows of equal height, each photo as wide as its shape needs; a photo counts as 4:3 until its thumbnail loads, so a set's rows re-flow once its thumbnails arrive). Hovering a photo shows its facts (name, path, size, dimensions, why it is in the set). Below the gallery a Left and a Right Viewer show photos large, with one zoom and shared panning: drag a photo in, or right-click it and choose "Place in Left Viewer" / "Place in Right Viewer" (a click places it only while the Left Viewer is empty); dropping one viewer's photo on the other swaps them, dropping it anywhere else empties that viewer, and the photo's tile reads "Left Viewer" or "Right Viewer". The user marks a photo by right-click → "Remove" or the viewer's "Remove this photo" button (red while marked; "Unmark for removal" and the button undo it), and the tile shows a Removed sign; at least one survivor per group is enforced (a dialog asks for confirmation before a set's last kept photo is marked). The search bar at the top centre (Photos tab, Review only) filters Review: each kind narrows to the sets with a matching photo ("3 of 14 sets"), shown whole and best match first, with the matches labelled; matching photos in no open set are listed under "Other matches" and open read-only. The search marks nothing and keeps every mark, the approval says how many marked photos it hides, and the clear button shows everything again. |
 | 4 | **Clean up** (phase ApproveCleanup) | The Review page ends with "Move N photos to the Recycle Bin?": the first marked photos with thumbnails and paths, then the full accounting. "Move to Recycle Bin" sends them one at a time and shows a progress bar, a card per photo (moved, skipped and why, or unknown) and a summary when it ends. |
 
 A **History** view in the top bar lists every saved cleanup (one card each, with every photo's
@@ -56,7 +57,7 @@ sequenceDiagram
   UI->>Scan: Start Scan (options)
   Scan->>OS: enumerate files, read bytes under a lease
   Scan->>Scan: Exact groups (SHA-256) + Near groups (dHash ≤4, color ≤12)
-  Scan->>Scan: photo vectors (SigLIP 2, parallel; Look-alikes on)
+  Scan->>Scan: photo vectors (SigLIP 2, parallel)
   Scan->>Scan: Maybe-similar sets from vector cosine (Near stays hash-only)
   Scan->>DB: checkpoints + accounting
   UI->>Rev: select files, keep ≥1 survivor

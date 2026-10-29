@@ -5,9 +5,11 @@
         AutomationProperties.ItemStatus="{Binding StatusText}">
     <StackPanel>
         <!-- MainWindow sizes the preview from the Review page viewport and the zoom
-             slider; a zoomed photo pans sideways inside this scroller. -->
+             slider. The scroller keeps the height a fitted photo takes (UpdateImageBounds
+             sets its MaxHeight to FitHeight on its first layout and on every change); a
+             zoomed photo scrolls both ways inside it, with both scroll bars. -->
         <ScrollViewer x:Name="PreviewImageScroller"
-                      HorizontalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Disabled"
                       Focusable="False"
                       PreviewMouseWheel="OnPreviewImageMouseWheel">
@@ -24,8 +26,8 @@
                  Text="{Binding FullPath, Mode=OneWay}"
                  IsReadOnly="True"
                  TextWrapping="Wrap"
-                 Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                 Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                 Background="{DynamicResource Albumen.SurfaceBrush}"
+                 Foreground="{DynamicResource Albumen.TextBrush}"
                  AutomationProperties.Name="Full preview path" />
         <TextBlock x:Name="PreviewStatusText"
                    Text="{Binding StatusText, Mode=OneWay}"

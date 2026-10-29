@@ -23,8 +23,8 @@ public partial class PreviewStatusControl : UserControl
         };
     }
 
-    // 1 fits the photo to the available width and FitHeight; larger values enlarge it
-    // and the photo then pans sideways while the page scrolls vertically.
+    // 1 fits the photo to the available width and FitHeight; larger values enlarge it, and the
+    // photo then scrolls both ways inside a box that keeps FitHeight.
     public double Zoom
     {
         get => (double)GetValue(ZoomProperty);
@@ -43,15 +43,26 @@ public partial class PreviewStatusControl : UserControl
     private void UpdateImageBounds()
     {
         var zoom = Math.Clamp(Zoom, 1, 8);
-        PreviewImage.MaxHeight = Math.Max(1, FitHeight) * zoom;
+        var fit = Math.Max(1, FitHeight);
+        PreviewImage.MaxHeight = fit * zoom;
         var width = PreviewImageScroller.ActualWidth;
         PreviewImage.MaxWidth = width > 0 ? width * zoom : double.PositiveInfinity;
+        // A fitted photo needs no scroll bar; a zoomed one shows both, so every part of it can be
+        // reached without the box growing past FitHeight.
+        PreviewImageScroller.MaxHeight = fit;
+        var bars = zoom > 1 ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+        PreviewImageScroller.HorizontalScrollBarVisibility = bars;
+        PreviewImageScroller.VerticalScrollBarVisibility = bars;
     }
 
-    // The image scroller only pans sideways, so the wheel keeps scrolling the page.
+    // The wheel scrolls a zoomed photo up and down until it reaches its top or bottom; then, and
+    // over a photo that fits, the wheel scrolls the page.
     private void OnPreviewImageMouseWheel(object sender, MouseWheelEventArgs eventArgs)
     {
         if (eventArgs.Handled) return;
+        var scroller = PreviewImageScroller;
+        if (eventArgs.Delta > 0 ? scroller.VerticalOffset > 0 : scroller.VerticalOffset < scroller.ScrollableHeight)
+            return;
         eventArgs.Handled = true;
         RaiseEvent(new MouseWheelEventArgs(eventArgs.MouseDevice, eventArgs.Timestamp, eventArgs.Delta)
         {

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 using Albumen.Application.Scan;
 using Albumen.Domain.Scan;
@@ -91,6 +92,7 @@ internal sealed class WindowsScopeTraversal
         yield return new WindowsTraversalRoot(rootEvidence);
 
         var counts = EmptyCounts;
+        var samples = ImmutableArray.CreateBuilder<string>(ScopeOutcomeCounts.MaxSampleSupportedFiles);
         var restrictions = EmptyRestrictions;
         var filePolicy = new WindowsScopeFilePolicy(native);
         var pending = new Stack<DirectoryFrame>();
@@ -227,6 +229,11 @@ internal sealed class WindowsScopeTraversal
 
                 var result = policyAttempt.Value;
                 counts = AddFileOutcome(counts, result.File.Outcome);
+                if (result.File.Outcome.State is ScanStageState.Succeeded
+                    && samples.Count < ScopeOutcomeCounts.MaxSampleSupportedFiles)
+                {
+                    samples.Add(Path.GetFileName(discoveredPath));
+                }
                 yield return new WindowsTraversalFile(result.File);
                 if (result.BlocksForUnknownFailure)
                 {
@@ -262,7 +269,12 @@ internal sealed class WindowsScopeTraversal
                 volume,
                 ScopeCloudState.Local,
                 ScopeTraversalState.Complete,
-                counts,
+                new ScopeOutcomeCounts(
+                    counts.Supported,
+                    counts.UnsupportedExtension,
+                    counts.Unreadable,
+                    counts.CodecUnavailable,
+                    samples.ToImmutable()),
                 restrictions));
     }
 

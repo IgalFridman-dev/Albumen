@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Albumen.App.Review;
 using Albumen.Domain.Review;
 
 namespace Albumen.App.Shell;
@@ -117,11 +118,11 @@ public sealed class WpfReviewDialogService(Func<Window?> ownerProvider) : IRevie
         element is UIElement { IsVisible: true, IsEnabled: true, Focusable: true } visual
         && PresentationSource.FromVisual(visual) is not null;
 
-    private static ReviewSelectionCheckBox? FindCurrentSelectionControl(
+    private static ReviewPhotoTile? FindCurrentSelectionControl(
         DependencyObject root,
         ReviewFocusIdentity identity)
     {
-        foreach (var control in Descendants<ReviewSelectionCheckBox>(root))
+        foreach (var control in Descendants<ReviewPhotoTile>(root))
         {
             if (control.DataContext is not ScanOccurrenceViewModel member
                 || member.OccurrenceId != identity.OccurrenceId)

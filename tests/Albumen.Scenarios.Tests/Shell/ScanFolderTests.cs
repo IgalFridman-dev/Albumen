@@ -24,15 +24,15 @@ public sealed class ScanFolderTests
         Assert.True(viewModel.IsChooseFolderPhase);
         Assert.True(viewModel.CanChangeScanOptions);
         Assert.Equal("Scan 2 photos", viewModel.ScanFolderText);
-        await scheduler.Finish(viewModel.ChangeNearDuplicateModeCommand.ExecuteAsync(false));
-        Assert.True(viewModel.IsChooseScopePhase);
         Assert.Empty(scan.Starts);
 
         Assert.True(viewModel.CanScanFolder);
         await scheduler.Finish(viewModel.ScanFolderCommand.ExecuteAsync());
 
+        // Look-alikes are always found: every scan uses the default options.
         var started = Assert.Single(scan.Starts);
-        Assert.Equal(NearDuplicateMode.Disabled, started.Options.Near);
+        Assert.Equal(ScanOptions.Default, started.Options);
+        Assert.Equal(NearDuplicateMode.Conservative, started.Options.Near);
         Assert.Equal(started, workflow.Current.Rules);
         Assert.True(viewModel.IsScanPhase);
     }
@@ -111,7 +111,7 @@ public sealed class ScanFolderTests
     }
 
     [Fact]
-    public void AnOptionChangeAfterAScanWarnsThatResultsAndMarksAreCleared()
+    public void ASubfoldersChangeAfterAScanWarnsThatResultsAndMarksAreCleared()
     {
         var fixture = new ExactShellFixture();
         Assert.DoesNotContain("clears the current results", fixture.ViewModel.ScanOptionsGuidance, StringComparison.Ordinal);
@@ -125,8 +125,9 @@ public sealed class ScanFolderTests
             },
         });
 
-        Assert.EndsWith("Changing an option clears the current results and your marks, and you scan again.",
-            fixture.ViewModel.ScanOptionsGuidance, StringComparison.Ordinal);
+        Assert.Equal("Identical copies and look-alikes are always found. Nothing is marked for you."
+            + " Changing Include subfolders clears the current results and your marks, and you scan again.",
+            fixture.ViewModel.ScanOptionsGuidance);
     }
 
     [Fact]

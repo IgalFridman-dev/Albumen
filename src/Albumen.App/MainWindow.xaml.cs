@@ -10,7 +10,9 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Albumen.App.Review;
 using Albumen.App.Shell;
+using Albumen.App.Themes;
 using Albumen.Application.Review;
 using Albumen.Domain.Review;
 using Albumen.Domain.Workflow;
@@ -19,6 +21,7 @@ namespace Albumen.App;
 
 public partial class MainWindow : Window
 {
+    private readonly ResourceDictionary palette = new();
     private ShellViewModel? shellViewModel;
     private int dataContextGeneration;
     private bool isClosed;
@@ -39,10 +42,17 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // The window applies the palette itself because tests construct it without App.
+        Resources.MergedDictionaries.Add(palette);
+        ApplyPalette();
+        SystemParameters.StaticPropertyChanged += OnSystemParametersChanged;
         ReviewPageScrollViewer.AddHandler(RequestBringIntoViewEvent,
             new RequestBringIntoViewEventHandler(OnReviewListItemBringIntoView), true);
         ActionPageScrollViewer.AddHandler(RequestBringIntoViewEvent,
             new RequestBringIntoViewEventHandler(OnReviewListItemBringIntoView), true);
+        LeftPreviewStatusControl.PreviewImage.SetValue(AutomationProperties.NameProperty, "Photo in the Left Viewer");
+        RightPreviewStatusControl.PreviewImage.SetValue(AutomationProperties.NameProperty, "Photo in the Right Viewer");
+        LinkViewerPanning(LeftPreviewStatusControl.PreviewImageScroller, RightPreviewStatusControl.PreviewImageScroller);
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
         SizeChanged += OnReviewSizeChanged;
@@ -50,8 +60,28 @@ public partial class MainWindow : Window
         Closed += OnClosed;
         AddHandler(Keyboard.GotKeyboardFocusEvent,
             new KeyboardFocusChangedEventHandler(OnReviewKeyboardFocusChanged), true);
+        // A drag's preview reaches the window before any viewer, so the dragged photo's picture
+        // follows every move; a drag that nothing below took is refused.
+        AddHandler(DragDrop.PreviewDragEnterEvent, new DragEventHandler(OnWindowPreviewDrag), true);
+        AddHandler(DragDrop.PreviewDragOverEvent, new DragEventHandler(OnWindowPreviewDrag), true);
+        AddHandler(DragDrop.DragEnterEvent, new DragEventHandler(OnWindowDragNotTaken));
+        AddHandler(DragDrop.DragOverEvent, new DragEventHandler(OnWindowDragNotTaken));
+        AddHandler(DragDrop.DropEvent, new DragEventHandler(OnWindowDragNotTaken));
         if (System.Windows.Application.Current is { } application)
             application.Exit += OnApplicationExit;
+    }
+
+    private void ApplyPalette() => AlbumenPalette.Apply(palette, SystemParameters.HighContrast);
+
+    // Raised on the thread that saw the setting change, so the window re-reads it on its own. Every
+    // change re-applies: the High Contrast palette holds the system brushes of the moment, so a
+    // theme change under High Contrast (Black to White) must refresh them too.
+    private void OnSystemParametersChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (!isClosed) ApplyPalette();
+        });
     }
 
     private void OnDataContextChanged(
@@ -159,12 +189,10 @@ public partial class MainWindow : Window
             || !ReferenceEquals(Keyboard.FocusedElement, element)
             || !CanReceiveFocus(element))
             return;
-        if (element.DataContext is ScanOccurrenceViewModel member
-            && FindReviewGroupId(element) is { } groupId)
+        if (ReviewFocusIdentityOf(element, session) is { } identity)
         {
             reviewFocusGeneration++;
-            reviewFocusIdentity = new(session, groupId, member.OccurrenceId,
-                IsWithin(element, ReviewComparisonsList));
+            reviewFocusIdentity = identity;
             return;
         }
         if (reviewFocusIdentity?.Session != session || !IsDeliberateReviewFocusTarget(element)) return;
@@ -172,9 +200,24 @@ public partial class MainWindow : Window
         reviewFocusIdentity = null;
     }
 
+    // The controls a mark is changed from: a photo's tile in its set, or a viewer's Remove
+    // button for the photo it shows. A projection or the override dialog gives focus back to
+    // the one that held it.
+    private static ReviewFocusIdentity? ReviewFocusIdentityOf(FrameworkElement element, ReviewSessionPin session) =>
+        element switch
+        {
+            { DataContext: ScanOccurrenceViewModel member } when FindReviewGroupId(element) is { } groupId =>
+                new ReviewFocusIdentity(session, groupId, member.OccurrenceId, Viewer: null),
+            ButtonBase { DataContext: ReviewViewerSlot { Member: { } shown, GroupId: { } groupId } slot } =>
+                new ReviewFocusIdentity(session, groupId, shown.OccurrenceId, slot.Side),
+            _ => null,
+        };
+
+    // The search box too: a search projects Review again, and focus must stay in the box.
     private bool IsDeliberateReviewFocusTarget(FrameworkElement element) =>
         ReferenceEquals(element, ReviewHeading)
         || ReferenceEquals(element, ApprovalPanel)
+        || ReferenceEquals(element, LikelyMatchesPromptBox)
         || element is ButtonBase;
 
     internal long BeginReviewDialogFocusTransition()
@@ -200,17 +243,13 @@ public partial class MainWindow : Window
         eventArgs.Handled = true;
     }
 
-    private AsyncCommand? FindSelectAllCommand(DependencyObject? source) =>
+    private static AsyncCommand? FindSelectAllCommand(DependencyObject? source) =>
         FindDataContext<ReviewGroupViewModel>(source)?.SelectAllCommand
-        ?? FindDataContext<ExactGroupViewModel>(source)?.SelectAllCommand
-        ?? (IsWithin(source, ReviewComparisonsList)
-            ? shellViewModel?.ActiveReviewGroup?.SelectAllCommand
-            : null);
+        ?? FindDataContext<ExactGroupViewModel>(source)?.SelectAllCommand;
 
-    private Guid? FindReviewGroupId(DependencyObject? source) =>
+    private static Guid? FindReviewGroupId(DependencyObject? source) =>
         FindDataContext<ReviewGroupViewModel>(source)?.GroupId
-        ?? FindDataContext<ExactGroupViewModel>(source)?.GroupId
-        ?? (IsWithin(source, ReviewComparisonsList) ? shellViewModel?.ActiveReviewGroup?.GroupId : null);
+        ?? FindDataContext<ExactGroupViewModel>(source)?.GroupId;
 
     private static bool IsWithin(DependencyObject? source, DependencyObject ancestor)
     {
@@ -229,23 +268,13 @@ public partial class MainWindow : Window
 
         var source = eventArgs.OriginalSource as DependencyObject
             ?? Keyboard.FocusedElement as DependencyObject;
-        // A card's own buttons (such as Compare) act on Enter themselves.
+        // A card's own buttons act on Enter themselves.
         if (FindAncestor<Button>(source) is { } button && IsWithin(button, list)
             && !AutomationProperties.GetAutomationId(button).StartsWith("open-review-", StringComparison.Ordinal))
             return;
-        var item = list.SelectedItem
-            ?? FindDataContext<ReviewCategoryViewModel>(source)
-            ?? (object?)FindDataContext<ReviewGroupViewModel>(source)
-            ?? (object?)FindDataContext<ScanOccurrenceViewModel>(source)
-            ?? FindDataContext<LikelyMatchItemViewModel>(source);
+        var item = list.SelectedItem ?? FindDataContext<ReviewCategoryViewModel>(source);
         if (ReferenceEquals(list, ReviewCategoriesList) && item is ReviewCategoryViewModel category)
             shellViewModel.OpenReviewCategoryCommand.Execute(category);
-        else if (ReferenceEquals(list, ReviewGroupsList) && item is ReviewGroupViewModel group)
-            shellViewModel.OpenReviewGroupCommand.Execute(group);
-        else if (ReferenceEquals(list, ReviewComparisonsList) && item is ScanOccurrenceViewModel member)
-            shellViewModel.OpenReviewMemberCommand.Execute(member);
-        else if (ReferenceEquals(list, LikelyMatchesList) && item is LikelyMatchItemViewModel match)
-            shellViewModel.OpenLikelyMatchCommand.Execute(match);
         else
             return;
 
@@ -258,33 +287,91 @@ public partial class MainWindow : Window
             shellViewModel?.OpenReviewCategoryCommand.Execute(category);
     }
 
-    private void OnOpenReviewGroupClick(object sender, RoutedEventArgs eventArgs)
+    // A shown set works out its Suggested best from its thumbnails; a set that scrolls away, or
+    // whose container is recycled for another set, stops.
+    private readonly Dictionary<FrameworkElement, CancellationTokenSource> suggestionLoads = [];
+
+    private void OnReviewSetLoaded(object sender, RoutedEventArgs eventArgs)
     {
-        if (sender is Button { DataContext: ReviewGroupViewModel group })
-            shellViewModel?.OpenReviewGroupCommand.Execute(group);
+        if (sender is not FrameworkElement set) return;
+        set.DataContextChanged -= OnReviewSetDataContextChanged;
+        set.DataContextChanged += OnReviewSetDataContextChanged;
+        StartSuggestion(set);
     }
 
-    private void OnOpenReviewMemberClick(object sender, RoutedEventArgs eventArgs)
+    private void OnReviewSetUnloaded(object sender, RoutedEventArgs eventArgs)
     {
-        if (sender is not Button { DataContext: ScanOccurrenceViewModel member }) return;
-        shellViewModel?.OpenReviewMemberCommand.Execute(member);
-        // Show the top of the viewer so the click visibly opens the photo, scrolling the
-        // page no further than that so the photo list stays in sight.
-        ReviewEvidencePanel.BringIntoView(new Rect(0, 0, ReviewEvidencePanel.ActualWidth,
-            Math.Min(ReviewEvidencePanel.ActualHeight, 160)));
+        if (sender is not FrameworkElement set) return;
+        set.DataContextChanged -= OnReviewSetDataContextChanged;
+        StopSuggestion(set);
     }
 
-    private void OnOpenLikelyMatchClick(object sender, RoutedEventArgs eventArgs)
+    private void OnReviewSetDataContextChanged(object sender, DependencyPropertyChangedEventArgs eventArgs)
     {
-        if (sender is not Button { DataContext: LikelyMatchItemViewModel match }) return;
-        shellViewModel?.OpenLikelyMatchCommand.Execute(match);
-        ReviewEvidencePanel.BringIntoView(new Rect(0, 0, ReviewEvidencePanel.ActualWidth,
-            Math.Min(ReviewEvidencePanel.ActualHeight, 160)));
+        if (sender is not FrameworkElement set) return;
+        StopSuggestion(set);
+        if (set.IsLoaded) StartSuggestion(set);
+    }
+
+    private void StartSuggestion(FrameworkElement set)
+    {
+        if (set.DataContext is not ReviewGroupViewModel group
+            || shellViewModel?.ReviewThumbnails is not { } thumbnails
+            || suggestionLoads.ContainsKey(set))
+            return;
+        var cancellation = new CancellationTokenSource();
+        suggestionLoads[set] = cancellation;
+        _ = group.LoadSuggestionAsync(thumbnails, cancellation.Token);
+    }
+
+    private void StopSuggestion(FrameworkElement set)
+    {
+        if (!suggestionLoads.Remove(set, out var cancellation)) return;
+        cancellation.Cancel();
+        cancellation.Dispose();
     }
 
     // Show all clears the search; the prompt keeps focus so the next search starts there.
     private void OnLikelyMatchesShowAllClick(object sender, RoutedEventArgs eventArgs) =>
         Dispatcher.BeginInvoke(() => LikelyMatchesPromptBox.Focus(), DispatcherPriority.Input);
+
+    // A click into the search box, or Tab, selects the whole prompt, so typing a new one replaces
+    // it; so does the first click after a search, since Enter leaves the focus in the box. The
+    // click is taken before the box sees it, as the box would put the caret where the pointer is;
+    // the next click, or one after more typing, places the caret as usual.
+    private bool selectPromptOnClick;
+
+    private void OnPromptBoxPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs eventArgs)
+    {
+        if (LikelyMatchesPromptBox.IsKeyboardFocusWithin && !selectPromptOnClick) return;
+        eventArgs.Handled = true;
+        selectPromptOnClick = false;
+        LikelyMatchesPromptBox.Focus();
+        LikelyMatchesPromptBox.SelectAll();
+    }
+
+    // Only focus that moves into the box from another element of this window (Tab, Shift+Tab, a
+    // click) selects the prompt. Focus that comes back with the window (Alt+Tab, a closed dialog)
+    // comes from no element, and the Review focus restore puts focus back where it was: both leave
+    // the prompt and its caret as they were, so the next key does not replace the prompt.
+    private void OnPromptBoxGotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs eventArgs)
+    {
+        if (isRestoringReviewFocus
+            || eventArgs.OldFocus is not DependencyObject previous
+            || ReferenceEquals(previous, LikelyMatchesPromptBox)
+            || !ReferenceEquals(GetWindow(previous), this))
+            return;
+        LikelyMatchesPromptBox.SelectAll();
+    }
+
+    // Enter searches through the box's key binding, which still runs.
+    private void OnPromptBoxPreviewKeyDown(object sender, KeyEventArgs eventArgs)
+    {
+        if (eventArgs.Key == Key.Enter) selectPromptOnClick = true;
+    }
+
+    private void OnPromptBoxTextChanged(object sender, TextChangedEventArgs eventArgs) =>
+        selectPromptOnClick = false;
 
     private void OnReviewBackClick(object sender, RoutedEventArgs eventArgs) =>
         shellViewModel?.ReviewBackCommand.Execute(null);
@@ -292,66 +379,226 @@ public partial class MainWindow : Window
     private void OnReviewSizeChanged(object sender, SizeChangedEventArgs eventArgs) =>
         UpdateReviewLayout();
 
-    // The navigation lists keep a bounded height so they stay virtualized inside the
-    // scrolling Review page, leaving room for the viewer below them to come into view.
-    // The lists scroll a whole card at a time, so they stay taller than one photo card:
-    // a shorter list would cut off the bottom of a card for good.
+    // The kinds and the gallery keep a bounded height so they stay virtualized inside the
+    // scrolling Review page, leaving room for the viewers below them to come into view. The
+    // kinds scroll a whole card at a time, so they stay taller than one card: a shorter list
+    // would cut off the bottom of a card for good.
     private void OnReviewPageSizeChanged(object sender, SizeChangedEventArgs eventArgs)
     {
         if (!eventArgs.HeightChanged || eventArgs.NewSize.Height <= 0) return;
         var viewport = eventArgs.NewSize.Height;
-        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.6, 300, 600));
-        // Scrolled to the viewer, the photo fills most of the page instead of a fixed thumbnail.
-        ReviewPreviewStatusControl.FitHeight = Math.Max(240, viewport * 0.8);
+        ReviewNavigationGrid.Height = Math.Min(viewport, Math.Clamp(viewport * 0.6, 300, 720));
+        // Scrolled to the viewers, a photo fills most of the page instead of a fixed thumbnail.
+        LeftPreviewStatusControl.FitHeight = Math.Max(240, viewport * 0.8);
+        RightPreviewStatusControl.FitHeight = LeftPreviewStatusControl.FitHeight;
     }
 
-    // The compared photo shares the viewer's size and zoom, and both photos pan together.
-    private void OnComparedPreviewLoaded(object sender, RoutedEventArgs eventArgs)
+    // The two viewers pan together, sideways and up and down; photos of different sizes by the same
+    // share of their own width and height. A new or re-zoomed photo takes the Left Viewer's position.
+    private static void LinkViewerPanning(ScrollViewer left, ScrollViewer right)
     {
-        if (sender is not PreviewStatusControl compared) return;
-        compared.SetBinding(PreviewStatusControl.ZoomProperty,
-            new Binding(nameof(Slider.Value)) { Source = ReviewZoomSlider });
-        compared.SetBinding(PreviewStatusControl.FitHeightProperty,
-            new Binding(nameof(PreviewStatusControl.FitHeight)) { Source = ReviewPreviewStatusControl });
-        compared.PreviewImage.SetValue(AutomationProperties.NameProperty, "Compared photo preview");
-        var main = ReviewPreviewStatusControl.PreviewImageScroller;
-        var other = compared.PreviewImageScroller;
-        // Photos of different widths pan by the same share of their own width.
         var syncing = false;
+        static double Share(double offset, double scrollable) => scrollable > 0 ? offset / scrollable : 0;
         void Follow(ScrollViewer leader, ScrollViewer follower)
         {
             if (syncing) return;
             syncing = true;
             try
             {
-                var share = leader.ScrollableWidth > 0 ? leader.HorizontalOffset / leader.ScrollableWidth : 0;
-                follower.ScrollToHorizontalOffset(share * follower.ScrollableWidth);
+                follower.ScrollToHorizontalOffset(Share(leader.HorizontalOffset, leader.ScrollableWidth) * follower.ScrollableWidth);
+                follower.ScrollToVerticalOffset(Share(leader.VerticalOffset, leader.ScrollableHeight) * follower.ScrollableHeight);
             }
             finally
             {
                 syncing = false;
             }
         }
-        ScrollChangedEventHandler fromMain = (_, change) =>
+        static bool Panned(ScrollChangedEventArgs change) => change.HorizontalChange != 0 || change.VerticalChange != 0;
+        static bool Resized(ScrollChangedEventArgs change) => change.ExtentWidthChange != 0 || change.ExtentHeightChange != 0;
+        left.ScrollChanged += (_, change) =>
         {
-            if (change.HorizontalChange != 0 || change.ExtentWidthChange != 0) Follow(main, other);
+            if (Panned(change) || Resized(change)) Follow(left, right);
         };
-        ScrollChangedEventHandler fromOther = (_, change) =>
+        right.ScrollChanged += (_, change) =>
         {
-            if (change.HorizontalChange != 0) Follow(other, main);
+            if (Panned(change)) Follow(right, left);
+            else if (Resized(change)) Follow(left, right);
         };
-        main.ScrollChanged += fromMain;
-        other.ScrollChanged += fromOther;
-        compared.Unloaded += OnUnloaded;
-        Follow(main, other);
+    }
 
-        void OnUnloaded(object? unloadedSender, RoutedEventArgs unloadedArgs)
+    // Drag and drop between the gallery and the viewers. A photo dragged from a set onto a viewer
+    // is placed there. A viewer's photo dropped on the other viewer swaps the two, dropped on its
+    // own viewer stays, and dropped anywhere else leaves its viewer; Esc cancels.
+    private (UIElement Source, Point Start)? pressed;
+    private bool viewerDropped;
+    private bool viewerDragCanceled;
+
+    private void OnTilePreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs eventArgs)
+    {
+        if (sender is UIElement tile) pressed = (tile, eventArgs.GetPosition(tile));
+    }
+
+    private void OnTileMouseMove(object sender, MouseEventArgs eventArgs)
+    {
+        if (sender is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } tile
+            || !DragStarts(tile, eventArgs) || FindReviewGroupId(tile) is not { } groupId)
+            return;
+        // The button holds the mouse while pressed; the drag takes it over, so no click follows.
+        tile.ReleaseMouseCapture();
+        ShowDragImage(tile);
+        try
         {
-            compared.Unloaded -= OnUnloaded;
-            main.ScrollChanged -= fromMain;
-            other.ScrollChanged -= fromOther;
+            DragDrop.DoDragDrop(tile, ReviewDragData.Create(member.OccurrenceId, groupId), DragDropEffects.Copy);
+        }
+        finally
+        {
+            HideDragImage();
         }
     }
+
+    // A viewer's photo is dragged by the photo itself, not by its button or path.
+    private void OnViewerPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs eventArgs)
+    {
+        pressed = sender is UIElement viewer && ViewerSideOfPanel(viewer) is { } side
+            && IsWithin(eventArgs.OriginalSource as DependencyObject, PreviewOf(side).PreviewImage)
+                ? (viewer, eventArgs.GetPosition(viewer))
+                : null;
+    }
+
+    private void OnViewerPreviewMouseMove(object sender, MouseEventArgs eventArgs)
+    {
+        if (sender is not UIElement viewer || ViewerSideOfPanel(viewer) is not { } side
+            || !DragStarts(viewer, eventArgs) || shellViewModel is not { } viewModel)
+            return;
+        var slot = side == ViewerSide.Left ? viewModel.LeftViewer : viewModel.RightViewer;
+        if (slot is not { Member: { } member, GroupId: { } groupId }) return;
+        viewerDropped = false;
+        viewerDragCanceled = false;
+        ShowDragImage(viewer);
+        try
+        {
+            DragDrop.DoDragDrop(viewer, ReviewDragData.Create(member.OccurrenceId, groupId, side), DragDropEffects.Move);
+        }
+        finally
+        {
+            HideDragImage();
+        }
+        FinishViewerDrag(side, viewerDropped, viewerDragCanceled);
+    }
+
+    private void OnViewerQueryContinueDrag(object sender, QueryContinueDragEventArgs eventArgs)
+    {
+        if (eventArgs.EscapePressed) viewerDragCanceled = true;
+    }
+
+    // Dragged out of its box and dropped anywhere but a viewer, a photo leaves its viewer and
+    // nothing else changes.
+    internal void FinishViewerDrag(ViewerSide side, bool droppedOnViewer, bool canceled)
+    {
+        if (!droppedOnViewer && !canceled) shellViewModel?.ClearViewerCommand.Execute(side);
+    }
+
+    // While a photo is dragged, its own small picture follows the pointer: the tile's decoded
+    // thumbnail, or the photo the viewer shows. A photo with no picture yet drags without one.
+    private ReviewDragImage? dragImage;
+
+    internal ReviewDragImage? ShowDragImage(UIElement source)
+    {
+        HideDragImage();
+        var picture = source is ReviewPhotoTile tile
+            ? Descendants<PhotoThumbnail>(tile).FirstOrDefault()?.Image
+            : ViewerSideOfPanel(source) is { } side ? PreviewOf(side).PreviewImage.Source : null;
+        if (picture is null || Content is not UIElement root || System.Windows.Documents.AdornerLayer.GetAdornerLayer(root) is not { } layer)
+            return null;
+        dragImage = new ReviewDragImage(root, picture);
+        layer.Add(dragImage);
+        // The press that starts the drag is still WPF's to track; once the system's drag loop holds
+        // the mouse, the drag events over the window move the picture.
+        dragImage.MoveTo(Mouse.GetPosition(root));
+        return dragImage;
+    }
+
+    internal void HideDragImage()
+    {
+        if (dragImage is not { } shown) return;
+        dragImage = null;
+        System.Windows.Documents.AdornerLayer.GetAdornerLayer(shown.AdornedElement)?.Remove(shown);
+    }
+
+    // Every element of the window allows drops (the root sets it) so that WPF raises a drag event
+    // over each; the preview comes to the window first, and the viewers still decide their drops.
+    // Outside the window no drag event comes, so the picture waits where the pointer left; it is
+    // clipped at the window's edge anyway.
+    private void OnWindowPreviewDrag(object sender, DragEventArgs eventArgs)
+    {
+        if (dragImage is { AdornedElement: { } root } shown) shown.MoveTo(eventArgs.GetPosition(root));
+    }
+
+    // A drag that no viewer (or text box) took is refused, so the root accepts no drop of its own
+    // and the pointer shows that a drop there does nothing.
+    private static void OnWindowDragNotTaken(object sender, DragEventArgs eventArgs)
+    {
+        eventArgs.Effects = DragDropEffects.None;
+        eventArgs.Handled = true;
+    }
+
+    private bool DragStarts(UIElement source, MouseEventArgs eventArgs)
+    {
+        if (eventArgs.LeftButton != MouseButtonState.Pressed)
+        {
+            pressed = null;
+            return false;
+        }
+        if (pressed is not { } press || !ReferenceEquals(press.Source, source)) return false;
+        var moved = eventArgs.GetPosition(source) - press.Start;
+        if (Math.Abs(moved.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(moved.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return false;
+        pressed = null;
+        return true;
+    }
+
+    // Only Albumen's own photos can be dropped on a viewer. The preview events run before the
+    // path box inside the viewer, which would refuse them as text. Entering the viewer, or a part
+    // of it, decides the same way, since the window refuses a drag that no one took.
+    private void OnViewerDragOver(object sender, DragEventArgs eventArgs)
+    {
+        eventArgs.Effects = ReviewDragData.TryRead(eventArgs.Data, out _, out _, out var fromViewer)
+            ? fromViewer is null ? DragDropEffects.Copy : DragDropEffects.Move
+            : DragDropEffects.None;
+        eventArgs.Handled = true;
+    }
+
+    private void OnViewerDrop(object sender, DragEventArgs eventArgs)
+    {
+        eventArgs.Handled = true;
+        if (sender is UIElement viewer && ViewerSideOfPanel(viewer) is { } side
+            && TryPlaceFromData(eventArgs.Data, side))
+            viewerDropped = true;
+    }
+
+    internal bool TryPlaceFromData(IDataObject data, ViewerSide side)
+    {
+        if (shellViewModel is not { } viewModel
+            || !ReviewDragData.TryRead(data, out var occurrenceId, out var groupId, out var fromViewer))
+            return false;
+        if (fromViewer is { } source)
+        {
+            if (source != side) viewModel.SwapViewersCommand.Execute(null);
+            return true;
+        }
+        if (viewModel.FindReviewMember(groupId, occurrenceId) is not { } member) return false;
+        viewModel.PlaceInViewerCommand.Execute(new PlaceInViewer(side, groupId, member));
+        return true;
+    }
+
+    private ViewerSide? ViewerSideOfPanel(UIElement element) =>
+        ReferenceEquals(element, LeftViewerPanel) ? ViewerSide.Left
+        : ReferenceEquals(element, RightViewerPanel) ? ViewerSide.Right
+        : null;
+
+    private PreviewStatusControl PreviewOf(ViewerSide side) =>
+        side == ViewerSide.Left ? LeftPreviewStatusControl : RightPreviewStatusControl;
 
     // The selection bar stays under the page; its button brings the approval into view.
     private void OnReviewCleanupClick(object sender, RoutedEventArgs eventArgs)
@@ -370,8 +617,7 @@ public partial class MainWindow : Window
     }
 
     private ScrollViewer? PageScrollerFor(DependencyObject element) =>
-        IsWithin(element, ReviewCategoriesList) || IsWithin(element, ReviewGroupsList)
-            || IsWithin(element, ReviewComparisonsList) ? ReviewPageScrollViewer
+        IsWithin(element, ReviewCategoriesList) || IsWithin(element, ReviewGalleryList) ? ReviewPageScrollViewer
         : IsWithin(element, ActionItemsList) ? ActionPageScrollViewer
         : null;
 
@@ -428,6 +674,46 @@ public partial class MainWindow : Window
         page.ScrollToVerticalOffset(page.VerticalOffset - eventArgs.Delta / 3.0);
     }
 
+    // The gallery scrolls by pixel, so a wheel notch moves it by the wheel's delta (a notch is
+    // 120 px, a touchpad's small deltas move it smoothly). At either end the page takes the wheel.
+    private void OnGalleryPreviewMouseWheel(object sender, MouseWheelEventArgs eventArgs)
+    {
+        if (sender is not DependencyObject gallery
+            || Descendants<ScrollViewer>(gallery).FirstOrDefault() is not { } scroller) return;
+        eventArgs.Handled = true;
+        var atLimit = eventArgs.Delta > 0
+            ? scroller.VerticalOffset <= 0
+            : scroller.VerticalOffset >= scroller.ScrollableHeight;
+        if (!atLimit)
+            scroller.ScrollToVerticalOffset(scroller.VerticalOffset - eventArgs.Delta);
+        else
+            ReviewPageScrollViewer.ScrollToVerticalOffset(ReviewPageScrollViewer.VerticalOffset - eventArgs.Delta / 3.0);
+    }
+
+    // Arrow keys move between the photos as they are laid out. The gallery's sets take no focus,
+    // so the list's own item navigation is not used.
+    private void OnGalleryPreviewKeyDown(object sender, KeyEventArgs eventArgs)
+    {
+        FocusNavigationDirection? direction = eventArgs.Key switch
+        {
+            Key.Left => FocusNavigationDirection.Left,
+            Key.Right => FocusNavigationDirection.Right,
+            Key.Up => FocusNavigationDirection.Up,
+            Key.Down => FocusNavigationDirection.Down,
+            _ => null,
+        };
+        if (direction is not { } move || Keyboard.FocusedElement is not UIElement focused
+            || !IsWithin(focused, ReviewGalleryList))
+            return;
+        // Directional moves from the list itself would leave it (its own photos don't count as
+        // targets), so the first arrow after a kind opens enters the first photo instead.
+        if (ReferenceEquals(focused, ReviewGalleryList))
+            Descendants<ReviewPhotoTile>(ReviewGalleryList).FirstOrDefault(CanReceiveFocus)?.Focus();
+        else
+            focused.MoveFocus(new TraversalRequest(move));
+        eventArgs.Handled = true;
+    }
+
     private void UpdateReviewLayout()
     {
         if (!IsInitialized) return;
@@ -435,48 +721,30 @@ public partial class MainWindow : Window
         var height = double.IsNaN(Height) ? ActualHeight : Height;
         ReviewSelectionBar.Visibility = height >= 640 ? Visibility.Visible : Visibility.Collapsed;
         var width = double.IsNaN(Width) ? ActualWidth : Width;
-        var level = shellViewModel?.ReviewNavigationLevel ?? ReviewNavigationLevel.Categories;
-        if (width >= 920)
-        {
-            ReviewCategoriesPanel.Visibility = Visibility.Visible;
-            ReviewGroupsPanel.Visibility = Visibility.Visible;
-            ReviewComparisonsPanel.Visibility = Visibility.Visible;
-            UpdateReviewColumnWidths();
-            return;
-        }
-
-        if (width >= 800)
-        {
-            ReviewCategoriesPanel.Visibility = Visibility.Visible;
-            ReviewGroupsPanel.Visibility = level == ReviewNavigationLevel.Groups
-                ? Visibility.Visible : Visibility.Collapsed;
-            ReviewComparisonsPanel.Visibility = level == ReviewNavigationLevel.Comparisons
-                ? Visibility.Visible : Visibility.Collapsed;
-            UpdateReviewColumnWidths();
-            return;
-        }
-
-        ReviewCategoriesPanel.Visibility = level == ReviewNavigationLevel.Categories
-            ? Visibility.Visible : Visibility.Collapsed;
-        ReviewGroupsPanel.Visibility = level == ReviewNavigationLevel.Groups
-            ? Visibility.Visible : Visibility.Collapsed;
-        ReviewComparisonsPanel.Visibility = level == ReviewNavigationLevel.Comparisons
-            ? Visibility.Visible : Visibility.Collapsed;
+        var galleryOpen = shellViewModel?.ReviewNavigationLevel == ReviewNavigationLevel.Gallery;
+        // A wide window shows the kinds beside the open kind's sets; a narrow one shows the
+        // open level only, and Back returns to the kinds.
+        var sideBySide = width >= 800;
+        ReviewCategoriesPanel.Visibility = sideBySide || !galleryOpen ? Visibility.Visible : Visibility.Collapsed;
+        ReviewGroupsPanel.Visibility = sideBySide || galleryOpen ? Visibility.Visible : Visibility.Collapsed;
         UpdateReviewColumnWidths();
     }
 
+    // Beside an open gallery the kinds keep a narrow fixed column and the photos take the rest;
+    // with no kind open the kinds take a third, and a level shown alone takes the full width.
     private void UpdateReviewColumnWidths()
     {
-        ReviewCategoriesColumn.Width = ReviewCategoriesPanel.Visibility == Visibility.Visible
-            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        ReviewGroupsColumn.Width = ReviewGroupsPanel.Visibility == Visibility.Visible
-            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        // An open set's photo cards get twice the room of the text lists beside them, so a
-        // card keeps a readable width and a height that fits the list.
-        var photosOpen = shellViewModel?.ReviewNavigationLevel == ReviewNavigationLevel.Comparisons;
-        ReviewComparisonsColumn.Width = ReviewComparisonsPanel.Visibility == Visibility.Visible
-            ? new GridLength(photosOpen ? 2 : 1, GridUnitType.Star) : new GridLength(0);
+        var categoriesShown = ReviewCategoriesPanel.Visibility == Visibility.Visible;
+        var galleryShown = ReviewGroupsPanel.Visibility == Visibility.Visible;
+        var galleryOpen = shellViewModel?.ReviewNavigationLevel == ReviewNavigationLevel.Gallery;
+        ReviewCategoriesColumn.Width = !categoriesShown ? new GridLength(0)
+            : galleryShown && galleryOpen ? new GridLength(ReviewCategoriesColumnWidth)
+            : new GridLength(1, GridUnitType.Star);
+        ReviewGroupsColumn.Width = galleryShown
+            ? new GridLength(2, GridUnitType.Star) : new GridLength(0);
     }
+
+    private const double ReviewCategoriesColumnWidth = 220;
 
     private void QueueReviewNavigationFocus()
     {
@@ -489,8 +757,7 @@ public partial class MainWindow : Window
             var target = level switch
             {
                 ReviewNavigationLevel.Categories => ReviewCategoriesList,
-                ReviewNavigationLevel.Groups => ReviewGroupsList,
-                ReviewNavigationLevel.Comparisons => ReviewComparisonsList,
+                ReviewNavigationLevel.Gallery => ReviewGalleryList,
                 _ => null,
             };
             if (target is null || !CanReceiveFocus(target)) return;
@@ -781,12 +1048,10 @@ public partial class MainWindow : Window
 
     internal ReviewFocusRestorationToken? CaptureReviewFocusRestorationToken(IInputElement invokingFocus)
     {
-        if (invokingFocus is not FrameworkElement { DataContext: ScanOccurrenceViewModel member } element
+        if (invokingFocus is not FrameworkElement element
             || shellViewModel?.ReviewSession is not { } session
-            || FindReviewGroupId(element) is not { } groupId)
+            || ReviewFocusIdentityOf(element, session) is not { } identity)
             return null;
-        var identity = new ReviewFocusIdentity(session, groupId, member.OccurrenceId,
-            IsWithin(element, ReviewComparisonsList));
         return identity == reviewFocusIdentity ? CaptureReviewFocusRestorationToken(identity) : null;
     }
 
@@ -797,7 +1062,7 @@ public partial class MainWindow : Window
             || expected.ReviewSession != identity.Session)
             return null;
         return new(expected, dataContextGeneration, identity.Session, identity.GroupId,
-            identity.OccurrenceId, identity.GroupedSurface, reviewFocusGeneration);
+            identity.OccurrenceId, identity.Viewer, reviewFocusGeneration);
     }
 
     internal void QueueReviewFocusRestoration(
@@ -810,7 +1075,7 @@ public partial class MainWindow : Window
             UpdateLayout();
             if (!IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration)) return;
             var identity = new ReviewFocusIdentity(token.Session, token.GroupId,
-                token.OccurrenceId, token.GroupedSurface);
+                token.OccurrenceId, token.Viewer);
             var target = FindCurrentSelectionControl(identity);
             if (target is null
                 || !IsReviewFocusRestorationRelevant(token, expectedDialogFocusTransitionGeneration))
@@ -844,27 +1109,29 @@ public partial class MainWindow : Window
         && token.ExpectedViewModel.IsReviewPhase
         && token.ExpectedViewModel.ReviewSession == token.Session
         && reviewFocusIdentity == new ReviewFocusIdentity(token.Session, token.GroupId,
-            token.OccurrenceId, token.GroupedSurface);
+            token.OccurrenceId, token.Viewer);
 
-    private ReviewSelectionCheckBox? FindCurrentSelectionControl(
+    // The viewer's Remove button while that viewer still shows the photo, or the photo's tile:
+    // its set is brought into view first, so only the sets around it are realized.
+    private FrameworkElement? FindCurrentSelectionControl(
         ReviewFocusIdentity identity)
     {
-        var group = shellViewModel?.ActiveReviewGroup;
-        var active = group?.GroupId == identity.GroupId
-            ? group.FindMember(identity.OccurrenceId)
-            : null;
-        if (active is not null)
+        if (identity.Viewer is { } side)
         {
-            ReviewComparisonsList.ScrollIntoView(active);
-            ReviewComparisonsList.ApplyTemplate();
-            ReviewComparisonsList.UpdateLayout();
+            var button = side == ViewerSide.Left ? LeftViewerRemoveButton : RightViewerRemoveButton;
+            return shellViewModel?.ViewerSideOf(identity.OccurrenceId, identity.GroupId) == side
+                && CanReceiveFocus(button) ? button : null;
         }
-        foreach (var control in Descendants<ReviewSelectionCheckBox>(ReviewComparisonsList))
+        if (shellViewModel?.ActiveReviewCategory?.FindGroup(identity.GroupId) is { } group)
         {
-            if (control.DataContext is not ScanOccurrenceViewModel member
-                || member.OccurrenceId != identity.OccurrenceId)
-                continue;
-            if (FindReviewGroupId(control) == identity.GroupId && CanReceiveFocus(control)) return control;
+            ReviewGalleryList.ScrollIntoView(group);
+            ReviewGalleryList.UpdateLayout();
+        }
+        foreach (var tile in Descendants<ReviewPhotoTile>(ReviewGalleryList))
+        {
+            if (tile.Member?.OccurrenceId == identity.OccurrenceId && tile.GroupId == identity.GroupId
+                && CanReceiveFocus(tile))
+                return tile;
         }
         return null;
     }
@@ -954,6 +1221,7 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs eventArgs)
     {
         isClosed = true;
+        SystemParameters.StaticPropertyChanged -= OnSystemParametersChanged;
         dataContextGeneration++;
         if (shellViewModel is not null)
         {
@@ -971,14 +1239,15 @@ public partial class MainWindow : Window
         ReviewSessionPin Session,
         Guid GroupId,
         long OccurrenceId,
-        bool GroupedSurface,
+        ViewerSide? Viewer,
         long FocusGeneration);
 
+    // Viewer is null for the photo's tile and names the viewer for that viewer's Remove button.
     private sealed record ReviewFocusIdentity(
         ReviewSessionPin Session,
         Guid GroupId,
         long OccurrenceId,
-        bool GroupedSurface);
+        ViewerSide? Viewer);
 }
 
 public class ReviewAutomationBorder : Border
@@ -994,6 +1263,26 @@ internal sealed class ReviewAutomationBorderPeer(ReviewAutomationBorder owner)
     protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Group;
     protected override bool IsControlElementCore() => true;
     protected override bool IsContentElementCore() => true;
+}
+
+// The window's views as tabs. Its tab row also shows the element in Tag (the photo search bar),
+// which is no tab: an ItemsControl's automation peer lists only its items, so this one lists the
+// bar after the tabs.
+public class TopBarTabControl : TabControl
+{
+    protected override AutomationPeer OnCreateAutomationPeer() => new TopBarTabControlPeer(this);
+}
+
+internal sealed class TopBarTabControlPeer(TopBarTabControl owner) : TabControlAutomationPeer(owner)
+{
+    protected override List<AutomationPeer> GetChildrenCore()
+    {
+        var children = base.GetChildrenCore() ?? [];
+        if (((TabControl)Owner).Tag is UIElement { IsVisible: true } header
+            && (UIElementAutomationPeer.FromElement(header) ?? UIElementAutomationPeer.CreatePeerForElement(header)) is { } peer)
+            children.Add(peer);
+        return children;
+    }
 }
 
 public class ReviewAnnouncementTextBlock : TextBlock
@@ -1146,68 +1435,3 @@ internal sealed class ReviewAnnouncementDiagnosticBuffer(int ownerThreadId)
         return new(captured, capacityOverflow, wrongThread, ownerThreadId);
     }
 }
-
-public class ReviewSelectionCheckBox : CheckBox
-{
-    private bool pressedShownChoice;
-
-    protected override AutomationPeer OnCreateAutomationPeer() =>
-        new ReviewSelectionCheckBoxAutomationPeer(this);
-
-    // The Keep | Remove style looks like two choices, so a mouse click on the choice that
-    // is already shown leaves it as it is instead of flipping it. Keyboard and UI
-    // Automation still toggle.
-    protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
-    {
-        pressedShownChoice = GetTemplateChild(IsChecked == true ? "RemovePart" : "KeepPart")
-            is UIElement { IsMouseOver: true };
-        base.OnMouseLeftButtonDown(e);
-    }
-
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        pressedShownChoice = false;
-        base.OnKeyDown(e);
-    }
-
-    protected override void OnClick()
-    {
-        if (pressedShownChoice)
-        {
-            pressedShownChoice = false;
-            return;
-        }
-        base.OnClick();
-    }
-
-    protected override void OnToggle()
-    {
-        // Selection is projected exclusively from the coordinator snapshot.
-        // OnClick still executes the bound command for every activation path.
-    }
-
-    internal void ActivateFromAutomation() => OnClick();
-}
-
-internal sealed class ReviewSelectionCheckBoxAutomationPeer(ReviewSelectionCheckBox owner)
-    : CheckBoxAutomationPeer(owner), IToggleProvider
-{
-    private ReviewSelectionCheckBox ReviewOwner => (ReviewSelectionCheckBox)Owner;
-
-    void IToggleProvider.Toggle()
-    {
-        if (!IsEnabled()) throw new ElementNotEnabledException();
-        ReviewOwner.Dispatcher.BeginInvoke(
-            DispatcherPriority.Input,
-            new Action(ReviewOwner.ActivateFromAutomation));
-    }
-
-    ToggleState IToggleProvider.ToggleState => ReviewOwner.IsChecked switch
-    {
-        true => ToggleState.On,
-        false => ToggleState.Off,
-        null => ToggleState.Indeterminate,
-    };
-}
-
-

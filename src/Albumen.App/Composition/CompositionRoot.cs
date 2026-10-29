@@ -76,17 +76,19 @@ public static class CompositionRoot
             encoder);
         var dialog = new WpfReviewDialogService(() => System.Windows.Application.Current?.MainWindow);
         // The viewer decodes large enough to stay sharp on high-DPI screens and when
-        // zoomed; the cache keeps the two compared photos.
+        // zoomed; the cache keeps the photos of both viewers.
         var preview = new BoundedReviewPreviewSource(
             reader,
             new WicPreviewDecoder(),
             new BoundedThumbnailCache(160L * 1024 * 1024),
             maximumEdge: 4096);
+        // A gallery row is about 200 px tall, so a landscape photo is about 270 px wide (340
+        // device pixels at 125 %); 512 px keeps it sharp.
         var thumbnails = new BoundedReviewPreviewSource(
             reader,
             new WicPreviewDecoder(),
             new BoundedThumbnailCache(32L * 1024 * 1024),
-            maximumEdge: 320);
+            maximumEdge: 512);
         return new ShellViewModel(
             workflow, photoWorkflow, dialog, new SemanticClearingScanData(stores.ScanData, scan),
             preview, thumbnails, new LikelyMatchesQuery(encoder, stores.Embeddings));

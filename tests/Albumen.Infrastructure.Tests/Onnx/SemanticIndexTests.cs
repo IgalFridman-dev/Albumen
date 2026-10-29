@@ -38,6 +38,9 @@ public sealed class SemanticIndexTests
             var result = await scan.IndexAsync(encoder, rows, workers: 2, Token);
 
             var profile = encoder.LoadProfile().Profile!;
+            // A Ready index opens the text model in the background; this waits for it, so the
+            // model files are closed before the folder goes.
+            Assert.Null(encoder.PrepareText(profile));
             Assert.Equal(new SemanticSnapshot(SemanticState.Ready, 5, 5, 4, profile.Fingerprint, ""), result);
             var stored = await scan.ReadAsync(profile);
             Assert.Equal([1L, 2L, 4L, 5L], stored.Select(embedding => embedding.OccurrenceId));
@@ -92,6 +95,9 @@ public sealed class SemanticIndexTests
             $"ms-per-photo={clock.Elapsed.TotalMilliseconds / Photos:F1} " +
             $"working-set-before-mb={workingSetBefore / 1048576} peak-working-set-mb={peak / 1048576}");
         Assert.InRange(peak, 0, 3L * 1024 * 1024 * 1024);
+        // The index opened the text model in the background; wait for it, so this encoder owns and
+        // disposes it.
+        Assert.Null(encoder.PrepareText(profile));
 
         using var cancel = new CancellationTokenSource();
         var partial = await scan.IndexAsync(encoder, scan.Rows, Environment.ProcessorCount, cancel.Token,

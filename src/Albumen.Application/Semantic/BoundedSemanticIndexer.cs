@@ -9,6 +9,8 @@ namespace Albumen.Application.Semantic;
 /// Embeds the Scan's photos on <c>workers</c> parallel workers, one photo each (E4-S1: one
 /// inference thread per photo gives 2.5x the throughput of one photo on all threads). At most one
 /// decoded photo per worker and <c>workers + </c><see cref="BatchSize"/> vectors are held at once.
+/// A Ready index then has the encoder open its text model in the background, so the first search
+/// does not wait for it.
 /// </summary>
 public sealed class BoundedSemanticIndexer : ISemanticIndexer
 {
@@ -38,11 +40,37 @@ public sealed class BoundedSemanticIndexer : ISemanticIndexer
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(progress);
+        var loaded = encoder.LoadProfile();
+        var result = await EmbedAsync(context, rows, loaded, progress, cancellationToken).ConfigureAwait(false);
+        // Ready means photos were embedded, so under this profile.
+        if (result.State == SemanticState.Ready && loaded.Profile is { } profile) OpenTextModelInTheBackground(profile);
+        return result;
+    }
+
+    // The b9e6761 walkthrough (owner, 2026-10-25): the first search waited seconds while the text
+    // model was verified and opened. Opened here, after the last photo, the first search is as quick
+    // as the next. Nothing waits for it: a failure is the one the search reports when it runs, and
+    // the index and the Scan stay as they are.
+    private void OpenTextModelInTheBackground(EncoderProfile profile) =>
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                _ = encoder.PrepareText(profile);
+            }
+            catch (Exception)
+            {
+                // The search opens the model itself and says why it can't.
+            }
+        }, CancellationToken.None);
+
+    private async Task<SemanticSnapshot> EmbedAsync(ScanRunContext context, ImmutableArray<ScanFileOccurrence> rows,
+        EncoderProfileResult loaded, Func<SemanticSnapshot, Task> progress, CancellationToken cancellationToken)
+    {
         var eligible = rows
             .Where(row => row.Exact.State == ScanStageState.Succeeded && row.Content is not null)
             .OrderBy(row => row.Token.OccurrenceId)
             .ToImmutableArray();
-        var loaded = encoder.LoadProfile();
         var state = new SemanticSnapshot(SemanticState.Indexing, eligible.Length, 0, 0,
             loaded.Profile?.Fingerprint, string.Empty);
         if (loaded is not { Profile: { } profile }) return Stopped(state, loaded.Failure!);

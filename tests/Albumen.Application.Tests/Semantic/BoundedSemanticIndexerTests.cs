@@ -167,6 +167,62 @@ public sealed class BoundedSemanticIndexerTests
         Assert.InRange(fixture.Progress.Count, 2, 40);
         Assert.Equal(640, fixture.Progress[^1].Indexed);
     }
+
+    // The b9e6761 walkthrough: the first search waited while the text model opened. Once the
+    // Scan's photos are indexed, the indexer asks the encoder to open it, once and in the background,
+    // under the profile the photos were embedded with (loaded once for both).
+    [Fact]
+    public async Task AReadyIndexOpensTheTextModelOnceAfterTheLastPhoto()
+    {
+        var fixture = new IndexerFixture();
+
+        var result = await fixture.IndexAsync(fixture.Rows(3));
+        var (profile, encodedBefore) = await fixture.Encoder.TextPrepared.Task
+            .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        Assert.Equal(SemanticState.Ready, result.State);
+        Assert.Equal(IndexerFixture.Profile, profile);
+        Assert.Equal(3, encodedBefore);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        Assert.Equal(1, fixture.Encoder.TextPreparations);
+        Assert.Equal(1, fixture.Encoder.ProfileLoads);
+    }
+
+    // Opening the text model is only a head start for the search: its failure, returned or thrown,
+    // leaves the index exactly as it is, and the search reports it when it opens the model itself.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ATextModelThatCannotOpenLeavesTheReadyIndexAsItIs(bool throws)
+    {
+        var fixture = new IndexerFixture();
+        if (throws) fixture.Encoder.TextFault = new InvalidOperationException("The text model broke.");
+        else fixture.Encoder.TextFailure = new(EncoderFailureKind.Failed, "The tokenizer could not be loaded.");
+
+        var result = await fixture.IndexAsync(fixture.Rows(2));
+        await fixture.Encoder.TextPrepared.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        Assert.Equal(new SemanticSnapshot(SemanticState.Ready, 2, 2, 2, IndexerFixture.Profile.Fingerprint, ""), result);
+        Assert.All(fixture.Progress, progress => Assert.Equal(SemanticState.Indexing, progress.State));
+    }
+
+    // Without a Ready index there is nothing to search, so the text model stays closed.
+    [Fact]
+    public async Task AnIndexThatIsNotReadyLeavesTheTextModelClosed()
+    {
+        var empty = new IndexerFixture();
+        var unavailable = new IndexerFixture();
+        unavailable.Encoder.LoadFailure = new(EncoderFailureKind.Unavailable, "The model files are not installed.");
+        var failed = new IndexerFixture();
+        failed.Encoder.Failures[1] = new(EncoderFailureKind.Failed, "The model could not run.");
+
+        Assert.Equal(SemanticState.Empty, (await empty.IndexAsync([empty.Row(1, exact: ScanTestData.Canceled)])).State);
+        Assert.Equal(SemanticState.Unavailable, (await unavailable.IndexAsync(unavailable.Rows(2))).State);
+        Assert.Equal(SemanticState.Failed, (await failed.IndexAsync(failed.Rows(2))).State);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+
+        Assert.All(new[] { empty, unavailable, failed }, fixture => Assert.Equal(0, fixture.Encoder.TextPreparations));
+    }
 }
 
 internal sealed class IndexerFixture(int workers = 2)
@@ -213,15 +269,37 @@ internal sealed class FakeEncoder : IVisionLanguageEncoder
 {
     private int live;
     private int maximumLive;
+    private int encoded;
+    private int textPreparations;
+    private int profileLoads;
 
     public EncoderFailure? LoadFailure { get; set; }
+    public int ProfileLoads => Volatile.Read(ref profileLoads);
     public ConcurrentDictionary<long, EncoderFailure> Failures { get; } = new();
     public Func<long, Task> Gate { get; set; } = _ => Task.CompletedTask;
     public int Live => Volatile.Read(ref live);
     public int MaximumLive => Volatile.Read(ref maximumLive);
 
-    public EncoderProfileResult LoadProfile() =>
-        LoadFailure is null ? new(IndexerFixture.Profile, null) : new(null, LoadFailure);
+    // The text model was asked to open: under which profile, and how many photos were encoded by then.
+    public TaskCompletionSource<(EncoderProfile Profile, int EncodedBefore)> TextPrepared { get; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public int TextPreparations => Volatile.Read(ref textPreparations);
+    public EncoderFailure? TextFailure { get; set; }
+    public Exception? TextFault { get; set; }
+
+    public EncoderProfileResult LoadProfile()
+    {
+        Interlocked.Increment(ref profileLoads);
+        return LoadFailure is null ? new(IndexerFixture.Profile, null) : new(null, LoadFailure);
+    }
+
+    public EncoderFailure? PrepareText(EncoderProfile profile)
+    {
+        Interlocked.Increment(ref textPreparations);
+        TextPrepared.TrySetResult((profile, Volatile.Read(ref encoded)));
+        if (TextFault is not null) throw TextFault;
+        return TextFailure;
+    }
 
     public EmbeddingResult EncodeImage(EncoderProfile profile, EncoderImage image)
     {
@@ -241,6 +319,7 @@ internal sealed class FakeEncoder : IVisionLanguageEncoder
         finally
         {
             Interlocked.Decrement(ref live);
+            Interlocked.Increment(ref encoded);
         }
     }
 

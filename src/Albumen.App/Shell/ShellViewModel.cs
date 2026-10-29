@@ -33,14 +33,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private IReviewPreviewSource? reviewPreviewSource;
     private IReviewPreviewSource? reviewThumbnailSource;
     private (ImmutableArray<ScanFileOccurrence> Source, Dictionary<long, ScanFileOccurrence>? ById) occurrenceIndex;
-    private SuggestedBest? activeReviewSuggestion;
-    private Guid? suggestionGroupId;
-    private CancellationTokenSource? suggestionCancellation;
-    private ScanOccurrenceViewModel? comparedReviewMember;
-    private PreviewItemViewModel? comparedReviewPreview;
-    private Guid? comparedGroupId;
-    private CancellationTokenSource? comparePreviewCancellation;
-    private long comparePreviewRequest;
     private AlbumenSnapshot? photoSnapshot;
     private ShellSnapshot? currentSnapshot;
     private ImmutableArray<PhaseItemViewModel> phases = [];
@@ -55,6 +47,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string selectedPath = string.Empty;
     private string resolvedPath = string.Empty;
     private string supportedCount = string.Empty;
+    private string folderContentsText = string.Empty;
     private string scanFolderText = "Scan folder";
     private string ruleSetStatus = string.Empty;
     private bool includeSubfolders;
@@ -84,6 +77,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string approvalTitle = "No photos marked for removal yet";
     private ImmutableArray<ScanOccurrenceViewModel> approvalMarkedPhotos = [];
     private string approvalMoreMarkedText = string.Empty;
+    private string approvalHiddenMarkedText = string.Empty;
     private string actionAnnouncement = string.Empty;
     private string actionRecoveryAnnouncement = string.Empty;
     private bool isClearScanDataConfirmationPending;
@@ -94,23 +88,17 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private ReviewLevel reviewNavigationLevel = ReviewLevel.Categories;
     private ImmutableArray<string> reviewBreadcrumbs = ["Review"];
     private ReviewCategoryViewModel? activeReviewCategory;
-    private ReviewGroupViewModel? activeReviewGroup;
-    private ScanOccurrenceViewModel? activeReviewMember;
-    private PreviewItemViewModel? activeReviewPreview;
-    private ReviewComparisonEvidenceViewModel? activeReviewEvidence;
-    private CancellationTokenSource? activePreviewCancellation;
-    private long activePreviewRequest;
     private readonly ObservableCollection<ActionItemViewModel> actionRows = [];
     private readonly ObservableCollection<ActionRecordViewModel> actionRecoveryRecords = [];
     private readonly object lifetime = new();
     private Task? disposalTask;
-    // Where Review was when the first likely match was opened; Show all returns there.
-    private (ReviewLevel Level, ReviewCategoryKind? Category, Guid? Group, long? Member)? likelyMatchesReturn;
 
     public ShellViewModel(IChooseScopeWorkflow chooseScopeWorkflow)
     {
         ActionRows = new(actionRows);
         ActionRecoveryRecords = new(actionRecoveryRecords);
+        LeftViewer = new(ViewerSide.Left);
+        RightViewer = new(ViewerSide.Right);
         this.chooseScopeWorkflow = chooseScopeWorkflow
             ?? throw new ArgumentNullException(nameof(chooseScopeWorkflow));
         ChooseScopeCommand = new AsyncCommand(
@@ -126,13 +114,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 new ChangeScopeRecursionCommand(RequireBoolean(parameter)), CancellationToken.None),
             allowConcurrentExecutions: true);
         ContinueCommand = new AsyncCommand(() => photoWorkflow?.ContinueAsync() ?? Task.CompletedTask);
-        ChangeNearDuplicateModeCommand = new AsyncCommand(
-            parameter => photoWorkflow?.SetScanOptionsAsync(new(
-                ExactDuplicateMode.Enabled,
-                RequireBoolean(parameter)
-                    ? NearDuplicateMode.Conservative
-                    : NearDuplicateMode.Disabled)) ?? Task.CompletedTask,
-            canExecute: () => CanChangeScanOptions);
         ConfirmExactRulesCommand = new AsyncCommand(() => photoWorkflow?.ConfirmExactRulesAsync() ?? Task.CompletedTask);
         StartScanCommand = new AsyncCommand(() => photoWorkflow?.StartScanAsync() ?? Task.CompletedTask);
         ScanFolderCommand = new AsyncCommand(ScanFolderAsync);
@@ -153,25 +134,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         CancelClearScanDataCommand = new AsyncCommand(CancelClearScanDataAsync,
             canExecute: () => IsClearScanDataConfirmationPending);
         OpenReviewCategoryCommand = new AsyncCommand(OpenReviewCategoryAsync);
-        OpenReviewGroupCommand = new AsyncCommand(OpenReviewGroupAsync);
-        OpenReviewMemberCommand = new AsyncCommand(
-            OpenReviewMemberAsync, allowConcurrentExecutions: true);
-        OpenLikelyMatchCommand = new AsyncCommand(
-            OpenLikelyMatchAsync, allowConcurrentExecutions: true);
-        LikelyMatches = new(null);
+        PlaceInViewerCommand = new AsyncCommand(PlaceInViewerAsync, allowConcurrentExecutions: true);
+        ClearViewerCommand = new AsyncCommand(parameter =>
+        {
+            if (parameter is ViewerSide side) Viewer(side).Clear();
+            return Task.CompletedTask;
+        }, allowConcurrentExecutions: true);
+        SwapViewersCommand = new AsyncCommand(SwapViewersAsync, allowConcurrentExecutions: true);
+        ReviewSearch = new(null);
         ReviewBackCommand = new AsyncCommand(ReviewBackAsync,
             canExecute: () => ReviewNavigationLevel != ReviewLevel.Categories);
-        ShowPreviousReviewMemberCommand = new AsyncCommand(() => ShowAdjacentReviewMemberAsync(-1),
-            allowConcurrentExecutions: true, canExecute: () => AdjacentReviewMember(-1) is not null);
-        ShowNextReviewMemberCommand = new AsyncCommand(() => ShowAdjacentReviewMemberAsync(1),
-            allowConcurrentExecutions: true, canExecute: () => AdjacentReviewMember(1) is not null);
-        CompareReviewMemberCommand = new AsyncCommand(CompareReviewMemberAsync,
-            allowConcurrentExecutions: true);
-        CloseCompareCommand = new AsyncCommand(() =>
-        {
-            ClearComparedReviewPreview();
-            return Task.CompletedTask;
-        }, canExecute: () => ComparedReviewMember is not null);
         NavigateCommand = new AsyncCommand(parameter => photoWorkflow is not null && parameter is WorkflowPhase phase
             ? photoWorkflow.NavigateAsync(phase) : parameter is WorkflowPhase.ChooseScope
                 ? this.chooseScopeWorkflow.HandleAsync(new ChooseScopeCommand(), CancellationToken.None) : Task.CompletedTask);
@@ -187,8 +159,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         LikelyMatchesQuery? likelyMatches = null) : this(scope)
     {
         photoWorkflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
-        LikelyMatches = new(likelyMatches);
-        LikelyMatches.Cleared += ReturnFromLikelyMatches;
+        ReviewSearch = new(likelyMatches);
+        ReviewSearch.FilterChanged += OnReviewSearchFilterChanged;
         this.reviewDialog = reviewDialog;
         this.localScanDataControl = localScanDataControl;
         this.reviewPreviewSource = reviewPreviewSource;
@@ -200,7 +172,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
 
     public AsyncCommand ContinueCommand { get; }
-    public AsyncCommand ChangeNearDuplicateModeCommand { get; }
     public AsyncCommand ConfirmExactRulesCommand { get; }
     public AsyncCommand StartScanCommand { get; }
     public AsyncCommand ScanFolderCommand { get; }
@@ -213,15 +184,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     public AsyncCommand ConfirmClearScanDataCommand { get; }
     public AsyncCommand CancelClearScanDataCommand { get; }
     public AsyncCommand OpenReviewCategoryCommand { get; }
-    public AsyncCommand OpenReviewGroupCommand { get; }
-    public AsyncCommand OpenReviewMemberCommand { get; }
-    public AsyncCommand OpenLikelyMatchCommand { get; }
-    public LikelyMatchesViewModel LikelyMatches { get; }
+    // The search bar's prompt and the filter its result puts on the kinds and sets.
+    public ReviewSearchViewModel ReviewSearch { get; }
     public AsyncCommand ReviewBackCommand { get; }
-    public AsyncCommand ShowPreviousReviewMemberCommand { get; }
-    public AsyncCommand ShowNextReviewMemberCommand { get; }
-    public AsyncCommand CompareReviewMemberCommand { get; }
-    public AsyncCommand CloseCompareCommand { get; }
+    // The two viewers below the sets. Placing takes a PlaceInViewer, clearing a ViewerSide.
+    public ReviewViewerSlot LeftViewer { get; }
+    public ReviewViewerSlot RightViewer { get; }
+    public AsyncCommand PlaceInViewerCommand { get; }
+    public AsyncCommand ClearViewerCommand { get; }
+    public AsyncCommand SwapViewersCommand { get; }
     public ReviewThumbnailLoader? ReviewThumbnails { get; }
     public AsyncCommand NavigateCommand { get; }
     public bool HasLocalScanDataControl => localScanDataControl is not null;
@@ -379,19 +350,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         { HasUnsettledWork: true } or
         { Status: ScanSessionStatus.Checking or ScanSessionStatus.Running };
     public bool CanOpenReview => photoSnapshot?.Scan.Pin is not null;
-    public bool NearDuplicatesEnabled => photoSnapshot?.Options.Near == NearDuplicateMode.Conservative;
+    private const string AlwaysFoundText = "Identical copies and look-alikes are always found. Nothing is marked for you.";
     public string ScanOptionsGuidance => photoSnapshot?.Options is { } options
         ? options.IsValid
-            ? (options.Near == NearDuplicateMode.Conservative
-                ? "Identical copies are always included. Look-alikes use one careful, fixed setting, and close calls are shown as Maybe similar. Nothing is marked for you."
-                : "Identical copies are always included. Look-alikes are off for the next scan. Nothing is marked for you.")
-              + (photoSnapshot.Scan.Pin is not null
-                ? " Changing an option clears the current results and your marks, and you scan again."
+            ? AlwaysFoundText + (photoSnapshot.Scan.Pin is not null
+                ? " Changing Include subfolders clears the current results and your marks, and you scan again."
                 : string.Empty)
             : options.ValidationGuidance
-        : "Identical copies are always included. Look-alikes are on unless you turn them off. Nothing is marked for you.";
+        : AlwaysFoundText;
     // The guidance is a live region, so it is shown only when it has something to say:
-    // invalid options, or the warning that changing an option clears the current results.
+    // invalid options, or the warning that changing subfolders clears the current results.
     public bool HasScanOptionsGuidance => photoSnapshot is { } snapshot
         && (!snapshot.Options.IsValid || snapshot.Scan.Pin is not null);
     public string RecursionSummary => IncludeSubfolders ? "Include subfolders" : "Top-level folder only";
@@ -477,57 +445,28 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
     public string ReviewBreadcrumbText => string.Join(" > ", ReviewBreadcrumbs);
     public bool CanReviewBack => ReviewNavigationLevel != ReviewLevel.Categories;
+    // The open kind's sets, all of them, in the gallery.
     public LazyReviewCollection<ReviewGroupViewModel>? ActiveReviewGroups => ActiveReviewCategory?.Groups;
-    public LazyReviewCollection<ScanOccurrenceViewModel>? ActiveReviewMembers => ActiveReviewGroup?.Members;
     public ReviewCategoryViewModel? ActiveReviewCategory
     {
         get => activeReviewCategory;
         private set => activeReviewCategory = value;
     }
-    public ReviewGroupViewModel? ActiveReviewGroup
-    {
-        get => activeReviewGroup;
-        private set => activeReviewGroup = value;
-    }
-    public ScanOccurrenceViewModel? ActiveReviewMember
-    {
-        get => activeReviewMember;
-        private set => activeReviewMember = value;
-    }
-    public PreviewItemViewModel? ActiveReviewPreview
-    {
-        get => activeReviewPreview;
-        private set => activeReviewPreview = value;
-    }
-    public ReviewComparisonEvidenceViewModel? ActiveReviewEvidence
-    {
-        get => activeReviewEvidence;
-        private set => activeReviewEvidence = value;
-    }
-    public SuggestedBest? ActiveReviewSuggestion
-    {
-        get => activeReviewSuggestion;
-        private set => SetField(ref activeReviewSuggestion, value);
-    }
-    public ScanOccurrenceViewModel? ComparedReviewMember
-    {
-        get => comparedReviewMember;
-        private set => comparedReviewMember = value;
-    }
-    public PreviewItemViewModel? ComparedReviewPreview
-    {
-        get => comparedReviewPreview;
-        private set => comparedReviewPreview = value;
-    }
-    public bool IsComparingReviewMembers => ComparedReviewMember is not null;
+    // Which viewer shows this photo of this set, for the tile that shows it too.
+    public ViewerSide? ViewerSideOf(long occurrenceId, Guid groupId) =>
+        LeftViewer.Shows(groupId, occurrenceId) ? ViewerSide.Left
+        : RightViewer.Shows(groupId, occurrenceId) ? ViewerSide.Right
+        : null;
     public string ReviewResultsSummary
     {
         get
         {
-            var sets = ReviewCategories.Where(category => category.Category != ReviewCategoryKind.CouldNotAnalyze)
-                .Sum(category => category.GroupCount);
+            // What the Scan found, whether or not a search hides some of it.
+            var sets = ReviewCategories.Where(category => category.Category is ReviewCategoryKind.Exact
+                    or ReviewCategoryKind.Near or ReviewCategoryKind.Uncertain)
+                .Sum(category => category.TotalGroupCount);
             var unreadable = ReviewCategories.Where(category => category.Category == ReviewCategoryKind.CouldNotAnalyze)
-                .Sum(category => category.GroupCount);
+                .Sum(category => category.TotalGroupCount);
             var summary = sets switch
             {
                 0 => "No copies or look-alikes found",
@@ -542,6 +481,24 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             };
         }
     }
+
+    // A search that matched nothing Review shows says so, with a way back to all of Review.
+    public string ReviewSearchEmptyText => ReviewSearch.Filter is { } filter
+        && ReviewCategories.All(category => category.GroupCount == 0)
+            ? $"No photos match “{filter.Prompt}”"
+            : string.Empty;
+
+    public bool HasReviewSearchEmpty => ReviewSearchEmptyText.Length != 0;
+
+    // A search that leaves the open kind without a set while other kinds have matches says so in
+    // the gallery, which would otherwise be blank.
+    public string ReviewKindEmptyText => ReviewSearch.Filter is { } filter
+        && ActiveReviewCategory is { GroupCount: 0 } open
+        && ReviewCategories.Any(category => category.GroupCount != 0)
+            ? $"No photos in {open.Name} match “{filter.Prompt}”. Other kinds have matches."
+            : string.Empty;
+
+    public bool HasReviewKindEmpty => ReviewKindEmptyText.Length != 0;
 
     public string SelectionSummary
     {
@@ -652,6 +609,20 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public bool HasMoreMarkedPhotos => ApprovalMoreMarkedText.Length != 0;
 
+    // While a search filters Review: how many of the marked photos it hides. The approval still
+    // counts and moves every marked photo.
+    public string ApprovalHiddenMarkedText
+    {
+        get => approvalHiddenMarkedText;
+        private set
+        {
+            SetField(ref approvalHiddenMarkedText, value);
+            OnPropertyChanged(nameof(HasApprovalHiddenMarked));
+        }
+    }
+
+    public bool HasApprovalHiddenMarked => ApprovalHiddenMarkedText.Length != 0;
+
     public string ApprovalDestinationText { get; } = "Destination: Windows Recycle Bin.";
     public string ApprovalRevalidationText { get; } =
         "Only the listed, revalidated selected occurrences are included. Each original path is sent one at a time after current checks of Scope, identity, content, remaining copies and override evidence, and durable recording.";
@@ -754,6 +725,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         private set => SetField(ref scanFolderText, value);
     }
 
+    // The first photos of a ready folder by name, so the user can tell it is the right one.
+    public string FolderContentsText
+    {
+        get => folderContentsText;
+        private set => SetField(ref folderContentsText, value);
+    }
+
+    public bool HasFolderContents => FolderContentsText.Length != 0;
+
     public string RuleSetStatus
     {
         get => ruleSetStatus;
@@ -848,7 +828,6 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         var previousBusy = IsScanBusy;
         var previousCanConfirm = CanConfirmExactRules;
         var previousCanChangeOptions = CanChangeScanOptions;
-        var previousOptions = photoSnapshot?.Options;
         var previousGuidance = ScanOptionsGuidance;
         var previousHasGuidance = HasScanOptionsGuidance;
         Apply(snapshot.Scope);
@@ -863,24 +842,14 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ProjectAction(previousAction, previousActionReview, snapshot);
         ProjectActionRecovery(previousRecovery, snapshot.ActionRecovery);
         Phases = Project(snapshot.Phases);
-        RuleSetStatus = snapshot.Rules is null
-            ? "not confirmed yet (Scan confirms them)"
-            : snapshot.Rules.Options.Near == NearDuplicateMode.Conservative
-                ? "identical copies and look-alikes, confirmed"
-                : "identical copies only, confirmed";
-        if (!preserveReviewProjection)
-        {
-            var previousNavigationLevel = ReviewNavigationLevel;
-            var previousCategory = ActiveReviewCategory?.Category;
-            var previousGroupId = ActiveReviewGroup?.GroupId;
-            var previousMemberId = ActiveReviewMember?.OccurrenceId;
-            legacyExactGroups = null;
-            ReviewCategories = ProjectReviewCategories(snapshot);
-            RestoreReviewNavigation(previousNavigationLevel, previousCategory,
-                previousGroupId, previousMemberId);
-        }
-        if (previousScan?.Pin != snapshot.Scan.Pin) likelyMatchesReturn = null;
-        LikelyMatches.Update(snapshot);
+        RuleSetStatus = snapshot.Rules is null ? "not confirmed yet (Scan confirms them)" : "confirmed";
+        // The search goes first: a new Scan clears it, and the kinds are projected with it.
+        var previousFilter = ReviewSearch.Filter;
+        ReviewSearch.Update(snapshot);
+        var reprojectReview = !preserveReviewProjection || !ReferenceEquals(previousFilter, ReviewSearch.Filter);
+        if (reprojectReview)
+            ProjectReviewView(snapshot, sessionChanged: previousReview?.Pin != snapshot.Review.Pin
+                || previousScan?.Pin != snapshot.Scan.Pin);
         legacyCouldNotAnalyze = null;
         ScanOutcomeSummaries = ProjectOutcomeSummaries(snapshot.Scan);
         ProjectReview(snapshot.Review);
@@ -903,15 +872,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             nameof(HasContinueReviewHint), nameof(ReviewContinuationText), nameof(HasReviewContinuation) })
             OnPropertyChanged(name);
         ContinueReviewCommand.NotifyCanExecuteChanged();
-        if (previousOptions != snapshot.Options) OnPropertyChanged(nameof(NearDuplicatesEnabled));
         if (previousGuidance != ScanOptionsGuidance) OnPropertyChanged(nameof(ScanOptionsGuidance));
         if (previousHasGuidance != HasScanOptionsGuidance) OnPropertyChanged(nameof(HasScanOptionsGuidance));
-        if (!preserveReviewProjection)
-        {
-            OnPropertyChanged(nameof(ExactGroups));
-            OnPropertyChanged(nameof(ReviewCategories));
-            OnPropertyChanged(nameof(ReviewResultsSummary));
-        }
+        if (reprojectReview) RaiseReviewCategoriesChanged();
         if (previousBusy != IsScanBusy)
         {
             RequestClearScanDataCommand.NotifyCanExecuteChanged();
@@ -919,13 +882,42 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             OnPropertyChanged(nameof(IsScanBusy));
         }
         if (previousCanConfirm != CanConfirmExactRules) OnPropertyChanged(nameof(CanConfirmExactRules));
-        if (previousCanChangeOptions != CanChangeScanOptions)
-        {
-            ChangeNearDuplicateModeCommand.NotifyCanExecuteChanged();
-            OnPropertyChanged(nameof(CanChangeScanOptions));
-        }
+        if (previousCanChangeOptions != CanChangeScanOptions) OnPropertyChanged(nameof(CanChangeScanOptions));
         if (previousStatus != ScanStatus) OnPropertyChanged(nameof(ScanStatus));
         if (previousPhase != CurrentPhase) OnPropertyChanged(nameof(CurrentPhase));
+    }
+
+    // The kinds and their sets as Review and the search show them now. The open kind stays open
+    // and each viewer follows its photo.
+    private void ProjectReviewView(AlbumenSnapshot snapshot, bool sessionChanged)
+    {
+        var previousNavigationLevel = ReviewNavigationLevel;
+        var previousCategory = ActiveReviewCategory?.Category;
+        legacyExactGroups = null;
+        ReviewCategories = ProjectReviewCategories(snapshot, ReviewSearch.Filter);
+        RestoreReviewNavigation(previousNavigationLevel, previousCategory);
+        RefreshViewers(sessionChanged);
+    }
+
+    private void RaiseReviewCategoriesChanged()
+    {
+        OnPropertyChanged(nameof(ExactGroups));
+        OnPropertyChanged(nameof(ReviewCategories));
+        OnPropertyChanged(nameof(ReviewResultsSummary));
+        OnPropertyChanged(nameof(ReviewSearchEmptyText));
+        OnPropertyChanged(nameof(HasReviewSearchEmpty));
+        OnPropertyChanged(nameof(ReviewKindEmptyText));
+        OnPropertyChanged(nameof(HasReviewKindEmpty));
+    }
+
+    // A search or Show all projects Review again with the new filter. Nothing is written: marks,
+    // the survivor rule and the approval stay the workflow's.
+    private void OnReviewSearchFilterChanged()
+    {
+        if (photoSnapshot is not { } snapshot) return;
+        ProjectReviewView(snapshot, sessionChanged: false);
+        ProjectReview(snapshot.Review);
+        RaiseReviewCategoriesChanged();
     }
 
     private Task RequestClearScanDataAsync()
@@ -1002,17 +994,20 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 .ToImmutableArray();
     }
 
-    private ImmutableArray<ReviewCategoryViewModel> ProjectReviewCategories(AlbumenSnapshot snapshot)
+    // The four kinds in evidence order. While a search filters Review each kind shows only its
+    // sets with a match, and Other matches comes before Couldn't check.
+    private ImmutableArray<ReviewCategoryViewModel> ProjectReviewCategories(AlbumenSnapshot snapshot, ReviewSearchFilter? filter)
     {
         var setNames = ProjectSetNames(snapshot.Review);
         string DescribeSet(Guid groupId) => setNames.TryGetValue(groupId, out var name) ? name : "another set";
-        return
-        [
-            ProjectCandidateCategory(snapshot, ReviewCategoryKind.Exact, 1, DescribeSet),
-            ProjectCandidateCategory(snapshot, ReviewCategoryKind.Near, 2, DescribeSet),
-            ProjectCandidateCategory(snapshot, ReviewCategoryKind.Uncertain, 3, DescribeSet),
-            ProjectCouldNotAnalyzeCategory(snapshot.Scan, 4),
-        ];
+        var size = filter is null ? 4 : 5;
+        var categories = ImmutableArray.CreateBuilder<ReviewCategoryViewModel>(size);
+        categories.Add(ProjectCandidateCategory(snapshot, ReviewCategoryKind.Exact, 1, size, DescribeSet, filter));
+        categories.Add(ProjectCandidateCategory(snapshot, ReviewCategoryKind.Near, 2, size, DescribeSet, filter));
+        categories.Add(ProjectCandidateCategory(snapshot, ReviewCategoryKind.Uncertain, 3, size, DescribeSet, filter));
+        if (filter is not null) categories.Add(ProjectOtherMatchesCategory(snapshot, filter, 4, size));
+        categories.Add(ProjectCouldNotAnalyzeCategory(snapshot.Scan, size, size, filter));
+        return categories.MoveToImmutable();
     }
 
     // "Look-alike set 2": the name a photo's mark is reported under in its other sets.
@@ -1033,7 +1028,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         AlbumenSnapshot snapshot,
         ReviewCategoryKind category,
         int positionInSet,
-        Func<Guid, string> describeSet)
+        int sizeOfSet,
+        Func<Guid, string> describeSet,
+        ReviewSearchFilter? filter)
     {
         var name = ReviewCategoryNames.For(category);
         if (snapshot.Review.Pin is not null)
@@ -1042,36 +1039,148 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             var groups = snapshot.Review.Groups
                 .Where(group => !group.Closed && InCategory(group.Candidate, category))
                 .ToImmutableArray();
-            return new(category, name, groups.Length, positionInSet, 4, index =>
-                new ReviewGroupViewModel(
-                    groups[index],
-                    category,
-                    index + 1,
-                    groups.Length,
-                    snapshot.Review.Status == ReviewStatus.Ready && !snapshot.Review.Sealed,
-                    (kind, ids) => ChangeReviewSelectionAsync(groups[index].Candidate.GroupId, kind, ids),
-                    describeSet),
-                groupId => FindGroupIndex(groups, groupId));
+            ReviewGroupViewModel Set(int index) => new(
+                groups[index],
+                category,
+                index + 1,
+                groups.Length,
+                snapshot.Review.Status == ReviewStatus.Ready && !snapshot.Review.Sealed,
+                (kind, ids) => ChangeReviewSelectionAsync(groups[index].Candidate.GroupId, kind, ids),
+                describeSet,
+                filter?.Matches);
+            int? FindSet(Guid groupId) => FindGroupIndex(groups, groupId);
+            if (filter is null) return new(category, name, groups.Length, positionInSet, sizeOfSet, Set, FindSet);
+            var shown = ShownSets(groups, group => group.Candidate.GroupId,
+                group => group.Members.Select(member => member.Occurrence.Token.OccurrenceId), filter);
+            return FilteredCategory(category, name, positionInSet, sizeOfSet, groups.Length, shown, Set, FindSet);
         }
 
         var candidates = snapshot.Scan.Groups
             .Where(group => InCategory(group, category))
             .ToImmutableArray();
-        return new(category, name, candidates.Length, positionInSet, 4,
-            index => new ReviewGroupViewModel(
-                candidates[index], category, index + 1, candidates.Length),
-            groupId => FindGroupIndex(candidates, groupId));
+        ReviewGroupViewModel Candidate(int index) => new(
+            candidates[index], category, index + 1, candidates.Length, filter?.Matches);
+        int? FindCandidate(Guid groupId) => FindGroupIndex(candidates, groupId);
+        if (filter is null) return new(category, name, candidates.Length, positionInSet, sizeOfSet, Candidate, FindCandidate);
+        var shownCandidates = ShownSets(candidates, group => group.GroupId,
+            group => group.Members.Select(member => member.Token.OccurrenceId), filter);
+        return FilteredCategory(category, name, positionInSet, sizeOfSet, candidates.Length, shownCandidates,
+            Candidate, FindCandidate);
+    }
+
+    // A search shows a set, whole, when any of its photos matches: the set with the best-ranked
+    // match first, ties by set id. A set keeps the number it has without the search.
+    private static int[] ShownSets<T>(
+        ImmutableArray<T> groups,
+        Func<T, Guid> groupId,
+        Func<T, IEnumerable<long>> memberIds,
+        ReviewSearchFilter filter)
+    {
+        var shown = new List<(int Index, int Best, Guid GroupId)>();
+        for (var index = 0; index < groups.Length; index++)
+        {
+            int? best = null;
+            foreach (var occurrenceId in memberIds(groups[index]))
+            {
+                if (filter.Places.TryGetValue(occurrenceId, out var place) && (best is null || place < best))
+                    best = place;
+            }
+            if (best is { } value) shown.Add((index, value, groupId(groups[index])));
+        }
+        return [.. shown.OrderBy(set => set.Best).ThenBy(set => set.GroupId).Select(set => set.Index)];
+    }
+
+    // The sets a search shows, in its order. A photo of a set it hides is still found, so a viewer
+    // that shows it keeps it.
+    private static ReviewCategoryViewModel FilteredCategory(
+        ReviewCategoryKind category,
+        string name,
+        int positionInSet,
+        int sizeOfSet,
+        int totalGroupCount,
+        int[] shown,
+        Func<int, ReviewGroupViewModel> set,
+        Func<Guid, int?> findIndex)
+    {
+        var shownAt = new Dictionary<int, int>(shown.Length);
+        for (var order = 0; order < shown.Length; order++) shownAt[shown[order]] = order;
+        int? FindShown(Guid groupId) =>
+            findIndex(groupId) is { } index && shownAt.TryGetValue(index, out var order) ? order : null;
+        ScanOccurrenceViewModel? FindHidden(Guid groupId, long occurrenceId) =>
+            findIndex(groupId) is { } index && !shownAt.ContainsKey(index) ? set(index).FindMember(occurrenceId) : null;
+        return new(category, name, shown.Length, positionInSet, sizeOfSet, order => set(shown[order]), FindShown,
+            totalGroupCount: totalGroupCount, findHiddenMember: FindHidden);
     }
 
     private static ReviewCategoryViewModel ProjectCouldNotAnalyzeCategory(
         Albumen.Application.Scan.ScanSnapshot scan,
-        int positionInSet)
+        int positionInSet,
+        int sizeOfSet,
+        ReviewSearchFilter? filter)
     {
-        var rows = scan.Occurrences.Where(IsCouldNotAnalyze).ToImmutableArray();
+        var all = scan.Occurrences.Where(IsCouldNotAnalyze).ToImmutableArray();
+        // A search shows only the files it matched; most have nothing to match.
+        var rows = filter is null
+            ? all
+            : all.Where(row => filter.Matches.ContainsKey(row.Token.OccurrenceId)).ToImmutableArray();
+        var rowIndexes = new Dictionary<long, int>(rows.Length);
+        for (var row = 0; row < rows.Length; row++) rowIndexes.TryAdd(rows[row].Token.OccurrenceId, row);
+        ScanOccurrenceViewModel? FindHidden(Guid groupId, long occurrenceId) =>
+            groupId == Guid.Empty && all.FirstOrDefault(row => row.Token.OccurrenceId == occurrenceId) is { } hidden
+                ? new ReviewGroupViewModel(hidden, 1, 1).Members[0]
+                : null;
         return new(ReviewCategoryKind.CouldNotAnalyze, ReviewCategoryNames.For(ReviewCategoryKind.CouldNotAnalyze), rows.Length,
-            positionInSet, 4,
-            index => new ReviewGroupViewModel(rows[index], index + 1, rows.Length),
-            _ => null);
+            positionInSet, sizeOfSet,
+            index => new ReviewGroupViewModel(rows[index], index + 1, rows.Length, matchesSearch: filter is not null),
+            _ => null,
+            occurrenceId => rowIndexes.TryGetValue(occurrenceId, out var index) ? index : null,
+            totalGroupCount: filter is null ? null : all.Length,
+            findHiddenMember: filter is null ? null : FindHidden);
+    }
+
+    // While a search filters Review: the matching photos no other kind shows, most likely first. A
+    // photo is listed when it is in no set or only in a set closed after a cleanup; one moved to
+    // the Recycle Bin is not, and a Couldn't-check file stays in its own kind.
+    private static ReviewCategoryViewModel ProjectOtherMatchesCategory(
+        AlbumenSnapshot snapshot,
+        ReviewSearchFilter filter,
+        int positionInSet,
+        int sizeOfSet)
+    {
+        var rows = new Dictionary<long, ScanFileOccurrence>(snapshot.Scan.Occurrences.Length);
+        foreach (var row in snapshot.Scan.Occurrences) rows.TryAdd(row.Token.OccurrenceId, row);
+        var grouped = snapshot.Scan.Groups.SelectMany(group => group.Members)
+            .Select(member => member.Token.OccurrenceId).ToHashSet();
+        var reviewed = grouped;
+        var open = grouped;
+        if (snapshot.Review.Pin is not null)
+        {
+            reviewed = [];
+            open = [];
+            foreach (var group in snapshot.Review.Groups)
+            {
+                foreach (var member in group.Members)
+                {
+                    reviewed.Add(member.Occurrence.Token.OccurrenceId);
+                    if (!group.Closed) open.Add(member.Occurrence.Token.OccurrenceId);
+                }
+            }
+        }
+        var other = filter.Ranked
+            .Where(match => rows.TryGetValue(match.OccurrenceId, out var row) && !IsCouldNotAnalyze(row)
+                && !open.Contains(match.OccurrenceId)
+                && (reviewed.Contains(match.OccurrenceId) || !grouped.Contains(match.OccurrenceId)))
+            .Select(match => rows[match.OccurrenceId])
+            .DistinctBy(row => row.Token.OccurrenceId)
+            .ToImmutableArray();
+        var indexes = new Dictionary<long, int>(other.Length);
+        for (var index = 0; index < other.Length; index++) indexes[other[index].Token.OccurrenceId] = index;
+        return new(ReviewCategoryKind.OtherMatches, ReviewCategoryNames.For(ReviewCategoryKind.OtherMatches), other.Length,
+            positionInSet, sizeOfSet,
+            index => new ReviewGroupViewModel(other[index], index + 1, other.Length, ReviewCategoryKind.OtherMatches),
+            _ => null,
+            occurrenceId => indexes.TryGetValue(occurrenceId, out var index) ? index : null,
+            totalGroupCount: other.Length);
     }
 
     private static int? FindGroupIndex(
@@ -1110,179 +1219,126 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             || !ReviewCategories.Any(row => ReferenceEquals(row, category)))
             throw new ArgumentException("Review category navigation requires a current category row.", nameof(parameter));
 
-        SetReviewNavigation(ReviewLevel.Groups, category, null, null);
+        SetReviewNavigation(ReviewLevel.Gallery, category);
         return Task.CompletedTask;
-    }
-
-    private Task OpenReviewGroupAsync(object? parameter)
-    {
-        if (parameter is not ReviewGroupViewModel group
-            || ActiveReviewCategory is null
-            || group.Category != ActiveReviewCategory.Category)
-            throw new ArgumentException("Review group navigation requires a group in the active category.", nameof(parameter));
-
-        SetReviewNavigation(ReviewLevel.Comparisons, ActiveReviewCategory, group, null);
-        return Task.CompletedTask;
-    }
-
-    private async Task OpenReviewMemberAsync(object? parameter)
-    {
-        if (parameter is not ScanOccurrenceViewModel member || ActiveReviewGroup is null)
-            throw new ArgumentException("Review comparison navigation requires a member in the active group.", nameof(parameter));
-
-        SetReviewNavigation(ReviewLevel.Comparisons, ActiveReviewCategory, ActiveReviewGroup, member);
-        await LoadActiveReviewPreviewAsync(member);
-    }
-
-    private async Task OpenLikelyMatchAsync(object? parameter)
-    {
-        if (parameter is not LikelyMatchItemViewModel { Set: { } set } match) return;
-        var category = ReviewCategories.FirstOrDefault(row => row.Category == set.Category);
-        if (category?.FindGroup(set.GroupId) is not { } group
-            || group.FindMember(match.Photo.OccurrenceId) is not { } member)
-            return;
-        likelyMatchesReturn ??= (ReviewNavigationLevel, ActiveReviewCategory?.Category,
-            ActiveReviewGroup?.GroupId, ActiveReviewMember?.OccurrenceId);
-        SetReviewNavigation(ReviewLevel.Comparisons, category, group, member);
-        await LoadActiveReviewPreviewAsync(member);
-    }
-
-    private void ReturnFromLikelyMatches()
-    {
-        if (likelyMatchesReturn is not { } back) return;
-        likelyMatchesReturn = null;
-        RestoreReviewNavigation(back.Level, back.Category, back.Group, back.Member);
     }
 
     private Task ReviewBackAsync()
     {
-        if (ReviewNavigationLevel == ReviewLevel.Comparisons)
-            SetReviewNavigation(ReviewLevel.Groups, ActiveReviewCategory, null, null);
-        else if (ReviewNavigationLevel == ReviewLevel.Groups)
+        if (ReviewNavigationLevel == ReviewLevel.Gallery)
             ResetReviewNavigation();
         return Task.CompletedTask;
     }
 
     private void ResetReviewNavigation() =>
-        SetReviewNavigation(ReviewLevel.Categories, null, null, null);
+        SetReviewNavigation(ReviewLevel.Categories, null);
 
-    private void RestoreReviewNavigation(
-        ReviewLevel level,
-        ReviewCategoryKind? categoryKind,
-        Guid? groupId,
-        long? memberId)
+    // A projection keeps the open kind open; its sets are the new projection's.
+    private void RestoreReviewNavigation(ReviewLevel level, ReviewCategoryKind? categoryKind)
     {
-        if (level == ReviewLevel.Categories || categoryKind is null)
-        {
-            ResetReviewNavigation();
-            return;
-        }
-
-        var category = ReviewCategories.FirstOrDefault(row => row.Category == categoryKind);
+        var category = level == ReviewLevel.Gallery
+            ? ReviewCategories.FirstOrDefault(row => row.Category == categoryKind)
+            : null;
         if (category is null)
-        {
             ResetReviewNavigation();
-            return;
-        }
-
-        if (level == ReviewLevel.Groups || groupId is null)
-        {
-            SetReviewNavigation(ReviewLevel.Groups, category, null, null);
-            return;
-        }
-
-        var group = category.FindGroup(groupId.Value);
-        if (group is null)
-        {
-            SetReviewNavigation(ReviewLevel.Groups, category, null, null);
-            return;
-        }
-
-        var member = memberId is { } id ? group.FindMember(id) : null;
-        var reloadPreview = member is not null && ActiveReviewMember is not null;
-        SetReviewNavigation(ReviewLevel.Comparisons, category, group, member,
-            preservePreview: member is not null && !reloadPreview);
-        if (reloadPreview)
-            _ = LoadActiveReviewPreviewAsync(member!);
+        else
+            SetReviewNavigation(ReviewLevel.Gallery, category);
     }
 
-    private void SetReviewNavigation(
-        ReviewLevel level,
-        ReviewCategoryViewModel? category,
-        ReviewGroupViewModel? group,
-        ScanOccurrenceViewModel? member,
-        bool preservePreview = false)
+    private void SetReviewNavigation(ReviewLevel level, ReviewCategoryViewModel? category)
     {
-        if (!preservePreview)
-            ClearActiveReviewPreview();
-        if (level != ReviewLevel.Comparisons || group?.GroupId != comparedGroupId
-            || member is not null && member.OccurrenceId == ComparedReviewMember?.OccurrenceId)
-            ClearComparedReviewPreview();
-        else if (ComparedReviewMember is { } compared && group?.FindMember(compared.OccurrenceId) is { } current)
-            ComparedReviewMember = current;
         var navigationLevelChanged = ReviewNavigationLevel != level;
         ReviewNavigationLevel = level;
         ActiveReviewCategory = category;
-        ActiveReviewGroup = group;
-        ActiveReviewMember = member;
         ReviewBreadcrumbs = level switch
         {
             ReviewLevel.Categories => ["Review"],
-            ReviewLevel.Groups => ["Review", category!.Name],
-            ReviewLevel.Comparisons => ["Review", category!.Name, group!.Summary],
+            ReviewLevel.Gallery => ["Review", category!.Name],
             _ => throw new InvalidOperationException($"Unknown Review navigation level: {level}"),
         };
         if (navigationLevelChanged) OnPropertyChanged(nameof(ReviewNavigationLevel));
         OnPropertyChanged(nameof(ActiveReviewCategory));
-        OnPropertyChanged(nameof(ActiveReviewGroup));
-        OnPropertyChanged(nameof(ActiveReviewMember));
         OnPropertyChanged(nameof(ReviewBreadcrumbs));
         OnPropertyChanged(nameof(ReviewBreadcrumbText));
         if (navigationLevelChanged) OnPropertyChanged(nameof(CanReviewBack));
         OnPropertyChanged(nameof(ActiveReviewGroups));
-        OnPropertyChanged(nameof(ActiveReviewMembers));
-        OnPropertyChanged(nameof(ComparedReviewMember));
+        OnPropertyChanged(nameof(ReviewKindEmptyText));
+        OnPropertyChanged(nameof(HasReviewKindEmpty));
         ReviewBackCommand.NotifyCanExecuteChanged();
-        ShowPreviousReviewMemberCommand.NotifyCanExecuteChanged();
-        ShowNextReviewMemberCommand.NotifyCanExecuteChanged();
-        RefreshActiveSuggestion(group);
     }
 
-    private ScanOccurrenceViewModel? AdjacentReviewMember(int offset)
-    {
-        if (ActiveReviewGroup is not { } group || ActiveReviewMember is not { } member) return null;
-        var index = member.PositionInSet - 1 + offset;
-        return index >= 0 && index < group.MemberCount ? group.Members[index] : null;
-    }
+    private ReviewViewerSlot Viewer(ViewerSide side) => side == ViewerSide.Left ? LeftViewer : RightViewer;
 
-    private Task ShowAdjacentReviewMemberAsync(int offset) =>
-        AdjacentReviewMember(offset) is { } next ? OpenReviewMemberAsync(next) : Task.CompletedTask;
-
-    private async Task CompareReviewMemberAsync(object? parameter)
+    // The member of a set as the current projection shows it: Review re-creates its rows on
+    // every projection, so a viewer holds the set and the photo, not the row.
+    internal ScanOccurrenceViewModel? FindReviewMember(Guid groupId, long occurrenceId)
     {
-        if (parameter is not ScanOccurrenceViewModel member || ActiveReviewGroup is not { } group
-            || group.FindMember(member.OccurrenceId) is null)
-            throw new ArgumentException("Comparison requires a member of the active group.", nameof(parameter));
-        if (ActiveReviewMember is null)
+        foreach (var category in ReviewCategories)
         {
-            await OpenReviewMemberAsync(member);
-            return;
+            if (category.FindMember(groupId, occurrenceId) is { } member) return member;
         }
-        if (ActiveReviewMember.OccurrenceId == member.OccurrenceId) return;
+        return null;
+    }
 
-        ClearComparedReviewPreview();
-        ComparedReviewMember = member;
-        comparedGroupId = group.GroupId;
-        OnPropertyChanged(nameof(ComparedReviewMember));
-        OnPropertyChanged(nameof(IsComparingReviewMembers));
-        CloseCompareCommand.NotifyCanExecuteChanged();
+    private Task PlaceInViewerAsync(object? parameter)
+    {
+        if (parameter is not PlaceInViewer place) return Task.CompletedTask;
+        var target = Viewer(place.Side);
+        var other = Viewer(place.Side == ViewerSide.Left ? ViewerSide.Right : ViewerSide.Left);
+        var occurrenceId = place.Member.OccurrenceId;
+        if ((place.OnlyIfEmpty && target.HasPhoto) || target.Shows(place.GroupId, occurrenceId))
+            return Task.CompletedTask;
+        // A photo is in at most one viewer: placing the other viewer's photo moves it here.
+        PreviewItemViewModel? moved = null;
+        if (other.Shows(place.GroupId, occurrenceId))
+        {
+            moved = other.Preview;
+            other.Clear();
+        }
+        target.CancelLoad();
+        target.Show(place.GroupId, place.Member, moved);
+        return moved is null ? LoadViewerPreviewAsync(target, place.GroupId, place.Member) : Task.CompletedTask;
+    }
+
+    // Swapping keeps each photo's preview; with one viewer empty it is a move.
+    private Task SwapViewersAsync()
+    {
+        var left = (LeftViewer.Member, LeftViewer.GroupId, LeftViewer.Preview);
+        var right = (RightViewer.Member, RightViewer.GroupId, RightViewer.Preview);
+        LeftViewer.Clear();
+        RightViewer.Clear();
+        return Task.WhenAll(Show(LeftViewer, right), Show(RightViewer, left));
+
+        Task Show(ReviewViewerSlot slot, (ScanOccurrenceViewModel? Member, Guid? GroupId, PreviewItemViewModel? Preview) photo)
+        {
+            if (photo is not { Member: { } member, GroupId: { } groupId }) return Task.CompletedTask;
+            slot.Show(groupId, member, photo.Preview);
+            return photo.Preview is null ? LoadViewerPreviewAsync(slot, groupId, member) : Task.CompletedTask;
+        }
+    }
+
+    // After a projection each viewer follows its photo's new row, so the Remove button reads
+    // the mark as it is now. A photo that left Review empties its viewer, and so does a new
+    // Review session or Scan.
+    private void RefreshViewers(bool sessionChanged)
+    {
+        foreach (var slot in new[] { LeftViewer, RightViewer })
+        {
+            if (slot.Member is not { } member || slot.GroupId is not { } groupId) continue;
+            if (!sessionChanged && FindReviewMember(groupId, member.OccurrenceId) is { } current)
+                slot.Show(groupId, current, slot.Preview);
+            else
+                slot.Clear();
+        }
+    }
+
+    private async Task LoadViewerPreviewAsync(ReviewViewerSlot slot, Guid groupId, ScanOccurrenceViewModel member)
+    {
         var source = reviewPreviewSource;
         if (source is null || ResolveOccurrence(member.OccurrenceId) is not { } target) return;
 
-        var cancellation = new CancellationTokenSource();
+        var cancellation = slot.BeginLoad(out var request);
         var cancellationToken = cancellation.Token;
-        comparePreviewCancellation = cancellation;
-        var request = Interlocked.Increment(ref comparePreviewRequest);
         ReviewPreviewResult? result = null;
         try
         {
@@ -1295,11 +1351,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 result = ReviewPreviewResult.Failure(target.Occurrence.ResolvedPath,
                     PreviewAvailability.Unavailable, "Preview unavailable: the file could not be read.");
             }
-            if (request != Volatile.Read(ref comparePreviewRequest)
-                || ComparedReviewMember?.OccurrenceId != member.OccurrenceId)
-                return;
-            ComparedReviewPreview = new PreviewItemViewModel(result);
-            OnPropertyChanged(nameof(ComparedReviewPreview));
+            if (slot.IsCurrentLoad(request) && slot.Shows(groupId, member.OccurrenceId))
+                slot.SetPreview(new PreviewItemViewModel(result));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1307,72 +1360,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         finally
         {
             result?.Dispose();
-            if (ReferenceEquals(comparePreviewCancellation, cancellation))
-                comparePreviewCancellation = null;
-            cancellation.Dispose();
+            slot.EndLoad(cancellation);
         }
-    }
-
-    private void ClearComparedReviewPreview()
-    {
-        Interlocked.Increment(ref comparePreviewRequest);
-        var cancellation = Interlocked.Exchange(ref comparePreviewCancellation, null);
-        if (cancellation is not null)
-        {
-            cancellation.Cancel();
-            cancellation.Dispose();
-        }
-        var wasComparing = ComparedReviewMember is not null || ComparedReviewPreview is not null;
-        ComparedReviewMember = null;
-        ComparedReviewPreview = null;
-        comparedGroupId = null;
-        if (!wasComparing) return;
-        OnPropertyChanged(nameof(ComparedReviewMember));
-        OnPropertyChanged(nameof(ComparedReviewPreview));
-        OnPropertyChanged(nameof(IsComparingReviewMembers));
-        CloseCompareCommand.NotifyCanExecuteChanged();
-    }
-
-    // The "Suggested best" badge needs every photo's pixel size, which only a decode gives,
-    // so it appears once the set's thumbnails have loaded. It is a hint, never a Selection.
-    private void RefreshActiveSuggestion(ReviewGroupViewModel? group)
-    {
-        if (group?.GroupId == suggestionGroupId && group is not null) return;
-        var cancellation = Interlocked.Exchange(ref suggestionCancellation, null);
-        if (cancellation is not null)
-        {
-            cancellation.Cancel();
-            cancellation.Dispose();
-        }
-        suggestionGroupId = group?.GroupId;
-        ActiveReviewSuggestion = null;
-        if (group is null || ReviewThumbnails is not { } thumbnails
-            || group.Category is not (ReviewCategoryKind.Near or ReviewCategoryKind.Uncertain)
-            || group.MemberCount is < 2 or > SuggestedBestPhoto.MaximumSetSize)
-            return;
-
-        var next = new CancellationTokenSource();
-        suggestionCancellation = next;
-        _ = LoadSuggestionAsync(group, thumbnails, next.Token);
-    }
-
-    private async Task LoadSuggestionAsync(
-        ReviewGroupViewModel group,
-        ReviewThumbnailLoader thumbnails,
-        CancellationToken cancellationToken)
-    {
-        var facts = new List<PhotoFacts>(group.MemberCount);
-        for (var index = 0; index < group.MemberCount; index++)
-        {
-            var member = group.Members[index];
-            var thumbnail = await thumbnails.LoadAsync(member, cancellationToken);
-            if (cancellationToken.IsCancellationRequested
-                || thumbnail is not { PixelWidth: { } width, PixelHeight: { } height })
-                return;
-            facts.Add(new(member.OccurrenceId, width, height, member.ByteCount, member.Sharpness));
-        }
-        if (!cancellationToken.IsCancellationRequested && suggestionGroupId == group.GroupId)
-            ActiveReviewSuggestion = SuggestedBestPhoto.Pick(facts);
     }
 
     private (ScanRunContext Context, ScanFileOccurrence Occurrence)? ResolveOccurrence(long occurrenceId)
@@ -1394,144 +1383,24 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             : null;
     }
 
-    private async Task LoadActiveReviewPreviewAsync(ScanOccurrenceViewModel member)
-    {
-        var source = reviewPreviewSource;
-        var snapshot = photoSnapshot;
-        var scope = snapshot?.Scope.Preflight?.Scope;
-        var pin = snapshot?.Scan.Pin;
-        var occurrence = snapshot?.Scan.Occurrences.FirstOrDefault(
-            row => row.Token.OccurrenceId == member.OccurrenceId);
-        if (source is null || scope is null || pin is null || occurrence is null)
-            return;
-
-        var cancellation = new CancellationTokenSource();
-        var cancellationToken = cancellation.Token;
-        activePreviewCancellation = cancellation;
-        var request = Interlocked.Increment(ref activePreviewRequest);
-        ReviewPreviewResult? result = null;
-        try
-        {
-            result = await source.LoadAsync(
-                new ScanRunContext(pin, scope), occurrence, cancellationToken);
-            if (request != Volatile.Read(ref activePreviewRequest)
-                || !ReferenceEquals(ActiveReviewMember, member))
-                return;
-
-            ActiveReviewPreview = new PreviewItemViewModel(result);
-            ActiveReviewEvidence = ProjectReviewEvidence(occurrence, result);
-            OnPropertyChanged(nameof(ActiveReviewPreview));
-            OnPropertyChanged(nameof(ActiveReviewEvidence));
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            if (request != Volatile.Read(ref activePreviewRequest)
-                || !ReferenceEquals(ActiveReviewMember, member))
-                return;
-            result = ReviewPreviewResult.Failure(
-                occurrence.ResolvedPath,
-                PreviewAvailability.Unavailable,
-                "Preview unavailable: the file could not be read.");
-            ActiveReviewPreview = new PreviewItemViewModel(result);
-            ActiveReviewEvidence = ProjectReviewEvidence(occurrence, result);
-            OnPropertyChanged(nameof(ActiveReviewPreview));
-            OnPropertyChanged(nameof(ActiveReviewEvidence));
-        }
-        finally
-        {
-            result?.Dispose();
-            if (ReferenceEquals(activePreviewCancellation, cancellation))
-                activePreviewCancellation = null;
-            cancellation.Dispose();
-        }
-    }
-
-    private ReviewComparisonEvidenceViewModel ProjectReviewEvidence(
-        ScanFileOccurrence occurrence,
-        ReviewPreviewResult result)
-    {
-        const string unavailable = "Unavailable";
-        var category = ActiveReviewGroup?.Category ?? ReviewCategoryKind.CouldNotAnalyze;
-        var candidate = photoSnapshot?.Scan.Groups.FirstOrDefault(
-            group => group.GroupId == ActiveReviewGroup?.GroupId);
-        var similarity = candidate?.Similarity.FirstOrDefault(edge =>
-            edge.Left.OccurrenceId == occurrence.Token.OccurrenceId
-            || edge.Right.OccurrenceId == occurrence.Token.OccurrenceId);
-        var confidence = category switch
-        {
-            ReviewCategoryKind.Exact => "The files are identical, byte for byte.",
-            ReviewCategoryKind.Uncertain when similarity?.Cosine is not null =>
-                "Similar content: matched by what the photos show, not by their pixels.",
-            ReviewCategoryKind.Near or ReviewCategoryKind.Uncertain when similarity is not null =>
-                $"Picture difference {similarity.HammingDistance.ToString(CultureInfo.InvariantCulture)}, color difference {similarity.ColorDistance.ToString(CultureInfo.InvariantCulture)} (lower is closer)",
-            _ => unavailable,
-        };
-        var uncertainty = category == ReviewCategoryKind.Uncertain
-            ? "A close call. Check these photos yourself."
-            : unavailable;
-        var reason = new[]
-            {
-                occurrence.NearDuplicate.Reason,
-                occurrence.VisualFeatures.Reason,
-                occurrence.Exact.Reason,
-                occurrence.Enumerate.Reason,
-            }
-            .FirstOrDefault(value => value != ScanReason.None);
-        return new(
-            occurrence.ResolvedPath,
-            ReviewCategoryNames.For(category),
-            result.SourcePixelWidth is { } width && result.SourcePixelHeight is { } height
-                ? $"{width.ToString(CultureInfo.InvariantCulture)} × {height.ToString(CultureInfo.InvariantCulture)} pixels"
-                : unavailable,
-            (result.ByteLength ?? occurrence.Content?.ByteLength) is { } bytes
-                ? $"{bytes.ToString(CultureInfo.InvariantCulture)} bytes"
-                : unavailable,
-            result.RelevantDate?.ToString("O", CultureInfo.InvariantCulture) ?? unavailable,
-            confidence,
-            uncertainty,
-            unavailable,
-            reason == ScanReason.None ? unavailable : reason.ToString());
-    }
-
-    private void ClearActiveReviewPreview()
-    {
-        Interlocked.Increment(ref activePreviewRequest);
-        var cancellation = Interlocked.Exchange(ref activePreviewCancellation, null);
-        if (cancellation is not null)
-        {
-            cancellation.Cancel();
-            cancellation.Dispose();
-        }
-        ActiveReviewPreview = null;
-        ActiveReviewEvidence = null;
-        OnPropertyChanged(nameof(ActiveReviewPreview));
-        OnPropertyChanged(nameof(ActiveReviewEvidence));
-    }
-
     private static ImmutableArray<ScanOutcomeSummaryItemViewModel> ProjectOutcomeSummaries(
         Albumen.Application.Scan.ScanSnapshot scan)
     {
-        var uncertainIds = scan.Groups.Where(group => group.Uncertain)
-            .SelectMany(group => group.Members)
-            .Select(member => member.Token.OccurrenceId)
-            .ToHashSet();
-        var candidateIds = scan.Groups.Where(group => !group.Uncertain)
-            .SelectMany(group => group.Members)
-            .Select(member => member.Token.OccurrenceId)
-            .Where(id => !uncertainIds.Contains(id))
-            .ToHashSet();
-        var acceptable = scan.Occurrences.LongCount(row =>
+        // Each photo is counted once, in the first of: Maybe similar, identical, look-alike.
+        var uncertainIds = MemberIds(scan, ReviewCategoryKind.Uncertain, []);
+        var identicalIds = MemberIds(scan, ReviewCategoryKind.Exact, uncertainIds);
+        var lookAlikeIds = MemberIds(scan, ReviewCategoryKind.Near, [.. uncertainIds, .. identicalIds]);
+        var unique = scan.Occurrences.LongCount(row =>
             row.Exact.State == ScanStageState.Succeeded
             && !IsCouldNotAnalyze(row)
-            && !candidateIds.Contains(row.Token.OccurrenceId)
+            && !identicalIds.Contains(row.Token.OccurrenceId)
+            && !lookAlikeIds.Contains(row.Token.OccurrenceId)
             && !uncertainIds.Contains(row.Token.OccurrenceId));
         return
         [
-            new("Candidate", candidateIds.Count, "Review the group and choose manually."),
-            new("Analyzed acceptable", acceptable,
+            new("In identical sets", identicalIds.Count, "Review the set and choose manually."),
+            new("In look-alike sets", lookAlikeIds.Count, "Review the set and choose manually."),
+            new("Unique photos", unique,
                 "No duplicate candidate was found. Keep it, or scan again after the file changes."),
             new("Uncertain", uncertainIds.Count,
                 "Review it before selecting; Albumen could not classify it confidently."),
@@ -1541,10 +1410,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 "Start a fresh Scan to analyze this file."),
             new("Failed", scan.Counts.Failed,
                 "Check file access and health, then start a fresh Scan."),
-            new("Outstanding", scan.Counts.Outstanding,
-                "Wait for this Scan to finish, or cancel it and start a fresh Scan."),
         ];
     }
+
+    private static HashSet<long> MemberIds(
+        Albumen.Application.Scan.ScanSnapshot scan, ReviewCategoryKind category, HashSet<long> counted) =>
+        scan.Groups.Where(group => InCategory(group, category))
+            .SelectMany(group => group.Members)
+            .Select(member => member.Token.OccurrenceId)
+            .Where(id => !counted.Contains(id))
+            .ToHashSet();
 
     private void ProjectAction(ActionSnapshot? previous, ReviewSnapshot? previousReview, AlbumenSnapshot snapshot)
     {
@@ -1766,12 +1641,38 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         ProjectMarkedPhotos(selectedMembers);
         ApprovalAutomationStatus = $"{ApprovalSelectedOccurrenceText}; {ApprovalSelectedPathText}; {ApprovalSelectedPhysicalText}; {ApprovalRecoveryText} {ApprovalCoverageText}; {ApprovalUnresolvedText}; {ApprovalUnresolvedSubtotals}; {ApprovalUnselectedSurvivorsText}; {ApprovalDestinationText} {ApprovalRevalidationText}";
         SelectionSummary = $"{ApprovalSelectedOccurrenceText}; {ApprovalRecoveryText} {ApprovalCoverageText}; unresolved total {review.Unresolved.Total.ToString(CultureInfo.InvariantCulture)}.";
-        ReviewSelectionBarText = FormatSelectionBar(review, selectedCount);
+        var hidden = CountHiddenMarked(review, selectedMembers, ReviewSearch.Filter);
+        ApprovalHiddenMarkedText = hidden switch
+        {
+            0 => string.Empty,
+            _ when selectedCount == 1 => "It is hidden by the search.",
+            1 => "1 of them is hidden by the search.",
+            _ => $"{hidden.ToString(CultureInfo.InvariantCulture)} of them are hidden by the search.",
+        };
+        ReviewSelectionBarText = FormatSelectionBar(review, selectedCount)
+            + (hidden == 0 ? string.Empty : $" · {hidden.ToString(CultureInfo.InvariantCulture)} hidden by the search");
         CanApproveReview = review.Status == ReviewStatus.Ready
             && review.Coverage is ScanSessionStatus.Complete or ScanSessionStatus.Incomplete
             && selectedCount > 0 && !review.Sealed
             && photoSnapshot?.ActionRecovery.Status != ActionRecoveryStatus.Faulted
             && selectedMembers.All(member => member.Eligibility == ReviewEligibilityState.Eligible);
+    }
+
+    // The marked photos a search hides: those in no set it shows. A set shows whole when any of
+    // its photos matches, so its marked photos show with it.
+    private static long CountHiddenMarked(ReviewSnapshot review, ReviewMemberSnapshot[] selectedMembers,
+        ReviewSearchFilter? filter)
+    {
+        if (filter is null || selectedMembers.Length == 0) return 0;
+        var shown = new HashSet<long>();
+        foreach (var group in review.Groups)
+        {
+            if (group.Closed
+                || !group.Members.Any(member => filter.Matches.ContainsKey(member.Occurrence.Token.OccurrenceId)))
+                continue;
+            foreach (var member in group.Members) shown.Add(member.Occurrence.Token.OccurrenceId);
+        }
+        return selectedMembers.LongCount(member => !shown.Contains(member.Occurrence.Token.OccurrenceId));
     }
 
     private static string FormatScanCounts(Albumen.Application.Scan.ScanCounts count)
@@ -1889,6 +1790,9 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             1 => "Scan 1 photo",
             int count => $"Scan {count.ToString("N0", CultureInfo.InvariantCulture)} photos",
         };
+        var hadFolderContents = HasFolderContents;
+        FolderContentsText = ProjectFolderContents(snapshot.Preflight?.CompleteCounts);
+        if (hadFolderContents != HasFolderContents) OnPropertyChanged(nameof(HasFolderContents));
         RuleSetStatus = snapshot.RuleSetStatus;
         ScopeSummary = ProjectSummary(snapshot.Preflight);
         BlockingReasons = ProjectBlockingReasons(snapshot.Preflight);
@@ -1925,6 +1829,18 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             ScopeSessionState.Canceled => "The folder wasn't checked. Check it again or choose another folder.",
             _ => throw new InvalidOperationException($"Unknown Scope state: {state}"),
         };
+
+    private static string ProjectFolderContents(ScopeOutcomeCounts? counts)
+    {
+        if (counts is null || counts.SampleSupportedFiles.IsEmpty) return string.Empty;
+        var names = counts.SampleSupportedFiles;
+        var more = counts.Supported - names.Length;
+        if (more > 0)
+            return $"Includes {string.Join(", ", names.AsEnumerable())} and {more.ToString("N0", CultureInfo.InvariantCulture)} more.";
+        return names.Length == 1
+            ? $"Includes {names[0]}."
+            : $"Includes {string.Join(", ", names.Take(names.Length - 1))} and {names[names.Length - 1]}.";
+    }
 
     private static bool ProjectRecursion(ScopeSelection? selection)
     {
@@ -2049,9 +1965,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private async Task DisposeCoreAsync()
     {
-        ClearActiveReviewPreview();
-        ClearComparedReviewPreview();
-        RefreshActiveSuggestion(null);
+        LeftViewer.Clear();
+        RightViewer.Clear();
         chooseScopeWorkflow.SnapshotChanged -= OnSnapshotChanged;
         if (photoWorkflow is not null)
             photoWorkflow.SnapshotChanged -= OnPhotoSnapshotChanged;

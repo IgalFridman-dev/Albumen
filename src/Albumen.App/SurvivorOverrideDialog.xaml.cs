@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using Albumen.App.Shell;
+using Albumen.App.Themes;
 using Albumen.Domain.Review;
 
 namespace Albumen.App;
@@ -15,6 +16,8 @@ public partial class SurvivorOverrideDialog : Window
     {
         ArgumentNullException.ThrowIfNull(proposal);
         InitializeComponent();
+        // An owned window does not inherit the owner's resources, so it takes the palette itself.
+        AlbumenPalette.Apply(Resources, SystemParameters.HighContrast);
         ConsequenceTextVersion = proposal.ConsequenceTextVersion;
         DataContext = this;
     }
