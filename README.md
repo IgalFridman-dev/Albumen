@@ -175,7 +175,8 @@ Raw observations, not benchmarks or promises. The verification VM has 2 CPUs and
   announcement, but that has not yet been checked with Narrator (PM-002, PM-005). Albumen makes
   no accessibility-compliance claim.
 - The release is not code-signed. SmartScreen offers "More info → Run anyway", but on a PC with
-  Smart App Control on, Windows blocks the app and offers no way to run it.
+  Smart App Control on, Windows blocks the app and offers no way to run it. A Microsoft Store
+  release, which Windows trusts, is planned after 1.3.
 - HEIF support depends on the installed Windows codec and is best effort; JPEG and PNG are supported.
 - Near-duplicate quality was validated on a small labeled corpus. Human review is always required.
 - The Maybe-similar cosine threshold (0.92) and the blur thresholds are provisional: they have not
