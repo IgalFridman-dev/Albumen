@@ -65,8 +65,9 @@ between frames, as Maybe similar. A classical sharpness measure names the sharpe
   which Windows trusts, is planned after 1.3.
 - Accessibility work is not complete, and Albumen makes no accessibility-compliance claim.
 - Albumen is dark only. Under Windows High Contrast it uses the system colours.
-- Zooming and moving a photo in the Right Viewer can crash the app (a fault in the WPF renderer).
-  A fix is planned for 1.2.
+- In one 1.1.5 test the app closed while a photo was zoomed in the Right Viewer, from a fault in the
+  WPF renderer. Its cause was not found, and a 100-round stress test of both viewers has not
+  reproduced it.
 - Text search misses small objects in the frame (the model sees each photo at 224 px), and a weak
   match in the search can hide the rest of Review until you clear it.
 - The Maybe-similar and blur thresholds are provisional: they have not yet been measured on a
