@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Albumen.Analysis.Exact;
@@ -51,7 +52,7 @@ public sealed class SignatureReuseScanTests
         Assert.Null(cold.Sharpness["small-1.png"]);
         Assert.NotNull(cold.Sharpness["a.png"]);
         Assert.Equal(cold.Sharpness, warm.Sharpness);
-        AssertSameVectors(cold, warm, 5);
+        AssertSameVectors(folder, cold, warm, 5);
         // One row per content and kind: the identical copies share theirs.
         Assert.Equal(12, await folder.SignatureRowsAsync());
     }
@@ -83,7 +84,7 @@ public sealed class SignatureReuseScanTests
         Assert.Equal((Every(5, 0), 0, 0), (after.Reuse, after.NearOpens, after.IndexOpens));
         Assert.Equal(changed.Groups, after.Groups);
         Assert.Equal(changed.Sharpness, after.Sharpness);
-        AssertSameVectors(changed, after, 5);
+        AssertSameVectors(folder, changed, after, 5);
     }
 
     [Fact]
@@ -143,18 +144,24 @@ public sealed class SignatureReuseScanTests
 
         Assert.Equal((ScanStatus.Complete, Every(0, Photos)), (cold.Status, cold.Reuse));
         Assert.Equal((ScanStatus.Complete, Every(Photos, 0), 0, 0), (warm.Status, warm.Reuse, warm.NearOpens, warm.IndexOpens));
-        AssertSameVectors(cold, warm, Photos);
+        AssertSameVectors(folder, cold, warm, Photos);
         TestContext.Current.TestOutputHelper?.WriteLine(
             $"signature-reuse: photos={Photos} cold-ms={cold.Elapsed.TotalMilliseconds:F0} " +
             $"warm-ms={warm.Elapsed.TotalMilliseconds:F0} hash-only-ms={hashing.TotalMilliseconds:F0} " +
             $"db-bytes-per-1000={databaseBytes * 1000 / Photos} signature-bytes-per-1000={signatureBytes * 1000 / Photos}");
     }
 
-    private static void AssertSameVectors(ScanResult expected, ScanResult actual, int count)
+    // Parallel ONNX runs can differ in the last float bit for identical bytes, and identical copies
+    // share the one vector stored first, so a photo's vector is the one computed for any photo with
+    // its content.
+    private static void AssertSameVectors(ReuseFolder folder, ScanResult expected, ScanResult actual, int count)
     {
         Assert.Equal(count, expected.Vectors.Count);
         Assert.Equal(expected.Vectors.Keys.Order(StringComparer.Ordinal), actual.Vectors.Keys.Order(StringComparer.Ordinal));
-        Assert.All(expected.Vectors, vector => Assert.Equal(vector.Value, actual.Vectors[vector.Key]));
+        var content = expected.Vectors.Keys.ToDictionary(key => key,
+            key => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(folder.PathOf(key)))));
+        Assert.All(actual.Vectors, vector => Assert.Contains(expected.Vectors,
+            candidate => content[candidate.Key] == content[vector.Key] && candidate.Value.SequenceEqual(vector.Value)));
     }
 
     // A different gradient per seed; a twin is the seed-1 photo with one row changed.
