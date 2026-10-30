@@ -19,6 +19,14 @@ public sealed class ManagedSharpnessTests
         Assert.Equal(first, rotated);
     }
 
+    // Stored scores are reused under BoundedNearDuplicatePipeline.SharpnessRevision: a change to this
+    // value needs a new revision there.
+    [Fact]
+    public void TheStoredRevisionStillDescribesThisExactScore()
+    {
+        Assert.Equal(158243.6108161206, ManagedSharpness.Measure(48, 32, Texture(48, 32)));
+    }
+
     [Fact]
     public void BlurLowersTheScoreAndStrongBlurLowersItFarMore()
     {

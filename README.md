@@ -71,7 +71,8 @@ between frames, as Maybe similar. A classical sharpness measure names the sharpe
   match in the search can hide the rest of Review until you clear it.
 - The Maybe-similar and blur thresholds are provisional: they have not yet been measured on a
   labelled set of real photos. Always look before you approve.
-- Every scan recomputes the photo vectors; nothing is reused across scans yet.
+- A rescan reuses the stored results of photos whose content is unchanged, but still reads every
+  file once. Stored results stay until "Clear scan data" (in History).
 - HEIF support depends on the installed Windows codec and is best effort; JPEG and PNG are supported.
 
 ## What's next
@@ -131,7 +132,7 @@ flowchart LR
   App --> Windows
   App --> Onnx
   Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature<br/>sharpness"] --> Application
-  Sqlite["Infrastructure.Sqlite<br/>schema v6, journals, records, photo vectors"] --> Application
+  Sqlite["Infrastructure.Sqlite<br/>schema v7, journals, records, photo vectors, signatures"] --> Application
   Onnx["Infrastructure.Onnx<br/>SigLIP 2 encoder on ONNX Runtime"] --> Application
   Windows["Infrastructure.Windows<br/>Win32 scope and traversal, WIC decode,<br/>IFileOperation Recycle Bin"] --> Application
   Application["Albumen.Application<br/>workflows, coordinators, ports"] --> Domain["Albumen.Domain<br/>pure rules and policies"]

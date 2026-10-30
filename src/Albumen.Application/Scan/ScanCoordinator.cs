@@ -434,6 +434,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
                 {
                     if (!ReferenceEquals(active, operation) || operation.Canceled || operation.Faulted)
                         return false;
+                    operation.Reuse = batch.Reuse;
                     var mutation = operation.Store.PrepareNearDuplicates(batch);
                     var result = operation.Store.Apply(mutation);
                     if (!result.Accepted) return false;
@@ -566,6 +567,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
         if (!ReferenceEquals(active, operation) || operation.Canceled || operation.Finished || operation.Faulted)
             return false;
         operation.Semantic = semantic;
+        operation.Reuse = operation.Reuse with { Vector = semantic.Vectors };
         // Rows, groups and counts are unchanged: republish the current snapshot with the new state
         // instead of rebuilding the Scan on the owner's thread.
         Publish(current);
@@ -835,10 +837,12 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
 
     private void Publish(ScanSnapshot snapshot)
     {
+        var owner = active is { } shown && snapshot.Pin == shown.Context.Pin ? shown : null;
         snapshot = snapshot with
         {
             HasUnsettledWork = operations.Count != 0,
-            Semantic = active is { } owner && snapshot.Pin == owner.Context.Pin ? owner.Semantic : SemanticSnapshot.Idle,
+            Semantic = owner?.Semantic ?? SemanticSnapshot.Idle,
+            Reuse = owner?.Reuse ?? SignatureReuse.None,
         };
         var terminalIsDurable = active is { DurableStarted: true } terminalOperation
             && snapshot.Pin == terminalOperation.Context.Pin
@@ -964,6 +968,7 @@ public sealed class ScanCoordinator : IScanCoordinator, IScanResultSink
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public StageOutcome Enumeration { get; set; } = Pending;
         public SemanticSnapshot Semantic { get; set; } = SemanticSnapshot.Idle;
+        public SignatureReuse Reuse { get; set; } = SignatureReuse.None;
         // Set while the photos are indexed; canceling it skips the rest of the index only.
         public CancellationTokenSource? Indexing { get; set; }
         // From the index's start on, Cancel never cancels the Scan.

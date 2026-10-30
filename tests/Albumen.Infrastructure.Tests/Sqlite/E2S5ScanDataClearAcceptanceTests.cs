@@ -39,8 +39,9 @@ public sealed class E2S5ScanDataClearAcceptanceTests
         Assert.Equal(1, result.ClearedScanCount);
         Assert.Equal<long?>(0, result.RetainedScanCount);
         await using var verify = await fixture.OpenRawAsync(SqliteOpenMode.ReadOnly);
-        Assert.Equal("0|0|0|0|0", await ScalarAsync(verify, """
+        Assert.Equal("0|0|0|0|0|0", await ScalarAsync(verify, """
             SELECT
+              (SELECT COUNT(*) FROM signatures) || '|' ||
               (SELECT COUNT(*) FROM scan_accounting) || '|' ||
               (SELECT COUNT(*) FROM scan_stage_checkpoints) || '|' ||
               (SELECT COUNT(*) FROM scan_lifecycle) || '|' ||
@@ -95,6 +96,7 @@ public sealed class E2S5ScanDataClearAcceptanceTests
             result.Message);
         await using var verify = await fixture.OpenRawAsync(SqliteOpenMode.ReadOnly);
         Assert.Equal(1L, await ScalarAsync(verify, "SELECT COUNT(*) FROM scans;"));
+        Assert.Equal(1L, await ScalarAsync(verify, "SELECT COUNT(*) FROM signatures;"));
         Assert.Equal(1L, await ScalarAsync(verify, "SELECT COUNT(*) FROM action_items;"));
     }
 
@@ -117,8 +119,9 @@ public sealed class E2S5ScanDataClearAcceptanceTests
             "Local Scan data could not be cleared and was retained. Check the local database, then try again.",
             result.Message);
         await using var verify = await fixture.OpenRawAsync(SqliteOpenMode.ReadOnly);
-        Assert.Equal("1|2|1|1|1", await ScalarAsync(verify, """
+        Assert.Equal("1|1|2|1|1|1", await ScalarAsync(verify, """
             SELECT
+              (SELECT COUNT(*) FROM signatures) || '|' ||
               (SELECT COUNT(*) FROM scan_accounting) || '|' ||
               (SELECT COUNT(*) FROM scan_stage_checkpoints) || '|' ||
               (SELECT COUNT(*) FROM scan_lifecycle) || '|' ||
@@ -204,6 +207,8 @@ public sealed class E2S5ScanDataClearAcceptanceTests
                 new(scan.Pin.ScanId, 7, ScanStage.Exact, 1, Transition(3),
                     new(ScanStageState.Succeeded, ScanReason.None),
                     new(ScanStage.Enumeration, new(ScanStageState.Succeeded, ScanReason.None)))), token)).Outcome);
+        await stores.Signatures.AddAsync(
+            [new(new(new string('D', 64), 10, SignatureKind.Near, "near-v1"), new byte[12])], token);
     }
 
     private static Guid Transition(long suffix) =>

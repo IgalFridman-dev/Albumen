@@ -31,7 +31,7 @@ flowchart LR
   App --> Windows
   App --> Onnx
   Analysis["Albumen.Analysis<br/>SHA-256 exact digest<br/>dHash + color signature<br/>sharpness"] --> Application
-  Sqlite["Infrastructure.Sqlite<br/>schema v6, journals, records, photo vectors"] --> Application
+  Sqlite["Infrastructure.Sqlite<br/>schema v7, journals, records, photo vectors, signatures"] --> Application
   Windows["Infrastructure.Windows<br/>Win32 scope/traversal, WIC decode,<br/>IFileOperation Recycle Bin"] --> Application
   Onnx["Infrastructure.Onnx<br/>SigLIP 2 encoder on ONNX Runtime"] --> Application
   Application["Albumen.Application<br/>workflows, coordinators, ports"] --> Domain["Albumen.Domain<br/>pure rules & policies"]
@@ -57,6 +57,7 @@ sequenceDiagram
   UI->>Scan: Start Scan (options)
   Scan->>OS: enumerate files, read bytes under a lease
   Scan->>Scan: Exact groups (SHA-256) + Near groups (dHash ≤4, color ≤12)
+  Scan->>DB: reuse stored signatures by SHA-256, store the new ones
   Scan->>Scan: photo vectors (SigLIP 2, parallel)
   Scan->>Scan: Maybe-similar sets from vector cosine (Near stays hash-only)
   Scan->>DB: checkpoints + accounting
@@ -73,6 +74,12 @@ Key ideas:
   one serialized owner, so UI threads never race on state; the UI renders immutable snapshots.
 - **Fail closed**: anything uncertain (file changed, crash mid-action, unreadable local data)
   blocks the action and is shown as such; interrupted actions are reconciled on restart, never replayed.
+- **Reuse needs proof**: a stored feature or vector is used only for the SHA-256 and length the
+  Exact stage just read under its lease, and only under the current analyzer revision or model
+  profile; anything else is computed again (`BoundedNearDuplicatePipeline`, `BoundedSemanticIndexer`).
+  The revisions cover Albumen's own analyzers and decode settings, not the Windows codecs; bump them
+  (or `OnnxVisionLanguageEncoder.PipelineRevision`) when those change. A hit opens no file, so a photo
+  changed after the Exact stage hashed it keeps the reused results for that scan.
 - **Near duplicates are conservative**: thresholds live in `Application/Scan/NearDuplicateThresholds.cs`;
   borderline pairs are not grouped.
 - **The photo model only adds Maybe similar**: two photos the hash does not relate are Maybe similar
@@ -83,11 +90,14 @@ Key ideas:
 ## Where data lives
 
 - `%LOCALAPPDATA%\Albumen\albumen.db` — SQLite (scan identity, checkpoints, override
-  evidence, action journal and records, and the last Scan's photo vectors). "Clear scan data" (in History) removes scan data only.
+  evidence, action journal and records, the last Scan's photo vectors, and the stored signatures:
+  look-alike features, sharpness scores and photo vectors keyed by a file's SHA-256, length, kind
+  and revision, with no path). "Clear scan data" (in History) removes scan data only.
 - `models\` next to `Albumen.App.exe` — the SigLIP 2 files (`vision.onnx`, `text.onnx`,
   `tokenizer.model`, 1,112 MB) and `manifest.json` with each file's length and SHA-256. A missing or
   changed file makes only the semantic features unavailable; Exact, Look-alike, Review and cleanup
-  work without them.
+  work without them. A scan that reuses every vector never opens `vision.onnx`, so a same-size
+  change to it is noticed by the next photo that needs encoding.
 - Photos are only read, never modified; removal = Windows Recycle Bin (restorable).
 - No network access at all (verified by network audits in a VM with no network adapter).
 
