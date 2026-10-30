@@ -62,9 +62,10 @@ jobs:
         if: success() || failure()
         run: dotnet test tests/Albumen.Infrastructure.Tests -c Release --no-build --filter "Category!=GoldenVm" --logger trx --results-directory TestResults
 
-      - name: Test Scenarios (WPF)
+      # Desktop tests draw on the Golden VM's signed-in desktop (Invoke-AlbumenUiSmoke.ps1 -DesktopTest).
+      - name: Test Scenarios (WPF, excluding Desktop)
         if: success() || failure()
-        run: dotnet test tests/Albumen.Scenarios.Tests -c Release --no-build --logger trx --results-directory TestResults
+        run: dotnet test tests/Albumen.Scenarios.Tests -c Release --no-build --filter "Category!=Desktop" --logger trx --results-directory TestResults
 
       - name: Upload test results
         if: always()
