@@ -36,12 +36,19 @@ public sealed record NearFeatureResult(
     ContentRevision? Content,
     PerceptualSignature? Signature,
     StageOutcome Outcome,
-    double? Sharpness = null);
+    double? Sharpness = null)
+{
+    /// <summary>The sharpness decode failed: the missing score says nothing about the photo, so it is not stored.</summary>
+    public bool SharpnessFailed { get; init; }
+}
 
 public sealed record NearDuplicateBatch(
     ScanPin Pin,
     string ImplementationRevision,
-    ImmutableArray<NearFeatureResult> Results);
+    ImmutableArray<NearFeatureResult> Results)
+{
+    public SignatureReuse Reuse { get; init; } = SignatureReuse.None;
+}
 
 public sealed record NearDuplicateCommit(bool Accepted);
 

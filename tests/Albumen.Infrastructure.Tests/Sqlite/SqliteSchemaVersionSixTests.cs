@@ -38,16 +38,17 @@ public sealed class SqliteSchemaVersionSixTests
 
         Assert.Equal(ScanCheckpointReadOutcome.Found, checkpoints.Outcome);
         await using var verify = await fixture.OpenRawAsync(SqliteOpenMode.ReadOnly);
-        Assert.Equal(6L, await ScalarAsync(verify, "PRAGMA user_version;"));
+        Assert.Equal(7L, await ScalarAsync(verify, "PRAGMA user_version;"));
         Assert.Equal(before, await RowsAsync(verify));
         Assert.Equal(0L, await ScalarAsync(verify, "SELECT count(*) FROM scan_embeddings;"));
     }
 
-    // Source five runs three steps: the vector table, the version, the validation.
+    // Source five runs four steps: the vector table, the signature table, the version, the validation.
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
+    [InlineData(4)]
     public async Task EveryVersionSixMigrationStepFailureLeavesVersionFiveUnchanged(int faultStep)
     {
         await using var fixture = new ScanIdentityFixture();
@@ -99,6 +100,7 @@ public sealed class SqliteSchemaVersionSixTests
     }
 
     private static Task DowngradeToVersionFiveAsync(SqliteConnection connection) => ExecuteAsync(connection, """
+        DROP TABLE signatures;
         DROP TABLE scan_embeddings;
         PRAGMA user_version=5;
         PRAGMA journal_mode=DELETE;
