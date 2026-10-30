@@ -61,7 +61,8 @@ between frames, as Maybe similar. A classical sharpness measure names the sharpe
 ## Known limitations
 
 - The app is not code-signed. SmartScreen offers "More info → Run anyway", but on a PC with Smart App
-  Control turned on, Windows blocks it and offers no way to run it.
+  Control turned on, Windows blocks it and offers no way to run it. A Microsoft Store release,
+  which Windows trusts, is planned after 1.3.
 - Accessibility work is not complete, and Albumen makes no accessibility-compliance claim.
 - Albumen is dark only. Under Windows High Contrast it uses the system colours.
 - Zooming and moving a photo in the Right Viewer can crash the app (a fault in the WPF renderer).
