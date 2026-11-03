@@ -9,8 +9,12 @@
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <!-- Builds never need a network: no NuGet vulnerability download (it fails offline as NU1900). -->
+    <!-- Builds never need a network, so the NuGet vulnerability audit (which downloads advisory
+         data and fails offline as NU1900) runs only in GitHub Actions CI, where a known
+         vulnerability in any package, direct or transitive, fails the restore. -->
     <NuGetAudit>false</NuGetAudit>
+    <NuGetAudit Condition="'$(GITHUB_ACTIONS)' == 'true'">true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
 </Project>
