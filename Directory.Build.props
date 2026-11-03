@@ -9,6 +9,8 @@
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Builds never need a network: no NuGet vulnerability download (it fails offline as NU1900). -->
+    <NuGetAudit>false</NuGetAudit>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
 </Project>
