@@ -6,13 +6,15 @@ namespace Albumen.Application.Scan;
 /// </summary>
 public static class MaybeSimilarThresholds
 {
-    /// <summary>
-    /// Provisional until the labelled corpus sets the threshold for precision first (decision D3);
-    /// that result replaces <see cref="CosineMinimum"/> and this revision.
-    /// </summary>
-    public const string Revision = "provisional-2026-10-21";
+    /// <summary>The labelled corpus that set <see cref="CosineMinimum"/> (E3-S6, decision D3).</summary>
+    public const string Revision = "corpus-41317957f7a6";
 
-    public const float CosineMinimum = 0.92f;
+    /// <summary>
+    /// Set on the owner's labelled corpus, precision first (E3-S6, corpus 41317957f7a6): from 0.88 to
+    /// 0.95 about 3 in 4 calls are right, the wrong ones being real look-alikes (one room on two
+    /// days). 0.89 keeps that (74.8%, was 75.2% at 0.92) and finds 75% of same-set pairs, not 62%.
+    /// </summary>
+    public const float CosineMinimum = 0.89f;
 
     /// <summary>
     /// Most photos in a set that a model match helped build. Sets the hash alone builds have no cap,
