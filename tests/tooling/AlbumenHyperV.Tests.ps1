@@ -522,6 +522,12 @@ Assert-Equal $true ($guestRunnerSource -match 'dotnetCliTelemetryOptOut') `
     'the guest summary must record the dotnet telemetry opt-out'
 Assert-Equal $true ($guestRunnerSource -match 'testingPlatformTelemetryOptOut') `
     'the guest summary must record the testing-platform telemetry opt-out'
+Assert-Equal $true ($guestRunnerSource -match "LocalDumps\\Albumen\.Scenarios\.Tests\.exe'") `
+    'the guest runner must keep a dump of a scenario test process that crashes'
+Assert-Equal $true ($guestRunnerSource -match "'DumpType' -Value 2 ") `
+    'the crash dump must be a full dump, so the renderer state can be read on the host'
+Assert-Equal $true ($guestRunnerSource -match "'--filter', 'Category!=Desktop'") `
+    'the stages must leave out Desktop tests, which need a signed-in desktop that PowerShell Direct does not give'
 
 $networkAuditRecord = ConvertFrom-AlbumenNetworkAuditXml -Xml @'
 <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">

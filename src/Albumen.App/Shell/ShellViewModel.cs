@@ -417,6 +417,23 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             + "Cancel skips the rest; identical copies and look-alikes already found are kept."
         : string.Empty;
     public bool HasSemanticProgress => SemanticProgressText.Length != 0;
+    // A photo counts as reused when none of its results was computed again; the smallest hit count
+    // of the kinds that ran says that.
+    public string SignatureReuseText
+    {
+        get
+        {
+            if (photoSnapshot?.Scan is not { Status: ScanSessionStatus.Complete or ScanSessionStatus.Incomplete, Reuse: var reuse })
+                return string.Empty;
+            var reused = Math.Min(reuse.Near.Hits, reuse.Sharpness.Hits);
+            if (reuse.Vector.Total > 0) reused = Math.Min(reused, reuse.Vector.Hits);
+            var photos = reuse.Near.Total;
+            return reused == 0 ? string.Empty
+                : $"Reused earlier results for {reused.ToString("N0", CultureInfo.InvariantCulture)} of "
+                    + $"{photos.ToString("N0", CultureInfo.InvariantCulture)} {(photos == 1 ? "photo" : "photos")}.";
+        }
+    }
+    public bool HasSignatureReuse => SignatureReuseText.Length != 0;
     public string CoverageStatus => photoSnapshot?.Scan.Status == ScanSessionStatus.Complete
         ? "Scan complete: every file in the folder was included. Unsupported, failed, and canceled files are listed separately."
         : "Partial results: the scan is incomplete, so these results don't cover every file in the folder.";
@@ -867,7 +884,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         if (previousReviewStatusText != ReviewStatusText) OnPropertyChanged(nameof(ReviewStatusText));
         foreach (var name in new[] { nameof(IsChooseScopePhase), nameof(IsConfirmRulesPhase), nameof(IsChooseFolderPhase), nameof(IsScanPhase), nameof(IsReviewPhase), nameof(IsActionPhase),
             nameof(CanContinue), nameof(CanStartScan), nameof(CanScanFolder), nameof(CanOpenReview),
-            nameof(RecursionSummary), nameof(ScanCountsText), nameof(SemanticProgressText), nameof(HasSemanticProgress), nameof(CoverageStatus), nameof(CouldNotAnalyze),
+            nameof(RecursionSummary), nameof(ScanCountsText), nameof(SemanticProgressText), nameof(HasSemanticProgress), nameof(SignatureReuseText), nameof(HasSignatureReuse), nameof(CoverageStatus), nameof(CouldNotAnalyze),
             nameof(ScanOutcomeSummaries), nameof(CanContinueReview), nameof(ContinueReviewHint),
             nameof(HasContinueReviewHint), nameof(ReviewContinuationText), nameof(HasReviewContinuation) })
             OnPropertyChanged(name);

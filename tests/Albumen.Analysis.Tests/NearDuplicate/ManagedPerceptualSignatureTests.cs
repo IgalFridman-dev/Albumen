@@ -21,6 +21,15 @@ public sealed class ManagedPerceptualSignatureTests
         Assert.NotEqual(first.DifferenceHash, rotated.DifferenceHash);
     }
 
+    // Stored signatures are reused under ImplementationRevision: a change to these values needs a
+    // new revision in ManagedPerceptualSignature and BoundedNearDuplicatePipeline.
+    [Fact]
+    public void TheStoredRevisionStillDescribesTheseExactValues()
+    {
+        Assert.Equal(new PerceptualSignature("managed-dhash-bgra-v1", 0x9FBF_3F3F_7F7F_7FFFUL, 110, 55, 111, 131),
+            ManagedPerceptualSignature.Create(24, 16, Gradient(24, 16)));
+    }
+
     [Fact]
     public void VersionedCorpusKeepsStrongEditsSeparateFromAmbiguityAndUnrelatedContent()
     {

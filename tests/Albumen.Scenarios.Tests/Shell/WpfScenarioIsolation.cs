@@ -13,7 +13,8 @@ internal static class WpfScenarioIsolation
         Type testClass,
         string kind,
         string methodName,
-        Action<IsolationStageWriter> childBody)
+        Action<IsolationStageWriter> childBody,
+        TimeSpan? timeout = null)
     {
         const string kindEnvironment = "ALBUMEN_SCENARIO_ISOLATION_KIND";
         const string nonceEnvironment = "ALBUMEN_SCENARIO_ISOLATION_NONCE";
@@ -96,7 +97,7 @@ internal static class WpfScenarioIsolation
             lifecycleStage = "waiting-for-exit";
             try
             {
-                await exit.WaitAsync(TimeSpan.FromSeconds(25));
+                await exit.WaitAsync(timeout ?? TimeSpan.FromSeconds(25));
             }
             catch (TimeoutException)
             {
@@ -123,7 +124,7 @@ internal static class WpfScenarioIsolation
             var hasExited = child.HasExited;
             var diagnostic = $"Isolated child kind={kind}; pid={childId}; timedOut={timedOut}; "
                 + $"hasExited={hasExited}; exitCode={(hasExited ? child.ExitCode : -1)}."
-                + Environment.NewLine + "STDOUT:" + Environment.NewLine + output
+                + Environment.NewLine + "STDOUT:" + Environment.NewLine + LastLines(output)
                 + Environment.NewLine + "STDERR:" + Environment.NewLine + errorOutput;
             if (drainFailure is not null)
                 throw new InvalidOperationException(diagnostic, drainFailure.SourceException);
@@ -143,6 +144,13 @@ internal static class WpfScenarioIsolation
         {
             await ContainIsolatedChildOrFailFastAsync(child, childId, kind, lifecycleStage);
         }
+    }
+
+    // A long child reports its progress; where it stopped is in its last lines.
+    private static string LastLines(string text)
+    {
+        var lines = text.Split('\n');
+        return lines.Length <= 60 ? text : string.Join('\n', lines[^60..]);
     }
 
     private static async Task ContainIsolatedChildOrFailFastAsync(

@@ -19,6 +19,7 @@ public sealed class CorpusLabelsTests : IDisposable
         Add("single/soft-3.png", "c");
         Add("single/flat-4.png", "d");
         Add("single/notes.txt", "e");
+        Add(SearchAnswers.FileName, "a dog: burst dog/2.JPG");
 
         var (photos, ignored) = CorpusLabels.FromFolders(root);
 

@@ -7,6 +7,7 @@ using Albumen.Infrastructure.Sqlite.Action;
 using Albumen.Infrastructure.Sqlite.Review;
 using Albumen.Infrastructure.Sqlite.Scan;
 using Albumen.Infrastructure.Sqlite.Semantic;
+using Albumen.Infrastructure.Sqlite.Signatures;
 
 namespace Albumen.Infrastructure.Sqlite;
 
@@ -24,6 +25,7 @@ public sealed class SqliteAlbumenStores : IAsyncDisposable
         ScanCheckpoints = new SqliteScanCheckpointStore(owner);
         ScanData = new SqliteScanDataControl(owner);
         Embeddings = new SqliteEmbeddingStore(owner);
+        Signatures = new SqliteSignatureStore(owner);
     }
     public IOverrideEvidenceStore OverrideEvidence { get; }
     public IActionJournalStore ActionJournal { get; }
@@ -32,5 +34,6 @@ public sealed class SqliteAlbumenStores : IAsyncDisposable
     public IScanCheckpointStore ScanCheckpoints { get; }
     public ILocalScanDataControl ScanData { get; }
     public IEmbeddingStore Embeddings { get; }
+    public ISignatureStore Signatures { get; }
     public ValueTask DisposeAsync() => owner.DisposeAsync();
 }

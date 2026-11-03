@@ -44,7 +44,7 @@ internal static class CorpusLabels
         var photos = new List<CorpusPhoto>();
         var ignored = Directory.EnumerateFiles(root, "*", Visible)
             .Select(file => Path.GetFileName(file))
-            .Where(name => name != FileName && !name.StartsWith("report-", StringComparison.Ordinal))
+            .Where(name => name != FileName && name != SearchAnswers.FileName && !name.StartsWith("report-", StringComparison.Ordinal))
             .ToList();
         foreach (var folder in Directory.EnumerateDirectories(root, "*", Visible).Order(StringComparer.Ordinal))
         {

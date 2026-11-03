@@ -148,4 +148,55 @@ public sealed class PlainWordingTests
 
         Assert.False(fixture.ViewModel.HasSemanticProgress);
     }
+
+    // E2-S4: a photo counts as reused only when none of its results had to be computed again.
+    [Theory]
+    [InlineData(ScanStatus.Complete, 1200L, 1200L, 1200L, 34L, "Reused earlier results for 1,200 of 1,234 photos.")]
+    [InlineData(ScanStatus.Incomplete, 1200L, 1200L, 1200L, 34L, "Reused earlier results for 1,200 of 1,234 photos.")]
+    [InlineData(ScanStatus.Complete, 1200L, 1200L, 1100L, 134L, "Reused earlier results for 1,100 of 1,234 photos.")]
+    [InlineData(ScanStatus.Complete, 1200L, 1150L, -1L, 0L, "Reused earlier results for 1,150 of 1,234 photos.")]
+    [InlineData(ScanStatus.Complete, 1200L, 1200L, 0L, 1234L, "")]
+    [InlineData(ScanStatus.Complete, 0L, 0L, 0L, 1234L, "")]
+    [InlineData(ScanStatus.Running, 1200L, 1200L, 1200L, 34L, "")]
+    public void TheFinishedScanSaysHowManyResultsWereReused(
+        ScanStatus status, long near, long sharpness, long vectors, long vectorMisses, string expected)
+    {
+        const long Photos = 1234;
+        var fixture = new ExactShellFixture();
+        fixture.Workflow.Publish(fixture.Workflow.Current with
+        {
+            Scan = fixture.Workflow.Current.Scan with
+            {
+                Status = status,
+                // -1 vectors: the index did not run, so only the look-alike features count.
+                Reuse = new(new(near, Photos - near, 0), new(sharpness, Photos - sharpness, 0),
+                    vectors < 0 ? SignatureReuseCounts.None : new(vectors, vectorMisses, 0)),
+            },
+        });
+
+        Assert.Equal(expected, fixture.ViewModel.SignatureReuseText);
+        Assert.Equal(expected.Length != 0, fixture.ViewModel.HasSignatureReuse);
+        Assert.DoesNotContain("vector", fixture.ViewModel.SignatureReuseText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void OneReusedPhotoIsSingularAndNoReuseSaysNothing()
+    {
+        var fixture = new ExactShellFixture();
+        fixture.Workflow.Publish(fixture.Workflow.Current with
+        {
+            Scan = fixture.Workflow.Current.Scan with
+            {
+                Status = ScanStatus.Complete,
+                Reuse = new(new(1, 0, 0), new(1, 0, 0), SignatureReuseCounts.None),
+            },
+        });
+        Assert.Equal("Reused earlier results for 1 of 1 photo.", fixture.ViewModel.SignatureReuseText);
+
+        fixture.Workflow.Publish(fixture.Workflow.Current with
+        {
+            Scan = fixture.Workflow.Current.Scan with { Reuse = SignatureReuse.None },
+        });
+        Assert.False(fixture.ViewModel.HasSignatureReuse);
+    }
 }

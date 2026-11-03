@@ -23,6 +23,23 @@ public sealed record ScanCounts(
     long Canceled,
     long Outstanding);
 
+/// <summary>
+/// Per feature kind, the photos whose stored feature was reused, the photos computed because none
+/// was stored, and the photos computed because a lookup, a stored value or a write failed. A photo
+/// is counted once per kind.
+/// </summary>
+public sealed record SignatureReuseCounts(long Hits, long Misses, long Rejects)
+{
+    public static SignatureReuseCounts None { get; } = new(0, 0, 0);
+
+    public long Total => Hits + Misses + Rejects;
+}
+
+public sealed record SignatureReuse(SignatureReuseCounts Near, SignatureReuseCounts Sharpness, SignatureReuseCounts Vector)
+{
+    public static SignatureReuse None { get; } = new(SignatureReuseCounts.None, SignatureReuseCounts.None, SignatureReuseCounts.None);
+}
+
 public sealed record ScanSnapshot(
     ScanPin? Pin,
     ScanStatus Status,
@@ -35,6 +52,9 @@ public sealed record ScanSnapshot(
 
     // Reported beside the Scan, never inside it: no semantic state changes a row, group or count.
     public SemanticSnapshot Semantic { get; init; } = SemanticSnapshot.Idle;
+
+    // Facts about the work done, beside the Scan like Semantic: reuse never changes a row or group.
+    public SignatureReuse Reuse { get; init; } = SignatureReuse.None;
 }
 
 public interface IScanCoordinator : IAsyncDisposable

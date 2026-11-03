@@ -41,11 +41,18 @@ public sealed class SemanticIndexTests
             // A Ready index opens the text model in the background; this waits for it, so the
             // model files are closed before the folder goes.
             Assert.Null(encoder.PrepareText(profile));
-            Assert.Equal(new SemanticSnapshot(SemanticState.Ready, 5, 5, 4, profile.Fingerprint, ""), result);
+            Assert.Equal(new SemanticSnapshot(SemanticState.Ready, 5, 5, 4, profile.Fingerprint, "")
+                { Vectors = new(0, 5, 0) }, result);
             var stored = await scan.ReadAsync(profile);
             Assert.Equal([1L, 2L, 4L, 5L], stored.Select(embedding => embedding.OccurrenceId));
             Assert.All(stored, embedding => Assert.Equal(1.0, Norm(embedding.Vector), 5));
             Assert.Empty(await scan.ReadAsync(profile with { PipelineRevision = profile.PipelineRevision + 1 }));
+
+            // Indexed again, the four vectors are reused bit for bit; the changed photo is a miss again.
+            var again = await scan.IndexAsync(encoder, rows, workers: 2, Token);
+            Assert.Null(encoder.PrepareText(profile));
+            Assert.Equal(result with { Vectors = new(4, 1, 0) }, again);
+            Assert.Equal(stored.Select(embedding => embedding.Vector), (await scan.ReadAsync(profile)).Select(embedding => embedding.Vector));
         }
         finally
         {
@@ -99,12 +106,13 @@ public sealed class SemanticIndexTests
         // disposes it.
         Assert.Null(encoder.PrepareText(profile));
 
+        // Without stored vectors, so every photo is encoded again and Cancel arrives mid-way.
         using var cancel = new CancellationTokenSource();
         var partial = await scan.IndexAsync(encoder, scan.Rows, Environment.ProcessorCount, cancel.Token,
             progress =>
             {
                 if (progress.Indexed >= Photos / 3) cancel.Cancel();
-            });
+            }, new NoSignatures());
 
         Assert.Equal(SemanticState.Ready, partial.State);
         Assert.InRange(partial.Indexed, Photos / 3, Photos - 1);
@@ -151,10 +159,11 @@ public sealed class SemanticIndexTests
         }
 
         public Task<SemanticSnapshot> IndexAsync(IVisionLanguageEncoder encoder, ImmutableArray<ScanFileOccurrence> rows,
-            int workers, CancellationToken cancellationToken, Action<SemanticSnapshot>? progress = null) =>
+            int workers, CancellationToken cancellationToken, Action<SemanticSnapshot>? progress = null,
+            ISignatureStore? signatures = null) =>
             new BoundedSemanticIndexer(encoder,
                     new WicEncoderImageSource(new MemoryReader(files), new StreamingExactContentAnalyzer(), new WicPreviewDecoder()),
-                    stores.Embeddings, workers)
+                    stores.Embeddings, signatures ?? stores.Signatures, workers)
                 .IndexAsync(Context, rows, snapshot =>
                 {
                     progress?.Invoke(snapshot);
@@ -197,6 +206,16 @@ public sealed class SemanticIndexTests
             encoder.Save(stream);
             return stream.ToArray();
         }
+    }
+
+    private sealed class NoSignatures : ISignatureStore
+    {
+        public ValueTask<IReadOnlyDictionary<SignatureKey, byte[]?>> LookupAsync(
+            IReadOnlyCollection<SignatureKey> keys, CancellationToken cancellationToken) =>
+            ValueTask.FromResult<IReadOnlyDictionary<SignatureKey, byte[]?>>(new Dictionary<SignatureKey, byte[]?>());
+
+        public ValueTask AddAsync(IReadOnlyList<StoredSignature> signatures, CancellationToken cancellationToken) =>
+            ValueTask.CompletedTask;
     }
 
     private sealed class MemoryReader(Dictionary<string, byte[]> files) : IProtectedFileReader

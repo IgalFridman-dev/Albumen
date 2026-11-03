@@ -16,7 +16,10 @@ public sealed class OnnxVisionLanguageEncoder : IVisionLanguageEncoder, IDisposa
     /// <summary>Longest edge of the decode handed to <see cref="EncodeImage"/> (spike: 512 keeps cosine 0.995 at 256's cost).</summary>
     public const int DecodeEdge = 512;
 
-    /// <summary>Bump when <see cref="SiglipPreprocessing"/>, the tensor names or the normalization change.</summary>
+    /// <summary>
+    /// Bump when <see cref="SiglipPreprocessing"/>, the tensor names, the normalization or the ONNX Runtime
+    /// package change: stored vectors are reused under the profile this is part of.
+    /// </summary>
     internal const int PipelineRevision = 1;
 
     private const string PixelInput = "pixel_values";
