@@ -197,10 +197,25 @@ Raw observations, not benchmarks or promises. The verification VM has 2 CPUs and
 
 ### How it was built
 
-Albumen was developed by one person working with AI coding agents under a written process: each
-story had a spec, a design and a test-first plan, was reviewed by a separate agent with no shared
-context, and was verified in the offline VM before a human-approved pull request merged it. Product
-planning used the BMAD Method (brief → PRD → UX → architecture → story specs). The planning
+Albumen is a one-person project. I set the scope of each release, wrote and changed code with AI
+coding agents, and stayed in the loop on every change: each story had a spec, a design and a
+test-first plan, a separate agent with no shared context reviewed it, and I merged each pull request
+myself after reading it and checking the result.
+
+Much of the work was hands-on:
+
+- **Testing by hand.** I tested each release myself on real photo folders and checked Review,
+  search, the Recycle Bin moves and the restores.
+- **Calibration.** I labelled 164 of my own photos so the Look-alike, Maybe similar, sharpness and
+  search thresholds are set from measured results, not guesses.
+- **The UI overhaul.** I went through each screen of the 1.1.5 redesign by hand, screenshot by
+  screenshot, and sent back what looked or behaved wrong until it was right.
+- **Debugging.** I found and fixed a UI deadlock in folder-scope handling that the agents could not
+  resolve.
+- **Release checks.** Before each public release I tested the release build in the verification VM,
+  which has no network adapter, alongside its automated builds, gates and clean-launch checks.
+
+Product planning used the BMAD Method (brief → PRD → UX → architecture → story specs). The planning
 documents, specs and per-story verification records are kept in a private development repository.
 
 ### Repository layout
