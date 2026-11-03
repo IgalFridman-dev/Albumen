@@ -1,25 +1,33 @@
 using System.Text;
 using Albumen.Application.Scan;
+using Albumen.Application.Semantic;
 using Albumen.Domain.Scan;
 using static System.FormattableString;
 
 namespace Albumen.Corpus;
 
 // The corpus measured against its labels: the hash rules (Look-alike, Maybe similar), the
-// embedding cosine for E4-S6's Maybe-similar threshold, and the E3-S3 blur evidence. Same
-// labels and features, same text: nothing here depends on time, culture or machine.
+// embedding cosine for E4-S6's Maybe-similar threshold, the E3-S3 blur evidence and the text
+// search cut-off against the answer key. Same labels, key and features, same text: nothing here
+// depends on time, culture or machine.
 internal static class CorpusReport
 {
     private static readonly double[] BlurrierFactors = [2, 2.5, 3, 4, 5, 6];
+    // As floats, like MinimumScore, so the shipped value is one of the rows whichever it is.
+    private static readonly double[] MinimumScores = new[] { 0.0001f, 0.001f, 0.01f, 0.1f, LikelyMatchesQuery.MinimumScore }
+        .Select(score => (double)score).Distinct().Order().ToArray();
     private const int ListedPairs = 10;
+    private const int FirstListed = 10;
 
     private sealed record Pair(int A, int B, string? Kind, NearRelationshipKind Hash, double Cosine)
     {
         public bool Same => Kind is not null;
     }
 
-    public static string Write(
-        string version, string code, string model, IReadOnlyList<CorpusPhoto> photos, IReadOnlyList<CorpusFeatures> features)
+    // prompts[i] is answers[i].Prompt encoded by CorpusMeasurement.EncodePrompt.
+    public static string Write(string version, string code, EncoderProfile profile,
+        IReadOnlyList<CorpusPhoto> photos, IReadOnlyList<CorpusFeatures> features,
+        string keyVersion, IReadOnlyList<SearchAnswer> answers, IReadOnlyList<float[]> prompts)
     {
         var pairs = new List<Pair>();
         for (var a = 0; a < photos.Count; a++)
@@ -39,7 +47,7 @@ internal static class CorpusReport
         Line(Invariant($"# Albumen corpus report {version}"));
         Line();
         Line(Invariant($"- Corpus `{version}` (the first 12 hex digits of the SHA-256 of `labels.csv`): {photos.Count} photos, {sets.Count} sets, {photos.Count(photo => photo.Set.Length == 0)} single photos."));
-        Line($"- Code: Albumen.Corpus {code}. Model: {model}.");
+        Line($"- Code: Albumen.Corpus {code}. Model: {profile.Model}, vision {profile.VisionSha256[..12]}.");
         Line("- Pairs are scored one at a time. The app also needs every photo of a set to match every other one, so whole-set results can be lower.");
         Line();
         Line("| Kind | Sets | Photos | sharp | obvious-blur | ambiguous | not-applicable |");
@@ -142,6 +150,46 @@ internal static class CorpusReport
                     : Invariant($"| {photos[index].Path} | {photos[index].Blur} | – | – | no |"));
         }
 
+        Line();
+        Line("## Text search (Likely matches and the Review filter)");
+        Line();
+        Line(Invariant($"Answer key `{keyVersion}` (the first 12 hex digits of the SHA-256 of `{SearchAnswers.FileName}`): {answers.Count} prompts, {answers.Count(answer => answer.Photos.Count == 0)} with no photo in the corpus. ")
+            + Invariant($"Each prompt is encoded and ranked with the app's code: a photo is listed while the model's odds for it are at least 1/{1 / LikelyMatchesQuery.LeastOddsRelativeToBest:0} of the best photo's ")
+            + Invariant($"and its score is at least {Score(LikelyMatchesQuery.MinimumScore)}. The Review filter shows only the listed photos and their sets, so every photo listed for a prompt with no answer is a wrong result."));
+        Line();
+        var indexOf = photos.Select((photo, index) => (photo.Path, index)).ToDictionary(entry => entry.Path, entry => (long)entry.index);
+        var searches = answers.Select((answer, at) => (
+            answer.Prompt,
+            Expected: answer.Photos.Select(path => indexOf[path]).ToHashSet(),
+            Cosines: features.Select((feature, index) => (OccurrenceId: (long)index, Cosine: (float)Cosine(prompts[at], feature.Embedding))).ToList()))
+            .ToList();
+        Line("| Prompt | Expected | Listed | Found | Recall | Precision (first 10 listed) | Best score |");
+        Line("|---|---|---|---|---|---|---|");
+        foreach (var (prompt, expected, cosines) in searches)
+        {
+            var listed = LikelyMatchesQuery.Listed(profile, cosines);
+            var first = listed.Take(FirstListed).ToList();
+            Line(Invariant($"| {prompt.Replace("|", "\\|", StringComparison.Ordinal)} | {expected.Count} | {listed.Count} | {listed.Count(row => expected.Contains(row.OccurrenceId))} | ")
+                + Invariant($"{Percent(listed.Count(row => expected.Contains(row.OccurrenceId)), expected.Count)} | {Percent(first.Count(row => expected.Contains(row.OccurrenceId)), first.Count)} | ")
+                + Invariant($"{Score(LikelyMatchesQuery.Probability(profile, cosines.Max(row => row.Cosine)))} |"));
+        }
+
+        Line();
+        Line("What another minimum score would do (the cut-off relative to the best photo unchanged). Recall and precision are over the prompts with an answer, every listed photo counted:");
+        Line();
+        Line("| Minimum score | Recall | Precision | Prompts with an answer listing nothing | Prompts without one listing nothing | Photos listed for prompts without one |");
+        Line("|---|---|---|---|---|---|");
+        foreach (var minimum in MinimumScores)
+        {
+            var runs = searches.Select(search => (search.Expected, Listed: LikelyMatchesQuery.Listed(profile, search.Cosines, minimum))).ToList();
+            var answered = runs.Where(run => run.Expected.Count > 0).ToList();
+            var unanswered = runs.Where(run => run.Expected.Count == 0).ToList();
+            var found = answered.Sum(run => run.Listed.Count(row => run.Expected.Contains(row.OccurrenceId)));
+            Line(Invariant($"| {Score(minimum)}{(minimum == LikelyMatchesQuery.MinimumScore ? " (shipped)" : "")} | {Percent(found, answered.Sum(run => run.Expected.Count))} | ")
+                + Invariant($"{Percent(found, answered.Sum(run => run.Listed.Count))} | {answered.Count(run => run.Listed.Count == 0)} | ")
+                + Invariant($"{unanswered.Count(run => run.Listed.Count == 0)} | {unanswered.Sum(run => run.Listed.Count)} |"));
+        }
+
         return report.ToString();
 
         void PairList(IEnumerable<Pair> ordered)
@@ -176,6 +224,10 @@ internal static class CorpusReport
             + string.Join(" | ", CorpusLabels.Kinds.Select(kind =>
                 Percent(pairs.Count(pair => pair.Kind == kind && called(pair)), pairs.Count(pair => pair.Kind == kind)))) + " |";
     }
+
+    // A model probability as a percentage, fine enough for the 0.01% row of the minimum score sweep.
+    private static string Score(double probability) =>
+        probability < 0.00001 ? "<0.001%" : Invariant($"{probability * 100:0.###}%");
 
     private static string Percent(int part, int whole) => whole == 0 ? "–" : Invariant($"{100.0 * part / whole:0.0}%");
 

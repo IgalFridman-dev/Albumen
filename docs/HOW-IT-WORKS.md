@@ -83,8 +83,8 @@ Key ideas:
 - **Near duplicates are conservative**: thresholds live in `Application/Scan/NearDuplicateThresholds.cs`;
   borderline pairs are not grouped.
 - **The photo model only adds Maybe similar**: two photos the hash does not relate are Maybe similar
-  when their vectors' cosine reaches `Application/Scan/MaybeSimilarThresholds.cs` (provisional until
-  the labelled corpus sets it). Look-alike sets are built from the hash alone, so they are the same
+  when their vectors' cosine reaches `Application/Scan/MaybeSimilarThresholds.cs` (0.89, set on the
+  owner's labelled corpus, E3-S6). Look-alike sets are built from the hash alone, so they are the same
   with or without the model; nothing the model finds is pre-marked.
 
 ## Where data lives

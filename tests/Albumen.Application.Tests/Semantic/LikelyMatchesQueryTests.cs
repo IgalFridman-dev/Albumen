@@ -51,19 +51,31 @@ public sealed class LikelyMatchesQueryTests
     [Fact]
     public async Task PhotosUnderTheMinimumScoreAreNeverListedAndNoneLeftIsNoMatches()
     {
-        // With scale 100 and bias -10 the probability reaches MinimumScore (0.01%) at cosine 0.0079.
+        // With scale 100 and bias -10 the probability reaches MinimumScore (0.1%) at cosine 0.0309.
         var some = new Fixture();
-        some.Store.Add(1, Unit(0.01f));
-        some.Store.Add(2, Unit(0.005f));
+        some.Store.Add(1, Unit(0.035f));
+        some.Store.Add(2, Unit(0.025f));
         var listed = await some.RankAsync("at sea");
         Assert.Equal([1L], listed.Matches.Select(match => match.OccurrenceId));
-        Assert.Equal(0.00012f, listed.Matches[0].Score, 5);
+        Assert.Equal(0.0015f, listed.Matches[0].Score, 5);
 
         var none = new Fixture();
-        none.Store.Add(1, Unit(0.005f));
+        none.Store.Add(1, Unit(0.025f));
         var result = await none.RankAsync("at sea");
         Assert.Equal((LikelyMatchesOutcome.NoMatches, "at sea"), (result.Outcome, result.Prompt));
         Assert.Empty(result.Matches);
+    }
+
+    [Fact]
+    public void AHigherMinimumScoreListsFewerPhotos()
+    {
+        // With scale 100 and bias -10 the probability is 0.01% at cosine 0.0079, 0.1% at 0.0309 and
+        // 1% at 0.0540; all three photos are within a fiftieth of the best photo's odds (0.0209).
+        (long, float)[] cosines = [(3, 0.03f), (1, 0.06f), (2, 0.05f)];
+
+        Assert.Equal([1L, 2L, 3L], LikelyMatchesQuery.Listed(Profile, cosines, minimumScore: 0.0001).Select(row => row.OccurrenceId));
+        Assert.Equal([1L, 2L], LikelyMatchesQuery.Listed(Profile, cosines).Select(row => row.OccurrenceId));
+        Assert.Equal([1L], LikelyMatchesQuery.Listed(Profile, cosines, minimumScore: 0.01).Select(row => row.OccurrenceId));
     }
 
     [Fact]

@@ -70,8 +70,9 @@ between frames, as Maybe similar. A classical sharpness measure names the sharpe
   reproduced it.
 - Text search misses small objects in the frame (the model sees each photo at 224 px), and a weak
   match in the search can hide the rest of Review until you clear it.
-- The Maybe-similar and blur thresholds are provisional: they have not yet been measured on a
-  labelled set of real photos. Always look before you approve.
+- Thresholds are measured on one labelled set of 164 of the owner's photos: Look-alike 100% precise,
+  Maybe similar about 75%, "blurrier" 94% relevant, text search about 89%. It is a small set with one
+  labeller, so always look before you approve.
 - A rescan reuses the stored results of photos whose content is unchanged, but still reads every
   file once. Stored results stay until "Clear scan data" (in History).
 - HEIF support depends on the installed Windows codec and is best effort; JPEG and PNG are supported.
