@@ -178,10 +178,10 @@ Raw observations, not benchmarks or promises. The verification VM has 2 CPUs and
   Smart App Control on, Windows blocks the app and offers no way to run it.
 - HEIF support depends on the installed Windows codec and is best effort; JPEG and PNG are supported.
 - Near-duplicate quality was validated on a small labeled corpus. Human review is always required.
-- The Maybe-similar cosine threshold (0.92) and the blur thresholds are provisional: they have not
-  yet been measured on a labelled set of real photos.
-- As a filter, a weak search match hides the rest of Review. The search cut-off is still 1.1's, set on
-  65 of the owner's photos; the labelled corpus has not measured it yet.
+- Thresholds are measured on one labelled corpus of 164 of the owner's photos (E3-S6): Look-alike
+  100% precise, Maybe similar (cosine 0.89) about 75% precise, "blurrier" 94% relevant, text search
+  about 89% precise. A small corpus with one labeller, so the numbers are indicative.
+- As a filter, a weak search match hides the rest of Review.
 - Albumen is dark only; a light mode is not scheduled.
 - Text search misses small objects in the frame (the model sees the photo at 224 px), and every scan
   recomputes the photo vectors; nothing is reused across scans.
