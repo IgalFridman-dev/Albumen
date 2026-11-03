@@ -225,7 +225,7 @@ internal static class CorpusReport
                 Percent(pairs.Count(pair => pair.Kind == kind && called(pair)), pairs.Count(pair => pair.Kind == kind)))) + " |";
     }
 
-    // A model probability as a percentage, fine enough for the 0.01% minimum score.
+    // A model probability as a percentage, fine enough for the 0.01% row of the minimum score sweep.
     private static string Score(double probability) =>
         probability < 0.00001 ? "<0.001%" : Invariant($"{probability * 100:0.###}%");
 

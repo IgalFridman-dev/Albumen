@@ -47,9 +47,12 @@ public sealed class LikelyMatchesQuery(IVisionLanguageEncoder encoder, IEmbeddin
     /// <summary>
     /// Lowest probability ever listed. The model's probability is small even for a photo that fits
     /// when the words are generic (owner's photos, 2026-10-21: 0.03% to 0.3% for "food", 5% to 54%
-    /// for "jetski"), so this drops only photos the model finds unrelated to the words.
+    /// for "jetski"), so this drops only photos the model finds unrelated to the words. Raised from
+    /// 0.01% on the owner's labelled corpus (E3-S6, corpus 981859d436b4, key e5707b10a21c): 0.1%
+    /// keeps recall at 80.7% (81.4%) and lifts precision to 89.0% (82.6%), and searches with no
+    /// right photo list 2 photos instead of 7.
     /// </summary>
-    public const float MinimumScore = 0.0001f;
+    public const float MinimumScore = 0.001f;
 
     /// <summary>
     /// A photo is listed only while the model's odds that the words fit it are at least this

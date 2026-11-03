@@ -48,9 +48,9 @@ public sealed class CorpusReportTests : IDisposable
         Assert.Contains("\n| burst dog/blur-2.jpg | obvious-blur | 10.0 | 10.0× | yes |\n", report, StringComparison.Ordinal);
         Assert.Contains("Answer key `k`", report, StringComparison.Ordinal);
         Assert.Contains("\n| dog | 2 | 1 | 1 | 50.0% | 100.0% | 100% |\n", report, StringComparison.Ordinal);
-        Assert.Contains("\n| a giraffe | 0 | 1 | 0 | – | 0.0% | 0.05% |\n", report, StringComparison.Ordinal);
-        Assert.Contains("\n| 0.01% (shipped) | 50.0% | 100.0% | 0 | 0 | 1 |\n", report, StringComparison.Ordinal);
-        Assert.Contains("\n| 0.1% | 50.0% | 100.0% | 0 | 1 | 0 |\n", report, StringComparison.Ordinal);
+        Assert.Contains("\n| a giraffe | 0 | 0 | 0 | – | – | 0.05% |\n", report, StringComparison.Ordinal);
+        Assert.Contains("\n| 0.01% | 50.0% | 100.0% | 0 | 0 | 1 |\n", report, StringComparison.Ordinal);
+        Assert.Contains("\n| 0.1% (shipped) | 50.0% | 100.0% | 0 | 1 | 0 |\n", report, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -67,9 +67,9 @@ public sealed class CorpusReportTests : IDisposable
         var report = CorpusReport.Write("v", "code", Profile, photos, features, "k", answers, prompts);
 
         Assert.Contains("\n| boat | 2 | 12 | 2 | 100.0% | 0.0% | 100% |\n", report, StringComparison.Ordinal);
-        Assert.Contains("\n| kite | 1 | 1 | 1 | 100.0% | 100.0% | 0.05% |\n", report, StringComparison.Ordinal);
-        Assert.Contains("\n| 0.01% (shipped) | 100.0% | 23.1% | 0 | 0 | 0 |\n", report, StringComparison.Ordinal);
-        Assert.Contains("\n| 0.1% | 66.7% | 16.7% | 1 | 0 | 0 |\n", report, StringComparison.Ordinal);
+        Assert.Contains("\n| kite | 1 | 0 | 0 | 0.0% | – | 0.05% |\n", report, StringComparison.Ordinal);
+        Assert.Contains("\n| 0.01% | 100.0% | 23.1% | 0 | 0 | 0 |\n", report, StringComparison.Ordinal);
+        Assert.Contains("\n| 0.1% (shipped) | 66.7% | 16.7% | 1 | 0 | 0 |\n", report, StringComparison.Ordinal);
         Assert.Contains("\n| 10% | 66.7% | 16.7% | 1 | 0 | 0 |\n", report, StringComparison.Ordinal);
     }
 
