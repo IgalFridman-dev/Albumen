@@ -1,4 +1,4 @@
-Albumen 1.1.5 - Windows 11 x64
+Albumen 1.2.0 - Windows 11 x64
 
 Starting Albumen
 Extract the complete ZIP to a local folder, keep its files together, and run

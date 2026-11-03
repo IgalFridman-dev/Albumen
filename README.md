@@ -22,7 +22,7 @@ nothing is ever deleted permanently.
 
 You need Windows 11 x64. Nothing else has to be installed.
 
-1. Download `Albumen-v1.1.5-win-x64.zip` from the
+1. Download `Albumen-v1.2.0-win-x64.zip` from the
    [latest release](https://github.com/IgalFridman-dev/Albumen/releases/latest) (about 1.1 GB, almost
    all of it the image model) and extract it to a local folder.
 2. Run `Start-Albumen.cmd`. It checks every packaged file, then starts the app.
@@ -65,9 +65,6 @@ between frames, as Maybe similar. A classical sharpness measure names the sharpe
   which Windows trusts, is planned after 1.3.
 - Accessibility work is not complete, and Albumen makes no accessibility-compliance claim.
 - Albumen is dark only. Under Windows High Contrast it uses the system colours.
-- In one 1.1.5 test the app closed while a photo was zoomed in the Right Viewer, from a fault in the
-  WPF renderer. Its cause was not found, and a 100-round stress test of both viewers has not
-  reproduced it.
 - Text search misses small objects in the frame (the model sees each photo at 224 px), and a weak
   match in the search can hide the rest of Review until you clear it.
 - Thresholds are measured on one labelled set of 164 of the owner's photos: Look-alike 100% precise,
@@ -79,8 +76,10 @@ between frames, as Maybe similar. A classical sharpness measure names the sharpe
 
 ## What's next
 
-- **1.2:** an accessibility pass, the Right Viewer crash fix, and reuse of computed signatures and
-  vectors across scans, so a rescan of the same folder is faster.
+- **1.3:** a faster first Scan: each photo read once and processed on all cores, the image model on
+  the GPU where one is available, and a 384 px model so search finds smaller objects. Then an
+  accessibility pass.
+- **After 1.3:** a Microsoft Store release, so Smart App Control lets the app run.
 
 ---
 
@@ -154,7 +153,7 @@ flowchart LR
 
 - **About 25,600 lines of production C# and 43,800 lines of tests** across Domain, Application,
   Analysis, Infrastructure and real-window WPF scenario suites.
-- **Full suite: 2,153 / 2,153 passing** in the official gate on the 1.1.5 code.
+- **Full suite: 2,238 / 2,238 passing** in the official gate on the 1.2.0 code.
 - **Isolated verification VM.** Official gates run in a Hyper-V VM with no network adapter, restored
   from a known checkpoint for every run. This proves the offline guarantee and keeps runs reproducible.
 - **Reproducible release.** Two independent locked, self-contained publishes are compared file by
@@ -194,6 +193,7 @@ Raw observations, not benchmarks or promises. The verification VM has 2 CPUs and
 | Peak memory while indexing | 566 MB working set in the VM |
 | App memory on a clean PC | 0.7 GB after a scan of the demo photos, 1.7 GB once a text search has loaded the text model |
 | One text search over 10,000 photos | 70 ms (median) in the VM |
+| Rescan of an unchanged folder (200 photos) | 0.8 to 1.0 s, against 40 to 53 s for the first Scan, in the VM |
 
 ### How it was built
 
