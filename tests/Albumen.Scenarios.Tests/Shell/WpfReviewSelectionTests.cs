@@ -529,7 +529,7 @@ public sealed class WpfReviewSelectionTests
         throw new InvalidOperationException("The focused Review group was not realized after five layout turns.");
     }
 
-    internal static void RunOnSta(Action action)
+    internal static void RunOnSta(Action action, TimeSpan? timeout = null)
     {
         ExceptionDispatchInfo? failure = null;
         Dispatcher? dispatcher = null;
@@ -570,12 +570,13 @@ public sealed class WpfReviewSelectionTests
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         Assert.True(dispatcherReady.Wait(TimeSpan.FromSeconds(2)), "The Review STA dispatcher did not start.");
-        if (!thread.Join(TimeSpan.FromSeconds(15)))
+        var limit = timeout ?? TimeSpan.FromSeconds(15);
+        if (!thread.Join(limit))
         {
             dispatcher?.BeginInvokeShutdown(DispatcherPriority.Send);
             if (!thread.Join(TimeSpan.FromSeconds(5)))
                 Environment.FailFast("The Review STA survived bounded Dispatcher shutdown.");
-            throw new TimeoutException("Review WPF scenario exceeded fifteen seconds and its dispatcher was shut down.");
+            throw new TimeoutException($"Review WPF scenario exceeded {limit.TotalSeconds:0} seconds and its dispatcher was shut down.");
         }
         failure?.Throw();
     }

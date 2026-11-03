@@ -16,9 +16,11 @@ public sealed class WicNearFeatureSource(
     public const int SharpnessEdge = 1024;
 
     public async ValueTask<NearFeatureResult> AnalyzeAsync(
-        ScanRunContext context, ScanFileOccurrence row, CancellationToken cancellationToken)
+        ScanRunContext context, ScanFileOccurrence row, NearFeatures wanted, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(row);
+        if (wanted == NearFeatures.None || (wanted & ~NearFeatures.All) != 0)
+            throw new ArgumentOutOfRangeException(nameof(wanted), wanted, "At least one known feature must be wanted.");
         if (row.PhysicalFileKey is not { } physical || row.Content is not { } content)
             return Failure(row, ScanStageState.NotApplicable,
                 row.Exact.Reason == ScanReason.None ? ScanReason.CapabilityUnavailable : row.Exact.Reason);
@@ -31,28 +33,35 @@ public sealed class WicNearFeatureSource(
             || !string.Equals(digest.Sha256, content.Sha256, StringComparison.OrdinalIgnoreCase))
             return Failure(row, ScanStageState.FailedRetryable, ScanReason.Changed);
 
-        using var decoded = await decoder.DecodeAsync(
-            lease, row.ResolvedPath, MaximumEdge, cancellationToken).ConfigureAwait(false);
-        if (decoded.Frame is not { } frame)
-            return decoded.Availability == PreviewAvailability.Unsupported
-                ? Failure(row, ScanStageState.Unsupported, ScanReason.CodecUnavailable)
-                : Failure(row, ScanStageState.FailedRetryable, ScanReason.ReadFailure);
-        var signature = signatures.Extract(frame.Width, frame.Height, frame.AnalysisPixels.Span);
+        PerceptualSignature? signature = null;
+        if (wanted.HasFlag(NearFeatures.Signature))
+        {
+            using var decoded = await decoder.DecodeAsync(
+                lease, row.ResolvedPath, MaximumEdge, cancellationToken).ConfigureAwait(false);
+            if (decoded.Frame is not { } frame)
+                return decoded.Availability == PreviewAvailability.Unsupported
+                    ? Failure(row, ScanStageState.Unsupported, ScanReason.CodecUnavailable)
+                    : Failure(row, ScanStageState.FailedRetryable, ScanReason.ReadFailure);
+            signature = signatures.Extract(frame.Width, frame.Height, frame.AnalysisPixels.Span);
+        }
+        var (score, failed) = wanted.HasFlag(NearFeatures.Sharpness)
+            ? await MeasureSharpnessAsync(lease, row, cancellationToken).ConfigureAwait(false)
+            : (null, false);
         return new(row.Token, content, signature,
-            new StageOutcome(ScanStageState.Succeeded, ScanReason.None),
-            await MeasureSharpnessAsync(lease, row, cancellationToken).ConfigureAwait(false));
+            new StageOutcome(ScanStageState.Succeeded, ScanReason.None), score) { SharpnessFailed = failed };
     }
 
     // Scores compare only at one scale, so a photo smaller than SharpnessEdge (never enlarged)
     // or one that fails this second decode gets no score and no blur claim.
-    private async Task<double?> MeasureSharpnessAsync(
+    private async Task<(double? Score, bool Failed)> MeasureSharpnessAsync(
         IProtectedFileLease lease, ScanFileOccurrence row, CancellationToken cancellationToken)
     {
         using var decoded = await decoder.DecodeAsync(
             lease, row.ResolvedPath, SharpnessEdge, cancellationToken).ConfigureAwait(false);
-        return decoded.Frame is { } frame && Math.Max(frame.Width, frame.Height) == SharpnessEdge
+        if (decoded.Frame is not { } frame) return (null, true);
+        return (Math.Max(frame.Width, frame.Height) == SharpnessEdge
             ? sharpness.Analyze(frame.Width, frame.Height, frame.AnalysisPixels.Span)
-            : null;
+            : null, false);
     }
 
     private static NearFeatureResult Failure(ScanFileOccurrence row,
