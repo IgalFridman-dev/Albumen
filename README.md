@@ -153,7 +153,7 @@ flowchart LR
 
 - **About 25,600 lines of production C# and 43,800 lines of tests** across Domain, Application,
   Analysis, Infrastructure and real-window WPF scenario suites.
-- **Full suite: 2,153 / 2,153 passing** in the official gate on the 1.1.5 code.
+- **Full suite: 2,238 / 2,238 passing** in the official gate on the 1.2.0 code.
 - **Isolated verification VM.** Official gates run in a Hyper-V VM with no network adapter, restored
   from a known checkpoint for every run. This proves the offline guarantee and keeps runs reproducible.
 - **Reproducible release.** Two independent locked, self-contained publishes are compared file by
