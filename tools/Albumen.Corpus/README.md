@@ -35,13 +35,22 @@ moment in its set. Folder and file names appear in the report.
 
 ## Search answer key
 
-`search-answers.txt` in the corpus folder, written by the owner: one prompt per line, a colon, then
-the photos the prompt should find, separated by `;`. Nothing after the colon means no photo in the
-corpus fits.
+`search-answers.txt` in the corpus folder, written by the owner: a prompt, a colon, then the photos
+the prompt should find, separated by `;` or one per line below it. Nothing after the colon and no
+photo line means no photo in the corpus fits. Blank lines and lines of dashes only are ignored, to
+keep prompts apart.
 
 ```
-a watch: single/IMG_0412.jpg; burst kids-pool/IMG_0533.jpg
+a watch:
+single/IMG_0412.jpg
+burst kids-pool/IMG_0533.jpg
+
+----------
+
 a dog on a beach: burst dog-park/IMG_0101.jpg; burst dog-park/IMG_0102.jpg
+
+----------
+
 a giraffe:
 ```
 

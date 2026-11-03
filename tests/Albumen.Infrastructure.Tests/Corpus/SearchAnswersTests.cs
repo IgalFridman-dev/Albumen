@@ -28,12 +28,24 @@ public sealed class SearchAnswersTests : IDisposable
             SearchAnswers.Read(root, Photos).Select(answer => $"{answer.Prompt}|{string.Join(',', answer.Photos)}"));
     }
 
+    [Fact]
+    public void PhotosMayFollowThePromptOnePerLineBetweenSeparators()
+    {
+        Write("a dog:\nburst dog/1.jpg\n burst dog/2.jpg \n\n-----\n\na red bicycle: single/img_3.jpg\n\n---\n\na giraffe:\n");
+
+        Assert.Equal(
+            ["a dog|burst dog/1.jpg,burst dog/2.jpg", "a red bicycle|single/IMG_3.JPG", "a giraffe|"],
+            SearchAnswers.Read(root, Photos).Select(answer => $"{answer.Prompt}|{string.Join(',', answer.Photos)}"));
+    }
+
     [Theory]
     [InlineData("a dog burst dog/1.jpg")]
     [InlineData(": burst dog/1.jpg")]
     [InlineData("LONG:")]
     [InlineData("a dog: burst dog/9.jpg")]
     [InlineData("a dog: burst dog/1.jpg; burst dog/1.jpg")]
+    [InlineData("a dog: burst dog/1.jpg\nburst dog/1.jpg")]
+    [InlineData("---\n")]
     [InlineData("a dog: burst dog/1.jpg\nA  Dog:")]
     [InlineData("\n")]
     public void KeysTheReportCannotScoreAreRejected(string key)
