@@ -156,10 +156,15 @@ flowchart LR
 - **Full suite: 2,238 / 2,238 passing** in the official gate on the 1.2.0 code.
 - **Isolated verification VM.** Official gates run in a Hyper-V VM with no network adapter, restored
   from a known checkpoint for every run. This proves the offline guarantee and keeps runs reproducible.
-- **Reproducible release.** Two independent locked, self-contained publishes are compared file by
-  file (path, length, SHA-256) before the ZIP is produced, with a checksum-verifying launcher and
-  third-party notices for every bundled component.
-- **CI.** Every pull request builds with warnings as errors and runs the test suites on `windows-latest`.
+- **Audited dependencies.** Every package version, transitive ones included, is pinned in
+  `packages.lock.json` and restored in locked mode. CI audits all of them against the GitHub
+  Advisory Database, and a known vulnerability fails the build.
+- **Sealed, reproducible release.** The release is built inside the offline VM from a sealed package
+  cache of exactly those audited, locked packages, so it needs no network. Two independent
+  self-contained publishes are compared file by file (path, length, SHA-256) before the ZIP is
+  produced, with a checksum-verifying launcher and third-party notices for every bundled component.
+- **CI.** Every pull request into `main` builds with warnings as errors, audits the packages and
+  runs the test suites on `windows-latest`.
 - **Evidence over claims.** Every finished story has a written verification record, and each
   release lists its open limitations instead of hiding them.
 
